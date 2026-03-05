@@ -1,0 +1,121 @@
+"""
+src/core/services.py — Domain services.
+Pure business logic; no infra imports.
+"""
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+from src.core.models import AgentProps, TaskAggregate
+
+
+# ---------------------------------------------------------------------------
+# Version comparison (simple semver subset: >=X.Y.Z)
+# ---------------------------------------------------------------------------
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse semver string like '1.2.3' into (1, 2, 3)."""
+    parts = re.findall(r"\d+", v)
+    return tuple(int(p) for p in parts[:3])
+
+
+def _satisfies_version(agent_version: str, constraint: str) -> bool:
+    """
+    Supports '>=X.Y.Z' and exact 'X.Y.Z'.
+    Returns True if agent_version satisfies constraint.
+    """
+    constraint = constraint.strip()
+    if constraint.startswith(">="):
+        required = _parse_version(constraint[2:])
+        actual = _parse_version(agent_version)
+        return actual >= required
+    # Exact match fallback
+    return _parse_version(agent_version) == _parse_version(constraint)
+
+
+# ---------------------------------------------------------------------------
+# SchedulerService — selects the best agent for a task
+# ---------------------------------------------------------------------------
+
+class SchedulerService:
+    """
+    Pure domain service. Selects the best available agent for a task.
+    Scoring: capability match + version + available capacity.
+    """
+
+    def select_agent(
+        self,
+        task: TaskAggregate,
+        agents: list[AgentProps],
+    ) -> Optional[AgentProps]:
+        """
+        Returns the highest-scoring eligible agent, or None if no match.
+        Eligibility:
+          - has required_capability in capabilities
+          - satisfies min_version constraint
+          - max_concurrent_tasks > 0 (caller is responsible for tracking)
+        """
+        selector = task.agent_selector
+        candidates = [
+            a for a in agents
+            if selector.required_capability in a.capabilities
+            and _satisfies_version(a.version, selector.min_version)
+        ]
+        if not candidates:
+            return None
+
+        # Score: prefer higher trust, higher max_concurrent, more matching tools
+        def score(agent: AgentProps) -> tuple:
+            trust_score = {"high": 3, "medium": 2, "low": 1}.get(agent.trust_level.value, 0)
+            return (trust_score, agent.max_concurrent_tasks, len(agent.tools))
+
+        return max(candidates, key=score)
+
+    def eligible_agents(
+        self,
+        task: TaskAggregate,
+        agents: list[AgentProps],
+    ) -> list[AgentProps]:
+        """Return all eligible agents without scoring."""
+        selector = task.agent_selector
+        return [
+            a for a in agents
+            if selector.required_capability in a.capabilities
+            and _satisfies_version(a.version, selector.min_version)
+        ]
+
+
+# ---------------------------------------------------------------------------
+# LeaseService — domain logic for lease expiry decisions
+# ---------------------------------------------------------------------------
+
+class LeaseService:
+    """
+    Pure domain helper for lease-related decisions.
+    (Redis operations are in LeasePort adapter.)
+    """
+
+    @staticmethod
+    def should_requeue(task: TaskAggregate, lease_active: bool) -> bool:
+        """
+        Return True if task should be requeued because its lease expired.
+        Only applies to ASSIGNED tasks.
+        """
+        from src.core.models import TaskStatus
+        return (
+            task.status == TaskStatus.ASSIGNED
+            and not lease_active
+            and task.retry_policy.attempt < task.retry_policy.max_retries
+        )
+
+    @staticmethod
+    def should_fail_stale(task: TaskAggregate, lease_active: bool) -> bool:
+        """
+        Return True if an IN_PROGRESS task with expired lease should be failed.
+        """
+        from src.core.models import TaskStatus
+        return (
+            task.status == TaskStatus.IN_PROGRESS
+            and not lease_active
+        )

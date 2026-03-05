@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  task-manager:
+    build: .
+    command: python -m src.cli task-manager
+    environment:
+      AGENT_MODE: real
+      REDIS_URL: redis://redis:6379/0
+      AGENT_ID: agent-task-manager
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./workflow:/app/workflow
+
+  worker:
+    build: .
+    command: rq worker --url redis://redis:6379/0 agent-tasks
+    environment:
+      AGENT_MODE: real
+      REDIS_URL: redis://redis:6379/0
+      AGENT_ID: agent-worker-001
+      REPO_URL: ${REPO_URL:-}
+      AGENT_BINARY: ${AGENT_BINARY:-/usr/local/bin/agent-cli}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./workflow:/app/workflow
+      - /tmp/workspaces:/tmp/workspaces
+
+  reconciler:
+    build: .
+    command: python -m src.cli reconciler
+    environment:
+      AGENT_MODE: real
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./workflow:/app/workflow
+
+volumes:
+  redis_data:
