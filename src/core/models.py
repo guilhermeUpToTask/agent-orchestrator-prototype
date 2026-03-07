@@ -53,6 +53,11 @@ class AgentProps(BaseModel):
     # Whether this agent should be started and assigned tasks.
     # Set to False to disable an agent without removing it from the registry.
     active: bool = True
+    # Which runtime adapter to use for this agent.
+    # "gemini" | "claude" | "dry-run"
+    runtime_type: str = "gemini"
+    # Runtime-specific config passed through to the adapter (model, flags, etc.)
+    runtime_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class Assignment(BaseModel):
