@@ -4,9 +4,9 @@ src/cli.py — Command-line entry point.
 Usage:
   python -m src.cli start             # Boot full system from registry.json
   python -m src.cli task-manager      # Start task manager event loop
-  python -m src.cli worker            # Start worker event loop (no RQ)
+  python -m src.cli worker            # Start worker event loop
   python -m src.cli reconciler        # Start reconciler loop
-  python -m src.cli create-task       # Create a task from YAML file
+  python -m src.cli create-task       # Create a task (ID auto-generated)
   python -m src.cli list-tasks        # Print task statuses
   python -m src.cli register-agent    # Register an agent in the registry
 """
@@ -229,16 +229,49 @@ def run_reconciler(interval: int):
 # ---------------------------------------------------------------------------
 
 @cli.command("create-task")
-@click.argument("yaml_file", type=click.Path(exists=True))
-def create_task(yaml_file: str):
+@click.option("--title", required=True, help="Short title for the task")
+@click.option("--description", required=True, help="Full description of what the agent must do")
+@click.option("--feature-id", default=None, help="Feature/project group ID (auto-generated if omitted)")
+@click.option("--capability", required=True, help="Required agent capability, e.g. code:backend")
+@click.option("--allow", multiple=True, required=True, help="File the agent is allowed to modify (repeatable)")
+@click.option("--test", default=None, help="Shell command to verify the result, e.g. 'python3 hello.py'")
+@click.option("--criteria", multiple=True, help="Acceptance criteria lines (repeatable)")
+@click.option("--depends-on", multiple=True, help="Task IDs this task depends on (repeatable)")
+@click.option("--max-retries", default=2, help="Max retry attempts on failure")
+@click.option("--min-version", default=">=1.0.0", help="Minimum agent version constraint")
+def create_task(
+    title: str,
+    description: str,
+    feature_id: str | None,
+    capability: str,
+    allow: tuple,
+    test: str | None,
+    criteria: tuple,
+    depends_on: tuple,
+    max_retries: int,
+    min_version: str,
+):
     """
-    Create a task from a YAML file and emit task.created.
-    The YAML is the source of truth; the event triggers the task manager.
-    If the event is lost (e.g. crash), the reconciler will re-emit it.
+    Create a task and emit task.created.
+
+    The task ID is generated automatically from a UUID — no manual file
+    naming required. The YAML is written to workflow/tasks/ as the source
+    of truth. If the event is lost (e.g. crash), the reconciler will
+    re-emit it on the next pass.
+
+    Example:
+      python -m src.cli create-task \\
+        --title "Create hello world" \\
+        --description "Create hello.py that prints Hello from agent!" \\
+        --capability code:backend \\
+        --allow hello.py \\
+        --test "python3 hello.py | grep -q 'Hello from agent!'"
     """
-    import yaml
-    from src.core.models import TaskAggregate, DomainEvent
-    from src.infra.factory import build_task_repo, build_event_port
+    import uuid
+    from src.core.models import (
+        AgentSelector, DomainEvent, ExecutionSpec, RetryPolicy, TaskAggregate,
+    )
+    from src.infra.factory import build_event_port, build_task_repo
 
     mode = os.getenv("AGENT_MODE", "dry-run")
     if mode != "real":
@@ -249,8 +282,28 @@ def create_task(yaml_file: str):
             err=True,
         )
 
-    data = yaml.safe_load(Path(yaml_file).read_text())
-    task = TaskAggregate.model_validate(data)
+    # Generate a collision-safe ID — filename will always match task_id
+    task_id = f"task-{uuid.uuid4().hex[:12]}"
+    fid = feature_id or f"feat-{uuid.uuid4().hex[:8]}"
+
+    task = TaskAggregate(
+        task_id=task_id,
+        feature_id=fid,
+        title=title,
+        description=description,
+        agent_selector=AgentSelector(
+            required_capability=capability,
+            min_version=min_version,
+        ),
+        execution=ExecutionSpec(
+            type=capability,
+            files_allowed_to_modify=list(allow),
+            test_command=test or None,
+            acceptance_criteria=list(criteria),
+        ),
+        depends_on=list(depends_on),
+        retry_policy=RetryPolicy(max_retries=max_retries),
+    )
 
     repo = build_task_repo()
     repo.save(task)                     # 1. Persist first (source of truth)
@@ -259,9 +312,18 @@ def create_task(yaml_file: str):
     events.publish(DomainEvent(         # 2. Emit event to trigger task manager
         type="task.created",
         producer="cli",
-        payload={"task_id": task.task_id},
+        payload={"task_id": task_id},
     ))
-    click.echo(f"✓ Task created: {task.task_id}")
+
+    click.echo(f"✓ Task created: {task_id}")
+    click.echo(f"  title:      {title}")
+    click.echo(f"  feature:    {fid}")
+    click.echo(f"  capability: {capability}")
+    click.echo(f"  files:      {', '.join(allow)}")
+    if test:
+        click.echo(f"  test:       {test}")
+    if depends_on:
+        click.echo(f"  depends on: {', '.join(depends_on)}")
 
 
 # ---------------------------------------------------------------------------
