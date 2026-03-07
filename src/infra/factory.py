@@ -3,17 +3,23 @@ src/infra/factory.py — Dependency injection factory.
 
 Reads AGENT_MODE env var:
   dry-run  → in-memory + dry-run adapters (CI/tests)
-  real     → Redis + subprocess + Git adapters (production)
+  real     → Redis + per-agent runtime adapters (production)
+
+Each agent in the registry declares its own runtime_type ("gemini", "claude", etc.)
+so multiple agents with different LLM backends can coexist in the same system.
 """
 from __future__ import annotations
 
 import os
+from typing import Callable
 
 import structlog
 
 from src.app.handlers.task_manager import TaskManagerHandler
 from src.app.handlers.worker import WorkerHandler
 from src.app.reconciler import Reconciler
+from src.core.models import AgentProps
+from src.core.ports import AgentRuntimePort
 from src.core.services import SchedulerService
 
 log = structlog.get_logger(__name__)
@@ -66,13 +72,53 @@ def build_git_workspace():
     return GitWorkspaceAdapter()
 
 
-def build_agent_runtime():
-    if _MODE == "dry-run":
+def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
+    """
+    Build the correct runtime adapter for the given agent based on its
+    runtime_type field. Each agent CLI has its own adapter that knows
+    how to invoke that specific tool, build prompts for it, and parse
+    its output — keeping the orchestration layer fully agent-agnostic.
+
+    runtime_type values:
+      "dry-run" — deterministic stub (CI/tests, always available)
+      "gemini"  — Gemini CLI (requires GEMINI_API_KEY)
+      "claude"  — Claude Code CLI (requires ANTHROPIC_API_KEY)
+    """
+    if _MODE == "dry-run" or agent_props.runtime_type == "dry-run":
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
         return DryRunAgentRuntime()
-    from src.infra.runtime.agent_runtime import SubprocessAgentRuntime
-    binary = os.getenv("AGENT_BINARY", "/usr/local/bin/agent-cli")
-    return SubprocessAgentRuntime(agent_binary=binary)
+
+    cfg = agent_props.runtime_config  # runtime-specific overrides from registry
+
+    if agent_props.runtime_type == "gemini":
+        from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
+        return GeminiAgentRuntime(
+            api_key=os.getenv("GEMINI_API_KEY", ""),
+            model=cfg.get("model", GeminiAgentRuntime.DEFAULT_MODEL),
+            extra_flags=cfg.get("extra_flags", []),
+        )
+
+    if agent_props.runtime_type == "claude":
+        from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
+        return ClaudeCodeRuntime(
+            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            model=cfg.get("model", ClaudeCodeRuntime.DEFAULT_MODEL),
+            extra_flags=cfg.get("extra_flags", []),
+        )
+
+    raise ValueError(
+        f"Unknown runtime_type '{agent_props.runtime_type}' for agent "
+        f"'{agent_props.agent_id}'. Valid values: gemini, claude, dry-run"
+    )
+
+
+def build_runtime_factory() -> Callable[[AgentProps], AgentRuntimePort]:
+    """
+    Returns a callable that maps AgentProps → AgentRuntimePort.
+    Passed to WorkerHandler so it can build the correct runtime per-task
+    after it knows which agent was assigned.
+    """
+    return build_agent_runtime
 
 
 def build_task_manager_handler() -> TaskManagerHandler:
@@ -94,7 +140,7 @@ def build_worker_handler() -> WorkerHandler:
         event_port=build_event_port(),
         lease_port=build_lease_port(),
         git_workspace=build_git_workspace(),
-        agent_runtime=build_agent_runtime(),
+        runtime_factory=build_runtime_factory(),
         task_timeout_seconds=_TASK_TIMEOUT,
     )
 
@@ -104,6 +150,6 @@ def build_reconciler(interval_seconds: int = 30) -> Reconciler:
         task_repo=build_task_repo(),
         lease_port=build_lease_port(),
         event_port=build_event_port(),
-        agent_registry=build_agent_registry(),   # needed for dead-agent detection
+        agent_registry=build_agent_registry(),
         interval_seconds=interval_seconds,
     )
