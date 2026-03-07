@@ -92,8 +92,21 @@ class EventPort(ABC):
         ...
 
     @abstractmethod
-    def subscribe(self, event_type: str) -> Iterator[DomainEvent]:
-        """Block-subscribe to events of a given type."""
+    def subscribe(self, event_type: str, group: str, consumer: str) -> Iterator[DomainEvent]:
+        """
+        Block-subscribe to events of a given type using consumer groups.
+        Each message is delivered to exactly one consumer in the group.
+        """
+        ...
+
+    @abstractmethod
+    def subscribe_many(self, event_types: list[str], group: str, consumer: str) -> Iterator[DomainEvent]:
+        """
+        Block-subscribe to multiple event types in a single call.
+        Yields events from any of the given types as they arrive.
+        Use this instead of chaining multiple subscribe() calls — chaining
+        blocking generators means only the first type is ever consumed.
+        """
         ...
 
 

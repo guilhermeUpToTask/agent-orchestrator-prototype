@@ -104,5 +104,6 @@ def build_reconciler(interval_seconds: int = 30) -> Reconciler:
         task_repo=build_task_repo(),
         lease_port=build_lease_port(),
         event_port=build_event_port(),
+        agent_registry=build_agent_registry(),   # needed for dead-agent detection
         interval_seconds=interval_seconds,
     )

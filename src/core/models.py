@@ -50,6 +50,9 @@ class AgentProps(BaseModel):
     max_concurrent_tasks: int = 1
     trust_level: TrustLevel = TrustLevel.MEDIUM
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Whether this agent should be started and assigned tasks.
+    # Set to False to disable an agent without removing it from the registry.
+    active: bool = True
 
 
 class Assignment(BaseModel):
@@ -111,6 +114,8 @@ class TaskAggregate(BaseModel):
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Tasks this one depends on. Will not be dispatched until all are SUCCEEDED.
+    depends_on: list[str] = Field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Invariant helpers

@@ -3,15 +3,14 @@ src/app/handlers/task_manager.py — Task Manager use-case handler.
 
 The Task Manager is itself an agent (capabilities include 'task_manager').
 It:
-  1. Listens for task.created / task.requeued events
+  1. Listens for task.created / task.requeued / task.completed events
   2. Selects an agent via SchedulerService
   3. Persists assignment (update_if_version)
   4. Creates a lease
-  5. Publishes task.assigned
+  5. Publishes task.assigned  ← this is what wakes the worker up
 """
 from __future__ import annotations
 
-import logging
 from uuid import uuid4
 
 import structlog
@@ -33,7 +32,8 @@ MAX_ASSIGN_RETRIES = 5
 
 class TaskManagerHandler:
     """
-    Processes task.created / task.requeued events and assigns tasks to agents.
+    Processes task.created / task.requeued / task.completed events.
+    Assigns tasks to agents and unblocks dependents on completion.
     Implements optimistic concurrency with retry on version conflict.
     """
 
@@ -52,7 +52,7 @@ class TaskManagerHandler:
         self._scheduler = scheduler or SchedulerService()
 
     # ------------------------------------------------------------------
-    # Public entry point
+    # Public entry points
     # ------------------------------------------------------------------
 
     def handle_task_created(self, task_id: str) -> bool:
@@ -67,6 +67,31 @@ class TaskManagerHandler:
     def handle_task_requeued(self, task_id: str) -> bool:
         log.info("task_manager.handling_requeued", task_id=task_id)
         return self._assign_with_retry(task_id)
+
+    def handle_task_completed(self, completed_task_id: str) -> None:
+        """
+        When a task completes, check if any dependent tasks are now unblocked.
+        A dependent task is dispatched only when ALL of its depends_on tasks
+        have SUCCEEDED.
+        """
+        log.info("task_manager.handling_completed", task_id=completed_task_id)
+
+        all_tasks = self._repo.list_all()
+        succeeded_ids = {t.task_id for t in all_tasks if t.status == TaskStatus.SUCCEEDED}
+
+        for task in all_tasks:
+            if completed_task_id not in task.depends_on:
+                continue
+            if task.status != TaskStatus.CREATED:
+                continue
+            # All dependencies must be satisfied before dispatching
+            if all(dep in succeeded_ids for dep in task.depends_on):
+                log.info(
+                    "task_manager.unblocking_dependent",
+                    task_id=task.task_id,
+                    completed=completed_task_id,
+                )
+                self._assign_with_retry(task.task_id)
 
     # ------------------------------------------------------------------
     # Internal logic
@@ -95,6 +120,19 @@ class TaskManagerHandler:
                 status=task.status,
             )
             return False
+
+        # Do not dispatch tasks whose dependencies are not yet satisfied
+        if task.depends_on:
+            all_tasks = self._repo.list_all()
+            succeeded_ids = {t.task_id for t in all_tasks if t.status == TaskStatus.SUCCEEDED}
+            unmet = [dep for dep in task.depends_on if dep not in succeeded_ids]
+            if unmet:
+                log.info(
+                    "task_manager.skip_unmet_dependencies",
+                    task_id=task_id,
+                    unmet=unmet,
+                )
+                return False
 
         agents = self._registry.list_agents()
         agent = self._scheduler.select_agent(task, agents)
@@ -125,13 +163,18 @@ class TaskManagerHandler:
         task.assignment.lease_token = lease_token
         self._repo.save(task)
 
-        # Emit event (after persisting)
+        # Emit task.assigned — this is what wakes the worker up.
+        # The worker subscribes to this event via Redis Streams consumer groups.
         self._events.publish(
             DomainEvent(
                 type="task.assigned",
                 producer=TASK_MANAGER_AGENT_ID,
                 correlation_id=task.feature_id,
-                payload={"task_id": task_id, "agent_id": agent.agent_id},
+                payload={
+                    "task_id": task_id,
+                    "agent_id": agent.agent_id,
+                    "project_id": task.feature_id,
+                },
             )
         )
 

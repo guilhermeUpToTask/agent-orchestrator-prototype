@@ -1,6 +1,0 @@
-project_id: proj-demo
-name: "Demo Project"
-description: "Agent Orchestrator demo project"
-created_at: "2026-03-04T00:00:00Z"
-repo_url: ""
-default_branch: main

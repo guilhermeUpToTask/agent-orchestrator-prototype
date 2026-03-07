@@ -4,7 +4,9 @@ src/infra/redis_adapters/event_adapter.py — Redis Streams EventPort adapter.
 Events are published to stream  events:{event_type}
 and to a global stream        events:all
 
-Consumers read with XREAD (blocking).
+Consumers read with XREADGROUP so each message is delivered to exactly
+one consumer in a group, preventing duplicate processing across multiple
+workers or task manager instances.
 """
 from __future__ import annotations
 
@@ -18,7 +20,6 @@ from src.core.ports import EventPort
 
 
 _GLOBAL_STREAM = "events:all"
-_JOURNAL_KEY = "events:journal"
 
 
 class RedisEventAdapter(EventPort):
@@ -33,29 +34,61 @@ class RedisEventAdapter(EventPort):
         payload = event.model_dump(mode="json")
         serialized = json.dumps(payload, default=str)
         pipe = self._r.pipeline()
-        # Per-type stream
         pipe.xadd(f"events:{event.type}", {"data": serialized})
-        # Global stream
         pipe.xadd(_GLOBAL_STREAM, {"data": serialized})
         pipe.execute()
-        # Optional: write to filesystem journal
         self._write_journal(event)
 
-    def subscribe(self, event_type: str) -> Iterator[DomainEvent]:
-        stream_key = f"events:{event_type}"
-        last_id = "0"
+    def subscribe(self, event_type: str, group: str, consumer: str) -> Iterator[DomainEvent]:
+        """Subscribe to a single event type. See subscribe_many() for multiple types."""
+        yield from self.subscribe_many([event_type], group, consumer)
+
+    def subscribe_many(self, event_types: list[str], group: str, consumer: str) -> Iterator[DomainEvent]:
+        """
+        Block-subscribe to multiple event types in a single XREADGROUP call.
+        Yields events from any of the given streams as they arrive — no
+        starvation, no missed types.
+
+        Args:
+            event_types: e.g. ["task.created", "task.requeued", "task.completed"]
+            group:       consumer group name, e.g. "task-manager" or "workers"
+            consumer:    unique consumer name within the group, e.g. AGENT_ID
+        """
+        streams = {f"events:{et}": et for et in event_types}
+
+        # Create consumer groups for all streams (idempotent).
+        # id="$" — only consume messages published from this point on.
+        for stream_key in streams:
+            try:
+                self._r.xgroup_create(stream_key, group, id="$", mkstream=True)
+            except redis.exceptions.ResponseError:
+                pass  # group already exists
+
+        # Build the read dict: {stream_key: ">"} for all streams.
+        read_dict = {key: ">" for key in streams}
+
         while True:
-            results = self._r.xread({stream_key: last_id}, block=5000, count=10)
+            results = self._r.xreadgroup(
+                group, consumer,
+                read_dict,
+                block=5000,
+                count=10,   # read up to 10 messages across all streams per call
+            )
             if not results:
                 continue
-            for _stream, messages in results:
+            for stream_key, messages in results:
+                stream_name = stream_key.decode() if isinstance(stream_key, bytes) else stream_key
                 for msg_id, fields in messages:
-                    last_id = msg_id.decode() if isinstance(msg_id, bytes) else msg_id
-                    data_raw = fields.get(b"data") or fields.get("data", b"{}")
-                    if isinstance(data_raw, bytes):
-                        data_raw = data_raw.decode()
-                    data = json.loads(data_raw)
-                    yield DomainEvent.model_validate(data)
+                    try:
+                        data_raw = fields.get(b"data") or fields.get("data", b"{}")
+                        if isinstance(data_raw, bytes):
+                            data_raw = data_raw.decode()
+                        data = json.loads(data_raw)
+                        yield DomainEvent.model_validate(data)
+                    finally:
+                        # Always ack so Redis doesn't redeliver on reconnect.
+                        # Recovery on processing failure is handled by the reconciler.
+                        self._r.xack(stream_name, group, msg_id)
 
     # ------------------------------------------------------------------
     # Internal
@@ -84,8 +117,12 @@ class InMemoryEventAdapter(EventPort):
         self._published.append(event)
         self._subscribers.setdefault(event.type, []).append(event)
 
-    def subscribe(self, event_type: str) -> Iterator[DomainEvent]:
+    def subscribe(self, event_type: str, group: str = "", consumer: str = "") -> Iterator[DomainEvent]:
         yield from self._subscribers.get(event_type, [])
+
+    def subscribe_many(self, event_types: list[str], group: str = "", consumer: str = "") -> Iterator[DomainEvent]:
+        for et in event_types:
+            yield from self._subscribers.get(et, [])
 
     @property
     def all_events(self) -> list[DomainEvent]:

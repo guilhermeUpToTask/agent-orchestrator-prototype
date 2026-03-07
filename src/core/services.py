@@ -5,6 +5,7 @@ Pure business logic; no infra imports.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.core.models import AgentProps, TaskAggregate
@@ -34,6 +35,17 @@ def _satisfies_version(agent_version: str, constraint: str) -> bool:
     return _parse_version(agent_version) == _parse_version(constraint)
 
 
+def _is_alive(agent: AgentProps, threshold_seconds: int = 60) -> bool:
+    """
+    Return True if the agent has sent a heartbeat within threshold_seconds.
+    An agent with no heartbeat at all is considered dead.
+    """
+    if agent.last_heartbeat is None:
+        return False
+    age = (datetime.now(timezone.utc) - agent.last_heartbeat).total_seconds()
+    return age < threshold_seconds
+
+
 # ---------------------------------------------------------------------------
 # SchedulerService — selects the best agent for a task
 # ---------------------------------------------------------------------------
@@ -42,6 +54,7 @@ class SchedulerService:
     """
     Pure domain service. Selects the best available agent for a task.
     Scoring: capability match + version + available capacity.
+    Only considers agents that are active AND alive (recent heartbeat).
     """
 
     def select_agent(
@@ -52,14 +65,17 @@ class SchedulerService:
         """
         Returns the highest-scoring eligible agent, or None if no match.
         Eligibility:
+          - active flag is True
+          - has sent a heartbeat within the last 60 seconds
           - has required_capability in capabilities
           - satisfies min_version constraint
-          - max_concurrent_tasks > 0 (caller is responsible for tracking)
         """
         selector = task.agent_selector
         candidates = [
             a for a in agents
-            if selector.required_capability in a.capabilities
+            if a.active
+            and _is_alive(a)
+            and selector.required_capability in a.capabilities
             and _satisfies_version(a.version, selector.min_version)
         ]
         if not candidates:
@@ -81,7 +97,9 @@ class SchedulerService:
         selector = task.agent_selector
         return [
             a for a in agents
-            if selector.required_capability in a.capabilities
+            if a.active
+            and _is_alive(a)
+            and selector.required_capability in a.capabilities
             and _satisfies_version(a.version, selector.min_version)
         ]
 
