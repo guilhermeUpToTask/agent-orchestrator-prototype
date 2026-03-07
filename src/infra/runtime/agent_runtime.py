@@ -1,17 +1,12 @@
 """
-src/infra/runtime/agent_runtime.py — AgentRuntimePort adapters.
+src/infra/runtime/agent_runtime.py — DryRunAgentRuntime for CI/tests.
 
-Two modes:
-  SubprocessAgentRuntime  — launches a real agent CLI binary
-  DryRunAgentRuntime      — deterministic stub for CI/tests; writes allowed files
+Real agent runtimes live in their own modules:
+  gemini_runtime.py      — Gemini CLI
+  claude_code_runtime.py — Claude Code CLI
 """
 from __future__ import annotations
 
-import json
-import os
-import signal
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Iterator
@@ -25,22 +20,8 @@ log = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Concrete SessionHandle implementations
+# Dry-run session handle
 # ---------------------------------------------------------------------------
-
-class SubprocessSessionHandle(SessionHandle):
-    def __init__(self, session_id: str, process: subprocess.Popen, context_file: str) -> None:
-        self._session_id = session_id
-        self.process = process
-        self.context_file = context_file
-        self.stdout_lines: list[str] = []
-        self.stderr_lines: list[str] = []
-        self.start_time = time.monotonic()
-
-    @property
-    def session_id(self) -> str:
-        return self._session_id
-
 
 class DryRunSessionHandle(SessionHandle):
     def __init__(self, session_id: str) -> None:
@@ -54,98 +35,6 @@ class DryRunSessionHandle(SessionHandle):
 
 
 # ---------------------------------------------------------------------------
-# Real subprocess adapter
-# ---------------------------------------------------------------------------
-
-class SubprocessAgentRuntime(AgentRuntimePort):
-    """
-    Launches an agent CLI as a subprocess with workspace as CWD.
-    The agent binary is resolved from agent_props.tools or a default path.
-    """
-
-    def __init__(
-        self,
-        agent_binary: str = "/usr/local/bin/agent-cli",
-        logs_base: str = "workflow/logs",
-    ) -> None:
-        self._binary = agent_binary
-        self._logs_base = Path(logs_base)
-
-    def start_session(
-        self,
-        agent_props: AgentProps,
-        workspace_path: str,
-        env_vars: dict[str, str],
-    ) -> SubprocessSessionHandle:
-        session_id = f"session-{agent_props.agent_id}-{int(time.time())}"
-        env = {**os.environ, **env_vars, "AGENT_SESSION_ID": session_id}
-
-        # Context file path — agent reads this on startup
-        context_file = os.path.join(workspace_path, ".agent_context.json")
-
-        process = subprocess.Popen(
-            [self._binary, "run", "--context", context_file],
-            cwd=workspace_path,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        log.info("runtime.session_started", session_id=session_id, pid=process.pid)
-        return SubprocessSessionHandle(session_id, process, context_file)
-
-    def send_execution_payload(
-        self,
-        handle: SubprocessSessionHandle,
-        context: ExecutionContext,
-    ) -> None:
-        payload = context.model_dump(mode="json")
-        Path(handle.context_file).write_text(json.dumps(payload, indent=2))
-
-    def wait_for_completion(
-        self,
-        handle: SubprocessSessionHandle,
-        timeout_seconds: int = 600,
-    ) -> AgentExecutionResult:
-        try:
-            stdout, stderr = handle.process.communicate(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            handle.process.kill()
-            stdout, stderr = handle.process.communicate()
-            elapsed = time.monotonic() - handle.start_time
-            return AgentExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout=stdout or "",
-                stderr=f"TIMEOUT after {timeout_seconds}s\n" + (stderr or ""),
-                elapsed_seconds=elapsed,
-            )
-
-        exit_code = handle.process.returncode
-        elapsed = time.monotonic() - handle.start_time
-        return AgentExecutionResult(
-            success=exit_code == 0,
-            exit_code=exit_code,
-            stdout=stdout or "",
-            stderr=stderr or "",
-            elapsed_seconds=elapsed,
-        )
-
-    def terminate_session(self, handle: SubprocessSessionHandle) -> None:
-        if handle.process.poll() is None:
-            handle.process.send_signal(signal.SIGTERM)
-            try:
-                handle.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                handle.process.kill()
-
-    def stream_logs(self, handle: SubprocessSessionHandle) -> Iterator[str]:
-        if handle.process.stdout:
-            for line in handle.process.stdout:
-                yield line
-
-
-# ---------------------------------------------------------------------------
 # Dry-run adapter (deterministic, no subprocess)
 # ---------------------------------------------------------------------------
 
@@ -155,7 +44,7 @@ class DryRunAgentRuntime(AgentRuntimePort):
 
     Behaviour:
       - Creates allowed files with stub content
-      - Always reports success
+      - Always reports success (unless simulate_failure=True)
       - Simulates short elapsed time
     """
 
@@ -219,7 +108,7 @@ class DryRunAgentRuntime(AgentRuntimePort):
         )
 
     def terminate_session(self, handle: DryRunSessionHandle) -> None:
-        pass  # nothing to terminate
+        pass
 
     def stream_logs(self, handle: DryRunSessionHandle) -> Iterator[str]:
         yield "[dry-run] no live logs\n"
