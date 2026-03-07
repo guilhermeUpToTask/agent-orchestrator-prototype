@@ -70,9 +70,11 @@ class YamlTaskRepository(TaskRepositoryPort):
 
     def list_all(self) -> list[TaskAggregate]:
         tasks = []
-        for path in sorted(self._dir.glob("task-*.yaml")):
+        for path in sorted(self._dir.glob("*.yaml")):
             try:
                 data = yaml.safe_load(path.read_text())
+                if data is None:
+                    continue  # skip empty files
                 tasks.append(TaskAggregate.model_validate(data))
             except Exception as exc:
                 import structlog
@@ -86,7 +88,7 @@ class YamlTaskRepository(TaskRepositoryPort):
     # ------------------------------------------------------------------
 
     def _task_path(self, task_id: str) -> Path:
-        return self._dir / f"task-{task_id}.yaml"
+        return self._dir / f"{task_id}.yaml"
 
     def _atomic_write(self, path: Path, task: TaskAggregate) -> None:
         """Write to .tmp then rename (atomic on POSIX)."""
