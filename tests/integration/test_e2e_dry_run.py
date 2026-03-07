@@ -121,6 +121,9 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
     from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
     from src.infra.runtime.agent_runtime import DryRunAgentRuntime
 
+    # Always use dry-run runtime in tests regardless of agent's runtime_type
+    dry_run = DryRunAgentRuntime()
+
     return WorkerHandler(
         agent_id=agent_id,
         repo_url="file:///dev/null",
@@ -129,7 +132,7 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
         event_port=event_port,
         lease_port=lease_port,
         git_workspace=DryRunGitWorkspaceAdapter(),
-        agent_runtime=DryRunAgentRuntime(),
+        runtime_factory=lambda agent_props: dry_run,
         task_timeout_seconds=30,
     )
 
@@ -302,7 +305,7 @@ class TestFullLifecycle:
 class TestReconciler:
 
     def test_requeues_assigned_expired_lease(
-        self, sample_task, task_repo, lease_port, event_port
+        self, sample_task, task_repo, lease_port, event_port, agent_registry
     ):
         # Assign task
         sample_task.assign(Assignment(agent_id="agent-001", lease_seconds=1))
@@ -313,7 +316,7 @@ class TestReconciler:
         lease_port.expire_all()
 
         from src.app.reconciler import Reconciler
-        reconciler = Reconciler(task_repo, lease_port, event_port)
+        reconciler = Reconciler(task_repo, lease_port, event_port, agent_registry)
         reconciler.run_once()
 
         task_after = task_repo.load(sample_task.task_id)
