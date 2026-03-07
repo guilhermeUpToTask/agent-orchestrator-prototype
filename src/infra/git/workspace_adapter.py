@@ -49,8 +49,35 @@ class GitWorkspaceAdapter(GitWorkspacePort):
     ) -> None:
         ws = workspace_path
         log.info("git.create_branch", branch=branch_name, ws=ws)
-        self._run(["git", "checkout", self._default_branch], cwd=ws)
-        self._run(["git", "pull", "--ff-only"], cwd=ws)
+
+        # Check if the repo has any commits at all.
+        # A freshly initialised bare repo has no HEAD yet — trying to checkout
+        # main would fail with "pathspec did not match any file(s)".
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=ws, capture_output=True,
+        )
+        if result.returncode != 0:
+            # Empty repo — create the initial commit on main so the branch
+            # structure exists before we create a task branch off it.
+            log.warning("git.empty_repo_creating_initial_commit", ws=ws)
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "orchestrator",
+                "GIT_AUTHOR_EMAIL": "orchestrator@local",
+                "GIT_COMMITTER_NAME": "orchestrator",
+                "GIT_COMMITTER_EMAIL": "orchestrator@local",
+            }
+            self._run(["git", "checkout", "-b", self._default_branch], cwd=ws)
+            self._run(
+                ["git", "commit", "--allow-empty", "-m", "chore: initial commit"],
+                cwd=ws, extra_env=env,
+            )
+            self._run(["git", "push", "-u", "origin", self._default_branch], cwd=ws)
+        else:
+            self._run(["git", "checkout", self._default_branch], cwd=ws)
+            self._run(["git", "pull", "--ff-only"], cwd=ws)
+
         self._run(["git", "checkout", "-b", branch_name], cwd=ws)
 
     def apply_changes_and_commit(
