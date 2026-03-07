@@ -297,10 +297,20 @@ def list_tasks():
 @click.option("--capabilities", required=True, help="Comma-separated")
 @click.option("--version", default="1.0.0")
 @click.option("--active/--inactive", default=True, help="Whether to include in boot and scheduling")
-def register_agent(agent_id: str, name: str, capabilities: str, version: str, active: bool):
+@click.option("--runtime-type", default="gemini", help="gemini | claude | dry-run")
+@click.option("--runtime-config", default="{}", help='JSON string, e.g. \'{"model":"gemini-2.0-pro"}\'')
+def register_agent(agent_id: str, name: str, capabilities: str, version: str,
+                   active: bool, runtime_type: str, runtime_config: str):
     """Register a new agent in the registry."""
+    import json
     from src.core.models import AgentProps
     from src.infra.factory import build_agent_registry
+
+    try:
+        config = json.loads(runtime_config)
+    except json.JSONDecodeError as e:
+        click.echo(f"✗ Invalid --runtime-config JSON: {e}", err=True)
+        sys.exit(1)
 
     agent = AgentProps(
         agent_id=agent_id,
@@ -308,11 +318,13 @@ def register_agent(agent_id: str, name: str, capabilities: str, version: str, ac
         capabilities=[c.strip() for c in capabilities.split(",")],
         version=version,
         active=active,
+        runtime_type=runtime_type,
+        runtime_config=config,
     )
     registry = build_agent_registry()
     registry.register(agent)
     status = "active" if active else "inactive"
-    click.echo(f"✓ Agent registered: {agent_id} ({status})")
+    click.echo(f"✓ Agent registered: {agent_id} ({status}, runtime: {runtime_type})")
 
 
 if __name__ == "__main__":
