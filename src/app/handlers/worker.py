@@ -1,27 +1,31 @@
 """
-src/app/handlers/worker.py — Worker use-case handler (runs inside an RQ job).
+src/app/handlers/worker.py — Worker use-case handler.
 
 Per-task execution flow:
   1. Load task, validate assignment
-  2. Create ephemeral git workspace
-  3. Start agent session (AgentRuntimePort)
-  4. Send ExecutionContext
-  5. Wait for result
-  6. Validate modified files against allowed list
-  7. Run acceptance tests
-  8. Commit + push on success  /  fail on error
-  9. Persist final state, emit event, cleanup
+  2. Load agent props → build the correct runtime for this agent
+  3. Create ephemeral git workspace
+  4. Transition task → in_progress
+  5. Start agent session (AgentRuntimePort)
+  6. Send ExecutionContext
+  7. Wait for result
+  8. Validate modified files against allowed list
+  9. Run acceptance tests
+  10. Commit + push on success / fail on error
+  11. Persist final state, emit event, cleanup
 """
 from __future__ import annotations
 
 import os
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 import structlog
 
 from src.core.models import (
     AgentExecutionResult,
+    AgentProps,
     DomainEvent,
     ExecutionContext,
     TaskAggregate,
@@ -45,8 +49,13 @@ LOG_BASE = Path("workflow/logs")
 
 class WorkerHandler:
     """
-    Executes a single task assignment. Instantiated once per RQ job.
+    Executes a single task assignment.
     All side effects (git, agent, persistence) go through ports.
+
+    runtime_factory is a callable that receives AgentProps and returns the
+    correct AgentRuntimePort for that agent's runtime_type. This makes the
+    system agent-agnostic — Gemini, Claude Code, or any future CLI can be
+    swapped per-agent without changing orchestration logic.
     """
 
     def __init__(
@@ -58,7 +67,7 @@ class WorkerHandler:
         event_port: EventPort,
         lease_port: LeasePort,
         git_workspace: GitWorkspacePort,
-        agent_runtime: AgentRuntimePort,
+        runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         task_timeout_seconds: int = 600,
     ) -> None:
         self._agent_id = agent_id
@@ -68,11 +77,11 @@ class WorkerHandler:
         self._events = event_port
         self._lease = lease_port
         self._git = git_workspace
-        self._runtime = agent_runtime
+        self._runtime_factory = runtime_factory
         self._timeout = task_timeout_seconds
 
     # ------------------------------------------------------------------
-    # Main entry point (called by RQ job function)
+    # Main entry point
     # ------------------------------------------------------------------
 
     def process(self, task_id: str, project_id: str) -> None:
@@ -84,12 +93,27 @@ class WorkerHandler:
         task = self._task_repo.load(task_id)
         self._validate_assignment(task)
 
+        # ----------------------------------------------------------------
+        # 2. Load agent props and build the runtime for this specific agent
+        # ----------------------------------------------------------------
+        agent_props = self._registry.get(self._agent_id)
+        if agent_props is None:
+            raise RuntimeError(f"Agent {self._agent_id} not found in registry")
+
+        runtime = self._runtime_factory(agent_props)
+        log.info(
+            "worker.runtime_selected",
+            task_id=task_id,
+            agent_id=self._agent_id,
+            runtime_type=agent_props.runtime_type,
+        )
+
         ws_path: str | None = None
         session = None
 
         try:
             # ------------------------------------------------------------
-            # 2. Create ephemeral workspace
+            # 3. Create ephemeral workspace
             # ------------------------------------------------------------
             ws_path = self._git.create_workspace(self._repo_url, task_id)
             branch = f"task/{task_id}"
@@ -97,7 +121,7 @@ class WorkerHandler:
             log.info("worker.workspace_ready", task_id=task_id, path=ws_path)
 
             # ------------------------------------------------------------
-            # 3. Transition task → in_progress (persist-first)
+            # 4. Transition task → in_progress (persist-first)
             # ------------------------------------------------------------
             expected_v = task.state_version
             task.start()
@@ -112,15 +136,14 @@ class WorkerHandler:
             ))
 
             # ------------------------------------------------------------
-            # 4. Start agent session
+            # 5. Start agent session
             # ------------------------------------------------------------
-            agent_props = self._registry.get(self._agent_id)
-            if agent_props is None:
-                raise RuntimeError(f"Agent {self._agent_id} not found in registry")
-
             env = self._build_env(task, ws_path)
-            session = self._runtime.start_session(agent_props, ws_path, env)
+            session = runtime.start_session(agent_props, ws_path, env)
 
+            # ------------------------------------------------------------
+            # 6. Send execution context
+            # ------------------------------------------------------------
             context = ExecutionContext(
                 task_id=task_id,
                 title=task.title,
@@ -131,19 +154,19 @@ class WorkerHandler:
                 branch=branch,
                 metadata={"project_id": project_id},
             )
-            self._runtime.send_execution_payload(session, context)
+            runtime.send_execution_payload(session, context)
 
             # ------------------------------------------------------------
-            # 5. Wait for completion + stream logs
+            # 7. Wait for completion
             # ------------------------------------------------------------
             log_dir = LOG_BASE / task_id
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            result = self._runtime.wait_for_completion(session, self._timeout)
+            result = runtime.wait_for_completion(session, self._timeout)
             self._save_logs(log_dir, result)
 
             # ------------------------------------------------------------
-            # 6. Validate modified files
+            # 8. Validate modified files
             # ------------------------------------------------------------
             actual_modified = self._git.get_modified_files(ws_path)
             violations = self._check_allowed_files(
@@ -153,19 +176,21 @@ class WorkerHandler:
                 raise _ForbiddenFileEdit(violations)
 
             # ------------------------------------------------------------
-            # 7. Check agent success
+            # 9. Check agent exit code
             # ------------------------------------------------------------
             if not result.success:
-                raise _AgentFailed(f"Agent exited with code {result.exit_code}\n{result.stderr}")
+                raise _AgentFailed(
+                    f"Agent exited with code {result.exit_code}\n{result.stderr}"
+                )
 
             # ------------------------------------------------------------
-            # 8. Run acceptance tests
+            # 10. Run acceptance tests
             # ------------------------------------------------------------
             if task.execution.test_command:
                 self._run_tests(ws_path, task.execution.test_command)
 
             # ------------------------------------------------------------
-            # 9. Commit + push
+            # 11. Commit + push
             # ------------------------------------------------------------
             commit_sha = self._git.apply_changes_and_commit(
                 ws_path, f"task({task_id}): {task.title}"
@@ -173,7 +198,7 @@ class WorkerHandler:
             self._git.push_branch(ws_path, branch)
 
             # ------------------------------------------------------------
-            # 10. Persist success
+            # 12. Persist success
             # ------------------------------------------------------------
             task_result = TaskResult(
                 branch=branch,
@@ -204,7 +229,7 @@ class WorkerHandler:
         finally:
             if session:
                 try:
-                    self._runtime.terminate_session(session)
+                    runtime.terminate_session(session)
                 except Exception:
                     pass
             if ws_path:
@@ -237,9 +262,7 @@ class WorkerHandler:
         }
 
     @staticmethod
-    def _check_allowed_files(
-        modified: list[str], allowed: list[str]
-    ) -> list[str]:
+    def _check_allowed_files(modified: list[str], allowed: list[str]) -> list[str]:
         allowed_set = set(allowed)
         return [f for f in modified if f not in allowed_set]
 
@@ -307,17 +330,3 @@ class _AgentFailed(Exception):
 
 class _TestsFailed(Exception):
     pass
-
-
-# ---------------------------------------------------------------------------
-# RQ job entry point (module-level function)
-# ---------------------------------------------------------------------------
-
-def process_assignment_job(task_id: str, project_id: str) -> None:
-    """
-    RQ job entry point. Dependencies are injected via factory to allow
-    swapping adapters in tests (dry-run vs real).
-    """
-    from src.infra.factory import build_worker_handler
-    handler = build_worker_handler()
-    handler.process(task_id, project_id)
