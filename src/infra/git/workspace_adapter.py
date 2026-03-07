@@ -36,7 +36,7 @@ class GitWorkspaceAdapter(GitWorkspacePort):
     # ------------------------------------------------------------------
 
     def create_workspace(self, repo_url: str, task_id: str) -> str:
-        ws = self._base / f"task-{task_id}"
+        ws = self._base / task_id
         if ws.exists():
             shutil.rmtree(ws)
         log.info("git.clone", repo_url=repo_url, dest=str(ws))
