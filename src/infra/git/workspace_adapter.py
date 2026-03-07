@@ -6,6 +6,7 @@ Workspaces are created in /tmp/workspaces/task-<id>/.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -111,13 +112,16 @@ class GitWorkspaceAdapter(GitWorkspacePort):
         cmd: list[str],
         cwd: str | None = None,
         capture: bool = False,
+        extra_env: dict | None = None,
     ) -> subprocess.CompletedProcess:
+        env = {**os.environ, **(extra_env or {})}
         result = subprocess.run(
             cmd,
             cwd=cwd,
             check=True,
             capture_output=capture,
             text=True,
+            env=env,
         )
         return result
 
