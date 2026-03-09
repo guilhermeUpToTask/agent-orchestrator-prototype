@@ -18,7 +18,7 @@ from src.core.ports import GitWorkspacePort
 
 log = structlog.get_logger(__name__)
 
-_WORKSPACE_BASE = Path("/tmp/workspaces")
+_WORKSPACE_BASE = Path("workflow/repos/workspaces")
 
 
 class GitWorkspaceAdapter(GitWorkspacePort):
