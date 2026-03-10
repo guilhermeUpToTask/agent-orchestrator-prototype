@@ -86,11 +86,10 @@ class GeminiAgentRuntime(AgentRuntimePort):
 
         cmd = [
             "gemini",
-            "--yolo",           # auto-accept all tool calls (file writes, shell commands)
+            "--model", self._model,  # always explicit — CLI default is 2.5-pro, not 2.0-flash
+            "--yolo",
             "-p", handle.prompt,
         ]
-        if self._model != self.DEFAULT_MODEL:
-            cmd += ["--model", self._model]
         cmd += self._extra_flags
 
         log.info(
