@@ -273,6 +273,7 @@ class WorkerHandler:
         proc = subprocess.run(
             test_command,
             shell=True,
+            executable="/bin/bash",   # dash (/bin/sh on Ubuntu) mishandles some quote patterns
             cwd=ws_path,
             capture_output=True,
             text=True,

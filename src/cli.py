@@ -286,6 +286,10 @@ def create_task(
     task_id = f"task-{uuid.uuid4().hex[:12]}"
     fid = feature_id or f"feat-{uuid.uuid4().hex[:8]}"
 
+    # Single quotes in test commands survive the shell but break when
+    # PyYAML stores them and bash re-executes. Replace with double quotes.
+    safe_test = test.replace("'", '"') if test else None
+
     task = TaskAggregate(
         task_id=task_id,
         feature_id=fid,
@@ -298,7 +302,7 @@ def create_task(
         execution=ExecutionSpec(
             type=capability,
             files_allowed_to_modify=list(allow),
-            test_command=test or None,
+            test_command=safe_test,
             acceptance_criteria=list(criteria),
         ),
         depends_on=list(depends_on),
