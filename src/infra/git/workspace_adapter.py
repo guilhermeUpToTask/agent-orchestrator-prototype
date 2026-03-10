@@ -140,23 +140,29 @@ class GitWorkspaceAdapter(GitWorkspacePort):
             log.info("git.cleanup", ws=workspace_path)
 
     def get_modified_files(self, workspace_path: str) -> list[str]:
-        """Return files modified vs origin/main."""
-        try:
-            result = self._run(
-                ["git", "diff", "--name-only", f"origin/{self._default_branch}...HEAD"],
-                cwd=workspace_path,
-                capture=True,
-            )
-            files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
-            return files
-        except Exception:
-            # Fallback: staged files
-            result = self._run(
-                ["git", "diff", "--name-only", "--cached"],
-                cwd=workspace_path,
-                capture=True,
-            )
-            return [f.strip() for f in result.stdout.splitlines() if f.strip()]
+        """
+        Return all files changed in the workspace vs the base branch —
+        including new untracked files, modifications, and deletions.
+
+        Called before apply_changes_and_commit so we must look at the
+        working tree, not just committed history.
+        """
+        result = self._run(
+            ["git", "status", "--porcelain"],
+            cwd=workspace_path,
+            capture=True,
+        )
+        files = []
+        for line in result.stdout.splitlines():
+            # porcelain format: "XY filename" — filename starts at col 3
+            # handles renames: "R  old -> new" — take the new name after " -> "
+            if not line.strip():
+                continue
+            entry = line[3:].strip()
+            if " -> " in entry:
+                entry = entry.split(" -> ", 1)[1]
+            files.append(entry)
+        return files
 
     # ------------------------------------------------------------------
     # Internal
