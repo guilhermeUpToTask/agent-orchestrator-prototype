@@ -44,7 +44,8 @@ from src.core.ports import (
 log = structlog.get_logger(__name__)
 
 MAX_UPDATE_RETRIES = 5
-LOG_BASE = Path("workflow/logs")
+_ORCHESTRATOR_HOME = os.path.abspath(os.getenv("ORCHESTRATOR_HOME", os.path.expanduser("~/.orchestrator")))
+LOG_BASE = Path(os.getenv("LOGS_DIR", os.path.join(_ORCHESTRATOR_HOME, "logs")))
 
 
 class WorkerHandler:

@@ -26,11 +26,18 @@ log = structlog.get_logger(__name__)
 
 _MODE = os.getenv("AGENT_MODE", "dry-run")
 _AGENT_ID = os.getenv("AGENT_ID", "agent-worker-001")
-_REPO_URL = os.getenv("REPO_URL", "file:///tmp/test-repo")
-_TASKS_DIR = os.getenv("TASKS_DIR", "workflow/tasks")
-_REGISTRY_PATH = os.getenv("REGISTRY_PATH", "workflow/agents/registry.json")
 _REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _TASK_TIMEOUT = int(os.getenv("TASK_TIMEOUT_SECONDS", "600"))
+
+# All workflow state lives under ORCHESTRATOR_HOME — outside the project repo
+# so bare repos and task state don't pollute the project's own git history.
+# Default: ~/.orchestrator  Override: ORCHESTRATOR_HOME=/some/other/path
+_HOME = os.path.abspath(os.getenv("ORCHESTRATOR_HOME", os.path.expanduser("~/.orchestrator")))
+
+_TASKS_DIR     = os.getenv("TASKS_DIR",      os.path.join(_HOME, "tasks"))
+_REGISTRY_PATH = os.getenv("REGISTRY_PATH",  os.path.join(_HOME, "agents", "registry.json"))
+_REPO_URL      = os.getenv("REPO_URL",        f"file://{os.path.join(_HOME, 'repos', 'my-repo')}")
+_WORKSPACE_DIR = os.getenv("WORKSPACE_DIR",   os.path.join(_HOME, "repos", "workspaces"))
 
 
 def _build_real_redis():
@@ -69,7 +76,7 @@ def build_git_workspace():
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
         return DryRunGitWorkspaceAdapter()
     from src.infra.git.workspace_adapter import GitWorkspaceAdapter
-    return GitWorkspaceAdapter()
+    return GitWorkspaceAdapter(workspace_base=_WORKSPACE_DIR)
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
