@@ -38,17 +38,32 @@ class GitWorkspaceAdapter(GitWorkspacePort):
 
     def create_workspace(self, repo_url: str, task_id: str) -> str:
         # If the repo URL is a local path and doesn't exist yet, create it
-        # as a bare repo so the worker can clone, branch, commit and push.
+        # as a regular (non-bare) repo so the user can browse branches,
+        # run git log, and merge task branches directly from that folder.
         if repo_url.startswith("file://"):
             local_path = repo_url[len("file://"):]
             from pathlib import Path as P
             if not P(local_path).exists():
                 log.warning("git.repo_not_found_creating", path=local_path)
+                env = {
+                    **os.environ,
+                    "GIT_AUTHOR_NAME": "orchestrator",
+                    "GIT_AUTHOR_EMAIL": "orchestrator@local",
+                    "GIT_COMMITTER_NAME": "orchestrator",
+                    "GIT_COMMITTER_EMAIL": "orchestrator@local",
+                }
+                subprocess.run(["git", "init", local_path], check=True, capture_output=True)
+                # Allow workers to push task branches without checking them out
                 subprocess.run(
-                    ["git", "init", "--bare", local_path],
+                    ["git", "-C", local_path, "config", "receive.denyCurrentBranch", "ignore"],
                     check=True, capture_output=True,
                 )
-                log.info("git.bare_repo_created", path=local_path)
+                # Initial commit so main branch exists before workers clone
+                subprocess.run(
+                    ["git", "-C", local_path, "commit", "--allow-empty", "-m", "chore: initial commit"],
+                    check=True, capture_output=True, env=env,
+                )
+                log.info("git.repo_created", path=local_path)
 
         ws = self._base / task_id
         if ws.exists():
@@ -179,4 +194,51 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
     def __init__(self) -> None:
         self._workspaces: dict[str, str] = {}
 
-    
+    def create_workspace(self, repo_url: str, task_id: str) -> str:
+        ws = tempfile.mkdtemp(prefix=f"dryrun-task-{task_id}-")
+        subprocess.run(["git", "init", ws], check=True, capture_output=True)
+        subprocess.run(["git", "-C", ws, "commit", "--allow-empty", "-m", "init"],
+                       check=True, capture_output=True,
+                       env={**__import__("os").environ,
+                            "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@t.com",
+                            "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@t.com"})
+        self._workspaces[task_id] = ws
+        return ws
+
+    def checkout_main_and_create_branch(self, workspace_path: str, branch_name: str) -> None:
+        subprocess.run(["git", "-C", workspace_path, "checkout", "-b", branch_name],
+                       check=True, capture_output=True)
+
+    def apply_changes_and_commit(self, workspace_path: str, commit_message: str) -> str:
+        env = {**__import__("os").environ,
+               "GIT_AUTHOR_NAME": "agent", "GIT_AUTHOR_EMAIL": "a@a.com",
+               "GIT_COMMITTER_NAME": "agent", "GIT_COMMITTER_EMAIL": "a@a.com"}
+        subprocess.run(["git", "-C", workspace_path, "add", "-A"],
+                       check=True, capture_output=True, env=env)
+        subprocess.run(["git", "-C", workspace_path, "commit", "--allow-empty",
+                        "-m", commit_message],
+                       check=True, capture_output=True, env=env)
+        result = subprocess.run(["git", "-C", workspace_path, "rev-parse", "HEAD"],
+                                check=True, capture_output=True, text=True, env=env)
+        return result.stdout.strip()
+
+    def push_branch(self, workspace_path: str, branch_name: str, remote_name: str = "origin") -> None:
+        pass  # no-op in dry-run
+
+    def cleanup_workspace(self, workspace_path: str) -> None:
+        shutil.rmtree(workspace_path, ignore_errors=True)
+
+    def get_modified_files(self, workspace_path: str) -> list[str]:
+        result = subprocess.run(
+            ["git", "-C", workspace_path, "status", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        files = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            entry = line[3:].strip()
+            if " -> " in entry:
+                entry = entry.split(" -> ", 1)[1]
+            files.append(entry)
+        return files
