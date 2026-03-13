@@ -152,11 +152,15 @@ def build_worker_handler() -> WorkerHandler:
     )
 
 
-def build_reconciler(interval_seconds: int = 30) -> Reconciler:
+def build_reconciler(
+    interval_seconds: int = 60,
+    stuck_task_min_age_seconds: int = 120,
+) -> Reconciler:
     return Reconciler(
         task_repo=build_task_repo(),
         lease_port=build_lease_port(),
         event_port=build_event_port(),
         agent_registry=build_agent_registry(),
         interval_seconds=interval_seconds,
+        stuck_task_min_age_seconds=stuck_task_min_age_seconds,
     )

@@ -39,9 +39,11 @@ def cli():
 # ---------------------------------------------------------------------------
 
 @cli.command("start")
-@click.option("--reconciler-interval", default=30, help="Reconciler interval in seconds")
+@click.option("--reconciler-interval", default=60, help="Reconciler interval in seconds (default: 60)")
+@click.option("--reconciler-stuck-age", default=120,
+              help="Seconds before reconciler republishes a stuck CREATED/REQUEUED task (default: 120)")
 @click.option("--heartbeat-timeout", default=30, help="Seconds to wait for worker heartbeats")
-def start_system(reconciler_interval: int, heartbeat_timeout: int):
+def start_system(reconciler_interval: int, reconciler_stuck_age: int, heartbeat_timeout: int):
     """
     Boot the full system: task-manager + all active workers + reconciler.
     Active workers are read from registry.json (active: true).
@@ -81,8 +83,12 @@ def start_system(reconciler_interval: int, heartbeat_timeout: int):
         _wait_for_heartbeats(registry, active_agents, timeout=heartbeat_timeout)
 
         # 4. Start Reconciler last
-        p = subprocess.Popen(["python", "-m", "src.cli", "reconciler",
-                               f"--interval={reconciler_interval}"], env=env)
+        p = subprocess.Popen(
+            ["python", "-m", "src.cli", "reconciler",
+             f"--interval={reconciler_interval}",
+             f"--stuck-age={reconciler_stuck_age}"],
+            env=env,
+        )
         procs.append(("reconciler", p))
         click.echo("✓ Reconciler started\n")
         click.echo("System ready. Ctrl+C to stop all.\n")
@@ -126,19 +132,23 @@ def _wait_for_heartbeats(registry, agents, timeout: int = 30) -> None:
 
 @cli.command("task-manager")
 def run_task_manager():
-    """Subscribe to task events and assign / unblock tasks."""
+    """Subscribe to task events and assign / unblock / recover tasks."""
     from src.infra.factory import build_task_manager_handler, build_event_port
 
     handler = build_task_manager_handler()
     events = build_event_port()
 
-    click.echo("Task Manager started — listening for task.created / task.requeued / task.completed")
+    click.echo("Task Manager started — listening for task.created / task.requeued / task.completed / task.failed")
 
-    # subscribe_many reads all three streams in a single XREADGROUP call.
+    # subscribe_many reads all streams in a single XREADGROUP call.
     # Using itertools.chain() on blocking generators would silently starve
-    # task.requeued and task.completed — the first stream blocks forever.
+    # task.requeued / task.completed / task.failed — the first stream blocks forever.
+    #
+    # task.failed is emitted by both the worker (agent failure) and the
+    # reconciler (dead agent / expired lease).  The task manager is the
+    # single place that decides whether to requeue or cancel.
     for event in events.subscribe_many(
-        ["task.created", "task.requeued", "task.completed"],
+        ["task.created", "task.requeued", "task.completed", "task.failed"],
         group="task-manager",
         consumer="tm-1",
     ):
@@ -151,6 +161,8 @@ def run_task_manager():
             handler.handle_task_requeued(task_id)
         elif event.type == "task.completed":
             handler.handle_task_completed(task_id)
+        elif event.type == "task.failed":
+            handler.handle_task_failed(task_id)
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +227,17 @@ def _start_heartbeat_thread(registry, agent_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command("reconciler")
-@click.option("--interval", default=30, help="Seconds between reconcile passes")
-def run_reconciler(interval: int):
+@click.option("--interval", default=60, help="Seconds between reconcile passes (default: 60)")
+@click.option("--stuck-age", default=120,
+              help="Seconds a CREATED/REQUEUED task must sit unassigned before reconciler republishes it (default: 120)")
+def run_reconciler(interval: int, stuck_age: int):
     """Run the reconciler loop (detects expired leases, dead agents, stuck tasks)."""
     from src.infra.factory import build_reconciler
-    reconciler = build_reconciler(interval_seconds=interval)
-    click.echo(f"Reconciler started — interval={interval}s")
+    reconciler = build_reconciler(
+        interval_seconds=interval,
+        stuck_task_min_age_seconds=stuck_age,
+    )
+    click.echo(f"Reconciler started — interval={interval}s, stuck-age={stuck_age}s")
     reconciler.run_forever()
 
 
