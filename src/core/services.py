@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.core.models import AgentProps, TaskAggregate
+from src.core.models import AgentProps, TaskAggregate, TaskStatus
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ class LeaseService:
         Return True if task should be requeued because its lease expired.
         Only applies to ASSIGNED tasks.
         """
-        from src.core.models import TaskStatus
+
         return (
             task.status == TaskStatus.ASSIGNED
             and not lease_active
@@ -132,7 +132,7 @@ class LeaseService:
         """
         Return True if an IN_PROGRESS task with expired lease should be failed.
         """
-        from src.core.models import TaskStatus
+
         return (
             task.status == TaskStatus.IN_PROGRESS
             and not lease_active
