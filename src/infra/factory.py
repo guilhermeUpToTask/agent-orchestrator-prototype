@@ -115,6 +115,14 @@ def build_runtime_factory() -> Callable[[AgentProps], AgentRuntimePort]:
     return build_agent_runtime
 
 
+def build_task_creation_service():
+    from src.app.services.task_creation import TaskCreationService
+    return TaskCreationService(
+        task_repo=build_task_repo(),
+        event_port=build_event_port(),
+    )
+
+
 def build_task_manager_handler() -> TaskManagerHandler:
     return TaskManagerHandler(
         task_repo=build_task_repo(),

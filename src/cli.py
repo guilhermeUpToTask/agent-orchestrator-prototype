@@ -285,11 +285,7 @@ def create_task(
         --allow hello.py \\
         --test "python3 hello.py | grep -q 'Hello from agent!'"
     """
-    import uuid
-    from src.core.models import (
-        AgentSelector, DomainEvent, ExecutionSpec, RetryPolicy, TaskAggregate,
-    )
-    from src.infra.factory import build_event_port, build_task_repo
+    from src.infra.factory import build_task_creation_service
 
     mode = os.getenv("AGENT_MODE", "dry-run")
     if mode != "real":
@@ -300,42 +296,22 @@ def create_task(
             err=True,
         )
 
-    # Generate a collision-safe ID — filename will always match task_id
-    task_id = f"task-{uuid.uuid4().hex[:12]}"
-    fid = feature_id or f"feat-{uuid.uuid4().hex[:8]}"
-
-    # Single quotes in test commands survive the shell but break when
-    # PyYAML stores them and bash re-executes. Replace with double quotes.
-    safe_test = test.replace("'", '"') if test else None
-
-    task = TaskAggregate(
-        task_id=task_id,
-        feature_id=fid,
+    service = build_task_creation_service()
+    task = service.create_task(
         title=title,
         description=description,
-        agent_selector=AgentSelector(
-            required_capability=capability,
-            min_version=min_version,
-        ),
-        execution=ExecutionSpec(
-            type=capability,
-            files_allowed_to_modify=list(allow),
-            test_command=safe_test,
-            acceptance_criteria=list(criteria),
-        ),
+        feature_id=feature_id,
+        capability=capability,
+        files_allowed_to_modify=list(allow),
+        test_command=test,
+        acceptance_criteria=list(criteria),
         depends_on=list(depends_on),
-        retry_policy=RetryPolicy(max_retries=max_retries),
+        max_retries=max_retries,
+        min_version=min_version,
     )
 
-    repo = build_task_repo()
-    repo.save(task)                     # 1. Persist first (source of truth)
-
-    events = build_event_port()
-    events.publish(DomainEvent(         # 2. Emit event to trigger task manager
-        type="task.created",
-        producer="cli",
-        payload={"task_id": task_id},
-    ))
+    task_id = task.task_id
+    fid = task.feature_id
 
     click.echo(f"✓ Task created: {task_id}")
     click.echo(f"  title:      {title}")
