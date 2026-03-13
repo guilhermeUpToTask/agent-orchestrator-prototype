@@ -71,26 +71,6 @@ class JsonAgentRegistry(AgentRegistryPort):
         return json.loads(self._path.read_text())
 
     def _write(self, data: dict) -> None:
+        from src.infra.fs.atomic_writer import AtomicFileWriter
         content = json.dumps(data, indent=2, default=str)
-        fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self._path)
-
-            # Fsync the parent directory so the rename is durable (same
-            # reasoning as YamlTaskRepository._atomic_write)
-            dir_fd = os.open(str(self._path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        AtomicFileWriter.write_text(self._path, content)

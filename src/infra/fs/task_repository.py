@@ -132,35 +132,9 @@ class YamlTaskRepository(TaskRepositoryPort):
 
     def _atomic_write(self, path: Path, task: TaskAggregate) -> None:
         """
-        Write to a .tmp file, fsync it, rename it (POSIX atomic), then
-        fsync the parent directory entry.
-
-        FIX #1.3: The fsync on os.open(parent_dir) ensures the directory
-        entry for the renamed file is flushed to disk.  Without it, a crash
-        immediately after os.replace() can leave the directory pointing to
-        the old inode on ext4 / XFS in data=ordered mode.
+        Delegates atomic write to AtomicFileWriter utility.
         """
+        from src.infra.fs.atomic_writer import AtomicFileWriter
         data = task.model_dump(mode="json")
         content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
-
-        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())   # fsync the file data
-            os.replace(tmp_path, path)
-
-            # FIX #1.3: fsync the directory so the rename is durable
-            dir_fd = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        AtomicFileWriter.write_text(path, content)
