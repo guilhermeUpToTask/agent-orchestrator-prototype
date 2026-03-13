@@ -416,9 +416,9 @@ class TestVersionConflict:
         from src.app.handlers.task_manager import TaskManagerHandler
 
         tasks_dir = tmp_path / "tasks"
-        tasks_dir.mkdir()
+        tasks_dir.mkdir(exist_ok=True)
         agents_dir = tmp_path / "agents"
-        agents_dir.mkdir()
+        agents_dir.mkdir(exist_ok=True)
 
         task_repo = YamlTaskRepository(tasks_dir)
         agent_registry = JsonAgentRegistry(agents_dir / "registry.json")
