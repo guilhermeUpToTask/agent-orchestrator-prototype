@@ -24,39 +24,26 @@ from src.core.services import SchedulerService
 
 log = structlog.get_logger(__name__)
 
-_MODE = os.getenv("AGENT_MODE", "dry-run")
-_AGENT_ID = os.getenv("AGENT_ID", "agent-worker-001")
-_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-_TASK_TIMEOUT = int(os.getenv("TASK_TIMEOUT_SECONDS", "600"))
-
-# All workflow state lives under ORCHESTRATOR_HOME — outside the project repo
-# so bare repos and task state don't pollute the project's own git history.
-# Default: ~/.orchestrator  Override: ORCHESTRATOR_HOME=/some/other/path
-_HOME = os.path.abspath(os.getenv("ORCHESTRATOR_HOME", os.path.expanduser("~/.orchestrator")))
-
-_TASKS_DIR     = os.getenv("TASKS_DIR",      os.path.join(_HOME, "tasks"))
-_REGISTRY_PATH = os.getenv("REGISTRY_PATH",  os.path.join(_HOME, "agents", "registry.json"))
-_REPO_URL      = os.getenv("REPO_URL",        f"file://{os.path.join(_HOME, 'repos', 'my-repo')}")
-_WORKSPACE_DIR = os.getenv("WORKSPACE_DIR",   os.path.join(_HOME, "repos", "workspaces"))
+from src.infra.config import config as app_config
 
 
 def _build_real_redis():
     import redis
-    return redis.from_url(_REDIS_URL, decode_responses=False)
+    return redis.from_url(app_config.redis_url, decode_responses=False)
 
 
 def build_task_repo():
     from src.infra.fs.task_repository import YamlTaskRepository
-    return YamlTaskRepository(_TASKS_DIR)
+    return YamlTaskRepository(app_config.tasks_dir)
 
 
 def build_agent_registry():
     from src.infra.fs.agent_registry import JsonAgentRegistry
-    return JsonAgentRegistry(_REGISTRY_PATH)
+    return JsonAgentRegistry(app_config.registry_path)
 
 
 def build_event_port():
-    if _MODE == "dry-run":
+    if app_config.mode == "dry-run":
         from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
         return InMemoryEventAdapter()
     from src.infra.redis_adapters.event_adapter import RedisEventAdapter
@@ -64,7 +51,7 @@ def build_event_port():
 
 
 def build_lease_port():
-    if _MODE == "dry-run":
+    if app_config.mode == "dry-run":
         from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
         return InMemoryLeaseAdapter()
     from src.infra.redis_adapters.lease_adapter import RedisLeaseAdapter
@@ -72,11 +59,11 @@ def build_lease_port():
 
 
 def build_git_workspace():
-    if _MODE == "dry-run":
+    if app_config.mode == "dry-run":
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
         return DryRunGitWorkspaceAdapter()
     from src.infra.git.workspace_adapter import GitWorkspaceAdapter
-    return GitWorkspaceAdapter(workspace_base=_WORKSPACE_DIR)
+    return GitWorkspaceAdapter(workspace_base=app_config.workspace_dir)
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
@@ -91,7 +78,7 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
       "gemini"  — Gemini CLI (requires GEMINI_API_KEY)
       "claude"  — Claude Code CLI (requires ANTHROPIC_API_KEY)
     """
-    if _MODE == "dry-run" or agent_props.runtime_type == "dry-run":
+    if app_config.mode == "dry-run" or agent_props.runtime_type == "dry-run":
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
         return DryRunAgentRuntime()
 
@@ -140,15 +127,15 @@ def build_task_manager_handler() -> TaskManagerHandler:
 
 def build_worker_handler() -> WorkerHandler:
     return WorkerHandler(
-        agent_id=_AGENT_ID,
-        repo_url=_REPO_URL,
+        agent_id=app_config.agent_id,
+        repo_url=app_config.repo_url,
         task_repo=build_task_repo(),
         agent_registry=build_agent_registry(),
         event_port=build_event_port(),
         lease_port=build_lease_port(),
         git_workspace=build_git_workspace(),
         runtime_factory=build_runtime_factory(),
-        task_timeout_seconds=_TASK_TIMEOUT,
+        task_timeout_seconds=app_config.task_timeout,
     )
 
 
