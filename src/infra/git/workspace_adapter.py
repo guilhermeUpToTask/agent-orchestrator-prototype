@@ -146,9 +146,15 @@ class GitWorkspaceAdapter(GitWorkspacePort):
 
         Called before apply_changes_and_commit so we must look at the
         working tree, not just committed history.
+
+        --untracked-files=all is required so git reports individual file
+        paths (e.g. app/auth.py) rather than collapsing untracked
+        directories to a trailing-slash summary (e.g. app/).  Without it,
+        _check_allowed_files would see "app/" ≠ "app/auth.py" and produce
+        a spurious forbidden-file violation for every new file in a new dir.
         """
         result = self._run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=workspace_path,
             capture=True,
         )
@@ -236,7 +242,7 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
 
     def get_modified_files(self, workspace_path: str) -> list[str]:
         result = subprocess.run(
-            ["git", "-C", workspace_path, "status", "--porcelain"],
+            ["git", "-C", workspace_path, "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True,
         )
         files = []
