@@ -211,7 +211,7 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
         subprocess.run(["git", "init", ws], check=True, capture_output=True)
         subprocess.run(["git", "-C", ws, "commit", "--allow-empty", "-m", "init"],
                        check=True, capture_output=True,
-                       env={**__import__("os").environ,
+                       env={**os.environ,
                             "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@t.com",
                             "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@t.com"})
         self._workspaces[task_id] = ws
@@ -222,7 +222,7 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
                        check=True, capture_output=True)
 
     def apply_changes_and_commit(self, workspace_path: str, commit_message: str) -> str:
-        env = {**__import__("os").environ,
+        env = {**os.environ,
                "GIT_AUTHOR_NAME": "agent", "GIT_AUTHOR_EMAIL": "a@a.com",
                "GIT_COMMITTER_NAME": "agent", "GIT_COMMITTER_EMAIL": "a@a.com"}
         subprocess.run(["git", "-C", workspace_path, "add", "-A"],
