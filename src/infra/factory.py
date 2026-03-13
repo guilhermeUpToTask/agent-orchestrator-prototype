@@ -82,9 +82,7 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
         return DryRunAgentRuntime()
 
-    cfg = agent_props.runtime_config  # runtime-specific overrides from registry
-
-    if agent_props.runtime_type == "gemini":
+    def _build_gemini(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
         return GeminiAgentRuntime(
             api_key=os.getenv("GEMINI_API_KEY", ""),
@@ -92,7 +90,7 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
             extra_flags=cfg.get("extra_flags", []),
         )
 
-    if agent_props.runtime_type == "claude":
+    def _build_claude(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
         return ClaudeCodeRuntime(
             api_key=os.getenv("ANTHROPIC_API_KEY", ""),
@@ -100,10 +98,19 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
             extra_flags=cfg.get("extra_flags", []),
         )
 
-    raise ValueError(
-        f"Unknown runtime_type '{agent_props.runtime_type}' for agent "
-        f"'{agent_props.agent_id}'. Valid values: gemini, claude, dry-run"
-    )
+    registry: dict[str, Callable[[dict], AgentRuntimePort]] = {
+        "gemini": _build_gemini,
+        "claude": _build_claude,
+    }
+
+    builder = registry.get(agent_props.runtime_type)
+    if not builder:
+        raise ValueError(
+            f"Unknown runtime_type '{agent_props.runtime_type}' for agent "
+            f"'{agent_props.agent_id}'. Valid values: {', '.join(list(registry.keys()) + ['dry-run'])}"
+        )
+
+    return builder(agent_props.runtime_config)
 
 
 def build_runtime_factory() -> Callable[[AgentProps], AgentRuntimePort]:
