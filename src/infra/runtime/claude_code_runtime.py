@@ -7,32 +7,12 @@ Requires ANTHROPIC_API_KEY in the environment.
 from __future__ import annotations
 
 import os
-import subprocess
-import time
-from typing import Iterator
 
-import structlog
-
-from src.core.models import AgentExecutionResult, AgentProps, ExecutionContext
-from src.core.ports import AgentRuntimePort, SessionHandle
-
-log = structlog.get_logger(__name__)
+from src.core.models import ExecutionContext
+from src.infra.runtime.cli_agent_runtime import CliAgentRuntime, CliSessionHandle
 
 
-class ClaudeSessionHandle(SessionHandle):
-    def __init__(self, session_id: str, workspace_path: str) -> None:
-        self._session_id = session_id
-        self.workspace_path = workspace_path
-        self.prompt: str = ""
-        self.context: ExecutionContext | None = None
-        self.start_time = time.monotonic()
-
-    @property
-    def session_id(self) -> str:
-        return self._session_id
-
-
-class ClaudeCodeRuntime(AgentRuntimePort):
+class ClaudeCodeRuntime(CliAgentRuntime):
     """
     Executes tasks using the Claude Code CLI (`claude` command).
 
@@ -51,39 +31,19 @@ class ClaudeCodeRuntime(AgentRuntimePort):
     ) -> None:
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY is required for ClaudeCodeRuntime")
-        self._api_key = api_key
-        self._model = model
-        self._extra_flags = extra_flags or []
+        super().__init__(api_key, model, extra_flags)
 
-    def start_session(
-        self,
-        agent_props: AgentProps,
-        workspace_path: str,
-        env_vars: dict[str, str],
-    ) -> ClaudeSessionHandle:
-        session_id = f"claude-{agent_props.agent_id}-{int(time.time())}"
-        log.info("claude.session_started", session_id=session_id, workspace=workspace_path)
-        return ClaudeSessionHandle(session_id, workspace_path)
+    @property
+    def log_prefix(self) -> str:
+        return "claude"
 
-    def send_execution_payload(
-        self,
-        handle: ClaudeSessionHandle,
-        context: ExecutionContext,
-    ) -> None:
-        handle.context = context
-        handle.prompt = self._build_prompt(context)
-        log.info("claude.prompt_built", session_id=handle.session_id, task_id=context.task_id)
-
-    def wait_for_completion(
-        self,
-        handle: ClaudeSessionHandle,
-        timeout_seconds: int = 600,
-    ) -> AgentExecutionResult:
-        env = {
+    def _get_env(self) -> dict[str, str]:
+        return {
             **os.environ,
             "ANTHROPIC_API_KEY": self._api_key,
         }
 
+    def _build_cmd(self, handle: CliSessionHandle) -> list[str]:
         cmd = [
             "claude",
             "--dangerously-skip-permissions",
@@ -92,62 +52,9 @@ class ClaudeCodeRuntime(AgentRuntimePort):
         if self._model != self.DEFAULT_MODEL:
             cmd += ["--model", self._model]
         cmd += self._extra_flags
+        return cmd
 
-        log.info(
-            "claude.running",
-            session_id=handle.session_id,
-            cwd=handle.workspace_path,
-            model=self._model,
-        )
-
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=handle.workspace_path,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            elapsed = time.monotonic() - handle.start_time
-            log.error("claude.timeout", session_id=handle.session_id, timeout=timeout_seconds)
-            return AgentExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout=exc.stdout or "",
-                stderr=f"TIMEOUT after {timeout_seconds}s\n{exc.stderr or ''}",
-                elapsed_seconds=elapsed,
-            )
-
-        elapsed = time.monotonic() - handle.start_time
-        log.info(
-            "claude.finished",
-            session_id=handle.session_id,
-            exit_code=result.returncode,
-            elapsed=round(elapsed, 2),
-        )
-        return AgentExecutionResult(
-            success=result.returncode == 0,
-            exit_code=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            elapsed_seconds=elapsed,
-        )
-
-    def terminate_session(self, handle: ClaudeSessionHandle) -> None:
-        # Claude Code CLI is a single blocking subprocess call — nothing to terminate
-        pass
-
-    def stream_logs(self, handle: ClaudeSessionHandle) -> Iterator[str]:
-        yield "[claude] no live log streaming — check stdout.txt after completion\n"
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _build_prompt(context: ExecutionContext) -> str:
+    def _build_prompt(self, context: ExecutionContext) -> str:
         # Claude Code understands richer markdown context
         allowed = "\n".join(f"  - {f}" for f in context.allowed_files) or "  - any files in the workspace"
 
