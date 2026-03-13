@@ -57,12 +57,18 @@ class RedisEventAdapter(EventPort):
         streams = {f"events:{et}": et for et in event_types}
 
         # Create consumer groups for all streams (idempotent).
-        # id="$" — only consume messages published from this point on.
+        # id="0" — start from the beginning of the stream so events published
+        # before this group existed (startup race, Redis restart) are not
+        # permanently lost.  XREADGROUP with ">" only delivers messages that
+        # have not yet been ACKed by anyone in the group, so already-processed
+        # events are not replayed.  id="$" (start from now) would silently
+        # discard any event that arrived in the gap between process start and
+        # the first xgroup_create call.
         for stream_key in streams:
             try:
-                self._r.xgroup_create(stream_key, group, id="$", mkstream=True)
+                self._r.xgroup_create(stream_key, group, id="0", mkstream=True)
             except redis.exceptions.ResponseError:
-                pass  # group already exists
+                pass  # group already exists — resume from its current position
 
         # Build the read dict: {stream_key: ">"} for all streams.
         read_dict = {key: ">" for key in streams}
