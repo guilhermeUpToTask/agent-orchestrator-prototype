@@ -215,8 +215,9 @@ def _start_heartbeat_thread(registry, agent_id: str) -> None:
             time.sleep(_HEARTBEAT_INTERVAL)
             try:
                 registry.heartbeat(agent_id)
-            except Exception:
-                pass  # don't crash the worker on a registry write failure
+            except Exception as e:
+                import structlog
+                structlog.get_logger(__name__).warning("heartbeat.failed", error=str(e))
 
     t = threading.Thread(target=_beat, daemon=True)
     t.start()
