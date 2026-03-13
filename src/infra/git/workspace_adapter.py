@@ -158,17 +158,7 @@ class GitWorkspaceAdapter(GitWorkspacePort):
             cwd=workspace_path,
             capture=True,
         )
-        files = []
-        for line in result.stdout.splitlines():
-            # porcelain format: "XY filename" — filename starts at col 3
-            # handles renames: "R  old -> new" — take the new name after " -> "
-            if not line.strip():
-                continue
-            entry = line[3:].strip()
-            if " -> " in entry:
-                entry = entry.split(" -> ", 1)[1]
-            files.append(entry)
-        return files
+        return _parse_git_porcelain(result.stdout)
 
     # ------------------------------------------------------------------
     # Internal
@@ -245,12 +235,19 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
             ["git", "-C", workspace_path, "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True,
         )
-        files = []
-        for line in result.stdout.splitlines():
-            if not line.strip():
-                continue
-            entry = line[3:].strip()
-            if " -> " in entry:
-                entry = entry.split(" -> ", 1)[1]
-            files.append(entry)
-        return files
+        return _parse_git_porcelain(result.stdout)
+
+
+def _parse_git_porcelain(output: str) -> list[str]:
+    """Parse output from `git status --porcelain` and return a list of modified files."""
+    files = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        # porcelain format: "XY filename" — filename starts at col 3
+        # handles renames: "R  old -> new" — take the new name after " -> "
+        entry = line[3:].strip()
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1]
+        files.append(entry)
+    return files
