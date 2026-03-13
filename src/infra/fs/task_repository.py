@@ -25,7 +25,18 @@ from src.core.ports import TaskRepositoryPort
 
 
 class YamlTaskRepository(TaskRepositoryPort):
+    """
+    Stores tasks as discrete YAML files in a designated directory.
+    Uses temp-file writes and os.replace() to guarantee atomic file updates on POSIX.
 
+    WARNING: Architectural Constraint (Single Orchestrator Assumption)
+    ------------------------------------------------------------------
+    The `update_if_version()` method uses read-compare-write sequence which is
+    NOT a true atomic CAS (Compare-and-Swap) against concurrent processes. 
+    It is ONLY safe if exactly one orchestrator process runs at any given time.
+    If multi-process horizontal scaling is needed, this repository must be 
+    replaced with a system supporting true atomic CAS (e.g. Postgres or Redis).
+    """
     def __init__(self, tasks_dir: str | Path = "workflow/tasks") -> None:
         self._dir = Path(tasks_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
