@@ -20,6 +20,12 @@ class InMemoryLeaseAdapter(LeasePort):
         self._tokens: dict[str, str] = {}
 
     def create_lease(self, task_id: str, agent_id: str, lease_seconds: int) -> str:
+        # If a lease already exists for this task, evict the old token so
+        # revoke_lease(old_token) correctly returns False after replacement.
+        existing = self._leases.get(task_id)
+        if existing:
+            self._tokens.pop(existing["lease_token"], None)
+
         token = str(uuid4())
         self._leases[task_id] = {
             "agent_id": agent_id,
