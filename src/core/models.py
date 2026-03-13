@@ -22,7 +22,6 @@ class TaskStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-    BLOCKED = "blocked"
     CANCELED = "canceled"
     REQUEUED = "requeued"
     MERGED = "merged"
