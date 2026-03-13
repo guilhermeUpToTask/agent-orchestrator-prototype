@@ -136,32 +136,15 @@ class WorkerHandler:
         lease_refresher: _LeaseRefresher | None = None
 
         try:
-            # ------------------------------------------------------------
-            # 3. Create ephemeral workspace
-            # ------------------------------------------------------------
-            ws_path = self._git.create_workspace(self._repo_url, task_id)
-            branch = f"task/{task_id}"
-            self._git.checkout_main_and_create_branch(ws_path, branch)
-            log.info("worker.workspace_ready", task_id=task_id, path=ws_path)
+            ws_path, branch = self._prepare_workspace(task_id)
 
-            # ------------------------------------------------------------
-            # 4. Transition task → in_progress (persist-first, with CAS retry)
-            #    FIX #1.1: retry up to MAX_UPDATE_RETRIES on version conflict
-            #    so a transient reconciler write does not burn a task retry.
-            # ------------------------------------------------------------
             task = self._start_task_with_retry(task_id)
-
             self._events.publish(DomainEvent(
                 type="task.started",
                 producer=self._agent_id,
                 payload={"task_id": task_id},
             ))
 
-            # ------------------------------------------------------------
-            # 5. Start lease-refresh background thread
-            #    FIX #2.6: keeps the lease alive for tasks that run longer
-            #    than the initial lease_seconds (300 s by default).
-            # ------------------------------------------------------------
             if lease_token:
                 lease_refresher = _LeaseRefresher(
                     lease_port=self._lease,
@@ -171,87 +154,17 @@ class WorkerHandler:
                 )
                 lease_refresher.start()
 
-            # ------------------------------------------------------------
-            # 6. Start agent session
-            # ------------------------------------------------------------
-            env = self._build_env(task, ws_path, agent_props)
-            session = runtime.start_session(agent_props, ws_path, env)
-
-            # ------------------------------------------------------------
-            # 7. Send execution context
-            # ------------------------------------------------------------
-            context = ExecutionContext(
-                task_id=task_id,
-                title=task.title,
-                description=task.description,
-                execution=task.execution,
-                allowed_files=task.execution.files_allowed_to_modify,
-                workspace_dir=ws_path,
-                branch=branch,
-                metadata={"project_id": project_id},
+            session, result = self._run_agent_session(
+                runtime, agent_props, task, ws_path, branch, project_id
             )
-            runtime.send_execution_payload(session, context)
 
-            # ------------------------------------------------------------
-            # 8. Wait for completion
-            # ------------------------------------------------------------
-            log_dir = LOG_BASE / task_id
-            log_dir.mkdir(parents=True, exist_ok=True)
-
-            result = runtime.wait_for_completion(session, self._timeout)
-            self._save_logs(log_dir, result)   # FIX #3.3: errors are warnings, not crashes
-
-            # ------------------------------------------------------------
-            # 9. Validate modified files
-            # ------------------------------------------------------------
-            actual_modified = self._git.get_modified_files(ws_path)
-            violations = self._check_allowed_files(
-                actual_modified, task.execution.files_allowed_to_modify
+            commit_sha, actual_modified = self._validate_and_commit(
+                task, ws_path, branch, result
             )
-            if violations:
-                raise _ForbiddenFileEdit(violations)
 
-            # ------------------------------------------------------------
-            # 10. Check agent exit code
-            # ------------------------------------------------------------
-            if not result.success:
-                raise _AgentFailed(
-                    f"Agent exited with code {result.exit_code}\n{result.stderr}"
-                )
-
-            # ------------------------------------------------------------
-            # 11. Run acceptance tests  (FIX #8: shell=False)
-            # ------------------------------------------------------------
-            if task.execution.test_command:
-                self._run_tests(ws_path, task.execution.test_command)
-
-            # ------------------------------------------------------------
-            # 12. Commit + push
-            # ------------------------------------------------------------
-            commit_sha = self._git.apply_changes_and_commit(
-                ws_path, f"task({task_id}): {task.title}"
+            self._persist_success(
+                task, branch, commit_sha, actual_modified, result.artifacts
             )
-            self._git.push_branch(ws_path, branch)
-
-            # ------------------------------------------------------------
-            # 13. Persist success
-            # ------------------------------------------------------------
-            task_result = TaskResult(
-                branch=branch,
-                commit_sha=commit_sha,
-                modified_files=actual_modified,
-                artifacts=result.artifacts,
-            )
-            expected_v = task.state_version
-            task.complete(task_result)
-            self._task_repo.update_if_version(task_id, task, expected_v)
-
-            self._events.publish(DomainEvent(
-                type="task.completed",
-                producer=self._agent_id,
-                payload={"task_id": task_id, "commit_sha": commit_sha},
-            ))
-            log.info("worker.task_succeeded", task_id=task_id, commit_sha=commit_sha)
 
         except _ForbiddenFileEdit as exc:
             self._handle_failure(task, f"Forbidden file edits: {exc.violations}")
@@ -441,6 +354,101 @@ class WorkerHandler:
         except Exception as exc:
             log.exception("worker.failure_handler_error", error=str(exc))
 
+
+# ------------------------------------------------------------------
+    # Process Helpers
+    # ------------------------------------------------------------------
+
+    def _prepare_workspace(self, task_id: str) -> tuple[str, str]:
+        ws_path = self._git.create_workspace(self._repo_url, task_id)
+        branch = f"task/{task_id}"
+        self._git.checkout_main_and_create_branch(ws_path, branch)
+        log.info("worker.workspace_ready", task_id=task_id, path=ws_path)
+        return ws_path, branch
+
+    def _run_agent_session(
+        self,
+        runtime: AgentRuntimePort,
+        agent_props: AgentProps,
+        task: TaskAggregate,
+        ws_path: str,
+        branch: str,
+        project_id: str,
+    ) -> tuple[Any, AgentResult]:
+        env = self._build_env(task, ws_path, agent_props)
+        session = runtime.start_session(agent_props, ws_path, env)
+
+        context = ExecutionContext(
+            task_id=task.task_id,
+            title=task.title,
+            description=task.description,
+            execution=task.execution,
+            allowed_files=task.execution.files_allowed_to_modify,
+            workspace_dir=ws_path,
+            branch=branch,
+            metadata={"project_id": project_id},
+        )
+        runtime.send_execution_payload(session, context)
+
+        log_dir = LOG_BASE / task.task_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        result = runtime.wait_for_completion(session, self._timeout)
+        self._save_logs(log_dir, result)
+        return session, result
+
+    def _validate_and_commit(
+        self,
+        task: TaskAggregate,
+        ws_path: str,
+        branch: str,
+        result: AgentResult,
+    ) -> tuple[str, list[str]]:
+        actual_modified = self._git.get_modified_files(ws_path)
+        violations = self._check_allowed_files(
+            actual_modified, task.execution.files_allowed_to_modify
+        )
+        if violations:
+            raise _ForbiddenFileEdit(violations)
+
+        if not result.success:
+            raise _AgentFailed(
+                f"Agent exited with code {result.exit_code}\n{result.stderr}"
+            )
+
+        if task.execution.test_command:
+            self._run_tests(ws_path, task.execution.test_command)
+
+        commit_sha = self._git.apply_changes_and_commit(
+            ws_path, f"task({task.task_id}): {task.title}"
+        )
+        self._git.push_branch(ws_path, branch)
+        return commit_sha, actual_modified
+
+    def _persist_success(
+        self,
+        task: TaskAggregate,
+        branch: str,
+        commit_sha: str,
+        actual_modified: list[str],
+        artifacts: dict,
+    ) -> None:
+        task_result = TaskResult(
+            branch=branch,
+            commit_sha=commit_sha,
+            modified_files=actual_modified,
+            artifacts=artifacts,
+        )
+        expected_v = task.state_version
+        task.complete(task_result)
+        self._task_repo.update_if_version(task.task_id, task, expected_v)
+
+        self._events.publish(DomainEvent(
+            type="task.completed",
+            producer=self._agent_id,
+            payload={"task_id": task.task_id, "commit_sha": commit_sha},
+        ))
+        log.info("worker.task_succeeded", task_id=task.task_id, commit_sha=commit_sha)
 
 # ---------------------------------------------------------------------------
 # FIX #2.6 — Background lease-refresh daemon thread
