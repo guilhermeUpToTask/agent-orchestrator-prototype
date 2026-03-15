@@ -23,5 +23,5 @@ class TestFactory:
         mock_config.mode = "dry-run"
         props = AgentProps(agent_id="a1", name="A1", runtime_type="gemini")
         runtime = build_agent_runtime(props)
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
-        assert isinstance(runtime, DryRunAgentRuntime)
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+        assert isinstance(runtime, SimulatedAgentRuntime)

@@ -121,11 +121,11 @@ def build_task_manager(task_repo, agent_registry, event_port, lease_port):
 def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow):
     from src.app.handlers.worker import WorkerHandler
     from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
-    from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+    from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
     from src.infra.logs_and_tests import FilesystemTaskLogsAdapter, SubprocessTestRunnerAdapter
 
-    # Always use dry-run runtime in tests regardless of agent's runtime_type
-    dry_run = DryRunAgentRuntime()
+    # Always use simulated runtime in tests regardless of agent's runtime_type
+    dry_run = SimulatedAgentRuntime()
 
     return WorkerHandler(
         agent_id=agent_id,
@@ -246,12 +246,12 @@ class TestFullLifecycle:
             tmp_workflow / "logs",
         )
 
-        # Monkeypatch dry-run to also write a forbidden file
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime, DryRunSessionHandle
+        # Monkeypatch simulated-run to also write a forbidden file
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime, SimulatedSessionHandle
         from src.core.models import AgentExecutionResult
         from pathlib import Path as P
 
-        original_wait = DryRunAgentRuntime.wait_for_completion
+        original_wait = SimulatedAgentRuntime.wait_for_completion
 
         def bad_wait(self, handle, timeout_seconds=600):
             context = handle.context
@@ -271,7 +271,7 @@ class TestFullLifecycle:
                 modified_files=list(context.allowed_files) + ["secrets/passwords.txt"],
             )
 
-        monkeypatch.setattr(DryRunAgentRuntime, "wait_for_completion", bad_wait)
+        monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion", bad_wait)
 
         # Also patch git.get_modified_files to return the forbidden file
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter

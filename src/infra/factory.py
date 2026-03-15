@@ -79,8 +79,8 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
       "claude"  — Claude Code CLI (requires ANTHROPIC_API_KEY)
     """
     if app_config.mode == "dry-run" or agent_props.runtime_type == "dry-run":
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
-        return DryRunAgentRuntime()
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+        return SimulatedAgentRuntime()
 
     def _build_gemini(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.gemini_runtime import GeminiAgentRuntime

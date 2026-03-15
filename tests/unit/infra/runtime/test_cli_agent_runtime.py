@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from src.core.models import AgentProps, ExecutionContext, ExecutionSpec, AgentExecutionResult
-from src.infra.runtime.cli_agent_runtime import CliAgentRuntime
+from src.infra.runtime.agent_runtime import CliAgentRuntime
 
 class TestCliAgentRuntime:
     @patch("subprocess.run")

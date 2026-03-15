@@ -1,14 +1,11 @@
 """
-src/infra/runtime/agent_runtime.py — DryRunAgentRuntime for CI/tests.
-
-Real agent runtimes live in their own modules:
-  gemini_runtime.py      — Gemini CLI
-  claude_code_runtime.py — Claude Code CLI
+src/infra/runtime/agent_runtime.py — Base runtime implementation for CLI tools.
 """
 from __future__ import annotations
 
+import subprocess
 import time
-from pathlib import Path
+from abc import ABC, abstractmethod
 from typing import Iterator
 
 import structlog
@@ -19,13 +16,11 @@ from src.core.ports import AgentRuntimePort, SessionHandle
 log = structlog.get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Dry-run session handle
-# ---------------------------------------------------------------------------
-
-class DryRunSessionHandle(SessionHandle):
-    def __init__(self, session_id: str) -> None:
+class CliSessionHandle(SessionHandle):
+    def __init__(self, session_id: str, workspace_path: str) -> None:
         self._session_id = session_id
+        self.workspace_path = workspace_path
+        self.prompt: str = ""
         self.context: ExecutionContext | None = None
         self.start_time = time.monotonic()
 
@@ -34,81 +29,115 @@ class DryRunSessionHandle(SessionHandle):
         return self._session_id
 
 
-# ---------------------------------------------------------------------------
-# Dry-run adapter (deterministic, no subprocess)
-# ---------------------------------------------------------------------------
-
-class DryRunAgentRuntime(AgentRuntimePort):
+class CliAgentRuntime(AgentRuntimePort, ABC):
     """
-    Deterministic stub for CI/acceptance tests.
-
-    Behaviour:
-      - Creates allowed files with stub content
-      - Always reports success (unless simulate_failure=True)
-      - Simulates short elapsed time
+    Base class for agent runtimes that execute a CLI command in a subprocess.
     """
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        extra_flags: list[str] | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._extra_flags = extra_flags or []
 
-    def __init__(self, simulate_failure: bool = False) -> None:
-        self._simulate_failure = simulate_failure
+    @property
+    @abstractmethod
+    def log_prefix(self) -> str:
+        pass
+
+    @abstractmethod
+    def _build_cmd(self, handle: CliSessionHandle) -> list[str]:
+        pass
+
+    @abstractmethod
+    def _get_env(self) -> dict[str, str]:
+        pass
+
+    @abstractmethod
+    def _build_prompt(self, context: ExecutionContext) -> str:
+        pass
 
     def start_session(
         self,
         agent_props: AgentProps,
         workspace_path: str,
         env_vars: dict[str, str],
-    ) -> DryRunSessionHandle:
-        session_id = f"dryrun-{agent_props.agent_id}-{int(time.time() * 1000)}"
-        log.info("dryrun.session_started", session_id=session_id)
-        return DryRunSessionHandle(session_id)
+    ) -> CliSessionHandle:
+        session_id = f"{self.log_prefix}-{agent_props.agent_id}-{int(time.time())}"
+        log.info(f"{self.log_prefix}.session_started", session_id=session_id, workspace=workspace_path)
+        return CliSessionHandle(session_id, workspace_path)
 
     def send_execution_payload(
         self,
-        handle: DryRunSessionHandle,
+        handle: CliSessionHandle,
         context: ExecutionContext,
     ) -> None:
+        # Type enforcement since we only ever get our own handle types
+        if not isinstance(handle, CliSessionHandle):
+            raise TypeError(f"Expected CliSessionHandle, got {type(handle)}")
         handle.context = context
+        handle.prompt = self._build_prompt(context)
+        log.info(f"{self.log_prefix}.prompt_built", session_id=handle.session_id, task_id=context.task_id)
 
     def wait_for_completion(
         self,
-        handle: DryRunSessionHandle,
+        handle: CliSessionHandle,
         timeout_seconds: int = 600,
     ) -> AgentExecutionResult:
-        if self._simulate_failure:
+        if not isinstance(handle, CliSessionHandle):
+            raise TypeError(f"Expected CliSessionHandle, got {type(handle)}")
+            
+        env = self._get_env()
+        cmd = self._build_cmd(handle)
+
+        log.info(
+            f"{self.log_prefix}.running",
+            session_id=handle.session_id,
+            cwd=handle.workspace_path,
+            model=self._model,
+        )
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=handle.workspace_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.monotonic() - handle.start_time
+            log.error(f"{self.log_prefix}.timeout", session_id=handle.session_id, timeout=timeout_seconds)
             return AgentExecutionResult(
                 success=False,
-                exit_code=1,
-                stdout="",
-                stderr="Simulated failure",
-                elapsed_seconds=0.1,
+                exit_code=-1,
+                stdout=exc.stdout or "",
+                stderr=f"TIMEOUT after {timeout_seconds}s\n{exc.stderr or ''}",
+                elapsed_seconds=elapsed,
             )
 
-        context = handle.context
-        modified: list[str] = []
-
-        if context:
-            ws = Path(context.workspace_dir)
-            for rel_path in context.allowed_files:
-                full = ws / rel_path
-                full.parent.mkdir(parents=True, exist_ok=True)
-                full.write_text(
-                    f"# Dry-run stub for task {context.task_id}\n"
-                    f"# File: {rel_path}\n"
-                    "pass\n"
-                )
-                modified.append(rel_path)
-
         elapsed = time.monotonic() - handle.start_time
+        log.info(
+            f"{self.log_prefix}.finished",
+            session_id=handle.session_id,
+            exit_code=result.returncode,
+            elapsed=round(elapsed, 2),
+        )
         return AgentExecutionResult(
-            success=True,
-            exit_code=0,
-            modified_files=modified,
-            stdout=f"[dry-run] Task {getattr(context, 'task_id', '?')} complete\n",
-            stderr="",
+            success=result.returncode == 0,
+            exit_code=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
             elapsed_seconds=elapsed,
         )
 
-    def terminate_session(self, handle: DryRunSessionHandle) -> None:
+    def terminate_session(self, handle: CliSessionHandle) -> None:
+        # CLI tools are blocking calls; nothing to terminate
         pass
 
-    def stream_logs(self, handle: DryRunSessionHandle) -> Iterator[str]:
-        yield "[dry-run] no live logs\n"
+    def stream_logs(self, handle: CliSessionHandle) -> Iterator[str]:
+        yield f"[{self.log_prefix}] no live log streaming — check stdout.txt after completion\n"

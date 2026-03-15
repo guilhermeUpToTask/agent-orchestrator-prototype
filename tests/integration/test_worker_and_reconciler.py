@@ -142,13 +142,13 @@ def build_worker(
 ):
     from src.app.handlers.worker import WorkerHandler
     from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
-    from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+    from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
     from src.infra.logs_and_tests import (
         FilesystemTaskLogsAdapter,
         SubprocessTestRunnerAdapter,
     )
 
-    dry_run = runtime or DryRunAgentRuntime()
+    dry_run = runtime or SimulatedAgentRuntime()
 
     return WorkerHandler(
         agent_id=agent_id,
@@ -308,9 +308,9 @@ class TestWorkerHandlerErrors:
     def test_agent_failure_causes_task_failed(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        failing_runtime = DryRunAgentRuntime(simulate_failure=True)
+        failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
 
@@ -325,9 +325,9 @@ class TestWorkerHandlerErrors:
     def test_agent_failure_emits_task_failed_event(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        failing_runtime = DryRunAgentRuntime(simulate_failure=True)
+        failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
 
@@ -341,7 +341,7 @@ class TestWorkerHandlerErrors:
     def test_forbidden_file_edit_causes_failure(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
 
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
@@ -355,7 +355,7 @@ class TestWorkerHandlerErrors:
                 forbidden.write_text("secret\n")
             return AgentExecutionResult(success=True, exit_code=0)
 
-        monkeypatch.setattr(DryRunAgentRuntime, "wait_for_completion", bad_wait)
+        monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion", bad_wait)
         monkeypatch.setattr(
             DryRunGitWorkspaceAdapter, "get_modified_files",
             lambda self, ws: ["secrets/creds.txt"],
@@ -374,11 +374,11 @@ class TestWorkerHandlerErrors:
     def test_forbidden_file_edit_records_reason(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
 
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        monkeypatch.setattr(DryRunAgentRuntime, "wait_for_completion",
+        monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion",
                             lambda self, h, timeout_seconds=600: AgentExecutionResult(success=True, exit_code=0))
         monkeypatch.setattr(DryRunGitWorkspaceAdapter, "get_modified_files",
                             lambda self, ws: ["forbidden.txt"])
@@ -395,9 +395,9 @@ class TestWorkerHandlerErrors:
     def test_lease_revoked_after_failure(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        failing_runtime = DryRunAgentRuntime(simulate_failure=True)
+        failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
 
         task = make_task()
         token = lease_port.create_lease(task.task_id, worker_agent.agent_id, 300)

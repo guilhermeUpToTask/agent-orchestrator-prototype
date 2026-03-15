@@ -1,10 +1,10 @@
 import pytest
 from src.core.models import AgentProps, ExecutionContext, ExecutionSpec
-from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
 
-class TestDryRunAgentRuntime:
+class TestSimulatedAgentRuntime:
     def test_run_task_success(self):
-        runtime = DryRunAgentRuntime()
+        runtime = SimulatedAgentRuntime()
         ctx = ExecutionContext(
             task_id="t1",
             title="T",
@@ -21,7 +21,7 @@ class TestDryRunAgentRuntime:
         assert result.exit_code == 0
 
     def test_run_task_failure_on_fail_keyword(self):
-        runtime = DryRunAgentRuntime(simulate_failure=True)
+        runtime = SimulatedAgentRuntime(simulate_failure=True)
         ctx = ExecutionContext(
             task_id="t1",
             title="FAIL THIS TASK",
