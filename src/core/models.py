@@ -73,6 +73,12 @@ class ExecutionSpec(BaseModel):
     files_allowed_to_modify: list[str] = Field(default_factory=list)
     test_command: Optional[str] = None
 
+    def validate_modifications(self, modified_files: list[str]) -> None:
+        allowed_set = set(self.files_allowed_to_modify)
+        violations = [f for f in modified_files if f not in allowed_set]
+        if violations:
+            raise ForbiddenFileEditError(violations)
+
 
 class RetryPolicy(BaseModel):
     max_retries: int = 2
@@ -120,6 +126,39 @@ class TaskAggregate(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # Tasks this one depends on. Will not be dispatched until all are SUCCEEDED.
     depends_on: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def create(
+        cls,
+        title: str,
+        description: str,
+        execution: ExecutionSpec,
+        agent_selector: AgentSelector,
+        feature_id: Optional[str] = None,
+        depends_on: Optional[list[str]] = None,
+        max_retries: int = 2,
+    ) -> "TaskAggregate":
+        target_feature_id = feature_id or f"feat-{uuid4().hex[:8]}"
+        task_id = f"task-{uuid4().hex[:12]}"
+        
+        return cls(
+            task_id=task_id,
+            feature_id=target_feature_id,
+            title=title,
+            description=description,
+            agent_selector=agent_selector,
+            execution=execution,
+            depends_on=depends_on or [],
+            retry_policy=RetryPolicy(max_retries=max_retries),
+        )
+
+    def is_unblocked(self, completed_task_ids: set[str]) -> bool:
+        if not self.depends_on:
+            return True
+        return all(dep in completed_task_ids for dep in self.depends_on)
+
+    def can_retry(self) -> bool:
+        return self.retry_policy.attempt < self.retry_policy.max_retries
 
     # ------------------------------------------------------------------
     # Invariant helpers
@@ -241,3 +280,12 @@ class AgentExecutionResult(BaseModel):
     stderr: str = ""
     elapsed_seconds: float = 0.0
     forbidden_file_violations: list[str] = Field(default_factory=list)
+
+# ---------------------------------------------------------------------------
+# Domain Exceptions
+# ---------------------------------------------------------------------------
+
+class ForbiddenFileEditError(Exception):
+    def __init__(self, violations: list[str]) -> None:
+        self.violations = violations
+        super().__init__(str(violations))
