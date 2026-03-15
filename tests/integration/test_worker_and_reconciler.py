@@ -187,7 +187,7 @@ class TestWorkerHandlerHappyPath:
     def test_task_transitions_to_succeeded(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
         lease_port.create_lease(task.task_id, worker_agent.agent_id, 300)
@@ -201,7 +201,7 @@ class TestWorkerHandlerHappyPath:
     def test_result_has_commit_sha(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
@@ -213,7 +213,7 @@ class TestWorkerHandlerHappyPath:
     def test_emits_started_and_completed_events(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
@@ -226,7 +226,7 @@ class TestWorkerHandlerHappyPath:
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         log_base = tmp_workflow / "logs"
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", log_base)
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", log_base)
         task = make_task()
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
@@ -239,7 +239,7 @@ class TestWorkerHandlerHappyPath:
     def test_lease_revoked_after_success(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         lease_token = lease_port.create_lease(task.task_id, worker_agent.agent_id, 300)
         task.assignment.lease_token = lease_token
@@ -259,7 +259,7 @@ class TestWorkerHandlerErrors:
     def test_agent_not_in_registry_raises(
         self, task_repo, agent_registry, event_port, lease_port, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(agent_id="missing-agent")
         task_repo.save(task)
 
@@ -270,7 +270,7 @@ class TestWorkerHandlerErrors:
     def test_wrong_agent_id_raises(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(agent_id="other-agent")
         task_repo.save(task)
 
@@ -282,7 +282,7 @@ class TestWorkerHandlerErrors:
     def test_task_not_assigned_raises(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(status=TaskStatus.CREATED)
         task.assignment = None
         task_repo.save(task)
@@ -294,7 +294,7 @@ class TestWorkerHandlerErrors:
     def test_task_in_wrong_status_raises(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         # Task is IN_PROGRESS (not ASSIGNED) but assignment is present — must
         # reach the status guard, not the "has no assignment" guard.
         task = make_task(status=TaskStatus.IN_PROGRESS)
@@ -309,7 +309,7 @@ class TestWorkerHandlerErrors:
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = DryRunAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
@@ -326,7 +326,7 @@ class TestWorkerHandlerErrors:
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = DryRunAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
@@ -344,7 +344,7 @@ class TestWorkerHandlerErrors:
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
 
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
 
         def bad_wait(self, handle, timeout_seconds=600):
             # Write forbidden file in workspace
@@ -377,7 +377,7 @@ class TestWorkerHandlerErrors:
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
 
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         monkeypatch.setattr(DryRunAgentRuntime, "wait_for_completion",
                             lambda self, h, timeout_seconds=600: AgentExecutionResult(success=True, exit_code=0))
         monkeypatch.setattr(DryRunGitWorkspaceAdapter, "get_modified_files",
@@ -396,7 +396,7 @@ class TestWorkerHandlerErrors:
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         from src.infra.runtime.agent_runtime import DryRunAgentRuntime
-        monkeypatch.setattr("src.app.handlers.worker.LOG_BASE", tmp_workflow / "logs")
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = DryRunAgentRuntime(simulate_failure=True)
 
         task = make_task()

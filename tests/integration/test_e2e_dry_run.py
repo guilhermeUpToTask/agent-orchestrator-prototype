@@ -122,6 +122,7 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
     from src.app.handlers.worker import WorkerHandler
     from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
     from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+    from src.infra.logs_and_tests import FilesystemTaskLogsAdapter, SubprocessTestRunnerAdapter
 
     # Always use dry-run runtime in tests regardless of agent's runtime_type
     dry_run = DryRunAgentRuntime()
@@ -135,6 +136,8 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
         lease_port=lease_port,
         git_workspace=DryRunGitWorkspaceAdapter(),
         runtime_factory=lambda agent_props: dry_run,
+        logs_port=FilesystemTaskLogsAdapter(),
+        test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=30,
     )
 
@@ -158,7 +161,7 @@ class TestFullLifecycle:
     ):
         # Override log dir to use tmp
         monkeypatch.setattr(
-            "src.app.handlers.worker.LOG_BASE",
+            "src.infra.logs_and_tests.LOG_BASE",
             tmp_workflow / "logs",
         )
 
@@ -239,7 +242,7 @@ class TestFullLifecycle:
         monkeypatch,
     ):
         monkeypatch.setattr(
-            "src.app.handlers.worker.LOG_BASE",
+            "src.infra.logs_and_tests.LOG_BASE",
             tmp_workflow / "logs",
         )
 
