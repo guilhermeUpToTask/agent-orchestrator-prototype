@@ -137,3 +137,81 @@ class LeaseService:
             task.status == TaskStatus.IN_PROGRESS
             and not lease_active
         )
+
+# ---------------------------------------------------------------------------
+# AnomalyDetectionService — pure domain logic for system anomalies
+# ---------------------------------------------------------------------------
+
+class AnomalyDetectionService:
+    """
+    Pure domain service for identifying tasks in anomalous states.
+    """
+
+    @staticmethod
+    def is_stuck_pending(task: TaskAggregate, threshold_seconds: int) -> bool:
+        if task.status not in (TaskStatus.CREATED, TaskStatus.REQUEUED):
+            return False
+        age = (datetime.now(timezone.utc) - task.updated_at).total_seconds()
+        return age >= threshold_seconds
+
+    @staticmethod
+    def is_assigned_to_dead_agent(task: TaskAggregate, agent: Optional[AgentProps]) -> bool:
+        if task.status != TaskStatus.ASSIGNED or task.assignment is None:
+            return False
+        if agent is None:
+            return False
+        return not _is_alive(agent)
+
+    @staticmethod
+    def is_lease_expired(task: TaskAggregate, lease_active: bool) -> bool:
+        if task.status not in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS):
+            return False
+        return not lease_active
+
+
+# ---------------------------------------------------------------------------
+# LifecyclePolicyService — high-level lifecycle and dependency policies
+# ---------------------------------------------------------------------------
+
+
+class LifecyclePolicyService:
+    """
+    Domain-level helper for task lifecycle and dependency policies.
+
+    This service centralises rules that were previously embedded in
+    application handlers so that the application layer can delegate
+    the decision making to the domain.
+    """
+
+    @staticmethod
+    def should_unblock_dependent(
+        dependent: TaskAggregate,
+        completed_task_ids: set[str],
+    ) -> bool:
+        """
+        Return True if a dependent task should be considered unblocked
+        after one of its dependencies has completed.
+
+        A task is unblocked when:
+          - it is in CREATED state, and
+          - all entries in depends_on are in completed_task_ids.
+        """
+        if dependent.status != TaskStatus.CREATED:
+            return False
+        return dependent.is_unblocked(completed_task_ids)
+
+    @staticmethod
+    def should_requeue_after_failure(task: TaskAggregate) -> bool:
+        """
+        Return True if a FAILED task should be requeued according to its
+        retry policy.
+        """
+        return task.status == TaskStatus.FAILED and task.can_retry()
+
+    @staticmethod
+    def should_cancel_after_failure(task: TaskAggregate) -> bool:
+        """
+        Return True if a FAILED task should be canceled because its retry
+        policy is exhausted.
+        """
+        return task.status == TaskStatus.FAILED and not task.can_retry()
