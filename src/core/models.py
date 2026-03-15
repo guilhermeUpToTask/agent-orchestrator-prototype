@@ -124,6 +124,7 @@ class TaskAggregate(BaseModel):
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_error: Optional[str] = None
     # Tasks this one depends on. Will not be dispatched until all are SUCCEEDED.
     depends_on: list[str] = Field(default_factory=list)
 
@@ -206,6 +207,7 @@ class TaskAggregate(BaseModel):
     def fail(self, reason: str) -> "TaskAggregate":
         self._assert_status(TaskStatus.IN_PROGRESS, TaskStatus.ASSIGNED)
         self.status = TaskStatus.FAILED
+        self.last_error = reason
         self._bump("task.failed",
                    self.assignment.agent_id if self.assignment else "system",
                    {"reason": reason})

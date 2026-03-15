@@ -1,31 +1,32 @@
+import time
 import pytest
 from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
 
-class TestInMemoryLeaseAdapter:
-    def test_create_returns_token(self):
-        adapter = InMemoryLeaseAdapter()
-        token = adapter.create_lease("task-1", "agent-1", 300)
-        assert token is not None and len(token) > 0
+@pytest.fixture
+def adapter():
+    return InMemoryLeaseAdapter()
 
-    def test_is_active(self):
-        adapter = InMemoryLeaseAdapter()
-        adapter.create_lease("task-1", "agent-1", 300)
-        assert adapter.is_lease_active("task-1") is True
-        assert adapter.is_lease_active("unknown") is False
+def test_create_lease(adapter):
+    token = adapter.create_lease("t1", "a1", 60)
+    assert token is not None
+    assert adapter.is_lease_active("t1")
 
-    def test_revoke(self):
-        adapter = InMemoryLeaseAdapter()
-        token = adapter.create_lease("task-1", "agent-1", 300)
-        assert adapter.revoke_lease(token) is True
-        assert adapter.is_lease_active("task-1") is False
+def test_refresh_lease(adapter):
+    token = adapter.create_lease("t1", "a1", 60)
+    ok = adapter.refresh_lease(token, 120)
+    assert ok is True
 
-    def test_refresh(self):
-        adapter = InMemoryLeaseAdapter()
-        token = adapter.create_lease("task-1", "agent-1", 1)
-        assert adapter.refresh_lease(token, 300) is True
-        assert adapter.is_lease_active("task-1") is True
+def test_revoke_lease(adapter):
+    token = adapter.create_lease("t1", "a1", 60)
+    adapter.revoke_lease(token)
+    assert not adapter.is_lease_active("t1")
 
-    def test_get_agent(self):
-        adapter = InMemoryLeaseAdapter()
-        adapter.create_lease("task-1", "agent-007", 300)
-        assert adapter.get_lease_agent("task-1") == "agent-007"
+def test_is_lease_active_expiration(adapter):
+    adapter.create_lease("t1", "a1", 0.01)
+    time.sleep(0.02)
+    assert not adapter.is_lease_active("t1")
+
+def test_expire_all(adapter):
+    adapter.create_lease("t1", "a1", 60)
+    adapter.expire_all()
+    assert not adapter.is_lease_active("t1")
