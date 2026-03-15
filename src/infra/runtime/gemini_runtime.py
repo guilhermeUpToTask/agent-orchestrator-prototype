@@ -10,6 +10,9 @@ import os
 
 from src.core.models import ExecutionContext
 from src.infra.runtime.cli_agent_runtime import CliAgentRuntime, CliSessionHandle
+import structlog
+
+log = structlog.get_logger(__name__)
 
 
 class GeminiAgentRuntime(CliAgentRuntime):
@@ -41,16 +44,18 @@ class GeminiAgentRuntime(CliAgentRuntime):
         return {
             **os.environ,
             "GEMINI_API_KEY": self._api_key,
+            "GEMINI_MODEL": self._model,
         }
 
     def _build_cmd(self, handle: CliSessionHandle) -> list[str]:
         cmd = [
             "gemini",
-            "--model", self._model,  # always explicit — CLI default is 2.5-pro, not 2.0-flash
+            f"--model={self._model}",  # explicit override; CLI default is often 2.5-flash
             "--yolo",
             "-p", handle.prompt,
         ]
         cmd += self._extra_flags
+        log.info("gemini.building_cmd", model=self._model, flags=self._extra_flags)
         return cmd
 
     def _build_prompt(self, context: ExecutionContext) -> str:
