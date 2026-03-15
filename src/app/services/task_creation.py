@@ -1,4 +1,3 @@
-import uuid
 from typing import Optional
 
 from src.core.models import (
@@ -31,16 +30,11 @@ class TaskCreationService:
         max_retries: int = 2,
         min_version: str = ">=1.0.0",
     ) -> TaskAggregate:
-        target_feature_id = feature_id or f"feat-{uuid.uuid4().hex[:8]}"
-        task_id = f"task-{uuid.uuid4().hex[:12]}"
-
         # Single quotes in test commands survive the shell but break when
         # PyYAML stores them and bash re-executes. Replace with double quotes.
         safe_test = test_command.replace("'", '"') if test_command else None
 
-        task = TaskAggregate(
-            task_id=task_id,
-            feature_id=target_feature_id,
+        task = TaskAggregate.create(
             title=title,
             description=description,
             agent_selector=AgentSelector(
@@ -53,8 +47,9 @@ class TaskCreationService:
                 test_command=safe_test,
                 acceptance_criteria=acceptance_criteria or [],
             ),
-            depends_on=depends_on or [],
-            retry_policy=RetryPolicy(max_retries=max_retries),
+            feature_id=feature_id,
+            depends_on=depends_on,
+            max_retries=max_retries,
         )
 
         self._repo.save(task)
@@ -62,7 +57,7 @@ class TaskCreationService:
         self._events.publish(DomainEvent(
             type="task.created",
             producer="task_creation_service",
-            payload={"task_id": task_id},
+            payload={"task_id": task.task_id},
         ))
 
         return task

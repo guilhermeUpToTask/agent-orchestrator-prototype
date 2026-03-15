@@ -47,7 +47,7 @@ import structlog
 
 from src.core.models import DomainEvent, TaskStatus
 from src.core.ports import AgentRegistryPort, EventPort, LeasePort, TaskRepositoryPort
-from src.core.services import _is_alive
+from src.core.services import AnomalyDetectionService
 
 log = structlog.get_logger(__name__)
 
@@ -144,7 +144,7 @@ class Reconciler:
         # ------------------------------------------------------------------
         if task.status in (TaskStatus.CREATED, TaskStatus.REQUEUED):
             age = self._task_status_age_seconds(task)
-            if age >= self._stuck_age:
+            if AnomalyDetectionService.is_stuck_pending(task, self._stuck_age):
                 log.warning(
                     "reconciler.stuck_pending_task",
                     task_id=task.task_id,
@@ -170,7 +170,7 @@ class Reconciler:
         # ------------------------------------------------------------------
         if task.status == TaskStatus.ASSIGNED and task.assignment:
             agent = self._registry.get(task.assignment.agent_id)
-            if agent is not None and not _is_alive(agent):
+            if AnomalyDetectionService.is_assigned_to_dead_agent(task, agent):
                 log.warning(
                     "reconciler.agent_dead",
                     task_id=task.task_id,
@@ -182,7 +182,7 @@ class Reconciler:
                 )
                 return
 
-            if not lease_active:
+            if AnomalyDetectionService.is_lease_expired(task, lease_active):
                 log.warning(
                     "reconciler.lease_expired_assigned",
                     task_id=task.task_id,
@@ -195,7 +195,7 @@ class Reconciler:
         # IN_PROGRESS — expired lease means the worker timed out or crashed.
         # ------------------------------------------------------------------
         if task.status == TaskStatus.IN_PROGRESS:
-            if not lease_active:
+            if AnomalyDetectionService.is_lease_expired(task, lease_active):
                 log.warning(
                     "reconciler.lease_expired_in_progress",
                     task_id=task.task_id,
