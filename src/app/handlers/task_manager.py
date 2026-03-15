@@ -30,7 +30,7 @@ from src.core.ports import (
     LeasePort,
     TaskRepositoryPort,
 )
-from src.core.services import SchedulerService
+from src.core.services import LifecyclePolicyService, SchedulerService
 
 log = structlog.get_logger(__name__)
 
@@ -60,6 +60,7 @@ class TaskManagerHandler:
         self._events = event_port
         self._lease = lease_port
         self._scheduler = scheduler or SchedulerService()
+        self._lifecycle = LifecyclePolicyService()
 
     # ------------------------------------------------------------------
     # handle_task_created — assign a newly-created task
@@ -111,15 +112,14 @@ class TaskManagerHandler:
         for task in all_tasks:
             if completed_task_id not in task.depends_on:
                 continue
-            if task.status != TaskStatus.CREATED:
+            if not self._lifecycle.should_unblock_dependent(task, succeeded_ids):
                 continue
-            if all(dep in succeeded_ids for dep in task.depends_on):
-                log.info(
-                    "task_manager.unblocking_dependent",
-                    task_id=task.task_id,
-                    completed=completed_task_id,
-                )
-                self._assign_with_retry(task.task_id, preloaded_succeeded=succeeded_ids)
+            log.info(
+                "task_manager.unblocking_dependent",
+                task_id=task.task_id,
+                completed=completed_task_id,
+            )
+            self._assign_with_retry(task.task_id, preloaded_succeeded=succeeded_ids)
 
     # ------------------------------------------------------------------
     # handle_task_failed — decide requeue or cancel
@@ -175,7 +175,7 @@ class TaskManagerHandler:
 
         expected_v = task.state_version
 
-        if task.retry_policy.attempt < task.retry_policy.max_retries:
+        if self._lifecycle.should_requeue_after_failure(task):
             # Retries remain — requeue
             task.requeue()
             ok = self._repo.update_if_version(task_id, task, expected_v)
@@ -266,8 +266,8 @@ class TaskManagerHandler:
                 preloaded_succeeded = {
                     t.task_id for t in all_tasks if t.status == TaskStatus.SUCCEEDED
                 }
-            unmet = [dep for dep in task.depends_on if dep not in preloaded_succeeded]
-            if unmet:
+            if not task.is_unblocked(preloaded_succeeded):
+                unmet = [dep for dep in task.depends_on if dep not in preloaded_succeeded]
                 log.info(
                     "task_manager.skip_unmet_dependencies",
                     task_id=task_id,

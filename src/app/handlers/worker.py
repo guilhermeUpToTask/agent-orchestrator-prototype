@@ -25,12 +25,7 @@ Fixes applied vs v1:
 from __future__ import annotations
 
 import json
-import os
-import shlex
-import subprocess
 import threading
-import time
-from pathlib import Path
 from typing import Callable
 
 import structlog
@@ -40,6 +35,7 @@ from src.core.models import (
     AgentProps,
     DomainEvent,
     ExecutionContext,
+    ForbiddenFileEditError,
     TaskAggregate,
     TaskResult,
     TaskStatus,
@@ -50,20 +46,17 @@ from src.core.ports import (
     EventPort,
     GitWorkspacePort,
     LeasePort,
+    TaskLogsPort,
     TaskRepositoryPort,
+    TestRunnerPort,
 )
 
 log = structlog.get_logger(__name__)
 
 MAX_UPDATE_RETRIES = 5
-# Caps stdout/stderr in memory; prevents OOM on runaway test output (fix #3.2)
-MAX_OUTPUT_BYTES = 10 * 1024 * 1024          # 10 MB per stream
 # Lease-refresh thread settings (fix #2.6)
-_LEASE_REFRESH_INTERVAL  = 60               # seconds between refreshes
-_LEASE_REFRESH_EXTENSION = 120              # seconds added per refresh
-
-_ORCHESTRATOR_HOME = os.path.abspath(os.getenv("ORCHESTRATOR_HOME", os.path.expanduser("~/.orchestrator")))
-LOG_BASE = Path(os.getenv("LOGS_DIR", os.path.join(_ORCHESTRATOR_HOME, "logs")))
+_LEASE_REFRESH_INTERVAL = 60
+_LEASE_REFRESH_EXTENSION = 120
 
 
 class WorkerHandler:
@@ -87,6 +80,8 @@ class WorkerHandler:
         lease_port: LeasePort,
         git_workspace: GitWorkspacePort,
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
+        logs_port: TaskLogsPort,
+        test_runner: TestRunnerPort,
         task_timeout_seconds: int = 600,
     ) -> None:
         self._agent_id = agent_id
@@ -97,6 +92,8 @@ class WorkerHandler:
         self._lease = lease_port
         self._git = git_workspace
         self._runtime_factory = runtime_factory
+        self._logs = logs_port
+        self._tests = test_runner
         self._timeout = task_timeout_seconds
 
     # ------------------------------------------------------------------
@@ -166,7 +163,7 @@ class WorkerHandler:
                 task, branch, commit_sha, actual_modified, result.artifacts
             )
 
-        except _ForbiddenFileEdit as exc:
+        except ForbiddenFileEditError as exc:
             self._handle_failure(task, f"Forbidden file edits: {exc.violations}")
         except _AgentFailed as exc:
             self._handle_failure(task, str(exc))
@@ -272,71 +269,7 @@ class WorkerHandler:
             env[key] = value if isinstance(value, str) else json.dumps(value)
         return env
 
-    @staticmethod
-    def _check_allowed_files(modified: list[str], allowed: list[str]) -> list[str]:
-        allowed_set = set(allowed)
-        return [f for f in modified if f not in allowed_set]
 
-    @staticmethod
-    def _run_tests(ws_path: str, test_command: str) -> None:
-        """
-        Run the acceptance-test command.
-
-        FIX #8: shlex.split + shell=False prevents shell-injection if
-        test_command ever comes from a user-writable task YAML.
-
-        FIX #3.2: stdout/stderr are capped at MAX_OUTPUT_BYTES so a
-        test suite that floods output cannot OOM the orchestrator process.
-        """
-        log.info("worker.running_tests", command=test_command, cwd=ws_path)
-        cmd_parts = shlex.split(test_command)
-        try:
-            proc = subprocess.run(
-                cmd_parts,
-                shell=False,
-                cwd=ws_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=120,
-            )
-        except FileNotFoundError as exc:
-            raise _TestsFailed(
-                f"Test command not found: {cmd_parts[0]!r} — {exc}"
-            ) from exc
-
-        stdout = proc.stdout[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
-        stderr = proc.stderr[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
-
-        if proc.returncode != 0:
-            raise _TestsFailed(
-                f"Tests failed (exit {proc.returncode})\n"
-                f"stdout: {stdout}\nstderr: {stderr}"
-            )
-        log.info("worker.tests_passed", command=test_command)
-
-    @staticmethod
-    def _save_logs(log_dir: Path, result: AgentExecutionResult) -> None:
-        """
-        Persist agent stdout/stderr and run metadata to disk.
-
-        FIX #3.3: OSError (full disk, permissions) is caught and logged as a
-        warning. It must not propagate as a task failure — the agent may have
-        actually succeeded.
-        """
-        try:
-            (log_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
-            (log_dir / "stderr.txt").write_text(result.stderr, encoding="utf-8")
-            meta = {
-                "exit_code": result.exit_code,
-                "success": result.success,
-                "elapsed_seconds": result.elapsed_seconds,
-                "modified_files": result.modified_files,
-            }
-            (log_dir / "metadata.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
-        except OSError as exc:
-            log.warning("worker.save_logs_failed", log_dir=str(log_dir), error=str(exc))
 
     def _handle_failure(self, task: TaskAggregate, reason: str) -> None:
         log.error("worker.task_failed", task_id=task.task_id, reason=reason)
@@ -360,10 +293,11 @@ class WorkerHandler:
     # ------------------------------------------------------------------
 
     def _prepare_workspace(self, task_id: str) -> tuple[str, str]:
+        log.info("worker.preparing_workspace", task_id=task_id, repo_url=self._repo_url)
         ws_path = self._git.create_workspace(self._repo_url, task_id)
         branch = f"task/{task_id}"
         self._git.checkout_main_and_create_branch(ws_path, branch)
-        log.info("worker.workspace_ready", task_id=task_id, path=ws_path)
+        log.info("worker.workspace_ready", task_id=task_id, path=ws_path, branch=branch)
         return ws_path, branch
 
     def _run_agent_session(
@@ -375,6 +309,7 @@ class WorkerHandler:
         branch: str,
         project_id: str,
     ) -> tuple[Any, AgentResult]:
+        log.info("worker.agent_session_starting", task_id=task.task_id, workspace=ws_path)
         env = self._build_env(task, ws_path, agent_props)
         session = runtime.start_session(agent_props, ws_path, env)
 
@@ -389,12 +324,22 @@ class WorkerHandler:
             metadata={"project_id": project_id},
         )
         runtime.send_execution_payload(session, context)
+        log.info("worker.agent_session_payload_sent", task_id=task.task_id)
 
-        log_dir = LOG_BASE / task.task_id
-        log_dir.mkdir(parents=True, exist_ok=True)
-
+        log.info(
+            "worker.agent_session_waiting",
+            task_id=task.task_id,
+            timeout=self._timeout,
+        )
         result = runtime.wait_for_completion(session, self._timeout)
-        self._save_logs(log_dir, result)
+        log.info(
+            "worker.agent_session_completed",
+            task_id=task.task_id,
+            success=result.success,
+            exit_code=result.exit_code,
+            elapsed_seconds=result.elapsed_seconds,
+        )
+        self._logs.save_logs(task.task_id, result)
         return session, result
 
     def _validate_and_commit(
@@ -405,11 +350,8 @@ class WorkerHandler:
         result: AgentResult,
     ) -> tuple[str, list[str]]:
         actual_modified = self._git.get_modified_files(ws_path)
-        violations = self._check_allowed_files(
-            actual_modified, task.execution.files_allowed_to_modify
-        )
-        if violations:
-            raise _ForbiddenFileEdit(violations)
+        log.info("worker.validating_modifications", task_id=task.task_id, modified_count=len(actual_modified), modified_files=actual_modified)
+        task.execution.validate_modifications(actual_modified)
 
         if not result.success:
             raise _AgentFailed(
@@ -417,11 +359,18 @@ class WorkerHandler:
             )
 
         if task.execution.test_command:
-            self._run_tests(ws_path, task.execution.test_command)
+            log.info(
+                "worker.running_acceptance_tests",
+                task_id=task.task_id,
+                cmd=task.execution.test_command,
+            )
+            self._tests.run_tests(ws_path, task.execution.test_command)
 
+        log.info("worker.committing_changes", task_id=task.task_id, branch=branch)
         commit_sha = self._git.apply_changes_and_commit(
             ws_path, f"task({task.task_id}): {task.title}"
         )
+        log.info("worker.pushing_changes", task_id=task.task_id, sha=commit_sha)
         self._git.push_branch(ws_path, branch)
         return commit_sha, actual_modified
 
@@ -509,11 +458,6 @@ class _LeaseRefresher:
 # ---------------------------------------------------------------------------
 # Internal exception types
 # ---------------------------------------------------------------------------
-
-class _ForbiddenFileEdit(Exception):
-    def __init__(self, violations: list[str]) -> None:
-        self.violations = violations
-        super().__init__(str(violations))
 
 
 class _AgentFailed(Exception):
