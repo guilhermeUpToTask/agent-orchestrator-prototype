@@ -143,6 +143,10 @@ def build_worker(
     from src.app.handlers.worker import WorkerHandler
     from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
     from src.infra.runtime.agent_runtime import DryRunAgentRuntime
+    from src.infra.logs_and_tests import (
+        FilesystemTaskLogsAdapter,
+        SubprocessTestRunnerAdapter,
+    )
 
     dry_run = runtime or DryRunAgentRuntime()
 
@@ -155,6 +159,8 @@ def build_worker(
         lease_port=lease_port,
         git_workspace=DryRunGitWorkspaceAdapter(),
         runtime_factory=lambda agent_props: dry_run,
+        logs_port=FilesystemTaskLogsAdapter(),
+        test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=30,
     )
 
@@ -413,35 +419,41 @@ class TestWorkerHandlerErrors:
 class TestCheckAllowedFiles:
 
     def test_no_violations_if_all_modified_allowed(self):
-        from src.app.handlers.worker import WorkerHandler
-        allowed = ["a.py", "b.py"]
+        from src.core.models import ExecutionSpec
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py", "b.py"])
         modified = ["a.py", "b.py"]
-        violations = WorkerHandler._check_allowed_files(modified, allowed)
-        assert violations == []
+        spec.validate_modifications(modified)
 
     def test_detects_forbidden_file(self):
-        from src.app.handlers.worker import WorkerHandler
-        allowed = ["a.py"]
+        import pytest
+        from src.core.models import ExecutionSpec, ForbiddenFileEditError
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
         modified = ["a.py", "forbidden.txt"]
-        violations = WorkerHandler._check_allowed_files(modified, allowed)
-        assert "forbidden.txt" in violations
+        with pytest.raises(ForbiddenFileEditError) as exc:
+            spec.validate_modifications(modified)
+        assert "forbidden.txt" in exc.value.violations
 
     def test_empty_modified_no_violations(self):
-        from src.app.handlers.worker import WorkerHandler
-        violations = WorkerHandler._check_allowed_files([], ["a.py"])
-        assert violations == []
+        from src.core.models import ExecutionSpec
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
+        spec.validate_modifications([])
 
     def test_empty_allowed_all_are_violations(self):
-        from src.app.handlers.worker import WorkerHandler
-        violations = WorkerHandler._check_allowed_files(["a.py", "b.py"], [])
-        assert set(violations) == {"a.py", "b.py"}
+        import pytest
+        from src.core.models import ExecutionSpec, ForbiddenFileEditError
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=[])
+        with pytest.raises(ForbiddenFileEditError) as exc:
+            spec.validate_modifications(["a.py", "b.py"])
+        assert set(exc.value.violations) == {"a.py", "b.py"}
 
     def test_multiple_violations_all_reported(self):
-        from src.app.handlers.worker import WorkerHandler
-        allowed = ["a.py"]
+        import pytest
+        from src.core.models import ExecutionSpec, ForbiddenFileEditError
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
         modified = ["b.txt", "c.txt", "a.py"]
-        violations = WorkerHandler._check_allowed_files(modified, allowed)
-        assert set(violations) == {"b.txt", "c.txt"}
+        with pytest.raises(ForbiddenFileEditError) as exc:
+            spec.validate_modifications(modified)
+        assert set(exc.value.violations) == {"b.txt", "c.txt"}
 
 
 # ===========================================================================
