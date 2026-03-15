@@ -357,7 +357,7 @@ def list_tasks():
 @click.option("--capabilities", required=True, help="Comma-separated")
 @click.option("--version", default="1.0.0")
 @click.option("--active/--inactive", default=True, help="Whether to include in boot and scheduling")
-@click.option("--runtime-type", default="gemini", help="gemini | claude | dry-run")
+@click.option("--runtime-type", default="gemini", help="gemini | claude | pi | dry-run")
 @click.option("--runtime-config", default="{}", help='JSON string, e.g. \'{"model":"gemini-2.0-pro"}\'')
 def register_agent(agent_id: str, name: str, capabilities: str, version: str,
                    active: bool, runtime_type: str, runtime_config: str):

@@ -10,7 +10,6 @@ so multiple agents with different LLM backends can coexist in the same system.
 """
 from __future__ import annotations
 
-import os
 from typing import Callable
 
 import structlog
@@ -73,10 +72,15 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
     how to invoke that specific tool, build prompts for it, and parse
     its output — keeping the orchestration layer fully agent-agnostic.
 
+    API keys are resolved from OrchestratorConfig (env vars / .env file).
+    No runtime reads os.environ directly.
+
     runtime_type values:
       "dry-run" — deterministic stub (CI/tests, always available)
-      "gemini"  — Gemini CLI (requires GEMINI_API_KEY)
-      "claude"  — Claude Code CLI (requires ANTHROPIC_API_KEY)
+      "gemini"  — Gemini CLI            (requires GEMINI_API_KEY)
+      "claude"  — Claude Code CLI       (requires ANTHROPIC_API_KEY)
+      "pi"      — pi-mono coding agent  (requires ANTHROPIC_API_KEY or GEMINI_API_KEY
+                                         depending on runtime_config.backend)
     """
     if app_config.mode == "dry-run" or agent_props.runtime_type == "dry-run":
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
@@ -85,7 +89,7 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
     def _build_gemini(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
         return GeminiAgentRuntime(
-            api_key=os.getenv("GEMINI_API_KEY", ""),
+            api_key=app_config.gemini_api_key.get_secret_value(),
             model=cfg.get("model", GeminiAgentRuntime.DEFAULT_MODEL),
             extra_flags=cfg.get("extra_flags", []),
         )
@@ -93,21 +97,39 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
     def _build_claude(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
         return ClaudeCodeRuntime(
-            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            api_key=app_config.anthropic_api_key.get_secret_value(),
             model=cfg.get("model", ClaudeCodeRuntime.DEFAULT_MODEL),
             extra_flags=cfg.get("extra_flags", []),
+        )
+
+    def _build_pi(cfg: dict) -> AgentRuntimePort:
+        from src.infra.runtime.pi_runtime import PiAgentRuntime
+        backend = cfg.get("backend", PiAgentRuntime.DEFAULT_BACKEND)
+        if backend == "gemini":
+            api_key = app_config.gemini_api_key.get_secret_value()
+        elif backend == "openrouter":
+            api_key = app_config.openrouter_api_key.get_secret_value()
+        else:
+            api_key = app_config.anthropic_api_key.get_secret_value()
+        return PiAgentRuntime(
+            api_key=api_key,
+            model=cfg.get("model", PiAgentRuntime.DEFAULT_MODEL),
+            extra_flags=cfg.get("extra_flags", []),
+            backend=backend,
         )
 
     registry: dict[str, Callable[[dict], AgentRuntimePort]] = {
         "gemini": _build_gemini,
         "claude": _build_claude,
+        "pi": _build_pi,
     }
 
     builder = registry.get(agent_props.runtime_type)
     if not builder:
+        valid = ", ".join(sorted(registry.keys()) + ["dry-run"])
         raise ValueError(
             f"Unknown runtime_type '{agent_props.runtime_type}' for agent "
-            f"'{agent_props.agent_id}'. Valid values: {', '.join(list(registry.keys()) + ['dry-run'])}"
+            f"'{agent_props.agent_id}'. Valid values: {valid}"
         )
 
     return builder(agent_props.runtime_config)
