@@ -141,6 +141,11 @@ def build_task_manager_handler() -> TaskManagerHandler:
 
 
 def build_worker_handler() -> WorkerHandler:
+    from src.infra.logs_and_tests import (
+        FilesystemTaskLogsAdapter,
+        SubprocessTestRunnerAdapter,
+    )
+
     return WorkerHandler(
         agent_id=app_config.agent_id,
         repo_url=app_config.repo_url,
@@ -150,6 +155,8 @@ def build_worker_handler() -> WorkerHandler:
         lease_port=build_lease_port(),
         git_workspace=build_git_workspace(),
         runtime_factory=build_runtime_factory(),
+        logs_port=FilesystemTaskLogsAdapter(),
+        test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=app_config.task_timeout,
     )
 
