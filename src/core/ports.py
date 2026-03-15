@@ -208,3 +208,57 @@ class AgentRuntimePort(ABC):
 
     @abstractmethod
     def stream_logs(self, handle: SessionHandle) -> Iterator[str]: ...
+
+
+# ---------------------------------------------------------------------------
+# Auxiliary ports
+# ---------------------------------------------------------------------------
+
+
+class TaskLogsPort(ABC):
+    """
+    Port for persisting task execution logs and simple metadata.
+    Implemented in infra using the filesystem or another storage backend.
+    """
+
+    @abstractmethod
+    def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
+        ...
+
+
+class TestRunnerPort(ABC):
+    """
+    Port for running acceptance tests against a workspace.
+    Application code depends on this instead of subprocess directly.
+    """
+
+    @abstractmethod
+    def run_tests(self, workspace_path: str, test_command: str) -> None:
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Auxiliary ports
+# ---------------------------------------------------------------------------
+
+
+class TaskLogsPort(ABC):
+    """
+    Port for persisting task execution logs and simple metadata.
+    Implemented in infra using the filesystem or another storage backend.
+    """
+
+    @abstractmethod
+    def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
+        ...
+
+
+class TestRunnerPort(ABC):
+    """
+    Port for running acceptance tests against a workspace.
+    Application code depends on this instead of subprocess directly.
+    """
+
+    @abstractmethod
+    def run_tests(self, workspace_path: str, test_command: str) -> None:
+        ...
