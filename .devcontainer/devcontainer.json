@@ -1,0 +1,63 @@
+{
+  "name": "agent-orchestrator",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/agent-orchestrator,type=bind,consistency=cached",
+  "workspaceFolder": "/workspaces/agent-orchestrator",
+  // Passes the .env file from your project root into the container as environment variables.
+  // Copy .env.example → .env and fill in your API keys — never commit .env.
+  // If .env doesn't exist the container still starts fine (Docker ignores missing --env-file).
+  "runArgs": [
+    "--env-file",
+    "${localWorkspaceFolder}/.env"
+  ],
+  // Bind-mount ~/.orchestrator from the host so project state (tasks, agents,
+  // logs, repos) persists across container rebuilds — same pattern as ~/.gemini.
+  "mounts": [
+    "source=${localEnv:HOME}/.orchestrator,target=/root/.orchestrator,type=bind,consistency=cached"
+  ],
+  "postCreateCommand": "uv pip install --system -e '.[dev]'",
+  "postStartCommand": "redis-server /etc/redis/redis-dev.conf --daemonize yes && sleep 1 && redis-cli ping",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "cweijan.vscode-redis-client"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
+        "python.testing.unittestEnabled": false,
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "terminal.integrated.env.linux": {
+          "REDIS_URL": "redis://localhost:6379/0",
+          "AGENT_MODE": "dry-run",
+          "ORCHESTRATOR_HOME": "/root/.orchestrator",
+          "PROJECT_NAME": "default",
+          "PYTHONPATH": "/workspaces/agent-orchestrator"
+        }
+      }
+    }
+  },
+  "forwardPorts": [
+    6379
+  ],
+  "portsAttributes": {
+    "6379": {
+      "label": "Redis",
+      "onAutoForward": "silent"
+    }
+  }
+}
