@@ -8,6 +8,7 @@ Reads AGENT_MODE env var:
 Each agent in the registry declares its own runtime_type ("gemini", "claude", etc.)
 so multiple agents with different LLM backends can coexist in the same system.
 """
+
 from __future__ import annotations
 
 from typing import Callable
@@ -28,40 +29,49 @@ from src.infra.config import config as app_config
 
 def _build_real_redis():
     import redis
+
     return redis.from_url(app_config.redis_url, decode_responses=False)
 
 
 def build_task_repo():
     from src.infra.fs.task_repository import YamlTaskRepository
+
     return YamlTaskRepository(app_config.tasks_dir)
 
 
 def build_agent_registry():
     from src.infra.fs.agent_registry import JsonAgentRegistry
+
     return JsonAgentRegistry(app_config.registry_path)
 
 
 def build_event_port():
     if app_config.mode == "dry-run":
         from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
+
         return InMemoryEventAdapter()
     from src.infra.redis_adapters.event_adapter import RedisEventAdapter
+
     return RedisEventAdapter(_build_real_redis())
 
 
 def build_lease_port():
     if app_config.mode == "dry-run":
         from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
+
         return InMemoryLeaseAdapter()
     from src.infra.redis_adapters.lease_adapter import RedisLeaseAdapter
+
     return RedisLeaseAdapter(_build_real_redis())
 
 
 def build_git_workspace():
     if app_config.mode == "dry-run":
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
+
         return DryRunGitWorkspaceAdapter()
     from src.infra.git.workspace_adapter import GitWorkspaceAdapter
+
     return GitWorkspaceAdapter(workspace_base=app_config.workspace_dir)
 
 
@@ -84,10 +94,12 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
     """
     if app_config.mode == "dry-run" or agent_props.runtime_type == "dry-run":
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+
         return SimulatedAgentRuntime()
 
     def _build_gemini(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
+
         return GeminiAgentRuntime(
             api_key=app_config.gemini_api_key.get_secret_value(),
             model=cfg.get("model", GeminiAgentRuntime.DEFAULT_MODEL),
@@ -96,6 +108,7 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
 
     def _build_claude(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
+
         return ClaudeCodeRuntime(
             api_key=app_config.anthropic_api_key.get_secret_value(),
             model=cfg.get("model", ClaudeCodeRuntime.DEFAULT_MODEL),
@@ -104,16 +117,22 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
 
     def _build_pi(cfg: dict) -> AgentRuntimePort:
         from src.infra.runtime.pi_runtime import PiAgentRuntime
-        backend = cfg.get("backend", PiAgentRuntime.DEFAULT_BACKEND)
+
+        model = cfg.get("model", PiAgentRuntime.DEFAULT_MODEL)
+
+        # Backend resolution: explicit declaration wins, otherwise openrouter.
+        backend = cfg.get("backend", "openrouter")
+
         if backend == "gemini":
             api_key = app_config.gemini_api_key.get_secret_value()
         elif backend == "openrouter":
             api_key = app_config.openrouter_api_key.get_secret_value()
         else:
             api_key = app_config.anthropic_api_key.get_secret_value()
+
         return PiAgentRuntime(
             api_key=api_key,
-            model=cfg.get("model", PiAgentRuntime.DEFAULT_MODEL),
+            model=model,
             extra_flags=cfg.get("extra_flags", []),
             backend=backend,
         )
@@ -146,6 +165,7 @@ def build_runtime_factory() -> Callable[[AgentProps], AgentRuntimePort]:
 
 def build_task_creation_service():
     from src.app.services.task_creation import TaskCreationService
+
     return TaskCreationService(
         task_repo=build_task_repo(),
         event_port=build_event_port(),
