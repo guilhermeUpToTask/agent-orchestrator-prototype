@@ -10,16 +10,14 @@ import structlog
 
 from src.core.models import AgentExecutionResult
 from src.core.ports import TaskLogsPort, TestRunnerPort
+from src.infra.config import config
 
 log = structlog.get_logger(__name__)
 
-
 MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB per stream
 
-_ORCHESTRATOR_HOME = os.path.abspath(
-    os.getenv("ORCHESTRATOR_HOME", os.path.expanduser("~/.orchestrator"))
-)
-LOG_BASE = Path(os.getenv("LOGS_DIR", os.path.join(_ORCHESTRATOR_HOME, "logs")))
+# Module-level alias — tests patch this directly via monkeypatch.setattr
+LOG_BASE = config.logs_dir
 
 
 class FilesystemTaskLogsAdapter(TaskLogsPort):
@@ -29,9 +27,11 @@ class FilesystemTaskLogsAdapter(TaskLogsPort):
     """
 
     def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
-        log_dir = LOG_BASE / task_id
-        log_dir.mkdir(parents=True, exist_ok=True)
+        import src.infra.logs_and_tests as _m
+
+        log_dir = _m.LOG_BASE / task_id
         try:
+            log_dir.mkdir(parents=True, exist_ok=True)
             (log_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
             (log_dir / "stderr.txt").write_text(result.stderr, encoding="utf-8")
             meta = {
@@ -40,13 +40,9 @@ class FilesystemTaskLogsAdapter(TaskLogsPort):
                 "elapsed_seconds": result.elapsed_seconds,
                 "modified_files": result.modified_files,
             }
-            (log_dir / "metadata.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            (log_dir / "metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         except OSError as exc:
-            log.warning(
-                "logs.save_failed", task_id=task_id, log_dir=str(log_dir), error=str(exc)
-            )
+            log.warning("logs.save_failed", task_id=task_id, log_dir=str(log_dir), error=str(exc))
 
 
 class SubprocessTestRunnerAdapter(TestRunnerPort):
@@ -68,17 +64,13 @@ class SubprocessTestRunnerAdapter(TestRunnerPort):
                 timeout=120,
             )
         except FileNotFoundError as exc:
-            raise RuntimeError(
-                f"Test command not found: {cmd_parts[0]!r} — {exc}"
-            ) from exc
+            raise RuntimeError(f"Test command not found: {cmd_parts[0]!r} — {exc}") from exc
 
         stdout = proc.stdout[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         stderr = proc.stderr[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
             raise RuntimeError(
-                f"Tests failed (exit {proc.returncode})\n"
-                f"stdout: {stdout}\nstderr: {stderr}"
+                f"Tests failed (exit {proc.returncode})\nstdout: {stdout}\nstderr: {stderr}"
             )
         log.info("tests.passed", command=test_command)
-
