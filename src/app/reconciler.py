@@ -38,6 +38,7 @@ the reconciler never races against the task manager on a healthy run:
   t=120    reconciler second pass — age 120 s ≥ 120 s → republish task.created
   t≈120    task manager (restarted) picks it up
 """
+
 from __future__ import annotations
 
 import time
@@ -61,11 +62,14 @@ MAX_CAS_RETRIES = 3
 STUCK_TASK_MIN_AGE_SECONDS = 120
 
 # Statuses the reconciler never acts on — task manager drives these via events.
-_IGNORED_STATUSES = frozenset({
-    TaskStatus.FAILED,
-    TaskStatus.CANCELED,
-    TaskStatus.MERGED,
-})
+_IGNORED_STATUSES = frozenset(
+    {
+        TaskStatus.SUCCEEDED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELED,
+        TaskStatus.MERGED,
+    }
+)
 
 
 class Reconciler:
@@ -206,11 +210,7 @@ class Reconciler:
         # ------------------------------------------------------------------
         # SUCCEEDED without commit_sha — data quality warning, no state change.
         # ------------------------------------------------------------------
-        if (
-            task.status == TaskStatus.SUCCEEDED
-            and task.result
-            and not task.result.commit_sha
-        ):
+        if task.status == TaskStatus.SUCCEEDED and task.result and not task.result.commit_sha:
             log.warning("reconciler.succeeded_no_commit", task_id=task.task_id)
 
     # ------------------------------------------------------------------
@@ -228,18 +228,18 @@ class Reconciler:
         eligible agent exists, the task remains CREATED/REQUEUED and will
         be republished again on the next reconciler pass after _stuck_age.
         """
-        event_type = (
-            "task.created" if task.status == TaskStatus.CREATED else "task.requeued"
+        event_type = "task.created" if task.status == TaskStatus.CREATED else "task.requeued"
+        self._events.publish(
+            DomainEvent(
+                type=event_type,
+                producer="reconciler",
+                payload={"task_id": task.task_id},
+            )
         )
-        self._events.publish(DomainEvent(
-            type=event_type,
-            producer="reconciler",
-            payload={"task_id": task.task_id},
-        ))
         log.info(
             "reconciler.republished_pending",
             task_id=task.task_id,
-            event_type=event_type,          # "event" is reserved by structlog
+            event_type=event_type,  # "event" is reserved by structlog
         )
 
     # ------------------------------------------------------------------
@@ -273,11 +273,13 @@ class Reconciler:
             expected_v = fresh.state_version
             fresh.fail(reason)
             if self._repo.update_if_version(task.task_id, fresh, expected_v):
-                self._events.publish(DomainEvent(
-                    type="task.failed",
-                    producer="reconciler",
-                    payload={"task_id": task.task_id, "reason": reason},
-                ))
+                self._events.publish(
+                    DomainEvent(
+                        type="task.failed",
+                        producer="reconciler",
+                        payload={"task_id": task.task_id, "reason": reason},
+                    )
+                )
                 log.info(
                     "reconciler.task_failed",
                     task_id=task.task_id,
