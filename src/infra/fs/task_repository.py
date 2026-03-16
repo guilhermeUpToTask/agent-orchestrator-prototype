@@ -10,6 +10,7 @@ Fixes applied vs v1:
   #3.1  list_all() quarantines corrupt files to tasks/quarantine/ instead of
         silently skipping them, making data loss and format regressions visible.
 """
+
 from __future__ import annotations
 
 import os
@@ -32,12 +33,17 @@ class YamlTaskRepository(TaskRepositoryPort):
     WARNING: Architectural Constraint (Single Orchestrator Assumption)
     ------------------------------------------------------------------
     The `update_if_version()` method uses read-compare-write sequence which is
-    NOT a true atomic CAS (Compare-and-Swap) against concurrent processes. 
+    NOT a true atomic CAS (Compare-and-Swap) against concurrent processes.
     It is ONLY safe if exactly one orchestrator process runs at any given time.
-    If multi-process horizontal scaling is needed, this repository must be 
+    If multi-process horizontal scaling is needed, this repository must be
     replaced with a system supporting true atomic CAS (e.g. Postgres or Redis).
     """
-    def __init__(self, tasks_dir: str | Path = "workflow/tasks") -> None:
+
+    def __init__(self, tasks_dir: str | Path | None = None) -> None:
+        if tasks_dir is None:
+            from src.infra.config import config
+
+            tasks_dir = config.tasks_dir
         self._dir = Path(tasks_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         # FIX #3.1: quarantine directory for corrupt task files
@@ -85,6 +91,7 @@ class YamlTaskRepository(TaskRepositoryPort):
     ) -> None:
         task = self.load(task_id)
         from src.core.models import HistoryEntry
+
         task.history.append(HistoryEntry(event=event, actor=actor, detail=detail))
         self._atomic_write(self._task_path(task_id), task)
 
@@ -106,6 +113,7 @@ class YamlTaskRepository(TaskRepositoryPort):
                 tasks.append(TaskAggregate.model_validate(data))
             except Exception as exc:
                 import structlog
+
                 structlog.get_logger(__name__).error(
                     "fs_repo.corrupt_file_quarantined",
                     path=str(path),
@@ -135,6 +143,7 @@ class YamlTaskRepository(TaskRepositoryPort):
         Delegates atomic write to AtomicFileWriter utility.
         """
         from src.infra.fs.atomic_writer import AtomicFileWriter
+
         data = task.model_dump(mode="json")
         content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
         AtomicFileWriter.write_text(path, content)

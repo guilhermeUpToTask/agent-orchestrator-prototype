@@ -7,6 +7,7 @@ Fixes applied vs v1:
         The signature change is backward-compatible: existing callers that
         ignore the return value continue to work.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,11 @@ from src.core.ports import AgentRegistryPort
 
 
 class JsonAgentRegistry(AgentRegistryPort):
+    def __init__(self, registry_path: str | Path | None = None) -> None:
+        if registry_path is None:
+            from src.infra.config import config
 
-    def __init__(self, registry_path: str | Path = "workflow/agents/registry.json") -> None:
+            registry_path = config.registry_path
         self._path = Path(registry_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         if not self._path.exists():
@@ -72,5 +76,6 @@ class JsonAgentRegistry(AgentRegistryPort):
 
     def _write(self, data: dict) -> None:
         from src.infra.fs.atomic_writer import AtomicFileWriter
+
         content = json.dumps(data, indent=2, default=str)
         AtomicFileWriter.write_text(self._path, content)
