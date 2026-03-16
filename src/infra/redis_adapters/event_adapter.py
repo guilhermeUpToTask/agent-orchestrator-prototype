@@ -8,6 +8,7 @@ Consumers read with XREADGROUP so each message is delivered to exactly
 one consumer in a group, preventing duplicate processing across multiple
 workers or task manager instances.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,10 +24,14 @@ _GLOBAL_STREAM = "events:all"
 
 
 class RedisEventAdapter(EventPort):
-
-    def __init__(self, redis_client: redis.Redis, journal_dir: str = "workflow/events") -> None:
+    def __init__(self, redis_client: redis.Redis, journal_dir: str | None = None) -> None:
         self._r = redis_client
         import pathlib
+
+        if journal_dir is None:
+            from src.infra.config import config
+
+            journal_dir = str(config.events_dir)
         self._journal_dir = pathlib.Path(journal_dir)
         self._journal_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,7 +48,9 @@ class RedisEventAdapter(EventPort):
         """Subscribe to a single event type. See subscribe_many() for multiple types."""
         yield from self.subscribe_many([event_type], group, consumer)
 
-    def subscribe_many(self, event_types: list[str], group: str, consumer: str) -> Iterator[DomainEvent]:
+    def subscribe_many(
+        self, event_types: list[str], group: str, consumer: str
+    ) -> Iterator[DomainEvent]:
         """
         Block-subscribe to multiple event types in a single XREADGROUP call.
         Yields events from any of the given streams as they arrive — no
@@ -75,10 +82,11 @@ class RedisEventAdapter(EventPort):
 
         while True:
             results = self._r.xreadgroup(
-                group, consumer,
+                group,
+                consumer,
                 read_dict,
                 block=5000,
-                count=10,   # read up to 10 messages across all streams per call
+                count=10,  # read up to 10 messages across all streams per call
             )
             if not results:
                 continue
@@ -102,7 +110,10 @@ class RedisEventAdapter(EventPort):
 
     def _write_journal(self, event: DomainEvent) -> None:
         try:
-            path = self._journal_dir / f"evt-{event.timestamp.strftime('%Y%m%dT%H%M%S')}-{event.event_id[:8]}.json"
+            path = (
+                self._journal_dir
+                / f"evt-{event.timestamp.strftime('%Y%m%dT%H%M%S')}-{event.event_id[:8]}.json"
+            )
             path.write_text(json.dumps(event.model_dump(mode="json"), indent=2, default=str))
         except Exception:
             pass  # journal is optional
@@ -111,6 +122,7 @@ class RedisEventAdapter(EventPort):
 # ---------------------------------------------------------------------------
 # In-memory event adapter (for testing / dry-run)
 # ---------------------------------------------------------------------------
+
 
 class InMemoryEventAdapter(EventPort):
     """Simple in-process pub/sub for testing. Not thread-safe."""
@@ -123,10 +135,14 @@ class InMemoryEventAdapter(EventPort):
         self._published.append(event)
         self._subscribers.setdefault(event.type, []).append(event)
 
-    def subscribe(self, event_type: str, group: str = "", consumer: str = "") -> Iterator[DomainEvent]:
+    def subscribe(
+        self, event_type: str, group: str = "", consumer: str = ""
+    ) -> Iterator[DomainEvent]:
         yield from self._subscribers.get(event_type, [])
 
-    def subscribe_many(self, event_types: list[str], group: str = "", consumer: str = "") -> Iterator[DomainEvent]:
+    def subscribe_many(
+        self, event_types: list[str], group: str = "", consumer: str = ""
+    ) -> Iterator[DomainEvent]:
         for et in event_types:
             yield from self._subscribers.get(et, [])
 
