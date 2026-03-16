@@ -1,6 +1,7 @@
 """
 tests/unit/infra/test_config.py — Unit tests for OrchestratorConfig.
 """
+
 from pathlib import Path
 import pytest
 from pydantic import SecretStr
@@ -9,20 +10,19 @@ from src.infra.config import OrchestratorConfig
 
 class TestOrchestratorConfigDefaults:
     def test_default_mode(self):
-        cfg = OrchestratorConfig()
-        assert cfg.mode == "dry-run"
+        assert OrchestratorConfig().mode == "dry-run"
 
     def test_default_agent_id(self):
-        cfg = OrchestratorConfig()
-        assert cfg.agent_id == "agent-worker-001"
+        assert OrchestratorConfig().agent_id == "agent-worker-001"
 
     def test_default_redis_url(self):
-        cfg = OrchestratorConfig()
-        assert cfg.redis_url == "redis://localhost:6379/0"
+        assert OrchestratorConfig().redis_url == "redis://localhost:6379/0"
 
     def test_default_task_timeout(self):
-        cfg = OrchestratorConfig()
-        assert cfg.task_timeout == 600
+        assert OrchestratorConfig().task_timeout == 600
+
+    def test_default_project_name(self):
+        assert OrchestratorConfig().project_name == "default"
 
     def test_default_api_keys_are_empty(self):
         cfg = OrchestratorConfig()
@@ -38,72 +38,69 @@ class TestOrchestratorConfigDefaults:
 class TestOrchestratorConfigEnvVars:
     def test_mode_from_env(self, monkeypatch):
         monkeypatch.setenv("AGENT_MODE", "real")
-        cfg = OrchestratorConfig()
-        assert cfg.mode == "real"
+        assert OrchestratorConfig().mode == "real"
 
     def test_agent_id_from_env(self, monkeypatch):
         monkeypatch.setenv("AGENT_ID", "worker-99")
-        cfg = OrchestratorConfig()
-        assert cfg.agent_id == "worker-99"
+        assert OrchestratorConfig().agent_id == "worker-99"
 
     def test_redis_url_from_env(self, monkeypatch):
         monkeypatch.setenv("REDIS_URL", "redis://remote:6380/2")
-        cfg = OrchestratorConfig()
-        assert cfg.redis_url == "redis://remote:6380/2"
+        assert OrchestratorConfig().redis_url == "redis://remote:6380/2"
 
     def test_task_timeout_from_env(self, monkeypatch):
         monkeypatch.setenv("TASK_TIMEOUT_SECONDS", "120")
-        cfg = OrchestratorConfig()
-        assert cfg.task_timeout == 120
+        assert OrchestratorConfig().task_timeout == 120
+
+    def test_project_name_from_env(self, monkeypatch):
+        monkeypatch.setenv("PROJECT_NAME", "my-api")
+        assert OrchestratorConfig().project_name == "my-api"
 
     def test_anthropic_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        cfg = OrchestratorConfig()
-        assert cfg.anthropic_api_key.get_secret_value() == "sk-ant-test"
+        assert OrchestratorConfig().anthropic_api_key.get_secret_value() == "sk-ant-test"
 
     def test_gemini_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "gm-key-test")
-        cfg = OrchestratorConfig()
-        assert cfg.gemini_api_key.get_secret_value() == "gm-key-test"
+        assert OrchestratorConfig().gemini_api_key.get_secret_value() == "gm-key-test"
 
     def test_openrouter_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-        cfg = OrchestratorConfig()
-        assert cfg.openrouter_api_key.get_secret_value() == "sk-or-test"
+        assert OrchestratorConfig().openrouter_api_key.get_secret_value() == "sk-or-test"
 
 
 class TestOrchestratorConfigPaths:
-    def test_derived_tasks_dir(self, monkeypatch, tmp_path):
+    def test_paths_scoped_under_project(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+        monkeypatch.setenv("PROJECT_NAME", "my-api")
         cfg = OrchestratorConfig()
-        assert cfg.tasks_dir == tmp_path / "tasks"
+        project = tmp_path / "projects" / "my-api"
+        assert cfg.tasks_dir == project / "tasks"
+        assert cfg.registry_path == project / "agents" / "registry.json"
+        assert cfg.workspace_dir == project / "workspaces"
+        assert cfg.logs_dir == project / "logs"
+        assert cfg.events_dir == project / "events"
+        assert cfg.repo_url == f"file://{project / 'repo'}"
 
-    def test_derived_registry_path(self, monkeypatch, tmp_path):
+    def test_project_home_property(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+        monkeypatch.setenv("PROJECT_NAME", "my-api")
         cfg = OrchestratorConfig()
-        assert cfg.registry_path == tmp_path / "agents" / "registry.json"
+        assert cfg.project_home == tmp_path / "projects" / "my-api"
 
-    def test_derived_workspace_dir(self, monkeypatch, tmp_path):
+    def test_default_project_paths(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
         cfg = OrchestratorConfig()
-        assert cfg.workspace_dir == tmp_path / "repos" / "workspaces"
-
-    def test_derived_repo_url(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        cfg = OrchestratorConfig()
-        assert cfg.repo_url == f"file://{tmp_path / 'repos' / 'my-repo'}"
+        project = tmp_path / "projects" / "default"
+        assert cfg.tasks_dir == project / "tasks"
+        assert cfg.logs_dir == project / "logs"
+        assert cfg.events_dir == project / "events"
 
     def test_explicit_tasks_dir_overrides_derived(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
         monkeypatch.setenv("TASKS_DIR", "/custom/tasks")
         cfg = OrchestratorConfig()
         assert cfg.tasks_dir == Path("/custom/tasks")
-
-    def test_explicit_registry_path_overrides_derived(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("REGISTRY_PATH", "/custom/registry.json")
-        cfg = OrchestratorConfig()
-        assert cfg.registry_path == Path("/custom/registry.json")
 
     def test_home_dir_compat_property(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
