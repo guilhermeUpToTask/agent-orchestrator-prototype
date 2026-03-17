@@ -95,6 +95,14 @@ class YamlTaskRepository(TaskRepositoryPort):
         task.history.append(HistoryEntry(event=event, actor=actor, detail=detail))
         self._atomic_write(self._task_path(task_id), task)
 
+    def delete(self, task_id: str) -> bool:
+        """Remove the task YAML file.  Returns True if deleted, False if not found."""
+        path = self._task_path(task_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
     def list_all(self) -> list[TaskAggregate]:
         """
         Return all tasks in the tasks directory.

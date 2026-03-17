@@ -17,7 +17,7 @@ import structlog
 
 from src.app.handlers.task_manager import TaskManagerHandler
 from src.app.handlers.worker import WorkerHandler
-from src.app.reconciler import Reconciler
+from src.app.reconciliation import Reconciler
 from src.core.models import AgentProps
 from src.core.ports import AgentRuntimePort
 from src.core.services import SchedulerService
@@ -214,4 +214,13 @@ def build_reconciler(
         agent_registry=build_agent_registry(),
         interval_seconds=interval_seconds,
         stuck_task_min_age_seconds=stuck_task_min_age_seconds,
+    )
+
+
+def build_task_retry_usecase():
+    from src.app.usecases.task_retry import TaskRetryUseCase
+
+    return TaskRetryUseCase(
+        task_repo=build_task_repo(),
+        event_port=build_event_port(),
     )
