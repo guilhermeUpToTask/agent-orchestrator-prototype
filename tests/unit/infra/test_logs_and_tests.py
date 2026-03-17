@@ -1,5 +1,5 @@
 import src.infra.logs_and_tests as logs_module
-from src.core.models import AgentExecutionResult
+from src.domain import AgentExecutionResult
 
 
 class TestFilesystemTaskLogsAdapter:

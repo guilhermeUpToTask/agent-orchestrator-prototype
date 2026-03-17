@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch, ANY
 import pytest
 
 from src.app.services.worker_execution import WorkerExecutionService
-from src.core.models import (
+from src.domain import (
     AgentExecutionResult,
     AgentProps,
     AgentSelector,

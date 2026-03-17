@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from src.app.handlers.task_manager import TaskManagerHandler, _VersionConflict
-from src.core.models import TaskAggregate, TaskStatus, AgentProps, AgentSelector, ExecutionSpec, Assignment
+from src.domain import TaskAggregate, TaskStatus, AgentProps, AgentSelector, ExecutionSpec, Assignment
 
 def make_task(task_id: str, status: TaskStatus) -> TaskAggregate:
     return TaskAggregate(

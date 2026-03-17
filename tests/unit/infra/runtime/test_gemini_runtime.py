@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from src.core.models import AgentProps, ExecutionContext, ExecutionSpec
+from src.domain import AgentProps, ExecutionContext, ExecutionSpec
 from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
 
 class TestGeminiAgentRuntime:

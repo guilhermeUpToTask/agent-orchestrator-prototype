@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from src.cli import cli
-from src.core.models import TaskStatus
+from src.domain import TaskStatus
 
 
 @pytest.fixture()
@@ -67,6 +67,7 @@ def _make_task(task_id="t-001", status=TaskStatus.FAILED):
 @patch("src.infra.factory.build_event_port")
 @patch("src.infra.factory.build_task_repo")
 def test_task_retry_requeues_existing_task(mock_repo_factory, mock_event_factory, runner):
+    # Use case calls repo.load() (raises KeyError on miss), not repo.get().
     task = _make_task()
     repo = MagicMock()
     repo.load.return_value = task
@@ -77,7 +78,7 @@ def test_task_retry_requeues_existing_task(mock_repo_factory, mock_event_factory
 
     result = runner.invoke(cli, ["task", "retry", "t-001"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     assert "t-001" in result.output
     assert "requeued" in result.output
     repo.save.assert_called_once_with(task)
@@ -87,9 +88,9 @@ def test_task_retry_requeues_existing_task(mock_repo_factory, mock_event_factory
 @patch("src.infra.factory.build_event_port")
 @patch("src.infra.factory.build_task_repo")
 def test_task_retry_exits_1_when_not_found(mock_repo_factory, mock_event_factory, runner):
+    # Use case calls repo.load(); a missing task raises KeyError.
     repo = MagicMock()
-    repo.load.side_effect = KeyError("no-such-task")  # new: load() raises
-
+    repo.load.side_effect = KeyError("no-such-task")
     mock_repo_factory.return_value = repo
     mock_event_factory.return_value = MagicMock()
 

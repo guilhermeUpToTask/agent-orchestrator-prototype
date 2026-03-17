@@ -2,7 +2,7 @@ import json
 import fakeredis
 import pytest
 from src.infra.redis_adapters.event_adapter import RedisEventAdapter
-from src.core.models import DomainEvent
+from src.domain import DomainEvent
 
 @pytest.fixture
 def redis_client():

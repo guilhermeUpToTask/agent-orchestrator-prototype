@@ -6,7 +6,7 @@ Follows the same pattern as test_gemini_runtime.py and test_claude_code_runtime.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.core.models import AgentProps, ExecutionContext, ExecutionSpec
+from src.domain import AgentProps, ExecutionContext, ExecutionSpec
 from src.infra.runtime.pi_runtime import PiAgentRuntime
 
 

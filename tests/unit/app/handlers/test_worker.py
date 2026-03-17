@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, ANY
 from src.app.handlers.worker import WorkerHandler
-from src.core.models import (
+from src.domain import (
     TaskAggregate, TaskStatus, AgentProps, AgentSelector, ExecutionSpec, Assignment, AgentExecutionResult
 )
 
@@ -83,7 +83,7 @@ class TestWorkerHandler:
 
     @patch("src.app.handlers.worker._LeaseRefresher")
     def test_process_forbidden_edit(self, mock_refresher):
-        from src.core.models import ForbiddenFileEditError
+        from src.domain import ForbiddenFileEditError
         task = make_task("t1", TaskStatus.ASSIGNED)
         self.repo.load.side_effect = lambda tid: task
         self.repo.update_if_version.return_value = True

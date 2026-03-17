@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from src.app.services.task_creation import TaskCreationService
-from src.core.models import TaskAggregate
+from src.domain import TaskAggregate
 
 class TestTaskCreationService:
     def test_create_task(self):

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from src.core.models import AgentProps, ExecutionContext, ExecutionSpec
+from src.domain import AgentProps, ExecutionContext, ExecutionSpec
 from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
 
 class TestClaudeCodeRuntime:

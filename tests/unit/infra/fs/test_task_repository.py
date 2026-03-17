@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from src.core.models import TaskAggregate, TaskStatus, Assignment, AgentSelector, ExecutionSpec
+from src.domain import TaskAggregate, TaskStatus, Assignment, AgentSelector, ExecutionSpec
 from src.infra.fs.task_repository import YamlTaskRepository
 
 def make_task(task_id: str = "task-001", status: TaskStatus = TaskStatus.CREATED) -> TaskAggregate:

@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from src.core.models import AgentProps, TrustLevel
+from src.domain import AgentProps, TrustLevel
 from src.infra.fs.agent_registry import JsonAgentRegistry
 
 def make_agent(agent_id: str = "agent-001") -> AgentProps:

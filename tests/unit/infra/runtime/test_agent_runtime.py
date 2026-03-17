@@ -1,5 +1,5 @@
 import pytest
-from src.core.models import AgentProps, ExecutionContext, ExecutionSpec
+from src.domain import AgentProps, ExecutionContext, ExecutionSpec
 from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
 
 class TestSimulatedAgentRuntime:

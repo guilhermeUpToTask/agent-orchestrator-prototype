@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from src.core.models import AgentProps, ExecutionContext, ExecutionSpec, AgentExecutionResult
+from src.domain import AgentProps, ExecutionContext, ExecutionSpec, AgentExecutionResult
 from src.infra.runtime.agent_runtime import CliAgentRuntime
 
 class TestCliAgentRuntime:

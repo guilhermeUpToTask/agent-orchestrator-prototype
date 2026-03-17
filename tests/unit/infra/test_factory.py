@@ -8,7 +8,7 @@ from src.infra.factory import (
     build_event_port,
     build_agent_runtime,
 )
-from src.core.models import AgentProps
+from src.domain import AgentProps
 
 
 class TestFactory:

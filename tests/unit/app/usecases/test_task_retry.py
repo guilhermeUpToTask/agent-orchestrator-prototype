@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, call
 
 from src.app.usecases.task_retry import TaskRetryUseCase, TaskRetryResult
-from src.core.models import (
+from src.domain import (
     AgentSelector,
     Assignment,
     ExecutionSpec,
