@@ -39,11 +39,45 @@ Env-var reference:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Tuple, Type
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+
+class LocalJsonConfigSource(PydanticBaseSettingsSource):
+    """
+    Loads project-scoped config from .orchestrator/config.json in the CWD.
+
+    Priority is below env vars / .env but above field defaults, so the wizard
+    values persist without ever touching environment variables.
+
+    Keys understood (mirrors managed keys in OrchestratorConfigManager):
+      project_name      → OrchestratorConfig.project_name
+      source_repo_url   → OrchestratorConfig.source_repo_url
+      redis_url         → OrchestratorConfig.redis_url
+    """
+
+    def _read(self) -> dict[str, Any]:
+        path = Path.cwd() / ".orchestrator" / "config.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        data = self._read()
+        if field_name in data and data[field_name] is not None:
+            return data[field_name], field_name, False
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return {k: v for k, v in self._read().items() if v is not None}
 
 
 class OrchestratorConfig(BaseSettings):
@@ -63,6 +97,23 @@ class OrchestratorConfig(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> Tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,  # constructor kwargs — highest priority
+            env_settings,  # environment variables
+            dotenv_settings,  # .env file
+            LocalJsonConfigSource(settings_cls),  # .orchestrator/config.json
+            file_secret_settings,  # /run/secrets (Docker etc.) — lowest
+        )
 
     # ── Orchestrator ─────────────────────────────────────────────────────────
 
