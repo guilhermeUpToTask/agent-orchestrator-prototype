@@ -1,5 +1,8 @@
 """
-src/app/reconciler.py — Reconciler loop (safety net only).
+src/app/reconciliation/reconciliation_engine.py — Reconciler loop (safety net only).
+
+Moved here from src/app/reconciler.py as part of Phase 1 orchestration refactoring.
+src/app/reconciler.py now re-exports Reconciler for backward compatibility.
 
 Architecture decision: the reconciler is NOT a scheduler.
 It is a watchdog that detects silent failures and stuck tasks, then emits
@@ -26,17 +29,7 @@ What it deliberately ignores:
   SUCCEEDED (with sha) — healthy terminal
 
 The minimum-age gate (STUCK_TASK_MIN_AGE_SECONDS, default 120 s) ensures
-the reconciler never races against the task manager on a healthy run:
-
-  t=0      task.created published by writer
-  t≈0      task manager assigns, publishes task.assigned
-  t=60     reconciler first pass — task is ASSIGNED, ignored
-  (normal path — reconciler never touches this task)
-
-  t=0      task.created published; task manager crashes
-  t=60     reconciler first pass — task is CREATED, age 60 s < 120 s → skip
-  t=120    reconciler second pass — age 120 s ≥ 120 s → republish task.created
-  t≈120    task manager (restarted) picks it up
+the reconciler never races against the task manager on a healthy run.
 """
 
 from __future__ import annotations
@@ -54,14 +47,8 @@ log = structlog.get_logger(__name__)
 
 MAX_CAS_RETRIES = 3
 
-# A CREATED or REQUEUED task is only re-published if it has been in that
-# state for at least this many seconds with no assignment.
-# Must be comfortably longer than normal task-manager latency (typically <1 s)
-# but short enough to recover quickly after a crash.
-# Default: 2 × reconciler interval (2 × 60 = 120 s).
 STUCK_TASK_MIN_AGE_SECONDS = 120
 
-# Statuses the reconciler never acts on — task manager drives these via events.
 _IGNORED_STATUSES = frozenset(
     {
         TaskStatus.SUCCEEDED,
@@ -77,6 +64,10 @@ class Reconciler:
     Watchdog process: scans task state periodically and either re-emits a
     pending event (crash recovery / no-agent dead end) or emits task.failed
     for tasks whose worker went silent.
+
+    Detection logic is fully delegated to AnomalyDetectionService (core/services.py).
+    This class only coordinates the scan loop, event emission, and CAS writes —
+    it contains no domain policy of its own.
 
     Does not implement retry or cancellation policy — those belong to the
     task manager, which reacts to task.failed.
@@ -133,19 +124,6 @@ class Reconciler:
     # ------------------------------------------------------------------
 
     def _reconcile_task(self, task) -> None:
-        # ------------------------------------------------------------------
-        # CREATED / REQUEUED — task exists in YAML but has not been assigned.
-        #
-        # Two scenarios:
-        #   1. Task manager crashed between ACKing the stream message and
-        #      persisting the assignment (or before emitting the event at all).
-        #   2. Task manager ran, found no eligible agent, returned False —
-        #      and no agent has come online since.
-        #
-        # We only act if the task has been in this state for longer than
-        # _stuck_age seconds.  This gives the event-driven path clear priority
-        # on every healthy run while still recovering stuck tasks.
-        # ------------------------------------------------------------------
         if task.status in (TaskStatus.CREATED, TaskStatus.REQUEUED):
             age = self._task_status_age_seconds(task)
             if AnomalyDetectionService.is_stuck_pending(task, self._stuck_age):
@@ -169,9 +147,6 @@ class Reconciler:
 
         lease_active = self._lease.is_lease_active(task.task_id)
 
-        # ------------------------------------------------------------------
-        # ASSIGNED — check for dead agent first, then lease expiry.
-        # ------------------------------------------------------------------
         if task.status == TaskStatus.ASSIGNED and task.assignment:
             agent = self._registry.get(task.assignment.agent_id)
             if AnomalyDetectionService.is_assigned_to_dead_agent(task, agent):
@@ -195,9 +170,6 @@ class Reconciler:
                 self._fail_task(task, reason="Lease expired while ASSIGNED")
                 return
 
-        # ------------------------------------------------------------------
-        # IN_PROGRESS — expired lease means the worker timed out or crashed.
-        # ------------------------------------------------------------------
         if task.status == TaskStatus.IN_PROGRESS:
             if AnomalyDetectionService.is_lease_expired(task, lease_active):
                 log.warning(
@@ -207,9 +179,6 @@ class Reconciler:
                 self._fail_task(task, reason="Lease expired while IN_PROGRESS")
                 return
 
-        # ------------------------------------------------------------------
-        # SUCCEEDED without commit_sha — data quality warning, no state change.
-        # ------------------------------------------------------------------
         if task.status == TaskStatus.SUCCEEDED and task.result and not task.result.commit_sha:
             log.warning("reconciler.succeeded_no_commit", task_id=task.task_id)
 
@@ -221,12 +190,8 @@ class Reconciler:
         """
         Re-emit the event for a task stuck in CREATED or REQUEUED.
 
-        This does NOT modify task state — it only re-publishes the event
-        that the task manager should have consumed.  The task manager will
-        attempt assignment on receipt; if it succeeds, the task moves to
-        ASSIGNED and will not be republished on the next pass.  If no
-        eligible agent exists, the task remains CREATED/REQUEUED and will
-        be republished again on the next reconciler pass after _stuck_age.
+        Does NOT modify task state — only re-publishes the event that the
+        task manager should have consumed.
         """
         event_type = "task.created" if task.status == TaskStatus.CREATED else "task.requeued"
         self._events.publish(
@@ -239,7 +204,7 @@ class Reconciler:
         log.info(
             "reconciler.republished_pending",
             task_id=task.task_id,
-            event_type=event_type,  # "event" is reserved by structlog
+            event_type=event_type,
         )
 
     # ------------------------------------------------------------------
@@ -253,15 +218,14 @@ class Reconciler:
         The task manager subscribes to task.failed and decides whether to
         requeue (retries remaining) or cancel (retries exhausted).
 
-        Uses optimistic CAS.  If the task has already moved out of the
-        active state (worker recovered and completed just before we acted),
-        we silently return — no spurious failure is written.
+        Uses optimistic CAS. If the task has already moved out of the
+        active state (worker recovered just before we acted), we silently
+        return — no spurious failure is written.
         """
         log.info("reconciler.failing_task", task_id=task.task_id, reason=reason)
         for attempt in range(MAX_CAS_RETRIES):
             fresh = self._repo.load(task.task_id)
 
-            # Guard: only fail tasks still in an active state.
             if fresh.status not in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS):
                 log.info(
                     "reconciler.fail_skipped_status_changed",
@@ -304,11 +268,7 @@ class Reconciler:
     def _task_status_age_seconds(task) -> float:
         """
         Seconds since the task last changed state, based on updated_at.
-
-        updated_at is stamped by TaskAggregate._bump() on every transition,
-        so it accurately reflects when the task entered its *current* status:
-          - CREATED:  equals created_at (no transitions yet)
-          - REQUEUED: set when requeue() was called
+        updated_at is stamped by TaskAggregate._bump() on every transition.
         """
         now = datetime.now(timezone.utc)
         return (now - task.updated_at).total_seconds()
