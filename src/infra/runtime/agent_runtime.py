@@ -10,8 +10,8 @@ from typing import Iterator
 
 import structlog
 
-from src.core.models import AgentExecutionResult, AgentProps, ExecutionContext
-from src.core.ports import AgentRuntimePort, SessionHandle
+from src.domain import AgentExecutionResult, AgentProps, ExecutionContext
+from src.domain import AgentRuntimePort, SessionHandle
 
 log = structlog.get_logger(__name__)
 

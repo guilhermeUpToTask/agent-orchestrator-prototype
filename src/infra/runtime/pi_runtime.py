@@ -33,7 +33,7 @@ from typing import Literal
 
 import structlog
 
-from src.core.models import ExecutionContext
+from src.domain import ExecutionContext
 from src.infra.runtime.agent_runtime import CliAgentRuntime, CliSessionHandle
 
 log = structlog.get_logger(__name__)

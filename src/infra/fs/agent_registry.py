@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from src.core.models import AgentProps
-from src.core.ports import AgentRegistryPort
+from src.domain import AgentProps
+from src.domain import AgentRegistryPort
 
 
 class JsonAgentRegistry(AgentRegistryPort):

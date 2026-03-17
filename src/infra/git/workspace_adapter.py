@@ -15,7 +15,7 @@ from pathlib import Path
 
 import structlog
 
-from src.core.ports import GitWorkspacePort
+from src.domain import GitWorkspacePort
 
 log = structlog.get_logger(__name__)
 

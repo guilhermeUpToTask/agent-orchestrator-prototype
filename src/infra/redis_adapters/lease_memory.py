@@ -7,7 +7,7 @@ import time
 from typing import Optional
 from uuid import uuid4
 
-from src.core.ports import LeasePort
+from src.domain import LeasePort
 
 
 class InMemoryLeaseAdapter(LeasePort):

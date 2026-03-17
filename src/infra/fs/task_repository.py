@@ -21,8 +21,8 @@ from typing import Any
 
 import yaml
 
-from src.core.models import TaskAggregate
-from src.core.ports import TaskRepositoryPort
+from src.domain import TaskAggregate
+from src.domain import TaskRepositoryPort
 
 
 class YamlTaskRepository(TaskRepositoryPort):
@@ -90,7 +90,7 @@ class YamlTaskRepository(TaskRepositoryPort):
         detail: dict,
     ) -> None:
         task = self.load(task_id)
-        from src.core.models import HistoryEntry
+        from src.domain import HistoryEntry
 
         task.history.append(HistoryEntry(event=event, actor=actor, detail=detail))
         self._atomic_write(self._task_path(task_id), task)

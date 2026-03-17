@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import redis
 
-from src.core.ports import LeasePort
+from src.domain import LeasePort
 
 
 class RedisLeaseAdapter(LeasePort):

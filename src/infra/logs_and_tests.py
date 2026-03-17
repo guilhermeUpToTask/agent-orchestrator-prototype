@@ -8,8 +8,8 @@ from pathlib import Path
 
 import structlog
 
-from src.core.models import AgentExecutionResult
-from src.core.ports import TaskLogsPort, TestRunnerPort
+from src.domain import AgentExecutionResult
+from src.domain import TaskLogsPort, TestRunnerPort
 from src.infra.config import config
 
 log = structlog.get_logger(__name__)

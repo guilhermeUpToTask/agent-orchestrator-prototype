@@ -15,7 +15,7 @@ import threading
 
 import structlog
 
-from src.core.ports import LeasePort
+from src.domain import LeasePort
 
 log = structlog.get_logger(__name__)
 

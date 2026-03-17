@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from src.core.models import ExecutionContext
+from src.domain import ExecutionContext
 from src.infra.runtime.agent_runtime import CliAgentRuntime, CliSessionHandle
 import structlog
 

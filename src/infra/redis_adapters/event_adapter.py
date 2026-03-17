@@ -16,8 +16,8 @@ from typing import Iterator
 
 import redis
 
-from src.core.models import DomainEvent
-from src.core.ports import EventPort
+from src.domain import DomainEvent
+from src.domain import EventPort
 
 
 _GLOBAL_STREAM = "events:all"
