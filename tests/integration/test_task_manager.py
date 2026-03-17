@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from src.core.models import (
+from src.domain import (
     AgentProps,
     AgentSelector,
     Assignment,
@@ -30,7 +30,7 @@ from src.core.models import (
     TrustLevel,
     DomainEvent,
 )
-from src.core.services import SchedulerService
+from src.domain import SchedulerService
 
 
 # ---------------------------------------------------------------------------
