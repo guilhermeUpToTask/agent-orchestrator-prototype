@@ -2,6 +2,7 @@
 src/core/models.py — Domain models (Pydantic v2).
 All domain state lives here. No infrastructure imports.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
+
 
 class TaskStatus(str, Enum):
     CREATED = "created"
@@ -36,6 +38,7 @@ class TrustLevel(str, Enum):
 # ---------------------------------------------------------------------------
 # Value objects
 # ---------------------------------------------------------------------------
+
 
 class AgentProps(BaseModel):
     agent_id: str
@@ -109,6 +112,7 @@ class AgentSelector(BaseModel):
 # TaskAggregate — authoritative domain entity
 # ---------------------------------------------------------------------------
 
+
 class TaskAggregate(BaseModel):
     task_id: str
     feature_id: str
@@ -141,7 +145,7 @@ class TaskAggregate(BaseModel):
     ) -> "TaskAggregate":
         target_feature_id = feature_id or f"feat-{uuid4().hex[:8]}"
         task_id = f"task-{uuid4().hex[:12]}"
-        
+
         return cls(
             task_id=task_id,
             feature_id=target_feature_id,
@@ -175,9 +179,7 @@ class TaskAggregate(BaseModel):
     def _bump(self, event: str, actor: str, detail: dict[str, Any] | None = None) -> None:
         self.state_version += 1
         self.updated_at = datetime.now(timezone.utc)
-        self.history.append(
-            HistoryEntry(event=event, actor=actor, detail=detail or {})
-        )
+        self.history.append(HistoryEntry(event=event, actor=actor, detail=detail or {}))
 
     # ------------------------------------------------------------------
     # State transitions (enforce invariants, bump version, append history)
@@ -187,7 +189,9 @@ class TaskAggregate(BaseModel):
         self._assert_status(TaskStatus.CREATED, TaskStatus.REQUEUED)
         self.assignment = assignment
         self.status = TaskStatus.ASSIGNED
-        self._bump("task.assigned", assignment.agent_id, {"lease_seconds": assignment.lease_seconds})
+        self._bump(
+            "task.assigned", assignment.agent_id, {"lease_seconds": assignment.lease_seconds}
+        )
         return self
 
     def start(self) -> "TaskAggregate":
@@ -200,31 +204,51 @@ class TaskAggregate(BaseModel):
         self._assert_status(TaskStatus.IN_PROGRESS)
         self.result = result
         self.status = TaskStatus.SUCCEEDED
-        self._bump("task.completed", self.assignment.agent_id if self.assignment else "unknown",
-                   {"commit_sha": result.commit_sha, "branch": result.branch})
+        self._bump(
+            "task.completed",
+            self.assignment.agent_id if self.assignment else "unknown",
+            {"commit_sha": result.commit_sha, "branch": result.branch},
+        )
         return self
 
     def fail(self, reason: str) -> "TaskAggregate":
         self._assert_status(TaskStatus.IN_PROGRESS, TaskStatus.ASSIGNED)
         self.status = TaskStatus.FAILED
         self.last_error = reason
-        self._bump("task.failed",
-                   self.assignment.agent_id if self.assignment else "system",
-                   {"reason": reason})
+        self._bump(
+            "task.failed",
+            self.assignment.agent_id if self.assignment else "system",
+            {"reason": reason},
+        )
         return self
 
     def requeue(self) -> "TaskAggregate":
         self._assert_status(TaskStatus.FAILED)
         if self.retry_policy.attempt >= self.retry_policy.max_retries:
             raise ValueError(
-                f"Task {self.task_id} exceeded max retries "
-                f"({self.retry_policy.max_retries})"
+                f"Task {self.task_id} exceeded max retries ({self.retry_policy.max_retries})"
             )
         self.retry_policy.attempt += 1
         self.assignment = None
         self.status = TaskStatus.REQUEUED
-        self._bump("task.requeued", "reconciler",
-                   {"attempt": self.retry_policy.attempt})
+        self._bump("task.requeued", "reconciler", {"attempt": self.retry_policy.attempt})
+        return self
+
+    def force_requeue(self, actor: str = "operator") -> "TaskAggregate":
+        """
+        Operator override: reset the task to REQUEUED without incrementing
+        the retry counter.  This is NOT an automatic retry — it is an
+        explicit human action (e.g. ``orchestrator task retry <id>``).
+
+        Allowed from any non-terminal-VCS status. The assignment is cleared
+        so the task is re-evaluated for agent selection from scratch.
+        """
+        if self.status == TaskStatus.MERGED:
+            raise ValueError(f"Task {self.task_id} is MERGED and cannot be requeued.")
+        previous = self.status
+        self.assignment = None
+        self.status = TaskStatus.REQUEUED
+        self._bump("task.force_requeued", actor, {"previous_status": previous.value})
         return self
 
     def cancel(self, reason: str = "") -> "TaskAggregate":
@@ -243,6 +267,7 @@ class TaskAggregate(BaseModel):
 # Domain events (minimal payload — IDs only)
 # ---------------------------------------------------------------------------
 
+
 class DomainEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     type: str
@@ -250,13 +275,14 @@ class DomainEvent(BaseModel):
     correlation_id: Optional[str] = None
     causation_id: Optional[str] = None
     producer: str
-    payload: dict[str, Any]           # MUST be minimal — IDs only
+    payload: dict[str, Any]  # MUST be minimal — IDs only
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
 # Execution context (sent to agent CLI session)
 # ---------------------------------------------------------------------------
+
 
 class ExecutionContext(BaseModel):
     task_id: str
@@ -273,6 +299,7 @@ class ExecutionContext(BaseModel):
 # Agent execution result (returned by AgentRuntimePort)
 # ---------------------------------------------------------------------------
 
+
 class AgentExecutionResult(BaseModel):
     success: bool
     exit_code: int
@@ -283,9 +310,11 @@ class AgentExecutionResult(BaseModel):
     elapsed_seconds: float = 0.0
     forbidden_file_violations: list[str] = Field(default_factory=list)
 
+
 # ---------------------------------------------------------------------------
 # Domain Exceptions
 # ---------------------------------------------------------------------------
+
 
 class ForbiddenFileEditError(Exception):
     def __init__(self, violations: list[str]) -> None:

@@ -2,6 +2,7 @@
 src/core/services.py — Domain services.
 Pure business logic; no infra imports.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,6 +15,7 @@ from src.core.models import AgentProps, TaskAggregate, TaskStatus
 # ---------------------------------------------------------------------------
 # Version comparison (simple semver subset: >=X.Y.Z)
 # ---------------------------------------------------------------------------
+
 
 def _parse_version(v: str) -> tuple[int, ...]:
     """Parse semver string like '1.2.3' into (1, 2, 3)."""
@@ -35,6 +37,18 @@ def _satisfies_version(agent_version: str, constraint: str) -> bool:
     return _parse_version(agent_version) == _parse_version(constraint)
 
 
+def is_agent_alive(agent: AgentProps, threshold_seconds: int = 60) -> bool:
+    """
+    Public helper: return True if the agent has sent a heartbeat within
+    threshold_seconds. An agent with no heartbeat at all is considered dead.
+    """
+    if agent.last_heartbeat is None:
+        return False
+    age = (datetime.now(timezone.utc) - agent.last_heartbeat).total_seconds()
+    return age < threshold_seconds
+
+
+# Backward-compatible private alias used internally and in legacy call sites.
 def _is_alive(agent: AgentProps, threshold_seconds: int = 60) -> bool:
     """
     Return True if the agent has sent a heartbeat within threshold_seconds.
@@ -49,6 +63,7 @@ def _is_alive(agent: AgentProps, threshold_seconds: int = 60) -> bool:
 # ---------------------------------------------------------------------------
 # SchedulerService — selects the best agent for a task
 # ---------------------------------------------------------------------------
+
 
 class SchedulerService:
     """
@@ -72,7 +87,8 @@ class SchedulerService:
         """
         selector = task.agent_selector
         candidates = [
-            a for a in agents
+            a
+            for a in agents
             if a.active
             and _is_alive(a)
             and selector.required_capability in a.capabilities
@@ -96,7 +112,8 @@ class SchedulerService:
         """Return all eligible agents without scoring."""
         selector = task.agent_selector
         return [
-            a for a in agents
+            a
+            for a in agents
             if a.active
             and _is_alive(a)
             and selector.required_capability in a.capabilities
@@ -107,6 +124,7 @@ class SchedulerService:
 # ---------------------------------------------------------------------------
 # LeaseService — domain logic for lease expiry decisions
 # ---------------------------------------------------------------------------
+
 
 class LeaseService:
     """
@@ -133,14 +151,13 @@ class LeaseService:
         Return True if an IN_PROGRESS task with expired lease should be failed.
         """
 
-        return (
-            task.status == TaskStatus.IN_PROGRESS
-            and not lease_active
-        )
+        return task.status == TaskStatus.IN_PROGRESS and not lease_active
+
 
 # ---------------------------------------------------------------------------
 # AnomalyDetectionService — pure domain logic for system anomalies
 # ---------------------------------------------------------------------------
+
 
 class AnomalyDetectionService:
     """

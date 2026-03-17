@@ -2,6 +2,7 @@
 src/core/ports.py — Abstract port interfaces (hexagonal boundary).
 Domain and application layers only depend on these ABCs; infra provides adapters.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -19,6 +20,7 @@ from src.core.models import (
 # ---------------------------------------------------------------------------
 # Repository port
 # ---------------------------------------------------------------------------
+
 
 class TaskRepositoryPort(ABC):
     """Persistence port for TaskAggregate. File-backed in prototype."""
@@ -57,13 +59,27 @@ class TaskRepositoryPort(ABC):
         """Return all tasks (used by reconciler)."""
         ...
 
+    def get(self, task_id: str) -> "TaskAggregate | None":
+        """Return task or None if not found. Default impl wraps load()."""
+        try:
+            return self.load(task_id)
+        except KeyError:
+            return None
+
+    def delete(self, task_id: str) -> bool:
+        """
+        Remove the task record.  Returns True if deleted, False if not found.
+        Default impl is a no-op that subclasses can override.
+        """
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Agent registry port
 # ---------------------------------------------------------------------------
 
-class AgentRegistryPort(ABC):
 
+class AgentRegistryPort(ABC):
     @abstractmethod
     def register(self, agent: AgentProps) -> None: ...
 
@@ -84,8 +100,8 @@ class AgentRegistryPort(ABC):
 # Event port
 # ---------------------------------------------------------------------------
 
-class EventPort(ABC):
 
+class EventPort(ABC):
     @abstractmethod
     def publish(self, event: DomainEvent) -> None:
         """Publish event. Payload must be minimal (IDs only)."""
@@ -100,7 +116,9 @@ class EventPort(ABC):
         ...
 
     @abstractmethod
-    def subscribe_many(self, event_types: list[str], group: str, consumer: str) -> Iterator[DomainEvent]:
+    def subscribe_many(
+        self, event_types: list[str], group: str, consumer: str
+    ) -> Iterator[DomainEvent]:
         """
         Block-subscribe to multiple event types in a single call.
         Yields events from any of the given types as they arrive.
@@ -114,8 +132,8 @@ class EventPort(ABC):
 # Lease port
 # ---------------------------------------------------------------------------
 
-class LeasePort(ABC):
 
+class LeasePort(ABC):
     @abstractmethod
     def create_lease(self, task_id: str, agent_id: str, lease_seconds: int) -> str:
         """Returns lease_token (opaque string)."""
@@ -140,8 +158,8 @@ class LeasePort(ABC):
 # Git workspace port
 # ---------------------------------------------------------------------------
 
-class GitWorkspacePort(ABC):
 
+class GitWorkspacePort(ABC):
     @abstractmethod
     def create_workspace(self, repo_url: str, task_id: str) -> str:
         """Clone repo and return workspace_path."""
@@ -156,7 +174,9 @@ class GitWorkspacePort(ABC):
         ...
 
     @abstractmethod
-    def push_branch(self, workspace_path: str, branch_name: str, remote_name: str = "origin") -> None: ...
+    def push_branch(
+        self, workspace_path: str, branch_name: str, remote_name: str = "origin"
+    ) -> None: ...
 
     @abstractmethod
     def cleanup_workspace(self, workspace_path: str) -> None: ...
@@ -171,6 +191,7 @@ class GitWorkspacePort(ABC):
 # Agent runtime port
 # ---------------------------------------------------------------------------
 
+
 class SessionHandle(ABC):
     """Opaque handle returned by AgentRuntimePort.start_session."""
 
@@ -180,7 +201,6 @@ class SessionHandle(ABC):
 
 
 class AgentRuntimePort(ABC):
-
     @abstractmethod
     def start_session(
         self,
@@ -222,8 +242,7 @@ class TaskLogsPort(ABC):
     """
 
     @abstractmethod
-    def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
-        ...
+    def save_logs(self, task_id: str, result: AgentExecutionResult) -> None: ...
 
 
 class TestRunnerPort(ABC):
@@ -233,32 +252,4 @@ class TestRunnerPort(ABC):
     """
 
     @abstractmethod
-    def run_tests(self, workspace_path: str, test_command: str) -> None:
-        ...
-
-
-# ---------------------------------------------------------------------------
-# Auxiliary ports
-# ---------------------------------------------------------------------------
-
-
-class TaskLogsPort(ABC):
-    """
-    Port for persisting task execution logs and simple metadata.
-    Implemented in infra using the filesystem or another storage backend.
-    """
-
-    @abstractmethod
-    def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
-        ...
-
-
-class TestRunnerPort(ABC):
-    """
-    Port for running acceptance tests against a workspace.
-    Application code depends on this instead of subprocess directly.
-    """
-
-    @abstractmethod
-    def run_tests(self, workspace_path: str, test_command: str) -> None:
-        ...
+    def run_tests(self, workspace_path: str, test_command: str) -> None: ...
