@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from src.core.models import (
+from src.domain import (
     AgentExecutionResult,
     AgentProps,
     AgentSelector,

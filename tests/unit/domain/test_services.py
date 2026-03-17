@@ -6,7 +6,6 @@ Covers:
   - SchedulerService.eligible_agents
   - _is_alive heartbeat logic
   - _satisfies_version: >=, exact match, edge cases
-  - LeaseService.should_requeue / should_fail_stale
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from src.core.models import (
+from src.domain import (
     AgentProps,
     AgentSelector,
     Assignment,
@@ -24,13 +23,13 @@ from src.core.models import (
     TaskStatus,
     TrustLevel,
 )
-from src.core.services import (
-    LeaseService,
-    SchedulerService,
-    _is_alive,
-    _parse_version,
-    _satisfies_version,
-)
+from src.domain import SchedulerService
+from src.domain.rules import TaskRules
+from src.domain.entities.agent import _parse_version, _satisfies_version
+
+# _is_alive is now a method on AgentProps — expose as a standalone helper for tests
+def _is_alive(agent, threshold_seconds=60):
+    return agent.is_alive(threshold_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -305,48 +304,48 @@ class TestEligibleAgents:
 # LeaseService
 # ===========================================================================
 
-class TestLeaseService:
+class TestTaskRulesLease:
 
     # should_requeue -----------------------------------------------------------
 
     def test_should_requeue_assigned_expired_lease(self):
         task = make_task(status=TaskStatus.ASSIGNED)
         task.assignment = Assignment(agent_id="a")
-        assert LeaseService.should_requeue(task, lease_active=False) is True
+        assert TaskRules.should_requeue_on_lease_expiry(task, lease_active=False) is True
 
     def test_should_not_requeue_active_lease(self):
         task = make_task(status=TaskStatus.ASSIGNED)
         task.assignment = Assignment(agent_id="a")
-        assert LeaseService.should_requeue(task, lease_active=True) is False
+        assert TaskRules.should_requeue_on_lease_expiry(task, lease_active=True) is False
 
     def test_should_not_requeue_non_assigned_status(self):
         for status in [TaskStatus.CREATED, TaskStatus.IN_PROGRESS, TaskStatus.SUCCEEDED]:
             task = make_task(status=status)
-            assert LeaseService.should_requeue(task, lease_active=False) is False
+            assert TaskRules.should_requeue_on_lease_expiry(task, lease_active=False) is False
 
     def test_should_not_requeue_if_retries_exhausted(self):
         task = make_task(status=TaskStatus.ASSIGNED, max_retries=2)
         task.retry_policy.attempt = 2
         task.assignment = Assignment(agent_id="a")
-        assert LeaseService.should_requeue(task, lease_active=False) is False
+        assert TaskRules.should_requeue_on_lease_expiry(task, lease_active=False) is False
 
     def test_should_requeue_at_attempt_less_than_max(self):
         task = make_task(status=TaskStatus.ASSIGNED, max_retries=3)
         task.retry_policy.attempt = 2  # 2 < 3
         task.assignment = Assignment(agent_id="a")
-        assert LeaseService.should_requeue(task, lease_active=False) is True
+        assert TaskRules.should_requeue_on_lease_expiry(task, lease_active=False) is True
 
     # should_fail_stale --------------------------------------------------------
 
     def test_should_fail_stale_in_progress_expired(self):
         task = make_task(status=TaskStatus.IN_PROGRESS)
-        assert LeaseService.should_fail_stale(task, lease_active=False) is True
+        assert TaskRules.should_fail_on_lease_expiry(task, lease_active=False) is True
 
     def test_should_not_fail_stale_active_lease(self):
         task = make_task(status=TaskStatus.IN_PROGRESS)
-        assert LeaseService.should_fail_stale(task, lease_active=True) is False
+        assert TaskRules.should_fail_on_lease_expiry(task, lease_active=True) is False
 
     def test_should_not_fail_stale_non_in_progress_status(self):
         for status in [TaskStatus.CREATED, TaskStatus.ASSIGNED, TaskStatus.FAILED]:
             task = make_task(status=status)
-            assert LeaseService.should_fail_stale(task, lease_active=False) is False
+            assert TaskRules.should_fail_on_lease_expiry(task, lease_active=False) is False
