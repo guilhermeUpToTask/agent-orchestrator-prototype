@@ -212,7 +212,7 @@ def _setup_registry(
 
 def _interactive_register_agent(registry: Any) -> None:
     """Collect agent details interactively and write to the registry."""
-    from src.core.models import AgentProps  # noqa: PLC0415
+    from src.domain import AgentProps  # noqa: PLC0415
 
     click.echo()
     agent_id: str = click.prompt("  Agent ID", default="agent-worker-001")

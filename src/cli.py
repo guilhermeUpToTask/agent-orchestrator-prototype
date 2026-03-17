@@ -220,7 +220,7 @@ def start_system(
 
 
 def _wait_for_heartbeats(registry, agents, timeout: int = 30) -> None:
-    from src.core.services import is_agent_alive
+    from src.domain.entities.agent import AgentProps as _A; is_agent_alive = lambda a, t=60: a.is_alive(t)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -499,7 +499,7 @@ def register_agent(
 ):
     """Register a new agent in the registry."""
     import json
-    from src.core.models import AgentProps
+    from src.domain import AgentProps
     from src.infra.factory import build_agent_registry
 
     try:
@@ -613,7 +613,7 @@ def task_prune(yes: bool, status: tuple):
       orchestrator task prune --yes                   # skip confirmation
     """
     from src.infra.factory import build_task_repo
-    from src.core.models import TaskStatus
+    from src.domain import TaskStatus
 
     repo = build_task_repo()
     all_tasks = repo.list_all()
