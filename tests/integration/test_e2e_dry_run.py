@@ -12,6 +12,7 @@ No external network required. Uses:
   - YamlTaskRepository (real FS in tmp dir)
   - JsonAgentRegistry (real FS in tmp dir)
 """
+
 from __future__ import annotations
 
 import os
@@ -36,6 +37,7 @@ from src.core.services import SchedulerService
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def tmp_workflow(tmp_path):
     """Return a tmp workflow dir with tasks/ and agents/ subdirs."""
@@ -48,30 +50,35 @@ def tmp_workflow(tmp_path):
 @pytest.fixture()
 def task_repo(tmp_workflow):
     from src.infra.fs.task_repository import YamlTaskRepository
+
     return YamlTaskRepository(tmp_workflow / "tasks")
 
 
 @pytest.fixture()
 def agent_registry(tmp_workflow):
     from src.infra.fs.agent_registry import JsonAgentRegistry
+
     return JsonAgentRegistry(tmp_workflow / "agents" / "registry.json")
 
 
 @pytest.fixture()
 def event_port():
     from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
+
     return InMemoryEventAdapter()
 
 
 @pytest.fixture()
 def lease_port():
     from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
+
     return InMemoryLeaseAdapter()
 
 
 @pytest.fixture()
 def worker_agent(agent_registry) -> AgentProps:
     from datetime import datetime, timezone
+
     agent = AgentProps(
         agent_id="agent-worker-001",
         name="Worker 001",
@@ -79,7 +86,7 @@ def worker_agent(agent_registry) -> AgentProps:
         version="1.2.0",
         tools=["pytest", "git"],
         trust_level=TrustLevel.HIGH,
-        last_heartbeat=datetime.now(timezone.utc),   # required for _is_alive()
+        last_heartbeat=datetime.now(timezone.utc),  # required for _is_alive()
     )
     agent_registry.register(agent)
     return agent
@@ -97,7 +104,7 @@ def sample_task() -> TaskAggregate:
             type="code:backend",
             constraints={"language": "python"},
             files_allowed_to_modify=["app/auth.py", "tests/test_auth.py"],
-            test_command=None,   # skip real pytest in CI
+            test_command=None,  # skip real pytest in CI
             acceptance_criteria=["All tests pass"],
         ),
     )
@@ -107,8 +114,10 @@ def sample_task() -> TaskAggregate:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def build_task_manager(task_repo, agent_registry, event_port, lease_port):
     from src.app.handlers.task_manager import TaskManagerHandler
+
     return TaskManagerHandler(
         task_repo=task_repo,
         agent_registry=agent_registry,
@@ -146,8 +155,8 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
 # E2E: full lifecycle
 # ---------------------------------------------------------------------------
 
-class TestFullLifecycle:
 
+class TestFullLifecycle:
     def test_created_to_succeeded(
         self,
         sample_task,
@@ -267,7 +276,8 @@ class TestFullLifecycle:
             forbidden.write_text("hunter2\n")
 
             return AgentExecutionResult(
-                success=True, exit_code=0,
+                success=True,
+                exit_code=0,
                 modified_files=list(context.allowed_files) + ["secrets/passwords.txt"],
             )
 
@@ -279,8 +289,9 @@ class TestFullLifecycle:
         monkeypatch.setattr(
             DryRunGitWorkspaceAdapter,
             "get_modified_files",
-            lambda self, ws: list(sample_task.execution.files_allowed_to_modify)
-            + ["secrets/passwords.txt"],
+            lambda self, ws: (
+                list(sample_task.execution.files_allowed_to_modify) + ["secrets/passwords.txt"]
+            ),
         )
 
         task_repo.save(sample_task)
@@ -307,8 +318,8 @@ class TestFullLifecycle:
 # Reconciler tests
 # ---------------------------------------------------------------------------
 
-class TestReconciler:
 
+class TestReconciler:
     def test_requeues_assigned_expired_lease(
         self, sample_task, task_repo, lease_port, event_port, agent_registry
     ):
@@ -320,7 +331,8 @@ class TestReconciler:
         lease_port.create_lease(sample_task.task_id, "agent-001", 1)
         lease_port.expire_all()
 
-        from src.app.reconciler import Reconciler
+        from src.app.reconciliation import Reconciler
+
         reconciler = Reconciler(task_repo, lease_port, event_port, agent_registry)
         reconciler.run_once()
 
@@ -335,6 +347,7 @@ class TestReconciler:
         from src.core.services import SchedulerService
         from src.infra.fs.agent_registry import JsonAgentRegistry
         from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
+
         # Build a fresh task manager (no agent registered here, just verify requeue)
         fresh_lease = InMemoryLeaseAdapter()
         tm = TaskManagerHandler(
