@@ -23,14 +23,10 @@ from __future__ import annotations
 
 import structlog
 
-from src.core.models import Assignment, DomainEvent, TaskAggregate, TaskStatus
-from src.core.ports import (
-    AgentRegistryPort,
-    EventPort,
-    LeasePort,
-    TaskRepositoryPort,
-)
-from src.core.services import LifecyclePolicyService, SchedulerService
+from src.domain import Assignment, DomainEvent, TaskAggregate, TaskStatus
+from src.domain import AgentRegistryPort, EventPort, LeasePort, TaskRepositoryPort
+from src.domain import SchedulerService
+from src.domain.rules import TaskRules
 
 log = structlog.get_logger(__name__)
 
@@ -60,7 +56,7 @@ class TaskManagerHandler:
         self._events = event_port
         self._lease = lease_port
         self._scheduler = scheduler or SchedulerService()
-        self._lifecycle = LifecyclePolicyService()
+        self._rules = TaskRules()
 
     # ------------------------------------------------------------------
     # handle_task_created — assign a newly-created task
@@ -112,7 +108,7 @@ class TaskManagerHandler:
         for task in all_tasks:
             if completed_task_id not in task.depends_on:
                 continue
-            if not self._lifecycle.should_unblock_dependent(task, succeeded_ids):
+            if not self._rules.should_unblock_dependent(task, succeeded_ids):
                 continue
             log.info(
                 "task_manager.unblocking_dependent",
@@ -163,7 +159,7 @@ class TaskManagerHandler:
             log.warning("task_manager.task_not_found_on_failed", task_id=task_id)
             return
 
-        if task.status != TaskStatus.FAILED:
+        if not task.needs_retry() and not task.needs_cancel():
             # Stale event — task has already moved on (e.g. another consumer
             # handled it first, or the task was canceled externally).
             log.info(
@@ -175,7 +171,7 @@ class TaskManagerHandler:
 
         expected_v = task.state_version
 
-        if self._lifecycle.should_requeue_after_failure(task):
+        if self._rules.should_requeue_after_failure(task):
             # Retries remain — requeue
             task.requeue()
             ok = self._repo.update_if_version(task_id, task, expected_v)
@@ -249,7 +245,7 @@ class TaskManagerHandler:
             log.warning("task_manager.task_not_found_on_assign", task_id=task_id)
             return False
 
-        if task.status not in (TaskStatus.CREATED, TaskStatus.REQUEUED):
+        if not task.is_assignable():
             log.info(
                 "task_manager.skip_not_assignable",
                 task_id=task_id,

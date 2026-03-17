@@ -1,9 +1,7 @@
 from typing import Optional
 
-from src.core.models import (
-    AgentSelector, DomainEvent, ExecutionSpec, RetryPolicy, TaskAggregate,
-)
-from src.core.ports import EventPort, TaskRepositoryPort
+from src.domain import AgentSelector, DomainEvent, ExecutionSpec, TaskAggregate
+from src.domain import EventPort, TaskRepositoryPort
 
 
 class TaskCreationService:

@@ -16,23 +16,17 @@ factory do not need updating. The handler internally constructs the service.
 _LeaseRefresher is re-exported here for backward compatibility with tests
 that patch "src.app.handlers.worker._LeaseRefresher".
 """
-
 from __future__ import annotations
 
 from typing import Callable
 
 import structlog
 
-from src.core.models import AgentProps
-from src.core.ports import (
-    AgentRegistryPort,
-    AgentRuntimePort,
-    EventPort,
-    GitWorkspacePort,
-    LeasePort,
-    TaskLogsPort,
-    TaskRepositoryPort,
-    TestRunnerPort,
+from src.domain import AgentProps
+from src.domain import (
+    AgentRegistryPort, AgentRuntimePort, EventPort,
+    GitWorkspacePort, LeasePort, TaskLogsPort,
+    TaskRepositoryPort, TestRunnerPort,
 )
 from src.app.services.worker_execution import WorkerExecutionService
 from src.infra.redis_adapters.lease_refresher import LeaseRefresher

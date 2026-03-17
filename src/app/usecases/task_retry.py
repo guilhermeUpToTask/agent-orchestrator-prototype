@@ -23,8 +23,8 @@ from dataclasses import dataclass
 
 import structlog
 
-from src.core.models import DomainEvent, TaskStatus
-from src.core.ports import EventPort, TaskRepositoryPort
+from src.domain import DomainEvent, TaskStatus
+from src.domain import EventPort, TaskRepositoryPort
 
 log = structlog.get_logger(__name__)
 

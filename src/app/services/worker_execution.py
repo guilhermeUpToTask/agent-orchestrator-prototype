@@ -20,7 +20,6 @@ Execution pipeline (10 steps):
   11. Commit + push on success / fail on error
   12. Persist final state, emit event, cleanup
 """
-
 from __future__ import annotations
 
 import json
@@ -28,25 +27,13 @@ from typing import Any, Callable
 
 import structlog
 
-from src.core.models import (
-    AgentExecutionResult,
-    AgentProps,
-    DomainEvent,
-    ExecutionContext,
-    ForbiddenFileEditError,
-    TaskAggregate,
-    TaskResult,
-    TaskStatus,
+from src.domain import (
+    AgentExecutionResult, AgentProps, DomainEvent, ExecutionContext,
+    ForbiddenFileEditError, TaskAggregate, TaskResult, TaskStatus,
 )
-from src.core.ports import (
-    AgentRegistryPort,
-    AgentRuntimePort,
-    EventPort,
-    GitWorkspacePort,
-    LeasePort,
-    TaskLogsPort,
-    TaskRepositoryPort,
-    TestRunnerPort,
+from src.domain import (
+    AgentRegistryPort, AgentRuntimePort, EventPort, GitWorkspacePort,
+    LeasePort, TaskLogsPort, TaskRepositoryPort, TestRunnerPort,
 )
 from src.infra.redis_adapters.lease_refresher import LeaseRefresher
 
@@ -129,13 +116,11 @@ class WorkerExecutionService:
             ws_path, branch = self._prepare_workspace(task_id)
 
             task = self._start_task_with_retry(task_id, agent_id)
-            self._events.publish(
-                DomainEvent(
-                    type="task.started",
-                    producer=agent_id,
-                    payload={"task_id": task_id},
-                )
-            )
+            self._events.publish(DomainEvent(
+                type="task.started",
+                producer=agent_id,
+                payload={"task_id": task_id},
+            ))
 
             if lease_token:
                 lease_refresher = LeaseRefresher(
@@ -148,11 +133,11 @@ class WorkerExecutionService:
                 runtime, agent_props, task, ws_path, branch, project_id
             )
 
-            commit_sha, actual_modified = self._validate_and_commit(task, ws_path, branch, result)
-
-            self._persist_success(
-                task, agent_id, branch, commit_sha, actual_modified, result.artifacts
+            commit_sha, actual_modified = self._validate_and_commit(
+                task, ws_path, branch, result
             )
+
+            self._persist_success(task, agent_id, branch, commit_sha, actual_modified, result.artifacts)
 
         except ForbiddenFileEditError as exc:
             self._handle_failure(task, agent_id, f"Forbidden file edits: {exc.violations}")
@@ -228,7 +213,9 @@ class WorkerExecutionService:
                 f"not this worker ({agent_id})"
             )
         if task.status != TaskStatus.ASSIGNED:
-            raise RuntimeError(f"Task {task.task_id} is {task.status.value}, expected assigned")
+            raise RuntimeError(
+                f"Task {task.task_id} is {task.status.value}, expected assigned"
+            )
 
     def _build_env(
         self,
@@ -259,18 +246,16 @@ class WorkerExecutionService:
     def _handle_failure(self, task: TaskAggregate, agent_id: str, reason: str) -> None:
         log.error("worker.task_failed", task_id=task.task_id, reason=reason)
         try:
-            if task.status not in (TaskStatus.IN_PROGRESS, TaskStatus.ASSIGNED):
+            if task.status not in TaskStatus.active():
                 return
             expected_v = task.state_version
             task.fail(reason)
             self._task_repo.update_if_version(task.task_id, task, expected_v)
-            self._events.publish(
-                DomainEvent(
-                    type="task.failed",
-                    producer=agent_id,
-                    payload={"task_id": task.task_id, "reason": reason},
-                )
-            )
+            self._events.publish(DomainEvent(
+                type="task.failed",
+                producer=agent_id,
+                payload={"task_id": task.task_id, "reason": reason},
+            ))
         except Exception as exc:
             log.exception("worker.failure_handler_error", error=str(exc))
 
@@ -343,7 +328,9 @@ class WorkerExecutionService:
         task.execution.validate_modifications(actual_modified)
 
         if not result.success:
-            raise _AgentFailed(f"Agent exited with code {result.exit_code}\n{result.stderr}")
+            raise _AgentFailed(
+                f"Agent exited with code {result.exit_code}\n{result.stderr}"
+            )
 
         if task.execution.test_command:
             log.info(
@@ -380,20 +367,17 @@ class WorkerExecutionService:
         task.complete(task_result)
         self._task_repo.update_if_version(task.task_id, task, expected_v)
 
-        self._events.publish(
-            DomainEvent(
-                type="task.completed",
-                producer=agent_id,
-                payload={"task_id": task.task_id, "commit_sha": commit_sha},
-            )
-        )
+        self._events.publish(DomainEvent(
+            type="task.completed",
+            producer=agent_id,
+            payload={"task_id": task.task_id, "commit_sha": commit_sha},
+        ))
         log.info("worker.task_succeeded", task_id=task.task_id, commit_sha=commit_sha)
 
 
 # ---------------------------------------------------------------------------
 # Internal exception types
 # ---------------------------------------------------------------------------
-
 
 class _AgentFailed(Exception):
     pass
