@@ -220,7 +220,9 @@ def start_system(
 
 
 def _wait_for_heartbeats(registry, agents, timeout: int = 30) -> None:
-    from src.domain.entities.agent import AgentProps as _A; is_agent_alive = lambda a, t=60: a.is_alive(t)
+    from src.domain.entities.agent import AgentProps as _A
+
+    is_agent_alive = lambda a, t=60: a.is_alive(t)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
