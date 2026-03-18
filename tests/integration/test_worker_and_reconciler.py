@@ -26,6 +26,7 @@ Reconciler tests:
   - CAS conflict on requeue (simulated) → error logged, no crash
   - Empty task list → no-op
 """
+
 from __future__ import annotations
 
 import os
@@ -55,6 +56,7 @@ from src.domain import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def tmp_workflow(tmp_path):
     for d in ["tasks", "agents", "logs"]:
@@ -65,24 +67,28 @@ def tmp_workflow(tmp_path):
 @pytest.fixture()
 def task_repo(tmp_workflow):
     from src.infra.fs.task_repository import YamlTaskRepository
+
     return YamlTaskRepository(tmp_workflow / "tasks")
 
 
 @pytest.fixture()
 def agent_registry(tmp_workflow):
     from src.infra.fs.agent_registry import JsonAgentRegistry
+
     return JsonAgentRegistry(tmp_workflow / "agents" / "registry.json")
 
 
 @pytest.fixture()
 def event_port():
     from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
+
     return InMemoryEventAdapter()
 
 
 @pytest.fixture()
 def lease_port():
     from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
+
     return InMemoryLeaseAdapter()
 
 
@@ -165,9 +171,16 @@ def build_worker(
     )
 
 
-def build_reconciler(task_repo, lease_port, event_port, agent_registry,
-                     interval: int = 5, stuck_task_min_age_seconds: int = 0):
+def build_reconciler(
+    task_repo,
+    lease_port,
+    event_port,
+    agent_registry,
+    interval: int = 5,
+    stuck_task_min_age_seconds: int = 0,
+):
     from src.app.reconciliation import Reconciler
+
     return Reconciler(
         task_repo=task_repo,
         lease_port=lease_port,
@@ -182,54 +195,90 @@ def build_reconciler(task_repo, lease_port, event_port, agent_registry,
 # WorkerHandler — happy path
 # ===========================================================================
 
-class TestWorkerHandlerHappyPath:
 
+class TestWorkerHandlerHappyPath:
     def test_task_transitions_to_succeeded(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
         lease_port.create_lease(task.task_id, worker_agent.agent_id, 300)
 
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.SUCCEEDED
 
     def test_result_has_commit_sha(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
         final = task_repo.load(task.task_id)
         assert final.result is not None
         assert final.result.commit_sha is not None
 
     def test_emits_started_and_completed_events(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
         task_repo.save(task)
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
         event_types = [e.type for e in event_port.all_events]
         assert "task.started" in event_types
         assert "task.completed" in event_types
 
     def test_logs_written_to_disk(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         log_base = tmp_workflow / "logs"
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", log_base)
         task = make_task()
         task_repo.save(task)
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
         log_dir = log_base / task.task_id
         assert (log_dir / "stdout.txt").exists()
@@ -237,7 +286,14 @@ class TestWorkerHandlerHappyPath:
         assert (log_dir / "metadata.json").exists()
 
     def test_lease_revoked_after_success(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task()
@@ -245,7 +301,9 @@ class TestWorkerHandlerHappyPath:
         task.assignment.lease_token = lease_token
         task_repo.save(task)
 
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
         assert not lease_port.is_lease_active(task.task_id)
 
@@ -254,8 +312,8 @@ class TestWorkerHandlerHappyPath:
 # WorkerHandler — error paths
 # ===========================================================================
 
-class TestWorkerHandlerErrors:
 
+class TestWorkerHandlerErrors:
     def test_agent_not_in_registry_raises(
         self, task_repo, agent_registry, event_port, lease_port, tmp_workflow, monkeypatch
     ):
@@ -263,36 +321,63 @@ class TestWorkerHandlerErrors:
         task = make_task(agent_id="missing-agent")
         task_repo.save(task)
 
-        worker = build_worker("missing-agent", task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            "missing-agent", task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         with pytest.raises(RuntimeError, match="not found in registry"):
             worker.process(task.task_id, "proj-test")
 
     def test_wrong_agent_id_raises(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(agent_id="other-agent")
         task_repo.save(task)
 
         # Worker is agent-worker-001 but task is assigned to other-agent
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         with pytest.raises(RuntimeError, match="not this worker"):
             worker.process(task.task_id, "proj-test")
 
     def test_task_not_assigned_raises(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(status=TaskStatus.CREATED)
         task.assignment = None
         task_repo.save(task)
 
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         with pytest.raises(RuntimeError, match="no assignment"):
             worker.process(task.task_id, "proj-test")
 
     def test_task_in_wrong_status_raises(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         # Task is IN_PROGRESS (not ASSIGNED) but assignment is present — must
@@ -301,21 +386,36 @@ class TestWorkerHandlerErrors:
         task.assignment = Assignment(agent_id=worker_agent.agent_id, lease_token="tok")
         task_repo.save(task)
 
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         with pytest.raises(RuntimeError, match="expected assigned"):
             worker.process(task.task_id, "proj-test")
 
     def test_agent_failure_causes_task_failed(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
 
         worker = build_worker(
-            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow,
+            worker_agent.agent_id,
+            task_repo,
+            agent_registry,
+            event_port,
+            lease_port,
+            tmp_workflow,
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
@@ -323,23 +423,43 @@ class TestWorkerHandlerErrors:
         assert final.status == TaskStatus.FAILED
 
     def test_agent_failure_emits_task_failed_event(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
         task = make_task()
         task_repo.save(task)
 
         worker = build_worker(
-            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow,
+            worker_agent.agent_id,
+            task_repo,
+            agent_registry,
+            event_port,
+            lease_port,
+            tmp_workflow,
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
         assert len(event_port.events_of_type("task.failed")) == 1
 
     def test_forbidden_file_edit_causes_failure(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
@@ -349,6 +469,7 @@ class TestWorkerHandlerErrors:
         def bad_wait(self, handle, timeout_seconds=600):
             # Write forbidden file in workspace
             from pathlib import Path as P
+
             if handle.context:
                 forbidden = P(handle.context.workspace_dir) / "secrets/creds.txt"
                 forbidden.parent.mkdir(parents=True, exist_ok=True)
@@ -357,7 +478,8 @@ class TestWorkerHandlerErrors:
 
         monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion", bad_wait)
         monkeypatch.setattr(
-            DryRunGitWorkspaceAdapter, "get_modified_files",
+            DryRunGitWorkspaceAdapter,
+            "get_modified_files",
             lambda self, ws: ["secrets/creds.txt"],
         )
 
@@ -372,20 +494,33 @@ class TestWorkerHandlerErrors:
         assert final.status == TaskStatus.FAILED
 
     def test_forbidden_file_edit_records_reason(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         from src.infra.git.workspace_adapter import DryRunGitWorkspaceAdapter
 
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion",
-                            lambda self, h, timeout_seconds=600: AgentExecutionResult(success=True, exit_code=0))
-        monkeypatch.setattr(DryRunGitWorkspaceAdapter, "get_modified_files",
-                            lambda self, ws: ["forbidden.txt"])
+        monkeypatch.setattr(
+            SimulatedAgentRuntime,
+            "wait_for_completion",
+            lambda self, h, timeout_seconds=600: AgentExecutionResult(success=True, exit_code=0),
+        )
+        monkeypatch.setattr(
+            DryRunGitWorkspaceAdapter, "get_modified_files", lambda self, ws: ["forbidden.txt"]
+        )
 
         task = make_task(allowed_files=["app/auth.py"])
         task_repo.save(task)
-        worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
         worker.process(task.task_id, "proj-test")
 
         final = task_repo.load(task.task_id)
@@ -393,9 +528,17 @@ class TestWorkerHandlerErrors:
         assert "forbidden.txt" in str(failed_entry.detail.get("reason", ""))
 
     def test_lease_revoked_after_failure(
-        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+        self,
+        task_repo,
+        agent_registry,
+        event_port,
+        lease_port,
+        worker_agent,
+        tmp_workflow,
+        monkeypatch,
     ):
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         failing_runtime = SimulatedAgentRuntime(simulate_failure=True)
 
@@ -405,7 +548,12 @@ class TestWorkerHandlerErrors:
         task_repo.save(task)
 
         worker = build_worker(
-            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow,
+            worker_agent.agent_id,
+            task_repo,
+            agent_registry,
+            event_port,
+            lease_port,
+            tmp_workflow,
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
@@ -416,10 +564,11 @@ class TestWorkerHandlerErrors:
 # WorkerHandler — file allowlist validation
 # ===========================================================================
 
-class TestCheckAllowedFiles:
 
+class TestCheckAllowedFiles:
     def test_no_violations_if_all_modified_allowed(self):
         from src.domain import ExecutionSpec
+
         spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py", "b.py"])
         modified = ["a.py", "b.py"]
         spec.validate_modifications(modified)
@@ -427,6 +576,7 @@ class TestCheckAllowedFiles:
     def test_detects_forbidden_file(self):
         import pytest
         from src.domain import ExecutionSpec, ForbiddenFileEditError
+
         spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
         modified = ["a.py", "forbidden.txt"]
         with pytest.raises(ForbiddenFileEditError) as exc:
@@ -435,12 +585,14 @@ class TestCheckAllowedFiles:
 
     def test_empty_modified_no_violations(self):
         from src.domain import ExecutionSpec
+
         spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
         spec.validate_modifications([])
 
     def test_empty_allowed_all_are_violations(self):
         import pytest
         from src.domain import ExecutionSpec, ForbiddenFileEditError
+
         spec = ExecutionSpec(type="code", files_allowed_to_modify=[])
         with pytest.raises(ForbiddenFileEditError) as exc:
             spec.validate_modifications(["a.py", "b.py"])
@@ -449,6 +601,7 @@ class TestCheckAllowedFiles:
     def test_multiple_violations_all_reported(self):
         import pytest
         from src.domain import ExecutionSpec, ForbiddenFileEditError
+
         spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
         modified = ["b.txt", "c.txt", "a.py"]
         with pytest.raises(ForbiddenFileEditError) as exc:
@@ -460,9 +613,11 @@ class TestCheckAllowedFiles:
 # Reconciler — pending task recovery
 # ===========================================================================
 
-class TestReconcilerPendingTasks:
 
-    def test_created_task_republishes_event(self, task_repo, lease_port, event_port, agent_registry):
+class TestReconcilerPendingTasks:
+    def test_created_task_republishes_event(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = make_task("task-created", status=TaskStatus.CREATED)
         task.assignment = None
         task_repo.save(task)
@@ -474,7 +629,9 @@ class TestReconcilerPendingTasks:
         assert len(events) == 1
         assert events[0].payload["task_id"] == "task-created"
 
-    def test_requeued_task_republishes_event(self, task_repo, lease_port, event_port, agent_registry):
+    def test_requeued_task_republishes_event(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = make_task("task-requeued", status=TaskStatus.REQUEUED)
         task.assignment = None
         task_repo.save(task)
@@ -495,14 +652,18 @@ class TestReconcilerPendingTasks:
 # Reconciler — lease expiry
 # ===========================================================================
 
-class TestReconcilerLeaseExpiry:
 
-    def test_assigned_with_expired_lease_gets_failed(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+class TestReconcilerLeaseExpiry:
+    def test_assigned_with_expired_lease_gets_failed(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
         # Reconciler's job: detect expired lease, write FAILED, emit task.failed.
         # The task manager then decides to requeue.
         task = TaskAggregate(
             task_id="task-exp",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.ASSIGNED,
@@ -520,11 +681,15 @@ class TestReconcilerLeaseExpiry:
         final = task_repo.load("task-exp")
         assert final.status == TaskStatus.FAILED
 
-    def test_assigned_with_expired_lease_task_manager_requeues(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_assigned_with_expired_lease_task_manager_requeues(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
         # Full two-step: reconciler fails, task manager requeues.
         task = TaskAggregate(
             task_id="task-exp-tm",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.ASSIGNED,
@@ -540,17 +705,24 @@ class TestReconcilerLeaseExpiry:
         assert len(event_port.events_of_type("task.failed")) >= 1
 
         from src.app.handlers.task_manager import TaskManagerHandler
+
         tm = TaskManagerHandler(
-            task_repo=task_repo, agent_registry=agent_registry,
-            event_port=event_port, lease_port=lease_port,
+            task_repo=task_repo,
+            agent_registry=agent_registry,
+            event_port=event_port,
+            lease_port=lease_port,
         )
         tm.handle_task_failed("task-exp-tm")
 
         final = task_repo.load("task-exp-tm")
         assert final.status == TaskStatus.REQUEUED
 
-    def test_assigned_expired_lease_emits_failed_event(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
-        task = make_task("task-lease-evt", status=TaskStatus.ASSIGNED, agent_id=worker_agent.agent_id)
+    def test_assigned_expired_lease_emits_failed_event(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
+        task = make_task(
+            "task-lease-evt", status=TaskStatus.ASSIGNED, agent_id=worker_agent.agent_id
+        )
         task_repo.save(task)
         lease_port.create_lease("task-lease-evt", worker_agent.agent_id, 1)
         lease_port.expire_all()
@@ -559,10 +731,14 @@ class TestReconcilerLeaseExpiry:
 
         assert len(event_port.events_of_type("task.failed")) >= 1
 
-    def test_in_progress_expired_lease_fails_task(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_in_progress_expired_lease_fails_task(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
         task = TaskAggregate(
             task_id="task-stale",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.IN_PROGRESS,
@@ -579,10 +755,14 @@ class TestReconcilerLeaseExpiry:
         final = task_repo.load("task-stale")
         assert final.status == TaskStatus.FAILED
 
-    def test_in_progress_expired_lease_emits_failed_event(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_in_progress_expired_lease_emits_failed_event(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
         task = TaskAggregate(
             task_id="task-stale-evt",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.IN_PROGRESS,
@@ -601,23 +781,30 @@ class TestReconcilerLeaseExpiry:
 # Reconciler — dead agent detection
 # ===========================================================================
 
-class TestReconcilerDeadAgent:
 
+class TestReconcilerDeadAgent:
     def _dead_agent(self, agent_id: str) -> AgentProps:
         return AgentProps(
-            agent_id=agent_id, name="Dead",
-            capabilities=["backend_dev"], version="1.0.0",
+            agent_id=agent_id,
+            name="Dead",
+            capabilities=["backend_dev"],
+            version="1.0.0",
             last_heartbeat=datetime.now(timezone.utc) - timedelta(seconds=300),
         )
 
     def _task_manager(self, task_repo, agent_registry, event_port, lease_port):
         from src.app.handlers.task_manager import TaskManagerHandler
+
         return TaskManagerHandler(
-            task_repo=task_repo, agent_registry=agent_registry,
-            event_port=event_port, lease_port=lease_port,
+            task_repo=task_repo,
+            agent_registry=agent_registry,
+            event_port=event_port,
+            lease_port=lease_port,
         )
 
-    def test_assigned_dead_agent_reconciler_fails_task(self, task_repo, lease_port, event_port, agent_registry):
+    def test_assigned_dead_agent_reconciler_fails_task(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         # Reconciler detects dead agent → writes FAILED, emits task.failed.
         agent_registry.register(self._dead_agent("dead-agent"))
         task = make_task("task-dead", agent_id="dead-agent")
@@ -630,7 +817,9 @@ class TestReconcilerDeadAgent:
         assert final.status == TaskStatus.FAILED
         assert len(event_port.events_of_type("task.failed")) == 1
 
-    def test_assigned_dead_agent_task_manager_requeues(self, task_repo, lease_port, event_port, agent_registry):
+    def test_assigned_dead_agent_task_manager_requeues(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         # Full two-step: reconciler fails → task manager requeues (retries left).
         agent_registry.register(self._dead_agent("dead-agent-r"))
         task = make_task("task-dead-r", agent_id="dead-agent-r", max_retries=2)
@@ -638,17 +827,23 @@ class TestReconcilerDeadAgent:
         task_repo.save(task)
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-dead-r")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-dead-r"
+        )
 
         final = task_repo.load("task-dead-r")
         assert final.status == TaskStatus.REQUEUED
 
-    def test_dead_agent_max_retries_exhausted_cancels(self, task_repo, lease_port, event_port, agent_registry):
+    def test_dead_agent_max_retries_exhausted_cancels(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         # Retries already exhausted → task manager cancels after reconciler fails.
         agent_registry.register(self._dead_agent("dead-agent-2"))
         task = TaskAggregate(
             task_id="task-dead-max",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.ASSIGNED,
@@ -659,16 +854,22 @@ class TestReconcilerDeadAgent:
         task_repo.save(task)
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-dead-max")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-dead-max"
+        )
 
         final = task_repo.load("task-dead-max")
         assert final.status == TaskStatus.CANCELED
 
-    def test_canceled_task_emits_canceled_event(self, task_repo, lease_port, event_port, agent_registry):
+    def test_canceled_task_emits_canceled_event(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         agent_registry.register(self._dead_agent("dead-agent-3"))
         task = TaskAggregate(
             task_id="task-cancel-evt",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.ASSIGNED,
@@ -679,7 +880,9 @@ class TestReconcilerDeadAgent:
         task_repo.save(task)
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-cancel-evt")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-cancel-evt"
+        )
 
         assert len(event_port.events_of_type("task.canceled")) >= 1
 
@@ -687,6 +890,7 @@ class TestReconcilerDeadAgent:
 # ===========================================================================
 # Reconciler — failed task retry/cancel
 # ===========================================================================
+
 
 class TestReconcilerFailedTasks:
     """
@@ -697,15 +901,22 @@ class TestReconcilerFailedTasks:
 
     def _task_manager(self, task_repo, agent_registry, event_port, lease_port):
         from src.app.handlers.task_manager import TaskManagerHandler
+
         return TaskManagerHandler(
-            task_repo=task_repo, agent_registry=agent_registry,
-            event_port=event_port, lease_port=lease_port,
+            task_repo=task_repo,
+            agent_registry=agent_registry,
+            event_port=event_port,
+            lease_port=lease_port,
         )
 
-    def test_failed_with_retries_left_gets_requeued(self, task_repo, lease_port, event_port, agent_registry):
+    def test_failed_with_retries_left_gets_requeued(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = TaskAggregate(
             task_id="task-retry",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.FAILED,
@@ -713,15 +924,21 @@ class TestReconcilerFailedTasks:
         )
         task_repo.save(task)
 
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-retry")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-retry"
+        )
 
         final = task_repo.load("task-retry")
         assert final.status == TaskStatus.REQUEUED
 
-    def test_failed_retries_exhausted_gets_canceled(self, task_repo, lease_port, event_port, agent_registry):
+    def test_failed_retries_exhausted_gets_canceled(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = TaskAggregate(
             task_id="task-exhaust",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.FAILED,
@@ -729,15 +946,21 @@ class TestReconcilerFailedTasks:
         )
         task_repo.save(task)
 
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-exhaust")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-exhaust"
+        )
 
         final = task_repo.load("task-exhaust")
         assert final.status == TaskStatus.CANCELED
 
-    def test_failed_exhausted_emits_canceled_event(self, task_repo, lease_port, event_port, agent_registry):
+    def test_failed_exhausted_emits_canceled_event(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = TaskAggregate(
             task_id="task-exhaust-evt",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.FAILED,
@@ -745,15 +968,21 @@ class TestReconcilerFailedTasks:
         )
         task_repo.save(task)
 
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-exhaust-evt")
+        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed(
+            "task-exhaust-evt"
+        )
 
         assert len(event_port.events_of_type("task.canceled")) >= 1
 
-    def test_reconciler_ignores_failed_status(self, task_repo, lease_port, event_port, agent_registry):
+    def test_reconciler_ignores_failed_status(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         # Sanity check: reconciler must not touch FAILED tasks at all.
         task = TaskAggregate(
             task_id="task-ignored",
-            feature_id="f", title="T", description="D",
+            feature_id="f",
+            title="T",
+            description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
             status=TaskStatus.FAILED,
@@ -772,13 +1001,16 @@ class TestReconcilerFailedTasks:
 # Reconciler — terminal state no-ops
 # ===========================================================================
 
-class TestReconcilerTerminalStates:
 
-    @pytest.mark.parametrize("terminal_status", [
-        TaskStatus.SUCCEEDED,
-        TaskStatus.MERGED,
-        TaskStatus.CANCELED,
-    ])
+class TestReconcilerTerminalStates:
+    @pytest.mark.parametrize(
+        "terminal_status",
+        [
+            TaskStatus.SUCCEEDED,
+            TaskStatus.MERGED,
+            TaskStatus.CANCELED,
+        ],
+    )
     def test_terminal_tasks_not_reprocessed(
         self, task_repo, lease_port, event_port, agent_registry, terminal_status
     ):
@@ -803,7 +1035,9 @@ class TestReconcilerTerminalStates:
         final = task_repo.load(task.task_id)
         assert final.status == terminal_status
 
-    def test_succeeded_without_commit_sha_no_state_change(self, task_repo, lease_port, event_port, agent_registry):
+    def test_succeeded_without_commit_sha_no_state_change(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
         task = TaskAggregate(
             task_id="task-no-sha",
             feature_id="f",
@@ -843,7 +1077,7 @@ class TestReconcilerTerminalStates:
 
         # Patch _reconcile_task to raise on the first call, succeed on the second
         call_count = {"n": 0}
-        original = reconciler._reconcile_task
+        original = reconciler._process
 
         def patched(task):
             call_count["n"] += 1
@@ -851,7 +1085,7 @@ class TestReconcilerTerminalStates:
                 raise RuntimeError("simulated error")
             return original(task)
 
-        reconciler._reconcile_task = patched
+        reconciler._process = patched
 
         # Should not raise even though one task errored
         reconciler.run_once()
