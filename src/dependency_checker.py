@@ -8,6 +8,7 @@ Checked dependencies:
   runtimes:
     gemini — Gemini CLI (`gemini` command, installed via npm)
     claude — Claude Code CLI (`claude` command, installed via npm)
+    pi     — pi-mono coding agent (`pi` command)
 
 The orchestrator requires:
   • redis  ✓
@@ -168,6 +169,11 @@ RUNTIME_DEFINITIONS: list[tuple[str, str, str]] = [
         "claude-code",
         "claude",
         "npm install -g @anthropic-ai/claude-code",
+    ),
+    (
+        "pi-mono",
+        "pi",
+        "See pi-mono installation docs — build from source or install via npm",
     ),
 ]
 
