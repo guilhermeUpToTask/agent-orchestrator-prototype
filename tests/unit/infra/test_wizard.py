@@ -10,14 +10,12 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from click.testing import CliRunner
 
-from src.orchestrator_config_manager import OrchestratorConfigManager
-from src.wizard import (
-    _check_and_report,
-    _collect_project_config,
-    _interactive_register_agent,
-    _setup_registry,
-    run_wizard,
-)
+from src.infra.config_manager import OrchestratorConfigManager
+from src.infra.cli.wizard import run_wizard
+from src.infra.cli.wizard.steps.deps     import check_and_report     as _check_and_report
+from src.infra.cli.wizard.steps.config   import collect_project_config as _collect_project_config
+from src.infra.cli.wizard.steps.registry import setup_registry         as _setup_registry
+from src.infra.cli.wizard.steps.registry import _interactive_register_agent
 from src.dependency_checker import DependencyReport, DepResult
 
 
@@ -48,28 +46,28 @@ def _make_registry(agents=None) -> MagicMock:
 
 
 def test_check_and_report_returns_true_when_all_ok():
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report()
         result = _check_and_report("redis://localhost:6379/0")
     assert result is True
 
 
 def test_check_and_report_returns_false_when_redis_missing():
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report(redis=False)
         result = _check_and_report("redis://x:6379/0")
     assert result is False
 
 
 def test_check_and_report_returns_false_when_no_runtime():
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report(any_runtime=False)
         result = _check_and_report("redis://localhost:6379/0")
     assert result is False
 
 
 def test_check_and_report_returns_false_when_git_missing():
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report(git=False)
         result = _check_and_report("redis://localhost:6379/0")
     assert result is False
@@ -142,7 +140,7 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
     monkeypatch.setattr("click.confirm", lambda *a, **kw: False)  # skip agent reg
 
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report()
         result = run_wizard(
             cwd=tmp_path,
@@ -160,7 +158,7 @@ def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
     prompts = iter(["proj", "", "redis://x:6379"])
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
 
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report(redis=False)
         result = run_wizard(
             cwd=tmp_path,
@@ -188,7 +186,7 @@ def test_run_wizard_pre_fills_existing_config(tmp_path, monkeypatch):
     monkeypatch.setattr("click.prompt", fake_prompt)
     monkeypatch.setattr("click.confirm", lambda *a, **kw: False)
 
-    with patch("src.wizard.DependencyChecker") as MockChecker:
+    with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report()
         run_wizard(cwd=tmp_path, registry_factory=lambda: _make_registry())
 

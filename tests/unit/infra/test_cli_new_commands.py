@@ -41,14 +41,14 @@ def test_init_defaults_output_contains_key_names(runner, tmp_path):
 
 
 def test_init_interactive_delegates_to_wizard(runner):
-    with patch("src.cli.run_wizard", return_value=True) as mock_wiz:
+    with patch("src.infra.cli.main.run_wizard", return_value=True) as mock_wiz:
         result = runner.invoke(cli, ["init"])
     mock_wiz.assert_called_once()
     assert result.exit_code == 0
 
 
 def test_init_exits_1_when_wizard_fails(runner):
-    with patch("src.cli.run_wizard", return_value=False):
+    with patch("src.infra.cli.main.run_wizard", return_value=False):
         result = runner.invoke(cli, ["init"])
     assert result.exit_code == 1
 
@@ -76,7 +76,7 @@ def test_task_retry_requeues_existing_task(mock_repo_factory, mock_event_factory
     events = MagicMock()
     mock_event_factory.return_value = events
 
-    result = runner.invoke(cli, ["task", "retry", "t-001"])
+    result = runner.invoke(cli, ["tasks", "retry", "t-001"])
 
     assert result.exit_code == 0, result.output
     assert "t-001" in result.output
@@ -94,10 +94,10 @@ def test_task_retry_exits_1_when_not_found(mock_repo_factory, mock_event_factory
     mock_repo_factory.return_value = repo
     mock_event_factory.return_value = MagicMock()
 
-    result = runner.invoke(cli, ["task", "retry", "no-such-task"])
+    result = runner.invoke(cli, ["tasks", "retry", "no-such-task"])
 
     assert result.exit_code == 1
-    assert "not found" in result.output
+    assert "Not found" in result.output or "not found" in result.output
 
 
 # ── task delete ───────────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ def test_task_delete_removes_task_with_yes_flag(mock_repo_factory, runner):
     repo.get.return_value = task
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "delete", "t-001", "--yes"])
+    result = runner.invoke(cli, ["tasks", "delete", "t-001", "--yes"])
 
     assert result.exit_code == 0
     assert "deleted" in result.output
@@ -123,7 +123,7 @@ def test_task_delete_exits_1_when_not_found(mock_repo_factory, runner):
     repo.get.return_value = None
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "delete", "no-task", "--yes"])
+    result = runner.invoke(cli, ["tasks", "delete", "no-task", "--yes"])
 
     assert result.exit_code == 1
 
@@ -136,7 +136,7 @@ def test_task_delete_prompts_without_yes(mock_repo_factory, runner):
     mock_repo_factory.return_value = repo
 
     # Simulate user answering 'y' to confirmation
-    result = runner.invoke(cli, ["task", "delete", "t-001"], input="y\n")
+    result = runner.invoke(cli, ["tasks", "delete", "t-001"], input="y\n")
 
     assert result.exit_code == 0
     repo.delete.assert_called_once()
@@ -149,7 +149,7 @@ def test_task_delete_aborts_on_no_confirmation(mock_repo_factory, runner):
     repo.get.return_value = task
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "delete", "t-001"], input="n\n")
+    result = runner.invoke(cli, ["tasks", "delete", "t-001"], input="n\n")
 
     # click.confirm(abort=True) raises Abort → exit code 1
     assert result.exit_code != 0
@@ -176,7 +176,7 @@ def test_task_prune_deletes_all_tasks(mock_repo_factory, runner):
     repo.list_all.return_value = tasks
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "prune", "--yes"])
+    result = runner.invoke(cli, ["tasks", "prune", "--yes"])
 
     assert result.exit_code == 0
     assert repo.delete.call_count == 3
@@ -190,7 +190,7 @@ def test_task_prune_filters_by_status(mock_repo_factory, runner):
     repo.list_all.return_value = tasks
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "prune", "--status", "failed", "--yes"])
+    result = runner.invoke(cli, ["tasks", "prune", "--status", "failed", "--yes"])
 
     assert result.exit_code == 0
     assert repo.delete.call_count == 2
@@ -202,7 +202,7 @@ def test_task_prune_no_tasks_is_noop(mock_repo_factory, runner):
     repo.list_all.return_value = []
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "prune", "--yes"])
+    result = runner.invoke(cli, ["tasks", "prune", "--yes"])
 
     assert result.exit_code == 0
     repo.delete.assert_not_called()
@@ -215,7 +215,7 @@ def test_task_prune_invalid_status_exits_1(mock_repo_factory, runner):
     repo.list_all.return_value = []
     mock_repo_factory.return_value = repo
 
-    result = runner.invoke(cli, ["task", "prune", "--status", "not_a_status", "--yes"])
+    result = runner.invoke(cli, ["tasks", "prune", "--status", "not_a_status", "--yes"])
 
     assert result.exit_code == 1
 

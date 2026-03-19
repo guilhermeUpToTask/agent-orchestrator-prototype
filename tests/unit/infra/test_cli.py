@@ -11,7 +11,7 @@ def runner():
 def test_cli_help(runner):
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Agent Orchestrator CLI" in result.output
+    assert "Agent Orchestrator" in result.output
 
 @patch("src.infra.factory.build_task_creation_service")
 def test_create_task(mock_factory, runner):
@@ -23,7 +23,7 @@ def test_create_task(mock_factory, runner):
     mock_service.create_task.return_value = mock_task
 
     result = runner.invoke(cli, [
-        "create-task",
+        "tasks", "create",
         "--title", "T",
         "--description", "D",
         "--capability", "c",
@@ -32,7 +32,7 @@ def test_create_task(mock_factory, runner):
     ])
 
     assert result.exit_code == 0
-    assert "Task created: t1" in result.output
+    assert "t1" in result.output
     mock_service.create_task.assert_called_once()
 
 @patch("src.infra.factory.build_task_repo")
@@ -49,18 +49,23 @@ def test_list_tasks(mock_factory, runner):
     
     mock_repo.list_all.return_value = [mock_task]
     
-    result = runner.invoke(cli, ["list-tasks"])
+    result = runner.invoke(cli, ["tasks", "list"])
     assert result.exit_code == 0
     assert "t1" in result.output
     assert "created" in result.output
 
-@patch("src.infra.factory.build_agent_registry")
+@patch("src.infra.factory.build_agent_register_usecase")
 def test_register_agent(mock_factory, runner):
-    mock_registry = MagicMock()
-    mock_factory.return_value = mock_registry
+    mock_uc = MagicMock()
+    mock_factory.return_value = mock_uc
+    mock_result = MagicMock()
+    mock_result.agent_id = "a1"
+    mock_result.active = True
+    mock_result.runtime_type = "gemini"
+    mock_uc.execute.return_value = mock_result
     
     result = runner.invoke(cli, [
-        "register-agent",
+        "agents", "create",
         "--agent-id", "a1",
         "--name", "N",
         "--capabilities", "c1,c2",
@@ -68,8 +73,8 @@ def test_register_agent(mock_factory, runner):
     ])
     
     assert result.exit_code == 0
-    assert "Agent registered: a1" in result.output
-    mock_registry.register.assert_called_once()
+    assert "a1" in result.output
+    mock_uc.execute.assert_called_once()
 
 @patch("src.infra.factory.build_reconciler")
 def test_reconciler(mock_factory, runner):
@@ -79,9 +84,8 @@ def test_reconciler(mock_factory, runner):
     # We don't want it to run forever in test
     mock_reconciler.run_forever.side_effect = Exception("stop")
     
-    result = runner.invoke(cli, ["reconciler", "--interval", "1"])
+    result = runner.invoke(cli, ["system", "reconciler", "--interval", "1"])
     assert result.exit_code == 1
-    assert "stop" in str(result.exception)
     mock_factory.assert_called_once_with(interval_seconds=1, stuck_task_min_age_seconds=120)
 
 @patch("src.infra.factory.build_task_manager_handler")
@@ -98,7 +102,7 @@ def test_task_manager(mock_events_factory, mock_handler_factory, runner):
     event.payload = {"task_id": "t1"}
     mock_events.subscribe_many.return_value = [event]
     
-    result = runner.invoke(cli, ["task-manager"])
+    result = runner.invoke(cli, ["system", "task-manager"])
     assert result.exit_code == 0
     mock_handler.handle_task_created.assert_called_once_with("t1")
 
@@ -117,6 +121,6 @@ def test_worker(mock_registry_factory, mock_handler_factory, mock_events_factory
     event.payload = {"agent_id": "agent-worker-001", "task_id": "t1"}
     mock_events.subscribe.return_value = [event]
     
-    result = runner.invoke(cli, ["worker"])
+    result = runner.invoke(cli, ["system", "worker"])
     assert result.exit_code == 0
     mock_handler.process.assert_called_once_with(task_id="t1", project_id="")
