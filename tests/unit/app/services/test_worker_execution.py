@@ -1,9 +1,9 @@
 """
-tests/unit/app/services/test_worker_execution.py — WorkerExecutionService tests.
+tests/unit/app/services/test_worker_execution.py — TaskExecuteUseCase tests.
 
-These tests cover the execution pipeline logic that was extracted from
-WorkerHandler into WorkerExecutionService during Phase 2 refactoring.
-WorkerHandler is now a thin router; the pipeline logic lives here.
+The execution pipeline was moved from WorkerExecutionService (Phase 2)
+into TaskExecuteUseCase (Phase 7). This file imports from both paths:
+the new canonical location and the backward-compat re-export in services/.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch, ANY
 
 import pytest
 
-from src.app.services.worker_execution import WorkerExecutionService
+from src.app.usecases.task_execute import TaskExecuteUseCase as WorkerExecutionService
 from src.domain import (
     AgentExecutionResult,
     AgentProps,
@@ -63,7 +63,7 @@ class TestWorkerExecutionService:
     # Happy path
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_execute_success(self, mock_refresher_cls):
         task = _make_task()
         svc = _make_service()
@@ -91,7 +91,7 @@ class TestWorkerExecutionService:
     # Agent failure → task.failed
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_execute_agent_failure(self, mock_refresher_cls):
         task = _make_task()
         svc = _make_service()
@@ -116,7 +116,7 @@ class TestWorkerExecutionService:
     # Forbidden file edit → task.failed
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_execute_forbidden_edit(self, mock_refresher_cls):
         task = _make_task()
         task.execution = ExecutionSpec(type="code", files_allowed_to_modify=["ok.py"])
@@ -147,7 +147,7 @@ class TestWorkerExecutionService:
     # CAS retry on start()
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_start_cas_retry(self, mock_refresher_cls):
         tasks_returned = []
 
@@ -182,7 +182,7 @@ class TestWorkerExecutionService:
     # agent can still process it. The error propagates to the event loop.
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_wrong_agent_raises(self, mock_refresher_cls):
         task = _make_task(agent_id="other-agent")
         svc = _make_service()
@@ -200,7 +200,7 @@ class TestWorkerExecutionService:
     # Workspace is always cleaned up even on error
     # ------------------------------------------------------------------
 
-    @patch("src.app.services.worker_execution.LeaseRefresher")
+    @patch("src.app.usecases.task_execute.LeaseRefresher")
     def test_workspace_cleanup_on_exception(self, mock_refresher_cls):
         task = _make_task()
         svc = _make_service()

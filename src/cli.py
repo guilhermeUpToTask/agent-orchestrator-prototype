@@ -220,9 +220,7 @@ def start_system(
 
 
 def _wait_for_heartbeats(registry, agents, timeout: int = 30) -> None:
-    from src.domain.entities.agent import AgentProps as _A
-
-    is_agent_alive = lambda a, t=60: a.is_alive(t)
+    from src.domain.entities.agent import AgentProps as _A; is_agent_alive = lambda a, t=60: a.is_alive(t)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -502,7 +500,7 @@ def register_agent(
     """Register a new agent in the registry."""
     import json
     from src.domain import AgentProps
-    from src.infra.factory import build_agent_registry
+    from src.infra.factory import build_agent_register_usecase
 
     try:
         config = json.loads(runtime_config)
@@ -519,10 +517,9 @@ def register_agent(
         runtime_type=runtime_type,
         runtime_config=config,
     )
-    registry = build_agent_registry()
-    registry.register(agent)
-    status = "active" if active else "inactive"
-    click.echo(f"✓ Agent registered: {agent_id} ({status}, runtime: {runtime_type})")
+    result = build_agent_register_usecase().execute(agent)
+    status = "active" if result.active else "inactive"
+    click.echo(f"✓ Agent registered: {result.agent_id} ({status}, runtime: {result.runtime_type})")
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +575,10 @@ def task_delete(task_id: str, yes: bool):
       orchestrator task delete task-abc123
       orchestrator task delete task-abc123 --yes
     """
-    from src.infra.factory import build_task_repo
+    from src.infra.factory import build_task_repo, build_task_delete_usecase
 
+    # Load first so we can show the current status in the confirm prompt
+    # before any destructive action.
     repo = build_task_repo()
     task = repo.get(task_id)
     if task is None:
@@ -592,7 +591,7 @@ def task_delete(task_id: str, yes: bool):
             abort=True,
         )
 
-    repo.delete(task_id)
+    build_task_delete_usecase().execute(task_id)
     click.echo(f"✓  Task {task_id} deleted")
 
 
@@ -614,23 +613,26 @@ def task_prune(yes: bool, status: tuple):
       orchestrator task prune --status failed --status canceled
       orchestrator task prune --yes                   # skip confirmation
     """
-    from src.infra.factory import build_task_repo
+    from src.infra.factory import build_task_repo, build_task_prune_usecase
     from src.domain import TaskStatus
 
-    repo = build_task_repo()
-    all_tasks = repo.list_all()
-
+    # Resolve filter statuses for the confirm prompt (before any deletion)
+    filter_statuses: set[TaskStatus] | None = None
+    label = "ALL"
     if status:
         try:
             filter_statuses = {TaskStatus(s) for s in status}
+            label = f"with status {'/'.join(status)}"
         except ValueError as exc:
             click.echo(f"✗  Invalid status value: {exc}", err=True)
             sys.exit(1)
-        targets = [t for t in all_tasks if t.status in filter_statuses]
-        label = f"with status {'/'.join(status)}"
-    else:
-        targets = list(all_tasks)
-        label = "ALL"
+
+    # Count targets before deletion so we can show the prompt
+    all_tasks = build_task_repo().list_all()
+    targets = (
+        all_tasks if filter_statuses is None
+        else [t for t in all_tasks if t.status in filter_statuses]
+    )
 
     if not targets:
         click.echo(f"  No tasks found ({label}).")
@@ -642,10 +644,8 @@ def task_prune(yes: bool, status: tuple):
             abort=True,
         )
 
-    for task in targets:
-        repo.delete(task.task_id)
-
-    click.echo(f"✓  Deleted {len(targets)} task(s) ({label})")
+    result = build_task_prune_usecase().execute(filter_statuses=filter_statuses)
+    click.echo(f"✓  Deleted {result.count} task(s) ({label})")
 
 
 # ---------------------------------------------------------------------------
@@ -685,9 +685,7 @@ def project_reset(yes: bool, keep_agents: bool):
       orchestrator project reset --keep-agents
       orchestrator project reset --yes
     """
-    import shutil
-
-    from src.infra.factory import build_task_repo, build_agent_registry, build_lease_port
+    from src.infra.factory import build_project_reset_usecase
     from src.infra.config import config as app_config
 
     if not yes:
@@ -697,93 +695,24 @@ def project_reset(yes: bool, keep_agents: bool):
             abort=True,
         )
 
-    errors: list[str] = []
+    result = build_project_reset_usecase().execute(keep_agents=keep_agents)
 
-    # 1. Delete all tasks ─────────────────────────────────────────────────────
-    try:
-        repo = build_task_repo()
-        tasks = repo.list_all()
-        task_ids = [t.task_id for t in tasks]
-        for tid in task_ids:
-            repo.delete(tid)
-        click.echo(f"  ✓  Deleted {len(task_ids)} task(s)")
-    except Exception as exc:  # noqa: BLE001
-        errors.append(f"tasks: {exc}")
-        click.echo(f"  ⚠  Could not delete tasks: {exc}", err=True)
+    if result.tasks_deleted:
+        click.echo(f"  ✓  Deleted {result.tasks_deleted} task(s)")
+    if result.leases_released:
+        click.echo(f"  ✓  Released {result.leases_released} lease(s)")
+    if result.branches_deleted:
+        click.echo(f"  ✓  Deleted {result.branches_deleted} git branch(es)")
+    if result.agents_removed:
+        click.echo(f"  ✓  Removed {result.agents_removed} agent(s) from registry")
 
-    # 2. Release Redis leases ─────────────────────────────────────────────────
-    try:
-        lease_port = build_lease_port()
-        # Best-effort: revoke leases for every task we just removed.
-        # get_lease_agent lets us find the token; if not found we skip.
-        released = 0
-        for tid in task_ids:
-            try:
-                if lease_port.is_lease_active(tid):
-                    # We don't have the token here; revoke_lease accepts the
-                    # task-scoped key on the in-memory adapter, but on Redis
-                    # we need the token.  Use the agent_id as the key lookup.
-                    agent = lease_port.get_lease_agent(tid)
-                    if agent:
-                        lease_port.revoke_lease(f"{tid}:{agent}")
-                        released += 1
-            except Exception:  # noqa: BLE001
-                pass
-        if released:
-            click.echo(f"  ✓  Released {released} lease(s)")
-    except Exception as exc:  # noqa: BLE001
-        click.echo(f"  ⚠  Could not release leases: {exc}", err=True)
-
-    # 3. Delete Git branches ──────────────────────────────────────────────────
-    _delete_task_branches(task_ids, app_config, errors)
-
-    # 4. Clear agent registry (unless --keep-agents) ──────────────────────────
-    if not keep_agents:
-        try:
-            registry = build_agent_registry()
-            agents = registry.list_agents()
-            for agent in agents:
-                registry.deregister(agent.agent_id)
-            click.echo(f"  ✓  Removed {len(agents)} agent(s) from registry")
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"registry: {exc}")
-            click.echo(f"  ⚠  Could not clear registry: {exc}", err=True)
-
-    if errors:
-        click.echo(f"\n⚠  Reset completed with {len(errors)} error(s). See above.", err=True)
+    if result.had_errors:
+        for err in result.errors:
+            click.echo(f"  ⚠  {err}", err=True)
+        click.echo(f"\n⚠  Reset completed with {len(result.errors)} error(s). See above.", err=True)
     else:
         click.echo(f"\n✓  Project '{app_config.project_name}' reset complete")
 
-
-def _delete_task_branches(
-    task_ids: list[str],
-    app_config: object,
-    errors: list[str],
-) -> None:
-    """Delete remote Git branches whose names start with task-<task_id>."""
-    import subprocess
-
-    repo_url = getattr(app_config, "repo_url", None)
-    if not repo_url:
-        return
-
-    deleted = 0
-    for tid in task_ids:
-        branch = f"task-{tid}"
-        try:
-            result = subprocess.run(
-                ["git", "push", repo_url, f":{branch}"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if result.returncode == 0:
-                deleted += 1
-        except Exception:  # noqa: BLE001
-            pass
-
-    if deleted:
-        click.echo(f"  ✓  Deleted {deleted} git branch(es)")
 
 
 if __name__ == "__main__":
