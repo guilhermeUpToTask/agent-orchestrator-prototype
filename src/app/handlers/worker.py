@@ -2,7 +2,7 @@
 src/app/handlers/worker.py — Worker event handler (thin router).
 
 Phase 2 refactoring: all execution pipeline logic has been moved to:
-    src/app/services/worker_execution.py  (WorkerExecutionService)
+    src/app/usecases/task_execute.py  (TaskExecuteUseCase)
     src/infra/redis_adapters/lease_refresher.py  (LeaseRefresher)
 
 This handler now has one responsibility: receive a task.assigned event and
@@ -28,7 +28,7 @@ from src.domain import (
     GitWorkspacePort, LeasePort, TaskLogsPort,
     TaskRepositoryPort, TestRunnerPort,
 )
-from src.app.services.worker_execution import WorkerExecutionService
+from src.app.usecases.task_execute import TaskExecuteUseCase
 from src.infra.redis_adapters.lease_refresher import LeaseRefresher
 
 log = structlog.get_logger(__name__)
@@ -42,7 +42,7 @@ class WorkerHandler:
     Thin event router for worker agents.
 
     Receives task.assigned events from the CLI event loop and delegates
-    the full execution pipeline to WorkerExecutionService.
+    the full execution pipeline to TaskExecuteUseCase.
 
     Constructor signature is intentionally preserved from v1 so the factory
     and existing unit tests require no changes. The handler constructs the
@@ -64,7 +64,7 @@ class WorkerHandler:
         task_timeout_seconds: int = 600,
     ) -> None:
         self._agent_id = agent_id
-        self._service = WorkerExecutionService(
+        self._service = TaskExecuteUseCase(
             repo_url=repo_url,
             task_repo=task_repo,
             agent_registry=agent_registry,
@@ -82,7 +82,7 @@ class WorkerHandler:
     # ------------------------------------------------------------------
 
     def process(self, task_id: str, project_id: str) -> None:
-        """Delegate task execution to WorkerExecutionService."""
+        """Delegate task execution to TaskExecuteUseCase."""
         self._service.execute(
             task_id=task_id,
             project_id=project_id,
