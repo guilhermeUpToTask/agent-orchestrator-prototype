@@ -88,7 +88,7 @@ def test_failing_returns_only_bad_results():
 def test_check_redis_ok_when_ping_succeeds():
     mock_client = MagicMock()
     mock_client.ping.return_value = True
-    with patch("src.dependency_checker.redis.from_url", return_value=mock_client):
+    with patch("src.infra.dependency_checker.redis.from_url", return_value=mock_client):
         result = _check_redis("redis://localhost:6379/0")
     assert result.ok is True
     assert result.name == "redis"
@@ -97,14 +97,14 @@ def test_check_redis_ok_when_ping_succeeds():
 def test_check_redis_fails_when_connection_refused():
     mock_client = MagicMock()
     mock_client.ping.side_effect = ConnectionRefusedError("refused")
-    with patch("src.dependency_checker.redis.from_url", return_value=mock_client):
+    with patch("src.infra.dependency_checker.redis.from_url", return_value=mock_client):
         result = _check_redis("redis://localhost:6379/0")
     assert result.ok is False
     assert result.install_hint != ""
 
 
 def test_check_redis_fails_gracefully_on_bad_url():
-    with patch("src.dependency_checker.redis.from_url", side_effect=Exception("bad url")):
+    with patch("src.infra.dependency_checker.redis.from_url", side_effect=Exception("bad url")):
         result = _check_redis("redis://nonexistent:9999/0")
     assert result.ok is False
 
@@ -113,8 +113,8 @@ def test_check_redis_fails_gracefully_on_bad_url():
 
 
 def test_check_git_ok_when_binary_present():
-    with patch("src.dependency_checker.shutil.which", return_value="/usr/bin/git"):
-        with patch("src.dependency_checker.subprocess.run") as mock_run:
+    with patch("src.infra.dependency_checker.shutil.which", return_value="/usr/bin/git"):
+        with patch("src.infra.dependency_checker.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="git version 2.40.0", stderr="")
             result = _check_git()
     assert result.ok is True
@@ -122,7 +122,7 @@ def test_check_git_ok_when_binary_present():
 
 
 def test_check_git_fails_when_binary_missing():
-    with patch("src.dependency_checker.shutil.which", return_value=None):
+    with patch("src.infra.dependency_checker.shutil.which", return_value=None):
         result = _check_git()
     assert result.ok is False
     assert result.install_hint != ""
@@ -132,8 +132,8 @@ def test_check_git_fails_when_binary_missing():
 
 
 def test_check_binary_ok_when_found():
-    with patch("src.dependency_checker.shutil.which", return_value="/usr/local/bin/gemini"):
-        with patch("src.dependency_checker.subprocess.run") as mock_run:
+    with patch("src.infra.dependency_checker.shutil.which", return_value="/usr/local/bin/gemini"):
+        with patch("src.infra.dependency_checker.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="gemini 1.2.3", stderr="")
             result = _check_binary("gemini-cli", "gemini", "npm install -g @google/gemini-cli")
     assert result.ok is True
@@ -141,7 +141,7 @@ def test_check_binary_ok_when_found():
 
 
 def test_check_binary_fails_when_not_found():
-    with patch("src.dependency_checker.shutil.which", return_value=None):
+    with patch("src.infra.dependency_checker.shutil.which", return_value=None):
         result = _check_binary("gemini-cli", "gemini", "npm install -g @google/gemini-cli")
     assert result.ok is False
     assert result.install_hint == "npm install -g @google/gemini-cli"
@@ -161,14 +161,14 @@ def test_checker_run_returns_report():
     # Patch all individual check functions
     with (
         patch(
-            "src.dependency_checker._check_redis",
+            "src.infra.dependency_checker._check_redis",
             return_value=DepResult("redis", ok=True, message=""),
         ),
         patch(
-            "src.dependency_checker._check_git", return_value=DepResult("git", ok=True, message="")
+            "src.infra.dependency_checker._check_git", return_value=DepResult("git", ok=True, message="")
         ),
         patch(
-            "src.dependency_checker._check_binary",
+            "src.infra.dependency_checker._check_binary",
             return_value=DepResult("gemini-cli", ok=True, message="", is_runtime=True),
         ),
     ):
@@ -184,14 +184,14 @@ def test_checker_extra_checks_are_included():
 
     with (
         patch(
-            "src.dependency_checker._check_redis",
+            "src.infra.dependency_checker._check_redis",
             return_value=DepResult("redis", ok=True, message=""),
         ),
         patch(
-            "src.dependency_checker._check_git", return_value=DepResult("git", ok=True, message="")
+            "src.infra.dependency_checker._check_git", return_value=DepResult("git", ok=True, message="")
         ),
         patch(
-            "src.dependency_checker._check_binary",
+            "src.infra.dependency_checker._check_binary",
             return_value=DepResult("r", ok=True, message="", is_runtime=True),
         ),
     ):
