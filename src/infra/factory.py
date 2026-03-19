@@ -76,91 +76,15 @@ def build_git_workspace():
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
-    """
-    Build the correct runtime adapter for the given agent based on its
-    runtime_type field. Each agent CLI has its own adapter that knows
-    how to invoke that specific tool, build prompts for it, and parse
-    its output — keeping the orchestration layer fully agent-agnostic.
-
-    API keys are resolved from OrchestratorConfig (env vars / .env file).
-    No runtime reads os.environ directly.
-
-    runtime_type values:
-      "dry-run" — deterministic stub (CI/tests, always available)
-      "gemini"  — Gemini CLI            (requires GEMINI_API_KEY)
-      "claude"  — Claude Code CLI       (requires ANTHROPIC_API_KEY)
-      "pi"      — pi-mono coding agent  (requires ANTHROPIC_API_KEY or GEMINI_API_KEY
-                                         depending on runtime_config.backend)
-    """
-    if app_config.mode == "dry-run" or agent_props.runtime_type == "dry-run":
-        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
-
-        return SimulatedAgentRuntime()
-
-    def _build_gemini(cfg: dict) -> AgentRuntimePort:
-        from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
-
-        return GeminiAgentRuntime(
-            api_key=app_config.gemini_api_key.get_secret_value(),
-            model=cfg.get("model", GeminiAgentRuntime.DEFAULT_MODEL),
-            extra_flags=cfg.get("extra_flags", []),
-        )
-
-    def _build_claude(cfg: dict) -> AgentRuntimePort:
-        from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
-
-        return ClaudeCodeRuntime(
-            api_key=app_config.anthropic_api_key.get_secret_value(),
-            model=cfg.get("model", ClaudeCodeRuntime.DEFAULT_MODEL),
-            extra_flags=cfg.get("extra_flags", []),
-        )
-
-    def _build_pi(cfg: dict) -> AgentRuntimePort:
-        from src.infra.runtime.pi_runtime import PiAgentRuntime
-
-        model = cfg.get("model", PiAgentRuntime.DEFAULT_MODEL)
-
-        # Backend resolution: explicit declaration wins, otherwise openrouter.
-        backend = cfg.get("backend", "openrouter")
-
-        if backend == "gemini":
-            api_key = app_config.gemini_api_key.get_secret_value()
-        elif backend == "openrouter":
-            api_key = app_config.openrouter_api_key.get_secret_value()
-        else:
-            api_key = app_config.anthropic_api_key.get_secret_value()
-
-        return PiAgentRuntime(
-            api_key=api_key,
-            model=model,
-            extra_flags=cfg.get("extra_flags", []),
-            backend=backend,
-        )
-
-    registry: dict[str, Callable[[dict], AgentRuntimePort]] = {
-        "gemini": _build_gemini,
-        "claude": _build_claude,
-        "pi": _build_pi,
-    }
-
-    builder = registry.get(agent_props.runtime_type)
-    if not builder:
-        valid = ", ".join(sorted(registry.keys()) + ["dry-run"])
-        raise ValueError(
-            f"Unknown runtime_type '{agent_props.runtime_type}' for agent "
-            f"'{agent_props.agent_id}'. Valid values: {valid}"
-        )
-
-    return builder(agent_props.runtime_config)
+    """Delegates to src/infra/runtime/factory.py (Phase 8 refactoring)."""
+    from src.infra.runtime.factory import build_agent_runtime as _build
+    return _build(agent_props)
 
 
 def build_runtime_factory() -> Callable[[AgentProps], AgentRuntimePort]:
-    """
-    Returns a callable that maps AgentProps → AgentRuntimePort.
-    Passed to WorkerHandler so it can build the correct runtime per-task
-    after it knows which agent was assigned.
-    """
-    return build_agent_runtime
+    """Returns a callable that maps AgentProps → AgentRuntimePort."""
+    from src.infra.runtime.factory import build_runtime_factory as _build
+    return _build()
 
 
 def build_task_creation_service():
@@ -222,4 +146,73 @@ def build_task_retry_usecase():
     return TaskRetryUseCase(
         task_repo=build_task_repo(),
         event_port=build_event_port(),
+    )
+
+def build_task_delete_usecase():
+    from src.app.usecases.task_delete import TaskDeleteUseCase
+    return TaskDeleteUseCase(task_repo=build_task_repo())
+
+
+def build_task_prune_usecase():
+    from src.app.usecases.task_prune import TaskPruneUseCase
+    return TaskPruneUseCase(task_repo=build_task_repo())
+
+
+def build_agent_register_usecase():
+    from src.app.usecases.agent_register import AgentRegisterUseCase
+    return AgentRegisterUseCase(agent_registry=build_agent_registry())
+
+
+def build_project_reset_usecase():
+    from src.app.usecases.project_reset import ProjectResetUseCase
+    return ProjectResetUseCase(
+        task_repo=build_task_repo(),
+        lease_port=build_lease_port(),
+        agent_registry=build_agent_registry(),
+        repo_url=app_config.repo_url,
+    )
+
+def build_task_assign_usecase():
+    from src.app.usecases.task_assign import TaskAssignUseCase
+    return TaskAssignUseCase(
+        task_repo=build_task_repo(),
+        agent_registry=build_agent_registry(),
+        event_port=build_event_port(),
+        lease_port=build_lease_port(),
+        scheduler=SchedulerService(),
+    )
+
+
+def build_task_fail_handling_usecase():
+    from src.app.usecases.task_fail_handling import TaskFailHandlingUseCase
+    return TaskFailHandlingUseCase(
+        task_repo=build_task_repo(),
+        event_port=build_event_port(),
+    )
+
+
+def build_task_unblock_usecase():
+    from src.app.usecases.task_unblock import TaskUnblockUseCase
+    return TaskUnblockUseCase(
+        task_repo=build_task_repo(),
+        assign_usecase=build_task_assign_usecase(),
+    )
+
+def build_task_execute_usecase():
+    from src.app.usecases.task_execute import TaskExecuteUseCase
+    from src.infra.logs_and_tests import (
+        FilesystemTaskLogsAdapter,
+        SubprocessTestRunnerAdapter,
+    )
+    return TaskExecuteUseCase(
+        repo_url=app_config.repo_url,
+        task_repo=build_task_repo(),
+        agent_registry=build_agent_registry(),
+        event_port=build_event_port(),
+        lease_port=build_lease_port(),
+        git_workspace=build_git_workspace(),
+        runtime_factory=build_runtime_factory(),
+        logs_port=FilesystemTaskLogsAdapter(),
+        test_runner=SubprocessTestRunnerAdapter(),
+        task_timeout_seconds=app_config.task_timeout,
     )

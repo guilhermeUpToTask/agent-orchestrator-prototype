@@ -26,7 +26,7 @@ class TestFactory:
 
         assert isinstance(port, InMemoryEventAdapter)
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_agent_runtime_dry_run(self, mock_config):
         mock_config.mode = "dry-run"
         props = AgentProps(agent_id="a1", name="A1", runtime_type="gemini")
@@ -35,7 +35,7 @@ class TestFactory:
 
         assert isinstance(runtime, SimulatedAgentRuntime)
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_gemini_runtime_uses_config_key(self, mock_config):
         mock_config.mode = "real"
         mock_config.gemini_api_key = SecretStr("gemini-secret")
@@ -46,7 +46,7 @@ class TestFactory:
         assert isinstance(runtime, GeminiAgentRuntime)
         assert runtime._api_key == "gemini-secret"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_claude_runtime_uses_config_key(self, mock_config):
         mock_config.mode = "real"
         mock_config.anthropic_api_key = SecretStr("ant-secret")
@@ -57,7 +57,7 @@ class TestFactory:
         assert isinstance(runtime, ClaudeCodeRuntime)
         assert runtime._api_key == "ant-secret"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_anthropic_backend(self, mock_config):
         mock_config.mode = "real"
         mock_config.anthropic_api_key = SecretStr("ant-key")
@@ -73,7 +73,7 @@ class TestFactory:
         assert isinstance(runtime, PiAgentRuntime)
         assert runtime._api_key == "ant-key"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_gemini_backend(self, mock_config):
         mock_config.mode = "real"
         mock_config.gemini_api_key = SecretStr("gm-key")
@@ -90,7 +90,7 @@ class TestFactory:
         assert runtime._api_key == "gm-key"
         assert runtime._model == "gemini-2.0-flash"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_openrouter_backend(self, mock_config):
         mock_config.mode = "real"
         mock_config.openrouter_api_key = SecretStr("sk-or-key")
@@ -108,7 +108,7 @@ class TestFactory:
         assert runtime._backend == "openrouter"
         assert runtime._env_var == "OPENROUTER_API_KEY"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_defaults_to_openrouter(self, mock_config):
         mock_config.mode = "real"
         mock_config.openrouter_api_key = SecretStr("sk-or-key")
@@ -124,7 +124,7 @@ class TestFactory:
         assert runtime._backend == "openrouter"
         assert runtime._api_key == "sk-or-key"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_explicit_backend_overrides_default(self, mock_config):
         mock_config.mode = "real"
         mock_config.anthropic_api_key = SecretStr("ant-key")
@@ -140,7 +140,7 @@ class TestFactory:
         assert runtime._backend == "anthropic"
         assert runtime._api_key == "ant-key"
 
-    @patch("src.infra.factory.app_config")
+    @patch("src.infra.runtime.factory.app_config")
     def test_unknown_runtime_type_raises(self, mock_config):
         mock_config.mode = "real"
         props = AgentProps(agent_id="x1", name="X", runtime_type="unknown-llm")
