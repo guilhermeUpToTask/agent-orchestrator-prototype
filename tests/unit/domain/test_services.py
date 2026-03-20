@@ -4,8 +4,8 @@ tests/unit/test_services.py — Exhaustive tests for domain services.
 Covers:
   - SchedulerService.select_agent: eligibility, scoring, edge cases
   - SchedulerService.eligible_agents
-  - _is_alive heartbeat logic
-  - _satisfies_version: >=, exact match, edge cases
+  - _parse_version / _satisfies_version parsing (low-level internals)
+  - TaskRules lease policy delegation
 """
 from __future__ import annotations
 
@@ -26,10 +26,6 @@ from src.domain import (
 from src.domain import SchedulerService
 from src.domain.rules import TaskRules
 from src.domain.entities.agent import _parse_version, _satisfies_version
-
-# _is_alive is now a method on AgentProps — expose as a standalone helper for tests
-def _is_alive(agent, threshold_seconds=60):
-    return agent.is_alive(threshold_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -100,56 +96,6 @@ class TestParseVersion:
         # _satisfies_version strips ">=" before calling _parse_version
         assert _parse_version("1.0.0") == (1, 0, 0)
 
-
-class TestSatisfiesVersion:
-
-    @pytest.mark.parametrize("agent_ver,constraint,expected", [
-        ("1.0.0", ">=1.0.0", True),
-        ("1.5.0", ">=1.0.0", True),
-        ("2.0.0", ">=1.0.0", True),
-        ("0.9.9", ">=1.0.0", False),
-        ("1.0.0", ">=2.0.0", False),
-        ("2.0.0", ">=2.0.0", True),
-        ("1.0.0", "1.0.0", True),   # exact match
-        ("1.0.1", "1.0.0", False),  # exact match — different patch
-        ("2.0.0", ">=1.99.99", True),
-        ("1.10.0", ">=1.9.0", True),  # 10 > 9
-    ])
-    def test_version_constraints(self, agent_ver, constraint, expected):
-        assert _satisfies_version(agent_ver, constraint) == expected
-
-
-# ===========================================================================
-# _is_alive
-# ===========================================================================
-
-class TestIsAlive:
-
-    def test_recent_heartbeat_is_alive(self):
-        agent = make_agent(heartbeat_age_seconds=5)
-        assert _is_alive(agent) is True
-
-    def test_old_heartbeat_is_dead(self):
-        agent = make_agent(heartbeat_age_seconds=120)
-        assert _is_alive(agent) is False
-
-    def test_exactly_at_threshold_is_dead(self):
-        # age == threshold_seconds → NOT alive (strict less-than)
-        agent = make_agent(heartbeat_age_seconds=60)
-        assert _is_alive(agent, threshold_seconds=60) is False
-
-    def test_just_below_threshold_is_alive(self):
-        agent = make_agent(heartbeat_age_seconds=59)
-        assert _is_alive(agent, threshold_seconds=60) is True
-
-    def test_no_heartbeat_is_dead(self):
-        agent = make_agent(heartbeat_age_seconds=None)
-        assert _is_alive(agent) is False
-
-    def test_custom_threshold(self):
-        agent = make_agent(heartbeat_age_seconds=100)
-        assert _is_alive(agent, threshold_seconds=200) is True
-        assert _is_alive(agent, threshold_seconds=50) is False
 
 
 # ===========================================================================

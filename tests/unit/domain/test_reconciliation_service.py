@@ -168,3 +168,18 @@ def test_decision_is_frozen():
     d = SVC.assess(make_task(status=TaskStatus.IN_PROGRESS), lease_active=True)
     with pytest.raises((AttributeError, TypeError)):
         d.action = ReconciliationAction.WARN_NO_COMMIT  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# ASSIGNED task with no assignment object (inconsistent/partial state)
+# ---------------------------------------------------------------------------
+
+def test_assigned_without_assignment_object_returns_no_action():
+    """
+    A task in ASSIGNED status but with assignment=None (can occur during a
+    partial CAS write) should be silently skipped, not crash.
+    """
+    task = make_task(status=TaskStatus.ASSIGNED)
+    task.assignment = None
+    d = SVC.assess(task, lease_active=False)
+    assert d.action == ReconciliationAction.NO_ACTION

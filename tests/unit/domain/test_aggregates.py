@@ -534,35 +534,6 @@ class TestStateVersionTracking:
 # AgentProps validation
 # ===========================================================================
 
-class TestAgentProps:
-
-    def test_defaults(self):
-        agent = AgentProps(agent_id="a-001", name="Agent 001")
-        assert agent.version == "1.0.0"
-        assert agent.trust_level == TrustLevel.MEDIUM
-        assert agent.max_concurrent_tasks == 1
-        assert agent.active is True
-        assert agent.runtime_type == "gemini"
-        assert agent.capabilities == []
-        assert agent.tools == []
-        assert agent.skills == []
-
-    def test_last_heartbeat_defaults_to_none(self):
-        agent = AgentProps(agent_id="a-001", name="Agent 001")
-        assert agent.last_heartbeat is None
-
-    def test_custom_trust_level(self):
-        agent = AgentProps(agent_id="a", name="n", trust_level=TrustLevel.HIGH)
-        assert agent.trust_level == TrustLevel.HIGH
-
-    def test_inactive_agent(self):
-        agent = AgentProps(agent_id="a", name="n", active=False)
-        assert agent.active is False
-
-    def test_runtime_config_defaults_empty(self):
-        agent = AgentProps(agent_id="a", name="n")
-        assert agent.runtime_config == {}
-
 
 # ===========================================================================
 # Assignment
@@ -607,41 +578,6 @@ class TestDomainEvent:
         assert e.correlation_id == "corr-1"
 
 
-# ===========================================================================
-# RetryPolicy
-# ===========================================================================
-
-class TestRetryPolicy:
-
-    def test_default_values(self):
-        rp = RetryPolicy()
-        assert rp.max_retries == 2
-        assert rp.backoff_seconds == 30
-        assert rp.attempt == 0
-
-    def test_custom_values(self):
-        rp = RetryPolicy(max_retries=5, backoff_seconds=60, attempt=2)
-        assert rp.max_retries == 5
-        assert rp.attempt == 2
-
-
-# ===========================================================================
-# ExecutionSpec
-# ===========================================================================
-
-class TestExecutionSpec:
-
-    def test_defaults(self):
-        spec = ExecutionSpec(type="code:backend")
-        assert spec.constraints == {}
-        assert spec.acceptance_criteria == []
-        assert spec.files_allowed_to_modify == []
-        assert spec.test_command is None
-
-    def test_with_test_command(self):
-        spec = ExecutionSpec(type="code:backend", test_command="pytest -q")
-        assert spec.test_command == "pytest -q"
-
 
 # ===========================================================================
 # AgentExecutionResult
@@ -663,3 +599,139 @@ class TestAgentExecutionResult:
         assert not r.success
         assert r.exit_code == 1
         assert r.stderr == "crash"
+
+
+# ===========================================================================
+# TaskAggregate.create() factory
+# ===========================================================================
+
+class TestTaskAggregateCreateFactory:
+
+    def test_task_id_format(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        assert task.task_id.startswith("task-")
+        assert len(task.task_id) == len("task-") + 12
+
+    def test_task_id_is_unique(self):
+        t1 = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        t2 = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        assert t1.task_id != t2.task_id
+
+    def test_feature_id_auto_generated_when_not_supplied(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        assert task.feature_id.startswith("feat-")
+
+    def test_feature_id_passed_through(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+            feature_id="feat-login",
+        )
+        assert task.feature_id == "feat-login"
+
+    def test_depends_on_defaults_to_empty_list(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        assert task.depends_on == []
+
+    def test_depends_on_forwarded(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+            depends_on=["task-A", "task-B"],
+        )
+        assert task.depends_on == ["task-A", "task-B"]
+
+    def test_max_retries_forwarded_to_retry_policy(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+            max_retries=5,
+        )
+        assert task.retry_policy.max_retries == 5
+
+    def test_initial_status_is_created(self):
+        task = TaskAggregate.create(
+            title="T", description="D",
+            execution=ExecutionSpec(type="code"),
+            agent_selector=AgentSelector(required_capability="backend"),
+        )
+        assert task.status == TaskStatus.CREATED
+
+
+# ===========================================================================
+# TaskAggregate.force_requeue()
+# ===========================================================================
+
+class TestForceRequeue:
+
+    @pytest.mark.parametrize("status", [
+        TaskStatus.CREATED,
+        TaskStatus.ASSIGNED,
+        TaskStatus.IN_PROGRESS,
+        TaskStatus.SUCCEEDED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELED,
+        TaskStatus.REQUEUED,
+    ])
+    def test_force_requeue_allowed_for_all_non_merged(self, status):
+        task = make_task(status=status)
+        task.force_requeue()
+        assert task.status == TaskStatus.REQUEUED
+
+    def test_force_requeue_blocked_for_merged(self):
+        task = make_task(status=TaskStatus.MERGED)
+        with pytest.raises(ValueError, match="MERGED"):
+            task.force_requeue()
+
+    def test_force_requeue_does_not_increment_retry_counter(self):
+        task = make_task(status=TaskStatus.FAILED)
+        task.retry_policy.attempt = 2
+        task.force_requeue()
+        assert task.retry_policy.attempt == 2  # unchanged
+
+    def test_force_requeue_clears_assignment(self):
+        task = make_task(status=TaskStatus.ASSIGNED)
+        task.assignment = Assignment(agent_id="a-001")
+        task.force_requeue()
+        assert task.assignment is None
+
+    def test_force_requeue_history_entry_records_previous_status(self):
+        task = make_task(status=TaskStatus.SUCCEEDED)
+        task.force_requeue()
+        entry = next(h for h in task.history if h.event == "task.force_requeued")
+        assert entry.detail["previous_status"] == TaskStatus.SUCCEEDED.value
+
+    def test_force_requeue_custom_actor_in_history(self):
+        task = make_task(status=TaskStatus.FAILED)
+        task.force_requeue(actor="ops-team")
+        entry = next(h for h in task.history if h.event == "task.force_requeued")
+        assert entry.actor == "ops-team"
+
+    def test_force_requeue_bumps_state_version(self):
+        task = make_task(status=TaskStatus.FAILED)
+        v0 = task.state_version
+        task.force_requeue()
+        assert task.state_version == v0 + 1

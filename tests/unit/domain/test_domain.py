@@ -354,6 +354,20 @@ class TestTaskAggregateNeedsRetryCancel:
     def test_needs_cancel_false_when_not_failed(self):
         assert make_task(status=TaskStatus.CREATED).needs_cancel() is False
 
+    def test_can_retry_true_when_attempts_below_max(self):
+        task = make_task(max_retries=3)
+        task.retry_policy.attempt = 2
+        assert task.can_retry() is True
+
+    def test_can_retry_false_when_attempts_at_max(self):
+        task = make_task(max_retries=2)
+        task.retry_policy.attempt = 2
+        assert task.can_retry() is False
+
+    def test_can_retry_false_when_zero_retries_configured(self):
+        task = make_task(max_retries=0)
+        assert task.can_retry() is False
+
 
 class TestTaskAggregateIsReadyForDispatch:
 
