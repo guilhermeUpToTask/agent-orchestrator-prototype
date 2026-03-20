@@ -143,8 +143,6 @@ class TaskExecuteUseCase:
             self._handle_failure(task, agent_id, f"Forbidden file edits: {exc.violations}")
         except _AgentFailed as exc:
             self._handle_failure(task, agent_id, str(exc))
-        except _TestsFailed as exc:
-            self._handle_failure(task, agent_id, str(exc))
         except Exception as exc:
             log.exception("worker.unexpected_error", task_id=task_id, error=str(exc))
             self._handle_failure(task, agent_id, f"Unexpected error: {exc}")
@@ -380,8 +378,4 @@ class TaskExecuteUseCase:
 # ---------------------------------------------------------------------------
 
 class _AgentFailed(Exception):
-    pass
-
-
-class _TestsFailed(Exception):
     pass

@@ -100,10 +100,6 @@ class Reconciler:
             self._republish(task, event_type=decision.reason)
             return
 
-        if decision.action == ReconciliationAction.WARN_NO_COMMIT:
-            log.warning("reconciler.succeeded_no_commit", task_id=task.task_id)
-            return
-
         if decision.action in (
             ReconciliationAction.FAIL_DEAD_AGENT,
             ReconciliationAction.FAIL_LEASE_EXPIRED,
