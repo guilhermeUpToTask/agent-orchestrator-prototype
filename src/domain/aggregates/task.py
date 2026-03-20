@@ -68,9 +68,10 @@ class TaskAggregate(BaseModel):
         feature_id: Optional[str] = None,
         depends_on: Optional[list[str]] = None,
         max_retries: int = 2,
+        task_id: Optional[str] = None,
     ) -> "TaskAggregate":
         return cls(
-            task_id=f"task-{uuid4().hex[:12]}",
+            task_id=task_id or f"task-{uuid4().hex[:12]}",
             feature_id=feature_id or f"feat-{uuid4().hex[:8]}",
             title=title,
             description=description,
