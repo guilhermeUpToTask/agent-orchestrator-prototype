@@ -64,7 +64,16 @@ class LeaseRefresher:
 
     def _run(self) -> None:
         while not self._stop_event.wait(timeout=self._interval):
-            ok = self._lease.refresh_lease(self._token, self._extension)
+            try:
+                ok = self._lease.refresh_lease(self._token, self._extension)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "lease_refresher.refresh_error",
+                    token=self._token[:8],
+                    error=str(exc),
+                    reason="transient error — will retry on next interval",
+                )
+                continue
             if ok:
                 log.debug("lease_refresher.refreshed", token=self._token[:8])
             else:
