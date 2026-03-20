@@ -27,6 +27,8 @@ class TaskCreationService:
         depends_on: list[str] = None,
         max_retries: int = 2,
         min_version: str = ">=1.0.0",
+        task_id: Optional[str] = None,
+        constraints: Optional[dict] = None,
     ) -> TaskAggregate:
         # Single quotes in test commands survive the shell but break when
         # PyYAML stores them and bash re-executes. Replace with double quotes.
@@ -44,10 +46,12 @@ class TaskCreationService:
                 files_allowed_to_modify=files_allowed_to_modify,
                 test_command=safe_test,
                 acceptance_criteria=acceptance_criteria or [],
+                constraints=constraints or {},
             ),
             feature_id=feature_id,
             depends_on=depends_on,
             max_retries=max_retries,
+            task_id=task_id,
         )
 
         self._repo.save(task)

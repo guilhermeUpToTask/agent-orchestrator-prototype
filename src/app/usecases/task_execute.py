@@ -260,8 +260,15 @@ class TaskExecuteUseCase:
     def _prepare_workspace(self, task_id: str) -> tuple[str, str]:
         log.info("worker.preparing_workspace", task_id=task_id, repo_url=self._repo_url)
         ws_path = self._git.create_workspace(self._repo_url, task_id)
-        branch = f"task/{task_id}"
-        self._git.checkout_main_and_create_branch(ws_path, branch)
+
+        # Goal-managed tasks carry explicit branch names in constraints.
+        # Standalone tasks fall back to the legacy "task/<id>" scheme.
+        task = self._task_repo.load(task_id)
+        constraints = task.execution.constraints
+        branch      = constraints.get("task_branch", f"task/{task_id}")
+        base_branch = constraints.get("goal_branch", "main")
+
+        self._git.checkout_main_and_create_branch(ws_path, branch, base_branch=base_branch)
         log.info("worker.workspace_ready", task_id=task_id, path=ws_path, branch=branch)
         return ws_path, branch
 
