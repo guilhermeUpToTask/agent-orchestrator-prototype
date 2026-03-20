@@ -104,20 +104,20 @@ class GitWorkspaceAdapter(GitWorkspacePort):
         self._run(["git", "clone", repo_url, str(ws)])
         return str(ws)
 
-    def checkout_main_and_create_branch(self, workspace_path: str, branch_name: str) -> None:
+    def checkout_main_and_create_branch(
+        self, workspace_path: str, branch_name: str, base_branch: str = "main"
+    ) -> None:
         ws = workspace_path
-        log.info("git.create_branch", branch=branch_name, ws=ws)
+        log.info("git.create_branch", branch=branch_name, base=base_branch, ws=ws)
 
         # Check if the repo has any commits at all.
-        # A freshly initialised bare repo has no HEAD yet — trying to checkout
-        # main would fail with "pathspec did not match any file(s)".
         result = subprocess.run(
             ["git", "rev-parse", "--verify", "HEAD"],
             cwd=ws,
             capture_output=True,
         )
         if result.returncode != 0:
-            # Empty workspace clone — create initial commit and push main to origin
+            # Empty workspace clone — create initial commit and push base_branch to origin
             log.warning("git.empty_repo_creating_initial_commit", ws=ws)
             env = {
                 **os.environ,
@@ -134,10 +134,101 @@ class GitWorkspaceAdapter(GitWorkspacePort):
             )
             self._run(["git", "push", "-u", "origin", self._default_branch], cwd=ws)
         else:
-            self._run(["git", "checkout", self._default_branch], cwd=ws)
-            self._run(["git", "pull", "--ff-only"], cwd=ws)
+            # Fetch so remote tracking refs include any new branches (e.g. goal/<n>)
+            self._run(["git", "fetch", "--all"], cwd=ws)
+            # Check out the base branch — could be "main" or "goal/<n>"
+            remote_ref = f"origin/{base_branch}"
+            branch_exists = subprocess.run(
+                ["git", "rev-parse", "--verify", remote_ref],
+                cwd=ws, capture_output=True,
+            ).returncode == 0
+            if branch_exists:
+                self._run(["git", "checkout", base_branch], cwd=ws)
+                self._run(["git", "pull", "--ff-only"], cwd=ws)
+            else:
+                # base_branch doesn't exist on the remote yet — fall back to default
+                log.warning(
+                    "git.base_branch_not_found_falling_back",
+                    base_branch=base_branch,
+                    fallback=self._default_branch,
+                )
+                self._run(["git", "checkout", self._default_branch], cwd=ws)
+                self._run(["git", "pull", "--ff-only"], cwd=ws)
 
         self._run(["git", "checkout", "-b", branch_name], cwd=ws)
+
+    def create_goal_branch(self, repo_url: str, goal_branch: str) -> None:
+        """
+        Create the goal branch from main on the target repo.
+        Uses a temporary workspace; cleans up after push.
+        Idempotent: if the branch already exists remotely, returns without error.
+        """
+        import tempfile as _tempfile
+        ws = _tempfile.mkdtemp(prefix="goal-init-")
+        try:
+            log.info("git.create_goal_branch", branch=goal_branch, repo=repo_url)
+            self._run(["git", "clone", repo_url, ws])
+            # If the branch already exists on the remote, nothing to do.
+            check = subprocess.run(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", goal_branch],
+                cwd=ws, capture_output=True,
+            )
+            if check.returncode == 0:
+                log.info("git.goal_branch_already_exists", branch=goal_branch)
+                return
+            self._run(["git", "checkout", self._default_branch], cwd=ws)
+            self._run(["git", "pull", "--ff-only"], cwd=ws)
+            self._run(["git", "checkout", "-b", goal_branch], cwd=ws)
+            self._run(["git", "push", "-u", "origin", goal_branch], cwd=ws)
+            log.info("git.goal_branch_created", branch=goal_branch)
+        finally:
+            shutil.rmtree(ws, ignore_errors=True)
+
+    def merge_task_into_goal(
+        self,
+        repo_url: str,
+        task_branch: str,
+        goal_branch: str,
+        commit_message: str = "",
+    ) -> str:
+        """
+        Merge task_branch into goal_branch on the target repo.
+        Uses a temporary workspace, performs the merge, pushes, and cleans up.
+        Returns the resulting merge commit sha.
+        """
+        import tempfile as _tempfile
+        ws = _tempfile.mkdtemp(prefix="goal-merge-")
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME":    "orchestrator",
+            "GIT_AUTHOR_EMAIL":   "orchestrator@local",
+            "GIT_COMMITTER_NAME": "orchestrator",
+            "GIT_COMMITTER_EMAIL":"orchestrator@local",
+        }
+        try:
+            log.info(
+                "git.merge_task_into_goal",
+                task_branch=task_branch,
+                goal_branch=goal_branch,
+                repo=repo_url,
+            )
+            self._run(["git", "clone", repo_url, ws])
+            self._run(["git", "fetch", "--all"], cwd=ws)
+            self._run(["git", "checkout", goal_branch], cwd=ws)
+            self._run(["git", "pull", "--ff-only"], cwd=ws)
+            msg = commit_message or f"merge: {task_branch} into {goal_branch}"
+            self._run(
+                ["git", "merge", "--no-ff", f"origin/{task_branch}", "-m", msg],
+                cwd=ws,
+                extra_env=env,
+            )
+            self._run(["git", "push", "origin", goal_branch], cwd=ws)
+            result = self._run(["git", "rev-parse", "HEAD"], cwd=ws, capture=True)
+            sha = result.stdout.strip()
+            log.info("git.merge_done", sha=sha, goal_branch=goal_branch)
+            return sha
+        finally:
+            shutil.rmtree(ws, ignore_errors=True)
 
     def apply_changes_and_commit(self, workspace_path: str, commit_message: str) -> str:
         ws = workspace_path
@@ -242,12 +333,30 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
         self._workspaces[task_id] = ws
         return ws
 
-    def checkout_main_and_create_branch(self, workspace_path: str, branch_name: str) -> None:
+    def checkout_main_and_create_branch(
+        self, workspace_path: str, branch_name: str, base_branch: str = "main"
+    ) -> None:
         subprocess.run(
             ["git", "-C", workspace_path, "checkout", "-b", branch_name],
             check=True,
             capture_output=True,
         )
+
+    def create_goal_branch(self, repo_url: str, goal_branch: str) -> None:
+        # No-op in dry-run — no actual remote to push to
+        pass
+
+    def merge_task_into_goal(
+        self,
+        repo_url: str,
+        task_branch: str,
+        goal_branch: str,
+        commit_message: str = "",
+    ) -> str:
+        # Return a fake sha in dry-run
+        import hashlib, time
+        fake = hashlib.sha1(f"{task_branch}{goal_branch}{time.time()}".encode()).hexdigest()
+        return fake
 
     def apply_changes_and_commit(self, workspace_path: str, commit_message: str) -> str:
         env = {

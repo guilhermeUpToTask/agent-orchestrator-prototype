@@ -20,9 +20,9 @@ class GitWorkspacePort(ABC):
 
     @abstractmethod
     def checkout_main_and_create_branch(
-        self, workspace_path: str, branch_name: str
+        self, workspace_path: str, branch_name: str, base_branch: str = "main"
     ) -> None:
-        """Ensure main is up to date and create a fresh task branch from it."""
+        """Ensure base_branch is up to date and create a fresh task branch from it."""
         ...
 
     @abstractmethod
@@ -50,4 +50,28 @@ class GitWorkspacePort(ABC):
     @abstractmethod
     def get_modified_files(self, workspace_path: str) -> list[str]:
         """Return relative paths of all files modified since branch creation."""
+        ...
+
+    @abstractmethod
+    def create_goal_branch(self, repo_url: str, goal_branch: str) -> None:
+        """
+        Create the goal branch from main and push it to the remote.
+        Must be idempotent: if the branch already exists, return without error.
+        """
+        ...
+
+    @abstractmethod
+    def merge_task_into_goal(
+        self,
+        repo_url: str,
+        task_branch: str,
+        goal_branch: str,
+        commit_message: str = "",
+    ) -> str:
+        """
+        Merge task_branch into goal_branch on the target repo.
+        Creates a temporary workspace, performs the merge, pushes, and cleans up.
+        Returns the resulting merge commit sha.
+        Raises subprocess.CalledProcessError on merge conflict or push failure.
+        """
         ...
