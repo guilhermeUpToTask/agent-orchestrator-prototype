@@ -32,8 +32,11 @@ class TestFactory:
         props = AgentProps(agent_id="a1", name="A1", runtime_type="gemini")
         runtime = build_agent_runtime(props)
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
-        assert isinstance(runtime, SimulatedAgentRuntime)
+        # Runtime is wrapped with LoggingRuntimeWrapper
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, SimulatedAgentRuntime)
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_gemini_runtime_uses_config_key(self, mock_config):
@@ -41,10 +44,12 @@ class TestFactory:
         mock_config.gemini_api_key = SecretStr("gemini-secret")
         props = AgentProps(agent_id="g1", name="G", runtime_type="gemini")
         from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert isinstance(runtime, GeminiAgentRuntime)
-        assert runtime._api_key == "gemini-secret"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, GeminiAgentRuntime)
+        assert runtime._base_runtime._api_key == "gemini-secret"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_claude_runtime_uses_config_key(self, mock_config):
@@ -52,10 +57,12 @@ class TestFactory:
         mock_config.anthropic_api_key = SecretStr("ant-secret")
         props = AgentProps(agent_id="c1", name="C", runtime_type="claude")
         from src.infra.runtime.claude_code_runtime import ClaudeCodeRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert isinstance(runtime, ClaudeCodeRuntime)
-        assert runtime._api_key == "ant-secret"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, ClaudeCodeRuntime)
+        assert runtime._base_runtime._api_key == "ant-secret"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_anthropic_backend(self, mock_config):
@@ -68,10 +75,12 @@ class TestFactory:
             runtime_config={"backend": "anthropic"},
         )
         from src.infra.runtime.pi_runtime import PiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._api_key == "ant-key"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, PiAgentRuntime)
+        assert runtime._base_runtime._api_key == "ant-key"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_gemini_backend(self, mock_config):
@@ -84,11 +93,13 @@ class TestFactory:
             runtime_config={"model": "gemini-2.0-flash", "backend": "gemini"},
         )
         from src.infra.runtime.pi_runtime import PiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._api_key == "gm-key"
-        assert runtime._model == "gemini-2.0-flash"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, PiAgentRuntime)
+        assert runtime._base_runtime._api_key == "gm-key"
+        assert runtime._base_runtime._model == "gemini-2.0-flash"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_runtime_openrouter_backend(self, mock_config):
@@ -101,12 +112,14 @@ class TestFactory:
             runtime_config={"model": "anthropic/claude-sonnet-4-5", "backend": "openrouter"},
         )
         from src.infra.runtime.pi_runtime import PiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._api_key == "sk-or-key"
-        assert runtime._backend == "openrouter"
-        assert runtime._env_var == "OPENROUTER_API_KEY"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, PiAgentRuntime)
+        assert runtime._base_runtime._api_key == "sk-or-key"
+        assert runtime._base_runtime._backend == "openrouter"
+        assert runtime._base_runtime._env_var == "OPENROUTER_API_KEY"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_pi_defaults_to_openrouter(self, mock_config):
@@ -119,10 +132,12 @@ class TestFactory:
             runtime_config={"model": "openrouter/hunter-alpha"},
         )
         from src.infra.runtime.pi_runtime import PiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert runtime._backend == "openrouter"
-        assert runtime._api_key == "sk-or-key"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert runtime._base_runtime._backend == "openrouter"
+        assert runtime._base_runtime._api_key == "sk-or-key"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_explicit_backend_overrides_default(self, mock_config):
@@ -135,10 +150,12 @@ class TestFactory:
             runtime_config={"model": "claude-sonnet-4-5", "backend": "anthropic"},
         )
         from src.infra.runtime.pi_runtime import PiAgentRuntime
+        from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
-        assert runtime._backend == "anthropic"
-        assert runtime._api_key == "ant-key"
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert runtime._base_runtime._backend == "anthropic"
+        assert runtime._base_runtime._api_key == "ant-key"
 
     @patch("src.infra.runtime.factory.app_config")
     def test_unknown_runtime_type_raises(self, mock_config):

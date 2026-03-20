@@ -286,6 +286,7 @@ class TestPiRuntimeFactory:
         from pydantic import SecretStr
         from src.infra.factory import build_agent_runtime
         import src.infra.factory as factory_module
+        from src.infra.logging import LoggingRuntimeWrapper
 
         with patch.object(factory_module.app_config, "mode", "real"), \
              patch.object(factory_module.app_config, "anthropic_api_key", SecretStr("ant-key")):
@@ -297,15 +298,18 @@ class TestPiRuntimeFactory:
             )
             runtime = build_agent_runtime(agent)
 
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._model == "claude-sonnet-4-5"
-        assert runtime._api_key == "ant-key"
+        # Runtime is now wrapped with LoggingRuntimeWrapper
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, PiAgentRuntime)
+        assert runtime._base_runtime._model == "claude-sonnet-4-5"
+        assert runtime._base_runtime._api_key == "ant-key"
 
     def test_factory_builds_pi_runtime_openrouter_backend(self):
         from unittest.mock import patch
         from pydantic import SecretStr
         from src.infra.factory import build_agent_runtime
         import src.infra.factory as factory_module
+        from src.infra.logging import LoggingRuntimeWrapper
 
         with patch.object(factory_module.app_config, "mode", "real"), \
              patch.object(factory_module.app_config, "openrouter_api_key", SecretStr("sk-or-key")):
@@ -317,25 +321,9 @@ class TestPiRuntimeFactory:
             )
             runtime = build_agent_runtime(agent)
 
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._backend == "openrouter"
-        assert runtime._env_var == "OPENROUTER_API_KEY"
-        assert runtime._api_key == "sk-or-key"
-        from unittest.mock import patch
-        from pydantic import SecretStr
-        from src.infra.factory import build_agent_runtime
-        import src.infra.factory as factory_module
-
-        with patch.object(factory_module.app_config, "mode", "real"), \
-             patch.object(factory_module.app_config, "gemini_api_key", SecretStr("gm-key")):
-            agent = AgentProps(
-                agent_id="pi-002",
-                name="Pi Gemini",
-                runtime_type="pi",
-                runtime_config={"model": "gemini-2.0-flash", "backend": "gemini"},
-            )
-            runtime = build_agent_runtime(agent)
-
-        assert isinstance(runtime, PiAgentRuntime)
-        assert runtime._model == "gemini-2.0-flash"
-        assert runtime._api_key == "gm-key"
+        # Runtime is now wrapped with LoggingRuntimeWrapper
+        assert isinstance(runtime, LoggingRuntimeWrapper)
+        assert isinstance(runtime._base_runtime, PiAgentRuntime)
+        assert runtime._base_runtime._backend == "openrouter"
+        assert runtime._base_runtime._env_var == "OPENROUTER_API_KEY"
+        assert runtime._base_runtime._api_key == "sk-or-key"
