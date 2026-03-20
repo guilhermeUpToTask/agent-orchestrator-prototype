@@ -83,3 +83,100 @@ class TestYamlTaskRepository:
         assert len(loaded.history) == 1
         assert loaded.history[0].event == "custom.event"
         assert loaded.history[0].detail["key"] == "val"
+
+    def test_delete_removes_yaml_file(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        task = make_task("task-del")
+        repo.save(task)
+        result = repo.delete("task-del")
+        assert result is True
+        assert not (tmp_path / "tasks" / "task-del.yaml").exists()
+
+    def test_delete_returns_false_when_not_found(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        assert repo.delete("nonexistent-task") is False
+
+    def test_load_raises_after_delete(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.save(make_task())
+        repo.delete("task-001")
+        with pytest.raises(KeyError):
+            repo.load("task-001")
+
+    def test_update_if_version_raises_key_error_for_nonexistent(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        task = make_task()
+        with pytest.raises(KeyError):
+            repo.update_if_version("nonexistent-task", task, expected_version=1)
+
+    def test_append_history_raises_key_error_for_nonexistent(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        with pytest.raises(KeyError):
+            repo.append_history("nonexistent-task", "some.event", "actor", {})
+
+    def test_list_all_quarantines_corrupt_file(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        (tmp_path / "tasks" / "task-corrupt.yaml").write_text(": bad: yaml: {{{{")
+        tasks = repo.list_all()
+        assert tasks == []
+        assert (tmp_path / "tasks" / "quarantine" / "task-corrupt.yaml").exists()
+
+    def test_list_all_skips_corrupt_continues_valid(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.save(make_task("task-good"))
+        (tmp_path / "tasks" / "task-corrupt.yaml").write_text(": {{{{")
+        tasks = repo.list_all()
+        assert len(tasks) == 1
+        assert tasks[0].task_id == "task-good"
+
+    def test_get_returns_task_when_found(self, tmp_path):
+        """TaskRepositoryPort.get() returns the task when it exists."""
+        repo = self._make_repo(tmp_path)
+        repo.save(make_task("task-get"))
+        result = repo.get("task-get")
+        assert result is not None
+        assert result.task_id == "task-get"
+
+    def test_get_returns_none_when_not_found(self, tmp_path):
+        """TaskRepositoryPort.get() returns None instead of raising KeyError."""
+        repo = self._make_repo(tmp_path)
+        assert repo.get("nonexistent") is None
+
+    def test_list_all_skips_empty_yaml_files(self, tmp_path):
+        """An empty YAML file (race with atomic write) is skipped silently."""
+        repo = self._make_repo(tmp_path)
+        repo.save(make_task("task-good"))
+        (tmp_path / "tasks" / "task-empty.yaml").write_text("")  # None when parsed
+        tasks = repo.list_all()
+        assert len(tasks) == 1
+        assert tasks[0].task_id == "task-good"
+
+    def test_list_all_continues_when_quarantine_move_fails(self, tmp_path, monkeypatch):
+        """If shutil.move() fails during quarantine, list_all() still returns valid tasks."""
+        import shutil
+        repo = self._make_repo(tmp_path)
+        repo.save(make_task("task-good"))
+        (tmp_path / "tasks" / "task-corrupt.yaml").write_text(": {{{{")
+
+        original_move = shutil.move
+
+        def failing_move(src, dst):
+            if "corrupt" in str(src):
+                raise OSError("permission denied")
+            return original_move(src, dst)
+
+        monkeypatch.setattr(shutil, "move", failing_move)
+
+        tasks = repo.list_all()
+        # Valid task must still be returned despite quarantine failure
+        assert len(tasks) == 1
+        assert tasks[0].task_id == "task-good"
+
+    def test_abstract_delete_default_returns_false(self, tmp_path):
+        """TaskRepositoryPort.delete() base implementation returns False (not found)."""
+        from src.domain.repositories.task_repository import TaskRepositoryPort
+        # Use the concrete YamlTaskRepository — it inherits delete() from the base
+        # and overrides it, but we can call the base directly to verify the default
+        repo = self._make_repo(tmp_path)
+        result = TaskRepositoryPort.delete(repo, "nonexistent")
+        assert result is False

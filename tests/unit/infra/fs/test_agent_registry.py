@@ -48,3 +48,20 @@ class TestJsonAgentRegistry:
         registry.heartbeat("a-001")
         loaded = registry.get("a-001")
         assert loaded.last_heartbeat >= before
+
+    def test_deregister_nonexistent_agent_does_not_raise(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        # Should not raise — deregistering a missing agent is a no-op
+        registry.deregister("nonexistent-agent")
+        assert registry.list_agents() == []
+
+    def test_register_overwrites_existing_agent(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        agent = make_agent("a-001")
+        registry.register(agent)
+        updated = make_agent("a-001")
+        updated.version = "2.0.0"
+        registry.register(updated)
+        loaded = registry.get("a-001")
+        assert loaded.version == "2.0.0"
+        assert len(registry.list_agents()) == 1

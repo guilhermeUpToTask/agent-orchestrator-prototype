@@ -28,24 +28,30 @@ def test_publish(adapter, redis_client):
 
 from unittest.mock import patch, MagicMock
 
-def test_subscribe_many(adapter, redis_client):
-    event = DomainEvent(type="t1", producer="p1", payload={"task_id": "t1"})
-    
-    # We mock xreadgroup to return one event and then empty list to break the iterator
-    # However RedisEventAdapter has 'while True', so we need to raise an exception or similar
-    # to exit the test if it loops.
-    # Alternatively, we test the logic that processes the results.
+def test_subscribe_many_yields_deserialized_event(adapter, redis_client):
+    """subscribe_many() should deserialise the raw Redis message into a DomainEvent."""
+    event = DomainEvent(type="task.created", producer="p1", payload={"task_id": "t1"})
+
+    # Sentinel exception to break out of the generator's internal while-True loop
+    # cleanly without misusing KeyboardInterrupt (a real signal, not a test tool).
+    class _Done(Exception):
+        pass
+
     with patch.object(redis_client, "xreadgroup") as mock_read:
         mock_read.side_effect = [
-            [(b"events:t1", [(b"msg-1", {b"data": json.dumps(event.model_dump(mode="json"))})])],
-            KeyboardInterrupt() # stop the while True loop
+            [(b"events:task.created", [(b"msg-1", {b"data": json.dumps(event.model_dump(mode="json"))})])],
+            _Done(),
         ]
-        
-        with pytest.raises(KeyboardInterrupt):
-            gen = adapter.subscribe_many(["t1"], "g1", "c1")
-            received = next(gen)
-            assert received.type == "t1"
-            next(gen) # triggers second call which raises
+
+        gen = adapter.subscribe_many(["task.created"], "grp-test", "consumer-1")
+        received = next(gen)
+
+        assert received.type == "task.created"
+        assert received.payload["task_id"] == "t1"
+
+        # Exhaust the second call (raises _Done — expected)
+        with pytest.raises(_Done):
+            next(gen)
 
 @pytest.mark.asyncio
 async def test_publish_journal_created(adapter, tmp_path):

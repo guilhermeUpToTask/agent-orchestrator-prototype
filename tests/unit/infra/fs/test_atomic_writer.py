@@ -23,15 +23,14 @@ class TestAtomicFileWriter:
         # Temporary file should be cleaned up even on failure
         assert len(list(tmp_path.glob("*.tmp"))) == 0
 
-    def test_partial_write_isolation(self, tmp_path):
+    def test_partial_write_preserves_original_on_rename_failure(self, tmp_path):
         target = tmp_path / "target.txt"
-        target.write_text("old")
-        
-        # Simulate a crash during write by mocking f.write
-        with patch("builtins.open", MagicMock()):
-            # This is complex to mock builtins.open correctly for all calls
-            # Let's mock the internal logic if possible or just use a simpler check
-            pass
+        target.write_text("original")
+        with patch("os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                AtomicFileWriter.write_text(target, "new content")
+        assert target.read_text() == "original"
+        assert len(list(tmp_path.glob("*.tmp"))) == 0
 
     def test_atomic_write_overwrites(self, tmp_path):
         target = tmp_path / "target.txt"
