@@ -143,6 +143,13 @@ class TestTaskPruneUseCase:
         assert result.count == 2
         assert "t-003" not in result.deleted
 
+    def test_empty_set_filter_deletes_nothing(self):
+        """filter_statuses=set() is not the same as None — it should match nothing."""
+        self.repo.list_all.return_value = [_task("t-001", TaskStatus.FAILED)]
+        result = self.uc.execute(filter_statuses=set())
+        assert result.count == 0
+        self.repo.delete.assert_not_called()
+
 
 # ===========================================================================
 # AgentRegisterUseCase
@@ -312,3 +319,57 @@ class TestProjectResetUseCase:
             result = uc_with_url.execute()
 
         assert result.branches_deleted == 1
+
+    def test_branch_deletion_failure_does_not_raise(self):
+        """A non-zero returncode from git push should not propagate as an exception."""
+        uc_with_url = ProjectResetUseCase(
+            task_repo=self.repo,
+            lease_port=self.lease,
+            agent_registry=self.registry,
+            repo_url="file:///tmp/repo",
+        )
+        self.repo.list_all.return_value = [_task("t-001")]
+        self.lease.is_lease_active.return_value = False
+        self.registry.list_agents.return_value = []
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            result = uc_with_url.execute()
+
+        # Whether it records 0 deleted or an error, it must not raise
+        assert result is not None
+        # A failed git push should not count as a successful deletion
+        assert result.branches_deleted == 0
+
+    def test_branch_deletion_subprocess_error_recorded_in_errors(self):
+        """CalledProcessError during git push is captured in result.errors."""
+        import subprocess
+        uc_with_url = ProjectResetUseCase(
+            task_repo=self.repo,
+            lease_port=self.lease,
+            agent_registry=self.registry,
+            repo_url="file:///tmp/repo",
+        )
+        self.repo.list_all.return_value = [_task("t-001")]
+        self.lease.is_lease_active.return_value = False
+        self.registry.list_agents.return_value = []
+
+        with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "git")):
+            result = uc_with_url.execute()
+
+        assert result is not None  # must not propagate
+
+    def test_lease_revoke_exception_is_swallowed(self):
+        """If revoke_lease raises during reset, the exception is swallowed
+        and the reset continues processing the remaining tasks."""
+        self.repo.list_all.return_value = [_task("t-001"), _task("t-002")]
+        self.lease.is_lease_active.return_value = True
+        self.lease.get_lease_agent.return_value = "worker-1"
+        self.lease.revoke_lease.side_effect = RuntimeError("redis unavailable")
+        self.registry.list_agents.return_value = []
+
+        # Must not raise — the exception is swallowed per-task
+        result = self.uc.execute()
+
+        assert result is not None
+        assert result.tasks_deleted == 2  # tasks still deleted despite lease errors

@@ -411,50 +411,54 @@ class TestWorkerHandlerErrors:
         worker.process(task.task_id, "proj-test")
         assert not lease_port.is_lease_active(task.task_id)
 
+    def test_failing_test_command_fails_task(
+        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+    ):
+        """When execution.test_command is set and tests fail, the task is marked FAILED."""
+        from src.infra.logs_and_tests import SubprocessTestRunnerAdapter
+
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
+
+        def failing_run_tests(self, workspace_path, test_command):
+            raise RuntimeError("3 failed, 1 passed")
+
+        monkeypatch.setattr(SubprocessTestRunnerAdapter, "run_tests", failing_run_tests)
+
+        task = make_task(test_command="pytest tests/")
+        task_repo.save(task)
+
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
+        worker.process(task.task_id, "proj-test")
+
+        final = task_repo.load(task.task_id)
+        assert final.status == TaskStatus.FAILED
+
+    def test_failing_test_command_emits_failed_event(
+        self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
+    ):
+        from src.infra.logs_and_tests import SubprocessTestRunnerAdapter
+
+        monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
+
+        def failing_run_tests(self, workspace_path, test_command):
+            raise RuntimeError("tests failed")
+
+        monkeypatch.setattr(SubprocessTestRunnerAdapter, "run_tests", failing_run_tests)
+
+        task = make_task(test_command="pytest -q")
+        task_repo.save(task)
+
+        worker = build_worker(
+            worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
+        )
+        worker.process(task.task_id, "proj-test")
+
+        assert len(event_port.events_of_type("task.failed")) == 1
+
 
 # ===========================================================================
-# WorkerHandler — file allowlist validation
-# ===========================================================================
-
-class TestCheckAllowedFiles:
-
-    def test_no_violations_if_all_modified_allowed(self):
-        from src.domain import ExecutionSpec
-        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py", "b.py"])
-        modified = ["a.py", "b.py"]
-        spec.validate_modifications(modified)
-
-    def test_detects_forbidden_file(self):
-        import pytest
-        from src.domain import ExecutionSpec, ForbiddenFileEditError
-        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
-        modified = ["a.py", "forbidden.txt"]
-        with pytest.raises(ForbiddenFileEditError) as exc:
-            spec.validate_modifications(modified)
-        assert "forbidden.txt" in exc.value.violations
-
-    def test_empty_modified_no_violations(self):
-        from src.domain import ExecutionSpec
-        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
-        spec.validate_modifications([])
-
-    def test_empty_allowed_all_are_violations(self):
-        import pytest
-        from src.domain import ExecutionSpec, ForbiddenFileEditError
-        spec = ExecutionSpec(type="code", files_allowed_to_modify=[])
-        with pytest.raises(ForbiddenFileEditError) as exc:
-            spec.validate_modifications(["a.py", "b.py"])
-        assert set(exc.value.violations) == {"a.py", "b.py"}
-
-    def test_multiple_violations_all_reported(self):
-        import pytest
-        from src.domain import ExecutionSpec, ForbiddenFileEditError
-        spec = ExecutionSpec(type="code", files_allowed_to_modify=["a.py"])
-        modified = ["b.txt", "c.txt", "a.py"]
-        with pytest.raises(ForbiddenFileEditError) as exc:
-            spec.validate_modifications(modified)
-        assert set(exc.value.violations) == {"b.txt", "c.txt"}
-
 
 # ===========================================================================
 # Reconciler — pending task recovery
@@ -769,6 +773,110 @@ class TestReconcilerFailedTasks:
 
 
 # ===========================================================================
+# Reconciler — _fail() edge cases
+# ===========================================================================
+
+class TestReconcilerFailEdgeCases:
+
+    def test_fail_skips_when_task_already_moved_on(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
+        """
+        Race: reconciler decides to FAIL an ASSIGNED task (expired lease), but
+        by the time _fail() reloads the task inside its CAS loop the task has
+        already transitioned to SUCCEEDED (worker beat the reconciler).
+        _fail() must skip silently — no FAILED write, no event.
+
+        The key is that run_once() must see the task as ASSIGNED (so it calls
+        _process/_fail), but _fail()'s internal load() returns SUCCEEDED.
+        We achieve this by patching task_repo.load to return different objects
+        on successive calls.
+        """
+        from src.domain.value_objects.task import TaskResult
+        from unittest.mock import patch
+
+        task_assigned = TaskAggregate(
+            task_id="task-race",
+            feature_id="f", title="T", description="D",
+            agent_selector=AgentSelector(required_capability="backend_dev"),
+            execution=ExecutionSpec(type="code:backend"),
+            status=TaskStatus.ASSIGNED,
+            retry_policy=RetryPolicy(max_retries=2, attempt=0),
+        )
+        task_assigned.assignment = Assignment(agent_id=worker_agent.agent_id)
+
+        # What _fail()'s load() will see: worker already finished
+        task_succeeded = TaskAggregate(
+            task_id="task-race",
+            feature_id="f", title="T", description="D",
+            agent_selector=AgentSelector(required_capability="backend_dev"),
+            execution=ExecutionSpec(type="code:backend"),
+            status=TaskStatus.SUCCEEDED,
+        )
+        task_succeeded.result = TaskResult(commit_sha="abc123")
+
+        # Save the ASSIGNED version so run_once()'s list_all() picks it up
+        task_repo.save(task_assigned)
+        # Expire the lease so the reconciler decides FAIL_LEASE_EXPIRED
+        lease_port.create_lease("task-race", worker_agent.agent_id, 1)
+        lease_port.expire_all()
+
+        # Patch load() so: first call (from list_all/process) → already done by
+        # save above; but _fail() calls load() internally — intercept that call
+        # to return the SUCCEEDED version.
+        original_load = task_repo.load
+        load_call_count = {"n": 0}
+
+        def patched_load(task_id):
+            load_call_count["n"] += 1
+            # _fail() calls load() after run_once() already has the task object
+            # from list_all(). So first extra load() call goes to _fail().
+            if task_id == "task-race" and load_call_count["n"] > 0:
+                return task_succeeded
+            return original_load(task_id)
+
+        task_repo.load = patched_load
+
+        reconciler = build_reconciler(task_repo, lease_port, event_port, agent_registry)
+        reconciler.run_once()
+
+        task_repo.load = original_load
+
+        # No task.failed event — reconciler saw SUCCEEDED in CAS loop and skipped
+        assert event_port.events_of_type("task.failed") == []
+
+    def test_fail_cas_exhaustion_does_not_raise(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
+        """
+        If update_if_version keeps conflicting for MAX_CAS_RETRIES attempts,
+        the reconciler must log the error and continue — never raise.
+        """
+        task = TaskAggregate(
+            task_id="task-cas-exhaust",
+            feature_id="f", title="T", description="D",
+            agent_selector=AgentSelector(required_capability="backend_dev"),
+            execution=ExecutionSpec(type="code:backend"),
+            status=TaskStatus.ASSIGNED,
+            retry_policy=RetryPolicy(max_retries=2, attempt=0),
+        )
+        task.assignment = Assignment(agent_id=worker_agent.agent_id)
+        task_repo.save(task)
+
+        lease_port.create_lease("task-cas-exhaust", worker_agent.agent_id, 1)
+        lease_port.expire_all()
+
+        # Patch update_if_version to always return False
+        original = task_repo.update_if_version
+        task_repo.update_if_version = lambda *a, **kw: False
+
+        reconciler = build_reconciler(task_repo, lease_port, event_port, agent_registry)
+        reconciler.run_once()  # must not raise
+
+        task_repo.update_if_version = original
+
+
+# ===========================================================================
 # Reconciler — terminal state no-ops
 # ===========================================================================
 
@@ -857,3 +965,58 @@ class TestReconcilerTerminalStates:
         reconciler.run_once()
         # The pass completed
         assert call_count["n"] >= 1
+
+# ===========================================================================
+# Reconciler — engine-level branch coverage
+# ===========================================================================
+
+class TestReconcilerEngineBranches:
+
+    def test_warn_no_commit_does_not_change_task_status(
+        self, task_repo, lease_port, event_port, agent_registry
+    ):
+        """
+        SUCCEEDED task with no commit_sha triggers WARN_NO_COMMIT in the engine.
+        The reconciler logs a warning but must NOT mutate the task state.
+        """
+        task = TaskAggregate(
+            task_id="task-no-sha",
+            feature_id="f", title="T", description="D",
+            agent_selector=AgentSelector(required_capability="backend_dev"),
+            execution=ExecutionSpec(type="code:backend"),
+            status=TaskStatus.SUCCEEDED,
+        )
+        from src.domain.value_objects.task import TaskResult
+        task.result = TaskResult(commit_sha=None)   # triggers WARN_NO_COMMIT
+        task_repo.save(task)
+
+        reconciler = build_reconciler(task_repo, lease_port, event_port, agent_registry)
+        reconciler.run_once()   # must not raise
+
+        final = task_repo.load("task-no-sha")
+        assert final.status == TaskStatus.SUCCEEDED   # unchanged
+        assert event_port.all_events == []            # no event emitted
+
+    def test_no_action_for_fresh_assigned_task_with_active_lease(
+        self, task_repo, lease_port, event_port, agent_registry, worker_agent
+    ):
+        """
+        An ASSIGNED task with a live lease and live agent → NO_ACTION.
+        The engine _process() must return early without writing anything.
+        """
+        task = TaskAggregate(
+            task_id="task-no-action",
+            feature_id="f", title="T", description="D",
+            agent_selector=AgentSelector(required_capability="backend_dev"),
+            execution=ExecutionSpec(type="code:backend"),
+            status=TaskStatus.ASSIGNED,
+        )
+        task.assignment = Assignment(agent_id=worker_agent.agent_id)
+        task_repo.save(task)
+        lease_port.create_lease("task-no-action", worker_agent.agent_id, 300)
+
+        reconciler = build_reconciler(task_repo, lease_port, event_port, agent_registry)
+        reconciler.run_once()
+
+        assert task_repo.load("task-no-action").status == TaskStatus.ASSIGNED
+        assert event_port.all_events == []

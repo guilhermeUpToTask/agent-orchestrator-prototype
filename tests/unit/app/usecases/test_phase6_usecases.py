@@ -267,6 +267,35 @@ class TestTaskFailHandlingUseCase:
         assert result.outcome == FailHandlingOutcome.REQUEUED
         assert self.repo.update_if_version.call_count == 2
 
+    def test_retries_on_version_conflict_in_cancel_path(self):
+        """CAS conflict during the cancel write (retries exhausted branch) retries cleanly."""
+        def exhausted_task(tid):
+            t = _task(tid, TaskStatus.FAILED)
+            t.retry_policy.attempt = 2
+            t.retry_policy.max_retries = 2
+            return t
+
+        self.repo.load.side_effect = exhausted_task
+        # First write (cancel) conflicts, second succeeds
+        self.repo.update_if_version.side_effect = [False, True]
+        result = self.uc.execute("t-001")
+        assert result.outcome == FailHandlingOutcome.CANCELED
+        assert self.repo.update_if_version.call_count == 2
+
+    def test_returns_skipped_after_max_cas_retries(self):
+        """When update_if_version always conflicts, must give up and return SKIPPED."""
+        self.repo.load.side_effect = lambda tid: _task(tid, TaskStatus.FAILED)
+        self.repo.update_if_version.return_value = False  # always conflict
+        result = self.uc.execute("t-001")
+        assert result.outcome == FailHandlingOutcome.SKIPPED
+        self.events.publish.assert_not_called()
+
+    def test_no_event_published_on_cas_exhaustion(self):
+        self.repo.load.side_effect = lambda tid: _task(tid, TaskStatus.FAILED)
+        self.repo.update_if_version.return_value = False
+        self.uc.execute("t-001")
+        self.events.publish.assert_not_called()
+
 
 # ===========================================================================
 # TaskUnblockUseCase
@@ -350,3 +379,53 @@ class TestTaskUnblockUseCase:
 
         assert result.count == 0
         assert result.skipped == []
+
+
+# ===========================================================================
+# TaskAssignUseCase — CAS retry exhaustion
+# ===========================================================================
+
+class TestTaskAssignCasExhaustion:
+
+    def setup_method(self):
+        self.repo      = MagicMock()
+        self.registry  = MagicMock()
+        self.events    = MagicMock()
+        self.lease     = MagicMock()
+        self.scheduler = MagicMock()
+        self.uc = TaskAssignUseCase(
+            task_repo=self.repo,
+            agent_registry=self.registry,
+            event_port=self.events,
+            lease_port=self.lease,
+            scheduler=self.scheduler,
+        )
+
+    def test_returns_not_assignable_after_max_cas_retries(self):
+        """update_if_version always returns False — must give up after MAX_CAS_RETRIES."""
+        self.repo.load.side_effect = lambda tid: _task(task_id=tid)
+        # Every write attempt conflicts
+        self.repo.update_if_version.return_value = False
+        agent = _alive_agent()
+        self.registry.list_agents.return_value = [agent]
+        self.scheduler.select_agent.return_value = agent
+        self.lease.create_lease.return_value = "tok"
+
+        result = self.uc.execute("t-001")
+
+        assert result.outcome == AssignOutcome.NOT_ASSIGNABLE
+        # Must have retried exactly MAX_CAS_RETRIES times (not looped forever)
+        from src.app.usecases.task_assign import MAX_CAS_RETRIES
+        assert self.repo.load.call_count == MAX_CAS_RETRIES
+
+    def test_no_event_published_on_cas_exhaustion(self):
+        self.repo.load.side_effect = lambda tid: _task(task_id=tid)
+        self.repo.update_if_version.return_value = False
+        agent = _alive_agent()
+        self.registry.list_agents.return_value = [agent]
+        self.scheduler.select_agent.return_value = agent
+        self.lease.create_lease.return_value = "tok"
+
+        self.uc.execute("t-001")
+
+        self.events.publish.assert_not_called()
