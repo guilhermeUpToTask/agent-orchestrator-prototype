@@ -191,6 +191,10 @@ class OrchestratorConfig(BaseSettings):
         None,
         validation_alias=AliasChoices("EVENTS_DIR", "events_dir"),
     )
+    goals_dir: Optional[Path] = Field(
+        None,
+        validation_alias=AliasChoices("GOALS_DIR", "goals_dir"),
+    )
 
     # ── API Keys ──────────────────────────────────────────────────────────────
 
@@ -234,6 +238,8 @@ class OrchestratorConfig(BaseSettings):
             self.logs_dir = project_home / "logs"
         if self.events_dir is None:
             self.events_dir = project_home / "events"
+        if self.goals_dir is None:
+            self.goals_dir = project_home / "goals"
         return self
 
     @property

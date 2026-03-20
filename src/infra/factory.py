@@ -216,3 +216,65 @@ def build_task_execute_usecase():
         test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=app_config.task_timeout,
     )
+
+
+# ---------------------------------------------------------------------------
+# Goal layer
+# ---------------------------------------------------------------------------
+
+def build_goal_repo():
+    from src.infra.fs.goal_repository import YamlGoalRepository
+    return YamlGoalRepository(app_config.goals_dir)
+
+
+def build_goal_init_usecase():
+    from src.app.usecases.goal_init import GoalInitUseCase
+    return GoalInitUseCase(
+        goal_repo=build_goal_repo(),
+        task_repo=build_task_repo(),
+        event_port=build_event_port(),
+        git_workspace=build_git_workspace(),
+        task_creation=build_task_creation_service(),
+        repo_url=app_config.repo_url,
+    )
+
+
+def build_goal_merge_task_usecase():
+    from src.app.usecases.goal_merge_task import GoalMergeTaskUseCase
+    return GoalMergeTaskUseCase(
+        task_repo=build_task_repo(),
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        git_workspace=build_git_workspace(),
+        repo_url=app_config.repo_url,
+    )
+
+
+def build_goal_cancel_task_usecase():
+    from src.app.usecases.goal_cancel_task import GoalCancelTaskUseCase
+    return GoalCancelTaskUseCase(
+        task_repo=build_task_repo(),
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+    )
+
+
+def build_goal_finalize_usecase():
+    from src.app.usecases.goal_finalize import GoalFinalizeUseCase
+    return GoalFinalizeUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        git_workspace=build_git_workspace(),
+        repo_url=app_config.repo_url,
+    )
+
+
+def build_task_graph_orchestrator():
+    from src.app.orchestrator import TaskGraphOrchestrator
+    return TaskGraphOrchestrator(
+        task_repo=build_task_repo(),
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        merge_usecase=build_goal_merge_task_usecase(),
+        cancel_usecase=build_goal_cancel_task_usecase(),
+    )

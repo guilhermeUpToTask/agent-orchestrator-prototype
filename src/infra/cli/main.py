@@ -25,6 +25,7 @@ from src.infra.cli.system.commands  import system_group
 from src.infra.cli.tasks.commands   import tasks_group
 from src.infra.cli.agents.commands  import agents_group
 from src.infra.cli.project.commands import project_group
+from src.infra.cli.goals.commands   import goals_group
 from src.infra.cli.wizard import run_wizard
 
 
@@ -77,6 +78,7 @@ cli.add_command(system_group)
 cli.add_command(tasks_group)
 cli.add_command(agents_group)
 cli.add_command(project_group)
+cli.add_command(goals_group)
 
 
 # ---------------------------------------------------------------------------
