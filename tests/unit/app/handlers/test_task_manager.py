@@ -90,28 +90,30 @@ class TestTaskManagerHandler:
         self.repo.update_if_version.assert_not_called()
 
     def test_assign_version_conflict(self):
+        agent = AgentProps(agent_id="a1", name="A1", capabilities=["c"])
         self.repo.load.side_effect = lambda tid: make_task(tid, TaskStatus.CREATED)
-        self.registry.list_agents.return_value = [AgentProps(agent_id="a1", name="A1", capabilities=["c"])]
-        self.scheduler.select_agent.return_value = MagicMock(agent_id="a1")
-        
+        self.registry.list_agents.return_value = [agent]
+        self.scheduler.select_agent.return_value = agent
+
         # Conflict on first update_if_version
         self.repo.update_if_version.side_effect = [False, True, True]
-        
+
         self.handler.handle_task_created("t1")
-        
+
         assert self.repo.update_if_version.call_count >= 2
 
     def test_handle_task_completed_unblocks_dependent(self):
+        agent = AgentProps(agent_id="a1", name="A1", capabilities=["c"])
         task1 = make_task("t1", TaskStatus.SUCCEEDED)
         task2 = make_task("t2", TaskStatus.CREATED)
         task2.depends_on = ["t1"]
-        
+
         self.repo.list_all.return_value = [task1, task2]
         self.repo.load.return_value = task2
         self.repo.update_if_version.return_value = True
-        self.registry.list_agents.return_value = [AgentProps(agent_id="a1", name="A1", capabilities=["c"])]
-        self.scheduler.select_agent.return_value = MagicMock(agent_id="a1")
-        
+        self.registry.list_agents.return_value = [agent]
+        self.scheduler.select_agent.return_value = agent
+
         self.handler.handle_task_completed("t1")
-        
+
         assert task2.status == TaskStatus.ASSIGNED
