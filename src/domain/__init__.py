@@ -38,9 +38,14 @@ from src.domain.entities.agent import AgentProps
 
 # Aggregates
 from src.domain.aggregates.task import TaskAggregate
+from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 
 # Repositories
 from src.domain.repositories import AgentRegistryPort, TaskRepositoryPort
+from src.domain.repositories.goal_repository import GoalRepositoryPort
+
+# Goal value objects
+from src.domain.value_objects.goal import GoalSpec, GoalTaskDef
 
 # Ports
 from src.domain.ports import (
@@ -74,15 +79,18 @@ __all__ = [
     # errors
     "DomainError", "ForbiddenFileEditError",
     "InvalidStatusTransitionError", "MaxRetriesExceededError",
-    # value objects
+    # value objects — task
     "AgentSelector", "Assignment", "ExecutionSpec",
     "HistoryEntry", "RetryPolicy", "TaskResult",
+    # value objects — goal
+    "GoalSpec", "GoalTaskDef",
     # entities
     "AgentProps",
     # aggregates
     "TaskAggregate",
+    "GoalAggregate", "GoalStatus", "TaskSummary",
     # repositories
-    "AgentRegistryPort", "TaskRepositoryPort",
+    "AgentRegistryPort", "TaskRepositoryPort", "GoalRepositoryPort",
     # ports
     "AgentRuntimePort", "EventPort", "GitWorkspacePort",
     "LeasePort", "SessionHandle", "TaskLogsPort", "TestRunnerPort",
