@@ -75,6 +75,14 @@ class GoalSpec(BaseModel):
     tasks: list[GoalTaskDef]
     version: str = "1"
 
+    # Inter-goal dependency: list of other goal *names* this goal depends on.
+    # Cross-goal reference validation is the planner's responsibility at the
+    # roadmap level — GoalSpec only validates its own internal task DAG.
+    depends_on: list[str] = Field(default_factory=list)
+
+    # Feature grouping tag — passed through to GoalAggregate unchanged.
+    feature_tag: Optional[str] = None
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str) -> str:
@@ -102,6 +110,140 @@ class GoalSpec(BaseModel):
             )
 
         return self
+
+
+class Roadmap(BaseModel):
+    """
+    A validated, ordered set of GoalSpecs that form a coherent plan.
+
+    Roadmap is the output contract of the planning layer — it is to goals
+    what GoalSpec is to tasks.  Construction fails fast if:
+
+      - any goal's depends_on references a name not present in this roadmap
+      - the goal dependency graph contains a cycle
+      - two goals share the same name (would produce the same branch ref)
+
+    Immutable after construction.  Use topological_order() to get goals
+    in a safe dispatch sequence (dependencies before dependents).
+
+    The planner produces a Roadmap; GoalInitUseCase consumes individual
+    GoalSpecs from it.  Nothing else should operate on raw goal lists.
+    """
+
+    goals: list[GoalSpec]
+
+    model_config = {"frozen": True}
+
+    @model_validator(mode="after")
+    def _validate_goal_dag(self) -> "Roadmap":
+        if not self.goals:
+            raise ValueError("A roadmap must contain at least one goal.")
+
+        # Duplicate name check — same name → same branch ref → git collision
+        names: list[str] = [g.name for g in self.goals]
+        seen: set[str] = set()
+        for name in names:
+            if name in seen:
+                raise ValueError(
+                    f"Duplicate goal name '{name}' in roadmap. "
+                    "Each goal must have a unique name."
+                )
+            seen.add(name)
+
+        goal_names: set[str] = set(names)
+
+        # Dangling reference check — every depends_on must resolve
+        for spec in self.goals:
+            unknown = [d for d in spec.depends_on if d not in goal_names]
+            if unknown:
+                raise ValueError(
+                    f"Goal '{spec.name}' depends on {unknown!r} which are "
+                    "not defined in this roadmap."
+                )
+
+        # Cycle check — reuses the same DFS used by GoalSpec for tasks
+        if _has_cycle({g.name: set(g.depends_on) for g in self.goals}):
+            raise ValueError(
+                "Goal dependency graph contains a cycle. "
+                "Check depends_on fields for circular references."
+            )
+
+        # Cross-feature dependency guard.
+        # Goals in different feature groups must not depend on each other
+        # directly — that relationship belongs at the Feature level and will
+        # be expressible once FeatureAggregate is introduced.  Enforcing this
+        # now keeps the flat Roadmap clean and makes the Feature migration
+        # mechanical: each feature_tag group becomes a FeatureSpec, and any
+        # inter-feature ordering is declared between FeatureSpecs, not goals.
+        feature_of: dict[str, str] = {
+            g.name: (g.feature_tag or "") for g in self.goals
+        }
+        for spec in self.goals:
+            for dep in spec.depends_on:
+                if feature_of[dep] != feature_of[spec.name]:
+                    raise ValueError(
+                        f"Goal '{spec.name}' (feature: '{feature_of[spec.name] or 'untagged'}') "
+                        f"depends on '{dep}' (feature: '{feature_of[dep] or 'untagged'}'). "
+                        "Cross-feature goal dependencies are not yet supported. "
+                        "Declare the dependency at the feature level when "
+                        "FeatureAggregate is introduced."
+                    )
+
+        return self
+
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
+    def topological_order(self) -> list[GoalSpec]:
+        """
+        Return goals sorted so every goal appears after all its dependencies.
+
+        Goals with no dependencies come first.  Among goals at the same
+        dependency depth the original declaration order is preserved.
+        Uses Kahn's algorithm — guaranteed O(V+E), no recursion limit risk.
+        """
+        from collections import defaultdict, deque
+
+        in_degree: dict[str, int] = {g.name: 0 for g in self.goals}
+        dependents: dict[str, list[str]] = defaultdict(list)
+
+        for spec in self.goals:
+            for dep in spec.depends_on:
+                in_degree[spec.name] += 1
+                dependents[dep].append(spec.name)
+
+        by_name = {g.name: g for g in self.goals}
+        queue   = deque(n for n, deg in in_degree.items() if deg == 0)
+        result: list[GoalSpec] = []
+
+        while queue:
+            name = queue.popleft()
+            result.append(by_name[name])
+            for dep_name in dependents[name]:
+                in_degree[dep_name] -= 1
+                if in_degree[dep_name] == 0:
+                    queue.append(dep_name)
+
+        return result
+
+    def goals_by_feature(self) -> dict[str, list[GoalSpec]]:
+        """
+        Group goals by feature_tag.  Goals with no tag are grouped under
+        the empty string key.  Useful for display and release gating.
+        """
+        groups: dict[str, list[GoalSpec]] = {}
+        for spec in self.goals:
+            key = spec.feature_tag or ""
+            groups.setdefault(key, []).append(spec)
+        return groups
+
+    def goal_names(self) -> set[str]:
+        """Return the set of all goal names in this roadmap."""
+        return {g.name for g in self.goals}
+
+    def __len__(self) -> int:
+        return len(self.goals)
 
 
 # ---------------------------------------------------------------------------
