@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.orchestrator_config_manager import (
+from src.infra.config_manager import (
     DEFAULTS,
     OrchestratorConfigManager,
 )

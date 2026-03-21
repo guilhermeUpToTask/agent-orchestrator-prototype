@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Type
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
+from src.infra.project_paths import ProjectPaths
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -57,7 +58,6 @@ class LocalJsonConfigSource(PydanticBaseSettingsSource):
 
     Keys understood (mirrors managed keys in OrchestratorConfigManager):
       project_name      → OrchestratorConfig.project_name
-      source_repo_url   → OrchestratorConfig.source_repo_url
       redis_url         → OrchestratorConfig.redis_url
     """
 
@@ -171,13 +171,13 @@ class OrchestratorConfig(BaseSettings):
         None,
         validation_alias=AliasChoices("REPO_URL", "repo_url"),
     )
-    # Optional upstream to clone into repo_url on first init.
-    # If set: git clone source_repo_url → project_home/repo (once)
-    # If not set: git init project_home/repo (new empty repo)
+    # Deprecated: source_repo_url has moved to ProjectSettings (project.json).
+    # This field is kept ONLY to support SOURCE_REPO_URL env-var overrides.
+    # The factory reads ProjectSettings first and falls back to this field.
     source_repo_url: Optional[str] = Field(
         None,
         validation_alias=AliasChoices("SOURCE_REPO_URL", "source_repo_url"),
-        description="Upstream repo to clone into the local project repo on first init.",
+        description="Deprecated: use ProjectSettings (project.json). Kept for SOURCE_REPO_URL env-var compat.",
     )
     workspace_dir: Optional[Path] = Field(
         None,
@@ -221,31 +221,42 @@ class OrchestratorConfig(BaseSettings):
     @model_validator(mode="after")
     def _resolve_derived_paths(self) -> "OrchestratorConfig":
         """
-        Derive all paths from orchestrator_home/projects/project_name.
-        Any field set explicitly (via env var or constructor) is left as-is.
+        Derive all paths by delegating to ProjectPaths.
+        Any field set explicitly (via env var or constructor) is left as-is —
+        overrides still work for power users and tests.
         """
-        project_home = self.orchestrator_home / "projects" / self.project_name
+        paths = ProjectPaths.for_project(self.orchestrator_home, self.project_name)
 
         if self.tasks_dir is None:
-            self.tasks_dir = project_home / "tasks"
+            self.tasks_dir = paths.tasks_dir
         if self.registry_path is None:
-            self.registry_path = project_home / "agents" / "registry.json"
+            self.registry_path = paths.registry_path
         if self.repo_url is None:
-            self.repo_url = f"file://{project_home / 'repo'}"
+            self.repo_url = paths.repo_url
         if self.workspace_dir is None:
-            self.workspace_dir = project_home / "workspaces"
+            self.workspace_dir = paths.workspace_dir
         if self.logs_dir is None:
-            self.logs_dir = project_home / "logs"
+            self.logs_dir = paths.logs_dir
         if self.events_dir is None:
-            self.events_dir = project_home / "events"
+            self.events_dir = paths.events_dir
         if self.goals_dir is None:
-            self.goals_dir = project_home / "goals"
+            self.goals_dir = paths.goals_dir
         return self
 
     @property
     def project_home(self) -> Path:
         """Convenience accessor for the active project directory."""
         return self.orchestrator_home / "projects" / self.project_name
+
+    @property
+    def paths(self) -> ProjectPaths:
+        """
+        The fully-resolved ProjectPaths for the active project.
+
+        Prefer this over accessing individual path fields directly — it makes
+        clear that these paths belong to the project, not the orchestrator.
+        """
+        return ProjectPaths.for_project(self.orchestrator_home, self.project_name)
 
     @property
     def home_dir(self) -> str:

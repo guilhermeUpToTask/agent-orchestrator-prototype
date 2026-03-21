@@ -12,10 +12,11 @@ Priority order for OrchestratorConfig resolution:
   4. .orchestrator/config.json              ← this module owns this layer
   5. Field defaults                          (lowest)
 
-Keys stored in config.json:
+Keys stored in config.json (orchestrator-global, per-machine):
   project_name      — active project context
-  source_repo_url   — upstream repo to clone on first project init
   redis_url         — Redis connection string
+
+Note: source_repo_url has moved to project.json (ProjectSettings).
 """
 
 from __future__ import annotations
@@ -28,11 +29,10 @@ ORCHESTRATOR_DIR = ".orchestrator"
 CONFIG_FILENAME = "config.json"
 
 # Keys managed by the wizard — any extras written by users are preserved.
-MANAGED_KEYS = {"project_name", "source_repo_url", "redis_url"}
+MANAGED_KEYS = {"project_name", "redis_url"}
 
 DEFAULTS: dict[str, Any] = {
     "project_name": "default",
-    "source_repo_url": None,
     "redis_url": "redis://localhost:6379/0",
 }
 
