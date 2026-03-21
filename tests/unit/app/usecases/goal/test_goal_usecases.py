@@ -354,8 +354,8 @@ class TestGoalMergeTaskUseCase:
         )
         uc.execute("t1")
 
-        assert goal_repo.load("goal-solo").status == GoalStatus.COMPLETED
-        assert any(e.type == "goal.completed" for e in events.all_events)
+        assert goal_repo.load("goal-solo").status == GoalStatus.READY_FOR_REVIEW
+        assert any(e.type == "goal.ready_for_review" for e in events.all_events)
 
     def test_no_op_for_task_without_goal(self):
         uc, _, _, _, git = self._build()
@@ -442,7 +442,7 @@ class TestGoalCancelTaskUseCase:
 # ===========================================================================
 
 class TestGoalFinalizeUseCase:
-    def _build(self, status=GoalStatus.COMPLETED):
+    def _build(self, status=GoalStatus.APPROVED):
         from src.app.usecases.goal_finalize import GoalFinalizeUseCase
 
         goal_repo = InMemoryGoalRepo()
@@ -457,8 +457,12 @@ class TestGoalFinalizeUseCase:
             ],
         )
         goal.start()
-        if status == GoalStatus.COMPLETED:
+        if status == GoalStatus.APPROVED:
             goal.record_task_merged("t1")
+            goal.open_pr(1, "http://url", "sha")
+            goal.sync_pr_state(pr_status="open", checks_passed=True, approved=True,
+                               head_sha="sha", approval_count=1)
+            goal.advance_from_pr_state()
         elif status == GoalStatus.FAILED:
             goal.record_task_canceled("t1", "reason")
         goal_repo.save(goal)
@@ -466,22 +470,22 @@ class TestGoalFinalizeUseCase:
         uc = GoalFinalizeUseCase(
             goal_repo=goal_repo,
             event_port=events,
-            git_workspace=git,
-            repo_url="file:///",
         )
         return uc, goal_repo, events, git
 
-    def test_merges_goal_branch_to_main(self):
-        uc, *_, git = self._build()
+    def test_records_finalization_in_history(self):
+        uc, goal_repo, *_ = self._build()
         uc.execute("goal-fin")
-        assert len(git.merges) == 1
-        assert git.merges[0]["goal_branch"] == "main"
-        assert git.merges[0]["task_branch"] == "goal/ready-goal"
+        goal = goal_repo.load("goal-fin")
+        events = [h.event for h in goal.history]
+        assert "goal.finalized" in events
 
-    def test_returns_commit_sha(self):
+    def test_returns_summary_dict(self):
         uc, *_ = self._build()
-        sha = uc.execute("goal-fin")
-        assert sha == "abc123def456"
+        result = uc.execute("goal-fin")
+        assert isinstance(result, dict)
+        assert result["goal_id"] == "goal-fin"
+        assert "pr_number" in result
 
     def test_emits_goal_finalized_event(self):
         uc, _, events, _ = self._build()
@@ -490,7 +494,7 @@ class TestGoalFinalizeUseCase:
 
     def test_raises_if_not_completed(self):
         uc, *_ = self._build(status=GoalStatus.FAILED)
-        with pytest.raises(ValueError, match="failed"):
+        with pytest.raises(ValueError):
             uc.execute("goal-fin")
 
     def test_raises_if_goal_not_found(self):
