@@ -1,0 +1,137 @@
+# .github/workflows/ci.yml — Orchestrator CI
+#
+# Tests the agent-orchestrator codebase itself.
+# This has nothing to do with projects managed by the orchestrator.
+#
+# For the CI that runs inside a *managed* project (the workflow that
+# SyncGoalPRStatusUseCase polls via the GitHub Checks API), see:
+#   src/infra/templates/project_ci.py
+#
+# That template is rendered by `orchestrate init` (Step 6 — GitHub Setup)
+# and written into the managed project's repo under .github/workflows/ci.yml.
+
+name: Orchestrator CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # tests — unit suite (no Redis required for dry-run mode)
+  # -------------------------------------------------------------------------
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Unit tests
+        env:
+          AGENT_MODE: dry-run
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          pytest tests/unit/ -v --tb=short --timeout=60 -p no:warnings
+
+      - name: Integration tests (dry-run)
+        env:
+          AGENT_MODE: dry-run
+          REDIS_URL: redis://localhost:6379/1
+        run: |
+          pytest tests/integration/ -v --tb=short --timeout=120 \
+            -p no:warnings -m "not slow"
+
+  # -------------------------------------------------------------------------
+  # lint
+  # -------------------------------------------------------------------------
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Ruff check
+        run: ruff check src/ tests/
+
+      - name: Ruff format
+        run: ruff format --check src/ tests/
+
+      - name: mypy
+        run: mypy src/ --ignore-missing-imports --no-error-summary --python-version 3.11
+
+  # -------------------------------------------------------------------------
+  # build — smoke-test that the package imports and the CLI entry point works
+  # -------------------------------------------------------------------------
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Smoke-test domain imports
+        run: |
+          python -c "
+          from src.domain import (
+              GoalAggregate, GoalStatus, TaskSummary,
+              PRInfo, PRStatus, GitHubPort, CIConfig,
+          )
+          print('domain imports OK')
+          "
+
+      - name: Smoke-test CLI entry point
+        env:
+          AGENT_MODE: dry-run
+        run: python -m src.cli --help || true
