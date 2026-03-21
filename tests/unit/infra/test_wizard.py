@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from src.infra.config_manager import OrchestratorConfigManager
+from src.infra.project_settings import ProjectSettingsManager
 from src.infra.cli.wizard import run_wizard
 from src.infra.cli.wizard.steps.deps     import check_and_report     as _check_and_report
 from src.infra.cli.wizard.steps.config   import collect_project_config as _collect_project_config
@@ -130,11 +131,13 @@ def test_interactive_register_agent(monkeypatch):
 
 
 def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
+    # Step 1: project_name, redis_url  (orchestrator-global)
+    # Step 3: source_repo_url          (project-scoped, now in project.json)
     prompts = iter(
         [
-            "my-project",  # project name
-            "https://github.com/x",  # source_repo_url
-            "redis://localhost:6379",  # redis_url
+            "my-project",             # step 1 — project name
+            "redis://localhost:6379",  # step 1 — redis URL
+            "https://github.com/x",   # step 3 — source_repo_url (project settings)
         ]
     )
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
@@ -145,17 +148,29 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
         result = run_wizard(
             cwd=tmp_path,
             registry_factory=lambda: _make_registry(),
+            skip_spec=True,
         )
 
     assert result is True
+
+    # Orchestrator config → .orchestrator/config.json (no source_repo_url)
+    from src.infra.config import OrchestratorConfig
+    orch_cfg = OrchestratorConfig(project_name="my-project")
     mgr = OrchestratorConfigManager(cwd=tmp_path)
     data = mgr.load()
     assert data["project_name"] == "my-project"
-    assert data["source_repo_url"] == "https://github.com/x"
+    assert "source_repo_url" not in data  # moved to project.json
+
+    # Project settings → ~/.orchestrator/projects/my-project/project.json
+    project_home = orch_cfg.orchestrator_home / "projects" / "my-project"
+    ps_manager = ProjectSettingsManager(project_home)
+    settings = ps_manager.load()
+    assert settings.source_repo_url == "https://github.com/x"
 
 
 def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
-    prompts = iter(["proj", "", "redis://x:6379"])
+    # Only step 1 prompts run before dep check: project_name + redis_url
+    prompts = iter(["proj", "redis://x:6379"])
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
 
     with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
@@ -163,6 +178,7 @@ def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
         result = run_wizard(
             cwd=tmp_path,
             registry_factory=lambda: _make_registry(),
+            skip_spec=True,
         )
 
     assert result is False
@@ -171,11 +187,9 @@ def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
 
 
 def test_run_wizard_pre_fills_existing_config(tmp_path, monkeypatch):
-    # Write an existing config
+    # Write an existing orchestrator config (no source_repo_url — that's in project.json now)
     mgr = OrchestratorConfigManager(cwd=tmp_path)
-    mgr.save(
-        {"project_name": "existing", "redis_url": "redis://old:6379/0", "source_repo_url": None}
-    )
+    mgr.save({"project_name": "existing", "redis_url": "redis://old:6379/0"})
 
     captured_defaults = {}
 
@@ -188,6 +202,6 @@ def test_run_wizard_pre_fills_existing_config(tmp_path, monkeypatch):
 
     with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
         MockChecker.return_value.run.return_value = _make_report()
-        run_wizard(cwd=tmp_path, registry_factory=lambda: _make_registry())
+        run_wizard(cwd=tmp_path, registry_factory=lambda: _make_registry(), skip_spec=True)
 
     assert "existing" in captured_defaults.values()

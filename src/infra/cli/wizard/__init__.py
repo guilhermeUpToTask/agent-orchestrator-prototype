@@ -1,14 +1,12 @@
 """
 src/infra/cli/wizard/ — Interactive setup wizard.
 
-Public entry point:
-    from src.infra.cli.wizard import run_wizard
-    success = run_wizard()
-
 Steps:
-    steps/config.py   — collect project_name, redis_url, source_repo_url
-    steps/deps.py     — verify redis, git, at least one runtime
-    steps/registry.py — inspect registry, optionally register first agent
+  1. Orchestrator config  — project_name, redis_url  → .orchestrator/config.json
+  2. Dependency check     — redis, git, runtimes
+  3. Project settings     — source_repo_url          → projects/<n>/project.json
+  4. Project spec         — tech stack, constraints  → projects/<n>/project_spec.yaml
+  5. Agent registry       — register first agent (optional)
 """
 from __future__ import annotations
 
@@ -17,9 +15,10 @@ from typing import Callable
 
 import click
 
-from src.infra.cli.wizard.steps.config   import collect_project_config
+from src.infra.cli.wizard.steps.config   import collect_orchestrator_config, collect_project_settings
 from src.infra.cli.wizard.steps.deps     import check_and_report
 from src.infra.cli.wizard.steps.registry import setup_registry
+from src.infra.cli.wizard.steps.spec     import collect_and_write_spec
 from src.infra.config_manager import OrchestratorConfigManager
 
 
@@ -27,31 +26,80 @@ def run_wizard(
     cwd: Path | None = None,
     *,
     registry_factory: Callable | None = None,
+    skip_spec: bool = False,
 ) -> bool:
     """
     Run the interactive setup wizard.
+
     Returns True on success, False on failure/abort.
     """
+    total_steps = 5 if not skip_spec else 4
     manager = OrchestratorConfigManager(cwd)
 
     _print_banner()
 
-    click.echo(_section("Step 1 of 3 — Project Configuration"))
-    config_data = collect_project_config(manager)
+    # ------------------------------------------------------------------
+    # Step 1 — Orchestrator configuration (global, per-machine)
+    # ------------------------------------------------------------------
+    click.echo(_section(f"Step 1 of {total_steps} — Orchestrator Configuration"))
+    click.echo("  These settings apply to this machine, not just this project.\n")
+    orch_data = collect_orchestrator_config(manager)
     click.echo()
 
-    click.echo(_section("Step 2 of 3 — Dependency Check"))
-    if not check_and_report(config_data["redis_url"]):
-        click.echo("\n✗  Fix the issues above then re-run:  orchestrator init\n", err=True)
+    # ------------------------------------------------------------------
+    # Step 2 — Dependency check
+    # ------------------------------------------------------------------
+    click.echo(_section(f"Step 2 of {total_steps} — Dependency Check"))
+    if not check_and_report(orch_data["redis_url"]):
+        click.echo(
+            "\n✗  Fix the issues above then re-run:  orchestrate init\n",
+            err=True,
+        )
         return False
 
-    manager.save(config_data)
-    click.echo(f"\n  ✓ Config written → {manager.config_path}")
+    # Persist orchestrator config before continuing
+    manager.save(orch_data)
+    click.echo(f"\n  ✓ Orchestrator config written → {manager.config_path}")
 
-    click.echo(_section("Step 3 of 3 — Agent Registry"))
-    setup_registry(config_data, registry_factory)
+    # ------------------------------------------------------------------
+    # Step 3 — Project settings (per-project operational config)
+    # ------------------------------------------------------------------
+    click.echo(_section(f"Step 3 of {total_steps} — Project Settings"))
+    click.echo("  These settings belong to this project, not the machine.\n")
 
-    click.echo("\n✓  Setup complete!  Run:  orchestrator start\n")
+    from src.infra.config import OrchestratorConfig
+    orch_cfg = OrchestratorConfig(**orch_data)   # ephemeral — just for path resolution
+    project_settings_data = collect_project_settings(
+        project_name=orch_data["project_name"],
+        orchestrator_home=orch_cfg.orchestrator_home,
+    )
+
+    # Persist project settings
+    from src.infra.project_settings import ProjectSettings, ProjectSettingsManager
+    project_home = orch_cfg.orchestrator_home / "projects" / orch_data["project_name"]
+    ps_manager = ProjectSettingsManager(project_home)
+    ps_manager.save(ProjectSettings(**project_settings_data))
+    click.echo(f"  ✓ Project settings written → {ps_manager.settings_path}")
+
+    # ------------------------------------------------------------------
+    # Step 4 — Project spec (domain/architecture constraints)
+    # ------------------------------------------------------------------
+    if not skip_spec:
+        click.echo(_section(f"Step 4 of {total_steps} — Project Specification"))
+        spec_ok = collect_and_write_spec({"project_name": orch_data["project_name"]})
+        if not spec_ok:
+            click.echo(
+                "\n⚠  Project spec was not written. "
+                "Run  orchestrate spec init  to create it later.\n"
+            )
+
+    # ------------------------------------------------------------------
+    # Step 5 — Agent registry
+    # ------------------------------------------------------------------
+    click.echo(_section(f"Step {total_steps} of {total_steps} — Agent Registry"))
+    setup_registry(orch_data, registry_factory)
+
+    click.echo("\n✓  Setup complete!  Run:  orchestrate system start\n")
     return True
 
 
