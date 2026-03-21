@@ -160,18 +160,7 @@ def build_worker_handler() -> WorkerHandler:
     )
 
 
-def build_reconciler(
-    interval_seconds: int = 60,
-    stuck_task_min_age_seconds: int = 120,
-) -> Reconciler:
-    return Reconciler(
-        task_repo=build_task_repo(),
-        lease_port=build_lease_port(),
-        event_port=build_event_port(),
-        agent_registry=build_agent_registry(),
-        interval_seconds=interval_seconds,
-        stuck_task_min_age_seconds=stuck_task_min_age_seconds,
-    )
+# build_reconciler moved to GitHub integration section below
 
 def build_task_retry_usecase():
     from src.app.usecases.task_retry import TaskRetryUseCase
@@ -292,17 +281,11 @@ def build_goal_cancel_task_usecase():
     )
 
 
-def build_goal_finalize_usecase():
-    from src.app.usecases.goal_finalize import GoalFinalizeUseCase
-    return GoalFinalizeUseCase(
-        goal_repo=build_goal_repo(),
-        event_port=build_event_port(),
-        git_workspace=build_git_workspace(),
-        repo_url=app_config.repo_url,
-    )
+# build_goal_finalize_usecase moved to GitHub integration section below
 
 
 def build_task_graph_orchestrator():
+    """Original orchestrator without PR integration (used in tests)."""
     from src.app.orchestrator import TaskGraphOrchestrator
     return TaskGraphOrchestrator(
         task_repo=build_task_repo(),
@@ -312,6 +295,7 @@ def build_task_graph_orchestrator():
         cancel_usecase=build_goal_cancel_task_usecase(),
         spec_repo=build_spec_repo(),
         project_name=app_config.project_name,
+        create_pr_usecase=None,
     )
 
 
@@ -345,3 +329,124 @@ def build_validate_against_spec():
 def build_propose_spec_change():
     from src.app.usecases.propose_spec_change import ProposeSpecChange
     return ProposeSpecChange(spec_repo=build_spec_repo())
+
+
+# ---------------------------------------------------------------------------
+# GitHub / PR integration layer
+# ---------------------------------------------------------------------------
+
+def build_github_client():
+    """
+    Return a GitHubPort adapter.
+
+    Priority order for credentials:
+      1. StubGitHubClient in dry-run mode.
+      2. project.json (github_token / github_owner / github_repo) — written by
+         `orchestrate init` Step 6 (GitHub Setup wizard step).
+      3. Environment variables GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO —
+         for CI pipelines and teams that prefer env-based config.
+      4. StubGitHubClient with a warning if nothing is configured.
+    """
+    import os
+    if app_config.mode == "dry-run":
+        from src.infra.github.client import StubGitHubClient
+        return StubGitHubClient()
+
+    from src.infra.github.client import GitHubClient
+
+    settings = build_project_settings()
+
+    # Prefer project.json values; fall back to env vars
+    token = settings.github_token        or os.environ.get("GITHUB_TOKEN", "")
+    owner = settings.github_owner        or os.environ.get("GITHUB_OWNER", "")
+    repo  = settings.github_repo         or os.environ.get("GITHUB_REPO", "")
+    base  = settings.github_base_branch
+
+    if not all([token, owner, repo]):
+        log.warning(
+            "factory.github_not_configured",
+            hint=(
+                "Run `orchestrate init` (Step 6 — GitHub Setup) or set "
+                "GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO to enable GitHub integration."
+            ),
+        )
+        from src.infra.github.client import StubGitHubClient
+        return StubGitHubClient()
+
+    return GitHubClient(token=token, owner=owner, repo=repo)
+
+
+def build_create_goal_pr_usecase(base_branch: str = "main"):
+    from src.app.usecases.create_goal_pr import CreateGoalPRUseCase
+    return CreateGoalPRUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        github=build_github_client(),
+        base_branch=base_branch,
+    )
+
+
+def build_sync_goal_pr_usecase():
+    from src.app.usecases.sync_goal_pr_status import SyncGoalPRStatusUseCase
+    spec = None
+    try:
+        spec = build_load_project_spec().execute(app_config.project_name)
+    except Exception:
+        pass  # spec not configured — CI gate will be disabled
+    return SyncGoalPRStatusUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        github=build_github_client(),
+        spec=spec,
+    )
+
+
+def build_advance_goal_from_pr_usecase():
+    from src.app.usecases.advance_goal_from_pr import AdvanceGoalFromPRUseCase
+    return AdvanceGoalFromPRUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+    )
+
+
+def build_reconciler(
+    interval_seconds: int = 60,
+    stuck_task_min_age_seconds: int = 120,
+) -> "Reconciler":
+    return Reconciler(
+        task_repo=build_task_repo(),
+        lease_port=build_lease_port(),
+        event_port=build_event_port(),
+        agent_registry=build_agent_registry(),
+        interval_seconds=interval_seconds,
+        stuck_task_min_age_seconds=stuck_task_min_age_seconds,
+        goal_repo=build_goal_repo(),
+        sync_pr_usecase=build_sync_goal_pr_usecase(),
+        advance_pr_usecase=build_advance_goal_from_pr_usecase(),
+    )
+
+
+def build_task_graph_orchestrator_with_pr():
+    """
+    Full orchestrator with GitHub PR integration enabled.
+    Use build_task_graph_orchestrator() for the original no-PR version (tests).
+    """
+    from src.app.orchestrator import TaskGraphOrchestrator
+    return TaskGraphOrchestrator(
+        task_repo=build_task_repo(),
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        merge_usecase=build_goal_merge_task_usecase(),
+        cancel_usecase=build_goal_cancel_task_usecase(),
+        spec_repo=build_spec_repo(),
+        project_name=app_config.project_name,
+        create_pr_usecase=build_create_goal_pr_usecase(),
+    )
+
+
+def build_goal_finalize_usecase():
+    from src.app.usecases.goal_finalize import GoalFinalizeUseCase
+    return GoalFinalizeUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+    )

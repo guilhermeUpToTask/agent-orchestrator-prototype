@@ -17,6 +17,7 @@ import click
 
 from src.infra.cli.wizard.steps.config   import collect_orchestrator_config, collect_project_settings
 from src.infra.cli.wizard.steps.deps     import check_and_report
+from src.infra.cli.wizard.steps.github   import collect_and_setup_github
 from src.infra.cli.wizard.steps.registry import setup_registry
 from src.infra.cli.wizard.steps.spec     import collect_and_write_spec
 from src.infra.config_manager import OrchestratorConfigManager
@@ -27,13 +28,21 @@ def run_wizard(
     *,
     registry_factory: Callable | None = None,
     skip_spec: bool = False,
+    github_only: bool = False,
 ) -> bool:
     """
     Run the interactive setup wizard.
 
+    Parameters
+    ----------
+    skip_spec    : Skip the ProjectSpec step (Step 4).
+    github_only  : Re-run only Step 6 (GitHub Setup). Useful when adding
+                   GitHub integration to an existing project, or after
+                   updating ci.required_checks in the spec.
+
     Returns True on success, False on failure/abort.
     """
-    total_steps = 5 if not skip_spec else 4
+    total_steps = 6 if not skip_spec else 5
     manager = OrchestratorConfigManager(cwd)
 
     _print_banner()
@@ -96,8 +105,18 @@ def run_wizard(
     # ------------------------------------------------------------------
     # Step 5 — Agent registry
     # ------------------------------------------------------------------
-    click.echo(_section(f"Step {total_steps} of {total_steps} — Agent Registry"))
+    click.echo(_section(f"Step 5 of {total_steps} — Agent Registry"))
     setup_registry(orch_data, registry_factory)
+
+    # ------------------------------------------------------------------
+    # Step 6 — GitHub integration + project CI template
+    # ------------------------------------------------------------------
+    if not skip_spec:
+        click.echo(_section(f"Step 6 of {total_steps} — GitHub Setup"))
+        collect_and_setup_github({
+            "project_name":    orch_data["project_name"],
+            "orchestrator_home": str(orch_cfg.orchestrator_home),
+        })
 
     click.echo("\n✓  Setup complete!  Run:  orchestrate system start\n")
     return True
