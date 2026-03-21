@@ -32,8 +32,6 @@ import structlog
 
 from src.domain import DomainEvent, EventPort, GoalStatus
 from src.domain.repositories.goal_repository import GoalRepositoryPort
-from src.domain.value_objects.task import HistoryEntry
-from datetime import datetime, timezone
 
 log = structlog.get_logger(__name__)
 
@@ -97,19 +95,7 @@ class GoalFinalizeUseCase:
             total_tasks=total,
         )
 
-        # Record in goal history
-        goal.history.append(HistoryEntry(
-            event="goal.finalized",
-            actor="operator",
-            detail={
-                "pr_number": goal.pr_number,
-                "pr_status": goal.pr_status,
-                "pr_head_sha": goal.pr_head_sha,
-                "goal_status": goal.status.value,
-            },
-        ))
-        goal.state_version += 1
-        goal.updated_at = datetime.now(timezone.utc)
+        goal.finalize()
         self._goal_repo.save(goal)
 
         self._events.publish(DomainEvent(

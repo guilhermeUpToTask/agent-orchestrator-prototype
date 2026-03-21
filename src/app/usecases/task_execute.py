@@ -35,7 +35,7 @@ from src.domain import (
     AgentRegistryPort, AgentRuntimePort, EventPort, GitWorkspacePort,
     LeasePort, TaskLogsPort, TaskRepositoryPort, TestRunnerPort,
 )
-from src.infra.redis_adapters.lease_refresher import LeaseRefresher  # infra dep injected via port
+from src.domain.ports.lease import LeaseRefresherFactory, LeaseRefresherPort
 
 log = structlog.get_logger(__name__)
 
@@ -67,6 +67,7 @@ class TaskExecuteUseCase:
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         logs_port: TaskLogsPort,
         test_runner: TestRunnerPort,
+        lease_refresher_factory: LeaseRefresherFactory,
         task_timeout_seconds: int = 600,
     ) -> None:
         self._repo_url = repo_url
@@ -78,6 +79,7 @@ class TaskExecuteUseCase:
         self._runtime_factory = runtime_factory
         self._logs = logs_port
         self._tests = test_runner
+        self._lease_refresher_factory = lease_refresher_factory
         self._timeout = task_timeout_seconds
 
     # ------------------------------------------------------------------
@@ -110,7 +112,7 @@ class TaskExecuteUseCase:
 
         ws_path: str | None = None
         session = None
-        lease_refresher: LeaseRefresher | None = None
+        lease_refresher: LeaseRefresherPort | None = None
 
         try:
             ws_path, branch = self._prepare_workspace(task_id)
@@ -123,9 +125,8 @@ class TaskExecuteUseCase:
             ))
 
             if lease_token:
-                lease_refresher = LeaseRefresher(
-                    lease_port=self._lease,
-                    lease_token=lease_token,
+                lease_refresher = self._lease_refresher_factory(
+                    self._lease, lease_token
                 )
                 lease_refresher.start()
 

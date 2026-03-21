@@ -94,6 +94,23 @@ class GoalInitUseCase:
                 "Use reset + init to restart it."
             )
 
+        # Validate cross-goal depends_on references exist in the repository.
+        # GoalSpec only validates its own internal task DAG; cross-goal refs
+        # are validated by Roadmap when goals are planned together. When
+        # GoalInitUseCase is called directly (e.g. ad-hoc goal creation), we
+        # must still catch dangling refs here so they don't produce permanently
+        # blocked goals with no error message.
+        if spec.depends_on:
+            existing_names = {g.name for g in existing}
+            unknown_deps = [d for d in spec.depends_on if d not in existing_names]
+            if unknown_deps:
+                raise ValueError(
+                    f"Goal '{spec.name}' depends on {unknown_deps!r} which do "
+                    "not exist in the goal repository. Create prerequisite goals "
+                    "first, or use the planning layer to dispatch a full Roadmap "
+                    "which validates all cross-goal references before dispatch."
+                )
+
         # ------------------------------------------------------------------
         # 2. Build TaskSummary stubs and create GoalAggregate
         # ------------------------------------------------------------------
@@ -113,6 +130,8 @@ class GoalInitUseCase:
             description=spec.description,
             task_summaries=task_summaries,
             goal_id=goal_id,
+            depends_on=spec.depends_on,
+            feature_tag=spec.feature_tag,
         )
 
         # ------------------------------------------------------------------

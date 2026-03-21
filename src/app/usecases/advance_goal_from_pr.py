@@ -39,15 +39,20 @@ MAX_CAS_RETRIES = 5
 class AdvanceGoalFromPRUseCase:
     """
     Apply eligible PR-driven state transitions and emit the resulting events.
+
+    When a goal transitions to MERGED, optionally triggers UnblockGoalsUseCase
+    to start any dependent goals whose prerequisites are now all satisfied.
     """
 
     def __init__(
         self,
         goal_repo: GoalRepositoryPort,
         event_port: EventPort,
+        unblock_goals_usecase=None,   # UnblockGoalsUseCase | None
     ) -> None:
         self._goal_repo = goal_repo
         self._events    = event_port
+        self._unblock   = unblock_goals_usecase
 
     def execute(self, goal_id: str) -> GoalStatus | None:
         """
@@ -90,6 +95,10 @@ class AdvanceGoalFromPRUseCase:
                     from_status=status_before.value,
                     to_status=new_status.value,
                 )
+                # When a goal reaches MERGED, release any dependent goals
+                # whose prerequisites are now fully satisfied.
+                if new_status == GoalStatus.MERGED and self._unblock:
+                    self._unblock.execute(goal_id)
                 return new_status
 
             log.warning(
