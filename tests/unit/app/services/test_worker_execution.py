@@ -1,13 +1,9 @@
 """
 tests/unit/app/services/test_worker_execution.py — TaskExecuteUseCase tests.
-
-The execution pipeline was moved from WorkerExecutionService (Phase 2)
-into TaskExecuteUseCase (Phase 7). This file imports from both paths:
-the new canonical location and the backward-compat re-export in services/.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, ANY
 
 import pytest
 
@@ -42,6 +38,8 @@ def _make_task(
 
 
 def _make_service(**overrides) -> WorkerExecutionService:
+    # Default lease_refresher_factory returns a mock handle with start/stop.
+    mock_refresher = MagicMock()
     defaults = dict(
         repo_url="git://repo",
         task_repo=MagicMock(),
@@ -52,6 +50,7 @@ def _make_service(**overrides) -> WorkerExecutionService:
         runtime_factory=MagicMock(),
         logs_port=MagicMock(),
         test_runner=MagicMock(),
+        lease_refresher_factory=MagicMock(return_value=mock_refresher),
     )
     defaults.update(overrides)
     return WorkerExecutionService(**defaults)
@@ -63,8 +62,7 @@ class TestWorkerExecutionService:
     # Happy path
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_execute_success(self, mock_refresher_cls):
+    def test_execute_success(self):
         task = _make_task()
         svc = _make_service()
 
@@ -91,8 +89,7 @@ class TestWorkerExecutionService:
     # Agent failure → task.failed
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_execute_agent_failure(self, mock_refresher_cls):
+    def test_execute_agent_failure(self):
         task = _make_task()
         svc = _make_service()
 
@@ -116,8 +113,8 @@ class TestWorkerExecutionService:
     # Forbidden file edit → task.failed
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_execute_forbidden_edit(self, mock_refresher_cls):
+    def test_execute_forbidden_edit(self):
+        from unittest.mock import patch
         task = _make_task()
         task.execution = ExecutionSpec(type="code", files_allowed_to_modify=["ok.py"])
         svc = _make_service()
@@ -147,8 +144,7 @@ class TestWorkerExecutionService:
     # CAS retry on start()
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_start_cas_retry(self, mock_refresher_cls):
+    def test_start_cas_retry(self):
         tasks_returned = []
 
         def _load(tid):
@@ -158,7 +154,6 @@ class TestWorkerExecutionService:
 
         svc = _make_service()
         svc._task_repo.load.side_effect = _load
-        # First update_if_version (start CAS) fails once, then succeeds
         svc._task_repo.update_if_version.side_effect = [False, True, True]
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
@@ -176,14 +171,10 @@ class TestWorkerExecutionService:
         assert tasks_returned[-1].status == TaskStatus.SUCCEEDED
 
     # ------------------------------------------------------------------
-    # Wrong agent → assignment validation raises before try/except block
-    # This is intentional: wrong-agent is a programming error, not a task
-    # failure. The task should NOT be transitioned to FAILED so the correct
-    # agent can still process it. The error propagates to the event loop.
+    # Wrong agent → raises before try/except block
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_wrong_agent_raises(self, mock_refresher_cls):
+    def test_wrong_agent_raises(self):
         task = _make_task(agent_id="other-agent")
         svc = _make_service()
         svc._task_repo.load.return_value = task
@@ -191,17 +182,14 @@ class TestWorkerExecutionService:
         with pytest.raises(RuntimeError, match="not this worker"):
             svc.execute("t-001", "p-001", "worker-1")
 
-        # Task must remain ASSIGNED so the correct agent can still pick it up
         assert task.status == TaskStatus.ASSIGNED
-        # No failure event should be emitted
         svc._events.publish.assert_not_called()
 
     # ------------------------------------------------------------------
     # Workspace is always cleaned up even on error
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_workspace_cleanup_on_exception(self, mock_refresher_cls):
+    def test_workspace_cleanup_on_exception(self):
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
@@ -223,17 +211,9 @@ class TestWorkerExecutionService:
     # _start_task_with_retry — status changed under us during CAS
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_start_raises_when_task_status_changes_during_cas(self, mock_refresher_cls):
-        """
-        execute() loads the task once for _validate_assignment (call 1: ASSIGNED, passes).
-        _start_task_with_retry() reloads inside its CAS loop (call 2+).
-        If the reloaded task is no longer ASSIGNED (worker raced us to SUCCEEDED),
-        a RuntimeError is raised — the execute() except block logs it and calls
-        _handle_failure with the original ASSIGNED task object.
-        """
-        assigned_initial = _make_task()   # first load: passes _validate_assignment
-        succeeded_reload = _make_task()   # second load inside CAS loop: status changed
+    def test_start_raises_when_task_status_changes_during_cas(self):
+        assigned_initial = _make_task()
+        succeeded_reload = _make_task()
         succeeded_reload.status = TaskStatus.SUCCEEDED
 
         svc = _make_service()
@@ -248,40 +228,23 @@ class TestWorkerExecutionService:
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
         svc._git.create_workspace.return_value = "/tmp/ws"
 
-        # RuntimeError from _start_task_with_retry is caught by the generic
-        # except handler in execute(), so execute() itself does NOT re-raise —
-        # it calls _handle_failure and then returns normally.
         svc.execute("t-001", "p-001", "worker-1")
 
-        # The CAS write inside _start_task_with_retry must not have succeeded
-        # (no successful IN_PROGRESS write), so update_if_version is not called.
-        # The failure handler may call it; but no task.started event must exist.
         started_events = [
             c for c in svc._events.publish.call_args_list
             if c[0][0].type == "task.started"
         ]
         assert started_events == []
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_start_raises_after_max_cas_retries_exhausted(self, mock_refresher_cls):
-        """
-        If update_if_version keeps conflicting through all MAX_UPDATE_RETRIES
-        attempts in _start_task_with_retry, a RuntimeError propagates to the
-        generic except handler, which marks the task FAILED.
-        """
+    def test_start_raises_after_max_cas_retries_exhausted(self):
         svc = _make_service()
-        # Every load returns a fresh ASSIGNED task (status never changes)
         svc._task_repo.load.side_effect = lambda tid: _make_task(task_id=tid)
-        # CAS writes always conflict
         svc._task_repo.update_if_version.return_value = False
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
         svc._git.create_workspace.return_value = "/tmp/ws"
 
-        # execute() catches the RuntimeError from _start_task_with_retry and
-        # calls _handle_failure — so execute() itself returns normally.
         svc.execute("t-001", "p-001", "worker-1")
 
-        # A task.failed event must have been published
         failed_events = [
             c for c in svc._events.publish.call_args_list
             if c[0][0].type == "task.failed"
@@ -294,24 +257,15 @@ class TestWorkerExecutionService:
     # ------------------------------------------------------------------
 
     def test_handle_failure_skips_when_task_not_active(self):
-        """
-        _handle_failure is a no-op when the task object passed to it is already
-        in a non-active state (e.g. the reconciler cancelled it between the runtime
-        completing and the failure handler running).
-
-        Tested directly to avoid the _validate_assignment guard in execute().
-        """
         from src.domain.value_objects.task import TaskResult
         svc = _make_service()
 
-        # Build a task that has gone past active state
         task = _make_task()
-        task.start()   # ASSIGNED → IN_PROGRESS
-        task.complete(TaskResult(commit_sha="abc"))  # IN_PROGRESS → SUCCEEDED
+        task.start()
+        task.complete(TaskResult(commit_sha="abc"))
 
         svc._handle_failure(task, "worker-1", "some transient error")
 
-        # No persistence write and no event should be emitted
         svc._task_repo.update_if_version.assert_not_called()
         svc._events.publish.assert_not_called()
 
@@ -319,10 +273,7 @@ class TestWorkerExecutionService:
     # _build_env — non-string runtime_config values are JSON-encoded
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_non_string_runtime_config_values_are_json_encoded(self, mock_refresher_cls):
-        """runtime_config entries with non-string values (int, bool, dict)
-        must be serialised to JSON strings in the subprocess environment."""
+    def test_non_string_runtime_config_values_are_json_encoded(self):
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
@@ -365,10 +316,7 @@ class TestWorkerExecutionService:
     # terminate_session exception is swallowed in finally block
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_terminate_session_exception_is_swallowed(self, mock_refresher_cls):
-        """An exception from runtime.terminate_session() in the finally block
-        must not propagate — cleanup should be best-effort."""
+    def test_terminate_session_exception_is_swallowed(self):
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
@@ -384,7 +332,6 @@ class TestWorkerExecutionService:
         svc._git.create_workspace.return_value = "/tmp/ws"
         svc._git.apply_changes_and_commit.return_value = "sha-abc"
 
-        # Must not raise — terminate_session error is silently swallowed
         svc.execute("t-001", "p-001", "worker-1")
 
         assert task.status == TaskStatus.SUCCEEDED
@@ -393,18 +340,12 @@ class TestWorkerExecutionService:
     # _start_task_with_retry — assignment stolen mid-CAS
     # ------------------------------------------------------------------
 
-    @patch("src.app.usecases.task_execute.LeaseRefresher")
-    def test_start_raises_when_assignment_changes_during_cas(self, mock_refresher_cls):
-        """
-        If the task is still ASSIGNED on reload but the assignment.agent_id
-        changed (reassigned to another worker), the CAS loop raises RuntimeError.
-        That error is caught by the generic except handler which marks it FAILED.
-        """
-        initial = _make_task()   # passes _validate_assignment
+    def test_start_raises_when_assignment_changes_during_cas(self):
+        initial = _make_task()
 
         def make_reassigned():
             t = _make_task()
-            t.assignment = Assignment(agent_id="other-worker")  # different agent
+            t.assignment = Assignment(agent_id="other-worker")
             return t
 
         svc = _make_service()
@@ -419,10 +360,8 @@ class TestWorkerExecutionService:
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
         svc._git.create_workspace.return_value = "/tmp/ws"
 
-        # execute() catches the RuntimeError via the generic handler
         svc.execute("t-001", "p-001", "worker-1")
 
-        # A task.failed event must have been emitted
         failed = [c for c in svc._events.publish.call_args_list
                   if c[0][0].type == "task.failed"]
         assert len(failed) == 1
@@ -433,18 +372,12 @@ class TestWorkerExecutionService:
     # ------------------------------------------------------------------
 
     def test_handle_failure_swallows_its_own_exception(self):
-        """
-        If update_if_version raises inside _handle_failure, the exception
-        must be swallowed — the outer finally block must still run.
-        """
         svc = _make_service()
-        task = _make_task()   # ASSIGNED → active, so failure path executes
-        task.start()          # IN_PROGRESS — also active
+        task = _make_task()
+        task.start()
 
         svc._task_repo.update_if_version.side_effect = RuntimeError("disk full")
 
-        # Must not propagate — _handle_failure has try/except Exception
         svc._handle_failure(task, "worker-1", "some reason")
 
-        # No event should have been published (update failed before publish)
         svc._events.publish.assert_not_called()

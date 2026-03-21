@@ -698,6 +698,7 @@ class TestPrepareWorkspaceBaseBranch:
             runtime_factory=MagicMock(),
             logs_port=MagicMock(),
             test_runner=MagicMock(),
+            lease_refresher_factory=MagicMock(),
         )
 
         uc._prepare_workspace("t1")
@@ -743,6 +744,7 @@ class TestPrepareWorkspaceBaseBranch:
             runtime_factory=MagicMock(),
             logs_port=MagicMock(),
             test_runner=MagicMock(),
+            lease_refresher_factory=MagicMock(),
         )
 
         uc._prepare_workspace("standalone")
