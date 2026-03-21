@@ -143,3 +143,12 @@ from src.domain.ports.github import GitHubPort, GitHubError, GitHubRateLimitErro
 
 # ProjectSpec CI config
 from src.domain.project_spec.value_objects import CIConfig
+
+# Roadmap — foundational value object for goal DAG validation
+from src.domain.value_objects.goal import Roadmap
+
+# Project state port — planner's persistent memory interface
+from src.domain.ports.project_state import ProjectStatePort
+
+# Lease refresher port + factory type (drift fix — app layer no longer imports infra)
+from src.domain.ports.lease import LeaseRefresherPort, LeaseRefresherFactory
