@@ -158,19 +158,20 @@ class GoalMergeTaskUseCase:
             expected_v = goal.state_version
             goal.record_task_merged(task_id)
             if self._goal_repo.update_if_version(goal_id, goal, expected_v):
-                if goal.status == GoalStatus.COMPLETED:
+                if goal.status == GoalStatus.READY_FOR_REVIEW:
                     merged, total = goal.progress()
                     self._events.publish(DomainEvent(
-                        type="goal.completed",
+                        type="goal.ready_for_review",
                         producer=PRODUCER,
                         payload={
                             "goal_id": goal_id,
+                            "branch":  goal.branch,
                             "merged":  merged,
                             "total":   total,
                         },
                     ))
                     log.info(
-                        "goal_merge.goal_completed",
+                        "goal_merge.goal_ready_for_review",
                         goal_id=goal_id,
                         merged=merged,
                         total=total,

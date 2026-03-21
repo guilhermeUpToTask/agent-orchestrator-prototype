@@ -434,19 +434,23 @@ class TestFinalizeDoubleCall:
             ],
         )
         goal.start()
-        goal.record_task_merged("t1")  # COMPLETED
+        goal.record_task_merged("t1")   # → READY_FOR_REVIEW
+        goal.open_pr(1, "http://url", "sha")
+        goal.sync_pr_state(pr_status="open", checks_passed=True, approved=True,
+                           head_sha="sha", approval_count=1)
+        goal.advance_from_pr_state()    # → APPROVED
         goal_repo.save(goal)
 
         uc = GoalFinalizeUseCase(
             goal_repo=goal_repo, event_port=events,
-            git_workspace=git, repo_url="file:///",
         )
         return uc, goal_repo, events, git
 
     def test_first_finalize_succeeds(self):
         uc, *_ = self._build()
-        sha = uc.execute("g-fin")
-        assert sha == "deadbeef0000"
+        result = uc.execute("g-fin")
+        assert isinstance(result, dict)
+        assert result["goal_id"] == "g-fin"
 
     def test_second_finalize_raises(self):
         uc, *_ = self._build()
@@ -476,9 +480,8 @@ class TestFinalizeDoubleCall:
 
         uc = GoalFinalizeUseCase(
             goal_repo=goal_repo, event_port=events,
-            git_workspace=_Git(), repo_url="file:///",
         )
-        with pytest.raises(ValueError, match="running"):
+        with pytest.raises(ValueError):
             uc.execute("g-run")
 
     def test_finalize_failed_goal_raises(self):
@@ -491,9 +494,8 @@ class TestFinalizeDoubleCall:
 
         uc = GoalFinalizeUseCase(
             goal_repo=goal_repo, event_port=InMemoryEventAdapter(),
-            git_workspace=_Git(), repo_url="file:///",
         )
-        with pytest.raises(ValueError, match="failed"):
+        with pytest.raises(ValueError):
             uc.execute("g-fail")
 
 
@@ -823,7 +825,7 @@ class TestGoalAggregateEdgeCases:
         g.start()
         g.record_task_merged("t1")
         events = [h.event for h in g.history]
-        assert events == ["goal.started", "goal.task_merged", "goal.completed"]
+        assert events == ["goal.started", "goal.task_merged", "goal.ready_for_review"]
 
     def test_record_task_status_does_not_auto_complete(self):
         """

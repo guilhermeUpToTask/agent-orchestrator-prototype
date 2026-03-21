@@ -127,7 +127,7 @@ class TestYamlGoalRepository:
         assert repo.update_if_version("goal-001", g3, v)
 
         final = repo.load("goal-001")
-        assert final.status == GoalStatus.COMPLETED
+        assert final.status == GoalStatus.READY_FOR_REVIEW
         assert final.tasks["t1"].status == TaskStatus.MERGED
 
 

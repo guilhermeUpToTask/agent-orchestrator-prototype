@@ -186,11 +186,15 @@ class TestGoalAggregateStart:
         g.start()
         assert g.state_version == 2
 
-    def test_start_on_completed_raises(self):
+    def test_start_on_ready_for_review_raises(self):
+        # READY_FOR_REVIEW is not terminal, but start() only allows PENDING
+        # In practice: once RUNNING, start() is idempotent; once READY_FOR_REVIEW,
+        # the goal is in the PR phase and start() is a no-op guard.
+        # The meaningful terminal-guard test is with FAILED.
         g = _goal("t1")
         g.start()
-        g.record_task_merged("t1")
-        with pytest.raises(ValueError, match="completed"):
+        g.record_task_canceled("t1", "reason")  # → FAILED
+        with pytest.raises(ValueError):
             g.start()
 
     def test_start_on_failed_raises(self):
@@ -229,8 +233,8 @@ class TestGoalAggregateRecordTaskStatus:
     def test_raises_when_terminal(self):
         g = _goal("t1")
         g.start()
-        g.record_task_merged("t1")  # goal is now COMPLETED
-        with pytest.raises(ValueError, match="completed"):
+        g.record_task_canceled("t1", "reason")  # → FAILED (terminal)
+        with pytest.raises(ValueError):
             g.record_task_status("t1", TaskStatus.IN_PROGRESS)
 
 
@@ -245,7 +249,7 @@ class TestGoalAggregateRecordTaskMerged:
         g.start()
         g.record_task_merged("t1")
         assert g.tasks["t1"].status == TaskStatus.MERGED
-        assert g.status == GoalStatus.COMPLETED
+        assert g.status == GoalStatus.READY_FOR_REVIEW
 
     def test_partial_merge_does_not_complete(self):
         g = _goal("t1", "t2")
@@ -260,14 +264,14 @@ class TestGoalAggregateRecordTaskMerged:
         g.record_task_merged("t2")
         assert g.status == GoalStatus.RUNNING
         g.record_task_merged("t3")
-        assert g.status == GoalStatus.COMPLETED
+        assert g.status == GoalStatus.READY_FOR_REVIEW
 
     def test_completion_appends_history(self):
         g = _goal("t1")
         g.start()
         g.record_task_merged("t1")
         events = [h.event for h in g.history]
-        assert "goal.completed" in events
+        assert "goal.ready_for_review" in events
 
     def test_unknown_task_raises(self):
         g = _goal("t1")
@@ -283,11 +287,11 @@ class TestGoalAggregateRecordTaskMerged:
         assert merged == 1
         assert total == 2
 
-    def test_merge_on_completed_goal_raises(self):
+    def test_merge_on_failed_goal_raises(self):
         g = _goal("t1")
         g.start()
-        g.record_task_merged("t1")
-        with pytest.raises(ValueError, match="completed"):
+        g.record_task_canceled("t1", "reason")  # → FAILED
+        with pytest.raises(ValueError):
             g.record_task_merged("t1")
 
 
@@ -346,10 +350,21 @@ class TestGoalAggregateHelpers:
         g.start()
         assert not g.is_terminal()
 
-    def test_completed_is_terminal(self):
+    def test_ready_for_review_is_not_terminal(self):
         g = _goal("t1")
         g.start()
         g.record_task_merged("t1")
+        assert g.status == GoalStatus.READY_FOR_REVIEW
+        assert not g.is_terminal()  # PR gate still pending
+
+    def test_merged_is_terminal(self):
+        g = _goal("t1")
+        g.start()
+        g.record_task_merged("t1")
+        g.open_pr(1, "http://url", "sha")
+        g.sync_pr_state(pr_status="merged", checks_passed=True, approved=True, head_sha="sha")
+        g.advance_from_pr_state()
+        assert g.status == GoalStatus.MERGED
         assert g.is_terminal()
 
     def test_failed_is_terminal(self):

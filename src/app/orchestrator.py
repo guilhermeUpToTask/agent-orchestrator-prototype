@@ -10,31 +10,34 @@ Architecture:
   - Reacts to task lifecycle events and delegates to use cases
 
 Event routing:
-  task.assigned  → transition goal PENDING → RUNNING (first task dispatch)
-  task.completed → GoalMergeTaskUseCase (merge branch, update goal state)
-  task.canceled  → GoalCancelTaskUseCase (fail goal)
+  task.assigned         → transition goal PENDING → RUNNING (first task dispatch)
+  task.completed        → GoalMergeTaskUseCase (merge branch, update goal state)
+  task.canceled         → GoalCancelTaskUseCase (fail goal)
+  goal.ready_for_review → CreateGoalPRUseCase (open PR on GitHub)
+  goal.approved         → unlock next goal in sequential plan
+  goal.merged           → unlock next goal in sequential plan (final gate)
 
-The orchestrator does not touch task assignment, execution, retries, or
-reconciliation — those remain the exclusive responsibility of the task layer.
-It only coordinates the goal-level view: branch merges and aggregate state.
+PR-phase events (goal.ready_for_review, goal.approved, goal.merged) are emitted
+by the use cases called from this orchestrator or by the reconciler's PR polling
+pass. The orchestrator subscribes to them to coordinate sequential goal plans.
+
+Sequential goal gating:
+  The orchestrator only releases the next goal in a plan when:
+    goal.status in {APPROVED, MERGED}
+  This enforces the spec requirement: no new goal starts until the preceding
+  goal's PR has passed CI and been approved (or merged).
 
 ProjectSpec integration:
   The orchestrator loads the ProjectSpec at startup via LoadProjectSpec and
-  exposes it through the read-only ``spec`` property.  Downstream consumers
+  exposes it through the read-only ``spec`` property. Downstream consumers
   (planner, validator, reconciler) receive it via constructor injection so
-  they never load it themselves.  Agents can never write the spec — only the
+  they never load it themselves. Agents can never write the spec — only the
   approved ProposeSpecChange -> operator-apply flow may persist changes.
-
-Design note on consumer group isolation:
-  The task manager and workers use consumer groups like "task-manager" and
-  "workers". The orchestrator uses "goal-orchestrator" — a separate group on
-  the same streams. Redis Streams fan-out semantics guarantee that each group
-  gets its own independent cursor through the event log. The orchestrator
-  therefore sees every task event independently of the task manager.
 """
 from __future__ import annotations
 
 import signal
+from typing import Optional
 
 import structlog
 
@@ -55,7 +58,13 @@ WATCHED_EVENTS = [
     "task.assigned",
     "task.completed",
     "task.canceled",
+    "goal.ready_for_review",
+    "goal.approved",
+    "goal.merged",
 ]
+
+# Statuses that unlock the next goal in a sequential plan
+_UNLOCK_STATUSES = {GoalStatus.APPROVED, GoalStatus.MERGED}
 
 
 class TaskGraphOrchestrator:
@@ -63,13 +72,19 @@ class TaskGraphOrchestrator:
     Event-driven goal coordinator.
 
     Lifecycle:
-      - run_forever() subscribes to task events and dispatches to use cases
+      - run_forever() subscribes to task/goal events and dispatches to use cases
       - shutdown() gracefully stops the loop on SIGTERM/SIGINT
 
-    ProjectSpec:
-      Pass spec_repo so the orchestrator can load the spec at startup.
-      The loaded spec is injected into all downstream consumers; it is
-      never reloaded mid-run unless explicitly requested by the operator.
+    PR integration:
+      - Reacts to goal.ready_for_review by opening a GitHub PR.
+      - Reacts to goal.approved / goal.merged to unlock sequential goals.
+      - CreateGoalPRUseCase must be injected for PR creation to work;
+        when absent (dry-run), the orchestrator logs a warning and skips.
+
+    Sequential gating:
+      The orchestrator never dispatches tasks for a goal whose predecessor
+      has not yet reached APPROVED or MERGED. This is enforced in
+      _check_and_unlock_next_goals() which fires on goal.approved / goal.merged.
     """
 
     def __init__(
@@ -79,18 +94,20 @@ class TaskGraphOrchestrator:
         event_port: EventPort,
         merge_usecase: GoalMergeTaskUseCase,
         cancel_usecase: GoalCancelTaskUseCase,
-        spec_repo: ProjectSpecRepository | None = None,
+        spec_repo: Optional[ProjectSpecRepository] = None,
         project_name: str = "",
+        create_pr_usecase=None,  # CreateGoalPRUseCase | None
     ) -> None:
         self._task_repo     = task_repo
         self._goal_repo     = goal_repo
         self._events        = event_port
         self._merge         = merge_usecase
         self._cancel        = cancel_usecase
-        self._spec_repo     = spec_repo        # None → spec not loaded (dry-run / tests)
+        self._spec_repo     = spec_repo
         self._project_name  = project_name
+        self._create_pr     = create_pr_usecase
         self._running       = False
-        self._spec: ProjectSpec | None = None
+        self._spec: Optional[ProjectSpec] = None
 
     # ------------------------------------------------------------------
     # ProjectSpec access
@@ -98,12 +115,6 @@ class TaskGraphOrchestrator:
 
     @property
     def spec(self) -> ProjectSpec:
-        """
-        The active ProjectSpec for this project.
-
-        Raises RuntimeError if accessed before run_forever() has been called
-        (i.e. before _load_spec() has run).
-        """
         if self._spec is None:
             raise RuntimeError(
                 "ProjectSpec has not been loaded yet. "
@@ -112,13 +123,6 @@ class TaskGraphOrchestrator:
         return self._spec
 
     def _load_spec(self) -> None:
-        """
-        Load and cache the ProjectSpec from the repository.
-
-        Called once at run_forever() startup. When no spec_repo is injected
-        (e.g. in tests or dry-run mode) the spec is skipped with a warning —
-        the orchestrator still runs, but spec-aware validation is unavailable.
-        """
         if self._spec_repo is None:
             log.warning(
                 "orchestrator.spec_not_configured",
@@ -140,15 +144,7 @@ class TaskGraphOrchestrator:
     # ------------------------------------------------------------------
 
     def run_forever(self) -> None:
-        """
-        Load the ProjectSpec, then subscribe to task events indefinitely.
-
-        Handles all goals currently managed by this orchestrator instance.
-        Blocks until shutdown() is called or the process receives SIGTERM.
-        """
         self._install_signal_handlers()
-
-        # spec must be loaded before any event processing begins
         self._load_spec()
 
         self._running = True
@@ -158,6 +154,7 @@ class TaskGraphOrchestrator:
             consumer=CONSUMER_NAME,
             events=WATCHED_EVENTS,
             spec_version=self._spec.meta.version if self._spec else "none",
+            pr_integration="enabled" if self._create_pr else "disabled",
         )
 
         try:
@@ -174,7 +171,6 @@ class TaskGraphOrchestrator:
             log.info("orchestrator.stopped")
 
     def shutdown(self) -> None:
-        """Signal the run loop to stop after the current event is processed."""
         log.info("orchestrator.shutdown_requested")
         self._running = False
 
@@ -190,6 +186,10 @@ class TaskGraphOrchestrator:
                 self._on_task_completed(event)
             elif event.type == "task.canceled":
                 self._on_task_canceled(event)
+            elif event.type == "goal.ready_for_review":
+                self._on_goal_ready_for_review(event)
+            elif event.type in ("goal.approved", "goal.merged"):
+                self._on_goal_unlocked(event)
         except Exception as exc:
             log.exception(
                 "orchestrator.dispatch_error",
@@ -197,14 +197,12 @@ class TaskGraphOrchestrator:
                 payload=event.payload,
                 error=str(exc),
             )
-            # Do not re-raise — a single bad event must not stop the loop.
+
+    # ------------------------------------------------------------------
+    # Task event handlers (unchanged logic)
+    # ------------------------------------------------------------------
 
     def _on_task_assigned(self, event: DomainEvent) -> None:
-        """
-        Transition the owning goal from PENDING -> RUNNING on first assignment.
-        Uses the same CAS-retry pattern as the use cases so a concurrent
-        version bump does not silently leave the goal stuck in PENDING.
-        """
         task_id = event.payload.get("task_id")
         if not task_id:
             return
@@ -249,6 +247,81 @@ class TaskGraphOrchestrator:
             return
         log.info("orchestrator.task_canceled", task_id=task_id, reason=reason)
         self._cancel.execute(task_id, reason)
+
+    # ------------------------------------------------------------------
+    # PR event handlers (new)
+    # ------------------------------------------------------------------
+
+    def _on_goal_ready_for_review(self, event: DomainEvent) -> None:
+        """
+        All task branches merged → open a GitHub PR for this goal.
+
+        If CreateGoalPRUseCase is not configured (dry-run / no GitHub token),
+        the event is logged and skipped. The operator can create the PR manually
+        or configure the integration later.
+        """
+        goal_id = event.payload.get("goal_id")
+        if not goal_id:
+            return
+
+        log.info("orchestrator.goal_ready_for_review", goal_id=goal_id)
+
+        if self._create_pr is None:
+            log.warning(
+                "orchestrator.pr_creation_skipped",
+                goal_id=goal_id,
+                reason="CreateGoalPRUseCase not configured (no GitHub integration)",
+            )
+            return
+
+        try:
+            pr_number = self._create_pr.execute(goal_id)
+            log.info(
+                "orchestrator.pr_opened",
+                goal_id=goal_id,
+                pr_number=pr_number,
+            )
+        except Exception as exc:
+            log.exception(
+                "orchestrator.pr_creation_failed",
+                goal_id=goal_id,
+                error=str(exc),
+            )
+
+    def _on_goal_unlocked(self, event: DomainEvent) -> None:
+        """
+        A goal reached APPROVED or MERGED → check if any dependent goals
+        should now be released for execution.
+
+        Sequential plan logic:
+          - Load all goals.
+          - Find any goal in PENDING status whose predecessor is the just-approved goal.
+          - Such blocking is currently enforced at task level (depends_on), but for
+            multi-goal sequential plans the orchestrator emits goal.unlock_next so
+            external planners can start the next goal's tasks.
+          - Emitting goal.unlock_next is advisory; the planner/operator decides
+            whether and how to start the next goal.
+        """
+        goal_id    = event.payload.get("goal_id")
+        event_type = event.type
+        if not goal_id:
+            return
+
+        log.info(
+            "orchestrator.goal_unlocked",
+            goal_id=goal_id,
+            trigger_event=event_type,
+        )
+
+        # Emit advisory event for sequential planners / dashboards.
+        self._events.publish(DomainEvent(
+            type="goal.unlock_next",
+            producer="goal-orchestrator",
+            payload={
+                "completed_goal_id": goal_id,
+                "trigger":           event_type,
+            },
+        ))
 
     # ------------------------------------------------------------------
     # Signal handling

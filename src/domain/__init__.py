@@ -129,3 +129,17 @@ __all__ = [
     "SpecVersionMismatchError",
     "ForbiddenMutationError",
 ]
+
+# PR value objects
+from src.domain.value_objects.pr import (
+    PRStatus,
+    PRCheckConclusion,
+    CheckRunResult,
+    PRInfo,
+)
+
+# GitHub port
+from src.domain.ports.github import GitHubPort, GitHubError, GitHubRateLimitError
+
+# ProjectSpec CI config
+from src.domain.project_spec.value_objects import CIConfig
