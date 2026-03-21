@@ -99,6 +99,15 @@ class GoalAggregate(BaseModel):
     pr_head_sha: Optional[str] = None
     pr_html_url: Optional[str] = None
 
+    # Inter-goal dependency graph (goal names, not IDs).
+    # A goal stays PENDING until all prerequisites are MERGED.
+    depends_on: list[str] = Field(default_factory=list)
+
+    # Optional feature grouping label — no lifecycle attached.
+    # Enables release gating ("all goals where feature_tag == X are MERGED")
+    # without requiring a FeatureAggregate to exist yet.
+    feature_tag: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------
@@ -110,6 +119,8 @@ class GoalAggregate(BaseModel):
         description: str,
         task_summaries: list[TaskSummary],
         goal_id: Optional[str] = None,
+        depends_on: Optional[list[str]] = None,
+        feature_tag: Optional[str] = None,
     ) -> "GoalAggregate":
         gid = goal_id or f"goal-{uuid4().hex[:12]}"
         return cls(
@@ -118,6 +129,8 @@ class GoalAggregate(BaseModel):
             description=description,
             branch=f"goal/{name}",
             tasks={t.task_id: t for t in task_summaries},
+            depends_on=depends_on or [],
+            feature_tag=feature_tag,
         )
 
     # ------------------------------------------------------------------
@@ -133,6 +146,25 @@ class GoalAggregate(BaseModel):
             GoalStatus.AWAITING_PR_APPROVAL,
             GoalStatus.APPROVED,
         )
+
+    def is_blocked(self, merged_goal_names: set[str]) -> bool:
+        """
+        Return True if this goal is still waiting on prerequisite goals.
+
+        A goal is blocked when any of its declared depends_on names have not
+        yet appeared in the set of merged goal names.  Goals with no
+        dependencies are never blocked.
+        """
+        if not self.depends_on:
+            return False
+        return any(dep not in merged_goal_names for dep in self.depends_on)
+
+    def is_startable(self, merged_goal_names: set[str]) -> bool:
+        """
+        Return True if this PENDING goal can be started immediately —
+        i.e. it has no unmet prerequisites.
+        """
+        return self.status == GoalStatus.PENDING and not self.is_blocked(merged_goal_names)
 
     def needs_next_goal_unlock(self) -> bool:
         """True when this goal's success should release dependent goals."""
@@ -392,6 +424,36 @@ class GoalAggregate(BaseModel):
                 {"pr_number": self.pr_number, "head_sha": self.pr_head_sha},
             )
 
+        return self
+
+    def finalize(self) -> "GoalAggregate":
+        """
+        Record an operator finalization of a goal that has been approved or
+        merged via GitHub PR.
+
+        Eligible from APPROVED or MERGED only.  Idempotent guard lives in the
+        use case (history scan) — this method trusts that the caller has
+        already verified eligibility.
+
+        Only GoalFinalizeUseCase may call this.  No direct field mutation from
+        outside the aggregate.
+        """
+        eligible = (GoalStatus.APPROVED, GoalStatus.MERGED)
+        if self.status not in eligible:
+            raise ValueError(
+                f"Goal '{self.goal_id}' is '{self.status.value}'. "
+                f"Only {[s.value for s in eligible]} goals can be finalized."
+            )
+        self._bump(
+            "goal.finalized",
+            "operator",
+            {
+                "pr_number":  self.pr_number,
+                "pr_status":  self.pr_status,
+                "pr_head_sha": self.pr_head_sha,
+                "goal_status": self.status.value,
+            },
+        )
         return self
 
     def record_merged(self, merge_sha: str) -> "GoalAggregate":
