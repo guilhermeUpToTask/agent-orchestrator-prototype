@@ -315,7 +315,7 @@ class TestSerialisation:
 
     def test_to_dict_contains_all_schema_keys(self):
         d = _minimal_spec().to_dict()
-        assert set(d.keys()) == {"meta", "objective", "tech_stack", "constraints", "structure"}
+        assert set(d.keys()) == {"meta", "objective", "tech_stack", "constraints", "structure", "ci"}
 
     def test_from_dict_missing_meta_raises(self):
         with pytest.raises(ValueError, match="meta"):

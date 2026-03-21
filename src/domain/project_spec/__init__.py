@@ -21,6 +21,7 @@ from src.domain.project_spec.errors import (
 )
 from src.domain.project_spec.repository import ProjectSpecRepository
 from src.domain.project_spec.value_objects import (
+    CIConfig,
     DirectoryRule,
     SpecConstraints,
     SpecObjective,
@@ -35,6 +36,7 @@ __all__ = [
     # Repository port
     "ProjectSpecRepository",
     # Value objects
+    "CIConfig",
     "SpecVersion",
     "TechStack",
     "SpecConstraints",

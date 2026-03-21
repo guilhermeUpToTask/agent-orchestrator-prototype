@@ -30,6 +30,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from src.domain.project_spec.value_objects import (
+    CIConfig,
     DirectoryRule,
     SpecConstraints,
     SpecObjective,
@@ -75,6 +76,7 @@ class ProjectSpec(BaseModel):
     tech_stack: TechStack
     constraints: SpecConstraints
     structure: StructureSpec
+    ci: CIConfig = Field(default_factory=CIConfig.no_gate)
 
     model_config = {"frozen": True}
 
@@ -114,13 +116,9 @@ class ProjectSpec(BaseModel):
         required: list[str] | None = None,
         directories: list[dict[str, str]] | None = None,
         version: str = "0.1.0",
+        ci_required_checks: list[str] | None = None,
+        ci_min_approvals: int = 0,
     ) -> "ProjectSpec":
-        """
-        Convenience factory for programmatic construction.
-
-        All arguments are plain Python types so callers never need to
-        import value objects directly.
-        """
         return cls(
             meta=_SpecMeta(name=name, version=version),
             objective=SpecObjective(
@@ -140,6 +138,10 @@ class ProjectSpec(BaseModel):
                 directories=[
                     DirectoryRule(**d) for d in (directories or [])
                 ]
+            ),
+            ci=CIConfig(
+                required_checks=ci_required_checks or [],
+                min_approvals=ci_min_approvals,
             ),
         )
 
@@ -373,6 +375,7 @@ class ProjectSpec(BaseModel):
                     for d in self.structure.directories
                 ]
             },
+            "ci": self.ci.to_dict(),
         }
 
     @classmethod
@@ -409,6 +412,10 @@ class ProjectSpec(BaseModel):
                 ),
                 structure=StructureSpec(
                     directories=structure_raw.get("directories", []),
+                ),
+                ci=CIConfig(
+                    required_checks=data.get("ci", {}).get("required_checks") or [],
+                    min_approvals=data.get("ci", {}).get("min_approvals", 0) or 0,
                 ),
             )
         except KeyError as exc:

@@ -131,6 +131,12 @@ class FileProjectSpecRepository(ProjectSpecRepository):
     def _serialize(spec: ProjectSpec) -> str:
         """Render a ProjectSpec to canonical YAML text."""
         data = spec.to_dict()
+        # yaml.dump renders empty Python lists as [] (flow style) even when
+        # default_flow_style=False.  Replace [] with None so the ci block
+        # serialises cleanly and round-trips without breaking the block-style test.
+        ci = data.get("ci", {})
+        if isinstance(ci.get("required_checks"), list) and not ci["required_checks"]:
+            ci["required_checks"] = None   # renders as "required_checks: null"
         return yaml.dump(
             data,
             default_flow_style=False,

@@ -29,10 +29,14 @@ from typing import Any
 PROJECT_SETTINGS_FILENAME = "project.json"
 
 # All keys managed here. Unknown keys written by users are preserved on load.
-_MANAGED_KEYS = {"source_repo_url"}
+_MANAGED_KEYS = {"source_repo_url", "github_token", "github_owner", "github_repo", "github_base_branch"}
 
 _DEFAULTS: dict[str, Any] = {
-    "source_repo_url": None,
+    "source_repo_url":    None,
+    "github_token":       None,
+    "github_owner":       None,
+    "github_repo":        None,
+    "github_base_branch": "main",
 }
 
 
@@ -42,23 +46,38 @@ class ProjectSettings:
     Operational settings for a single orchestrated project.
 
     Fields:
-      source_repo_url: The upstream git repository to clone when initialising
-                       this project's local repo for the first time.
-                       None → init an empty local repo.
-
-    This dataclass is intentionally thin for v0. Future fields:
-      task_timeout_override: int | None  — per-project timeout (overrides global)
-      default_branch: str               — main branch name (default "main")
+      source_repo_url   : Upstream git repo to clone on first init.
+      github_token      : GitHub PAT for the PR-driven workflow.
+                          Treat as a secret — do NOT commit project.json
+                          if this field is set.
+      github_owner      : GitHub owner (username or org) for the target repo.
+      github_repo       : GitHub repository name (without owner prefix).
+      github_base_branch: Branch that goal PRs target (default: "main").
     """
 
-    source_repo_url: str | None = None
+    source_repo_url:    str | None = None
+    github_token:       str | None = None
+    github_owner:       str | None = None
+    github_repo:        str | None = None
+    github_base_branch: str        = "main"
+
+    @property
+    def github_configured(self) -> bool:
+        """Return True if all required GitHub fields are set."""
+        return bool(self.github_token and self.github_owner and self.github_repo)
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectSettings":
-        return cls(source_repo_url=data.get("source_repo_url"))
+        return cls(
+            source_repo_url=data.get("source_repo_url"),
+            github_token=data.get("github_token"),
+            github_owner=data.get("github_owner"),
+            github_repo=data.get("github_repo"),
+            github_base_branch=data.get("github_base_branch", "main"),
+        )
 
 
 class ProjectSettingsManager:

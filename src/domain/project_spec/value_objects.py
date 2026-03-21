@@ -202,3 +202,54 @@ class SpecObjective(BaseModel):
     domain: str
 
     model_config = {"frozen": True}
+
+
+class CIConfig(BaseModel):
+    """
+    CI gate configuration for GitHub PR-driven goal progression.
+
+    Required checks and minimum approvals are evaluated by SyncGoalPRStatusUseCase
+    against GitHub's check run and review APIs.
+
+    Example spec YAML:
+        ci:
+          required_checks: [tests, lint, build]
+          min_approvals: 1
+
+    Defaults (no gate):
+      required_checks: []   → any check state passes
+      min_approvals: 0      → no human review required
+
+    These defaults are intentionally permissive so existing projects work
+    without a ci: block in their spec. Configure the gate explicitly for
+    production workflows.
+    """
+
+    required_checks: tuple[str, ...] = Field(default_factory=tuple)
+    min_approvals: int = Field(default=0, ge=0)
+
+    model_config = {"frozen": True}
+
+    @field_validator("required_checks", mode="before")
+    @classmethod
+    def _coerce_to_tuple(cls, v: object) -> tuple:
+        if isinstance(v, (list, tuple)):
+            return tuple(str(x) for x in v)
+        if v is None:
+            return ()
+        raise ValueError(f"Expected list/tuple, got {type(v)}")
+
+    def is_check_required(self, check_name: str) -> bool:
+        """Return True if check_name appears in required_checks."""
+        return check_name in self.required_checks
+
+    @classmethod
+    def no_gate(cls) -> "CIConfig":
+        """Return a CIConfig with no gates — all PRs pass immediately."""
+        return cls(required_checks=[], min_approvals=0)
+
+    def to_dict(self) -> dict:
+        return {
+            "required_checks": list(self.required_checks),
+            "min_approvals": self.min_approvals,
+        }
