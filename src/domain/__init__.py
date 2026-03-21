@@ -69,6 +69,22 @@ from src.domain.services import (
 # Rules
 from src.domain.rules import TaskRules
 
+# ProjectSpec — aggregate root, repository port, value objects, errors
+from src.domain.project_spec import (
+    DirectoryRule,
+    ForbiddenMutationError,
+    ProjectSpec,
+    ProjectSpecRepository,
+    SpecConstraints,
+    SpecNotFoundError,
+    SpecObjective,
+    SpecValidationError,
+    SpecVersion,
+    SpecVersionMismatchError,
+    StructureSpec,
+    TechStack,
+)
+
 __all__ = [
     # status
     "TaskStatus", "TrustLevel",
@@ -99,4 +115,17 @@ __all__ = [
     "SchedulerService",
     # rules
     "TaskRules",
+    # project spec — aggregate, repository, value objects, errors
+    "ProjectSpec",
+    "ProjectSpecRepository",
+    "SpecVersion",
+    "TechStack",
+    "SpecConstraints",
+    "StructureSpec",
+    "DirectoryRule",
+    "SpecObjective",
+    "SpecNotFoundError",
+    "SpecValidationError",
+    "SpecVersionMismatchError",
+    "ForbiddenMutationError",
 ]
