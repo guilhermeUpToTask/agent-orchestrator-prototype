@@ -20,8 +20,8 @@ from src.infra.cli.error_handler import die, warn, ok
 
 log = structlog.get_logger(__name__)
 
-_AGENT_ID           = os.getenv("AGENT_ID", "agent-worker-001")
-_HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30"))
+# AGENT_ID and HEARTBEAT_INTERVAL_SECONDS are resolved lazily from OrchestratorConfig
+# inside each command that needs them — no module-level env reads.
 
 
 @click.group("system")
@@ -182,7 +182,8 @@ def run_worker():
     """
     from src.infra.factory import build_event_port, build_worker_handler, build_agent_registry
 
-    agent_id = _AGENT_ID
+    from src.infra.config import config as app_config
+    agent_id = os.getenv("AGENT_ID") or app_config.agent_id
     events   = build_event_port()
     registry = build_agent_registry()
     handler  = build_worker_handler()

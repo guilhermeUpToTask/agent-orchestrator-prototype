@@ -50,7 +50,8 @@ def task_create(
     """Create a task and emit task.created."""
     from src.infra.factory import build_task_creation_service
 
-    mode = os.getenv("AGENT_MODE", "dry-run")
+    from src.infra.config import config as app_config
+    mode = app_config.mode
     if mode != "real":
         warn(
             f"AGENT_MODE is not 'real' (current: '{mode}').\n"
