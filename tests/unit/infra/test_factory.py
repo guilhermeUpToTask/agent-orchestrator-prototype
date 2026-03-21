@@ -14,9 +14,12 @@ from src.domain import AgentProps
 class TestFactory:
     @patch("src.infra.factory.app_config")
     def test_build_task_repo(self, mock_config):
-        mock_config.tasks_dir = "/tmp/tasks"
+        # build_task_repo() now derives tasks_dir via ProjectPaths.for_project()
+        # rather than reading app_config.tasks_dir directly.
+        mock_config.orchestrator_home = Path("/tmp/orch")
+        mock_config.project_name = "test-proj"
         repo = build_task_repo()
-        assert repo._dir == Path("/tmp/tasks")
+        assert repo._dir == Path("/tmp/orch/projects/test-proj/tasks")
 
     @patch("src.infra.factory.app_config")
     def test_build_event_port_dry_run(self, mock_config):

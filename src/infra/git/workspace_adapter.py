@@ -23,16 +23,14 @@ log = structlog.get_logger(__name__)
 class GitWorkspaceAdapter(GitWorkspacePort):
     def __init__(
         self,
-        workspace_base: str | Path | None = None,
+        workspace_base: str | Path,
         default_branch: str = "main",
+        source_repo_url: str | None = None,
     ) -> None:
-        if workspace_base is None:
-            from src.infra.config import config
-
-            workspace_base = config.workspace_dir
         self._base = Path(workspace_base)
         self._base.mkdir(parents=True, exist_ok=True)
         self._default_branch = default_branch
+        self._source_repo_url = source_repo_url
 
     # ------------------------------------------------------------------
     # GitWorkspacePort
@@ -47,13 +45,11 @@ class GitWorkspaceAdapter(GitWorkspacePort):
 
             if not p.exists() or not (p / ".git").exists():
                 p.mkdir(parents=True, exist_ok=True)
-                from src.infra.config import config
-
-                if config.source_repo_url:
+                if self._source_repo_url:
                     # Clone upstream into the local repo folder
-                    log.info("git.cloning_upstream", source=config.source_repo_url, dest=local_path)
+                    log.info("git.cloning_upstream", source=self._source_repo_url, dest=local_path)
                     subprocess.run(
-                        ["git", "clone", config.source_repo_url, local_path],
+                        ["git", "clone", self._source_repo_url, local_path],
                         check=True,
                         capture_output=True,
                     )

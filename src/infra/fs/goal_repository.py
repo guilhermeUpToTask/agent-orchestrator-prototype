@@ -28,10 +28,7 @@ class YamlGoalRepository(GoalRepositoryPort):
     safe as long as exactly one orchestrator process runs per project.
     """
 
-    def __init__(self, goals_dir: str | Path | None = None) -> None:
-        if goals_dir is None:
-            from src.infra.config import config
-            goals_dir = config.goals_dir
+    def __init__(self, goals_dir: str | Path) -> None:
         self._dir = Path(goals_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._quarantine = self._dir / "quarantine"

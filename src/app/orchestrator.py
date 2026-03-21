@@ -18,6 +18,13 @@ The orchestrator does not touch task assignment, execution, retries, or
 reconciliation — those remain the exclusive responsibility of the task layer.
 It only coordinates the goal-level view: branch merges and aggregate state.
 
+ProjectSpec integration:
+  The orchestrator loads the ProjectSpec at startup via LoadProjectSpec and
+  exposes it through the read-only ``spec`` property.  Downstream consumers
+  (planner, validator, reconciler) receive it via constructor injection so
+  they never load it themselves.  Agents can never write the spec — only the
+  approved ProposeSpecChange -> operator-apply flow may persist changes.
+
 Design note on consumer group isolation:
   The task manager and workers use consumer groups like "task-manager" and
   "workers". The orchestrator uses "goal-orchestrator" — a separate group on
@@ -28,15 +35,16 @@ Design note on consumer group isolation:
 from __future__ import annotations
 
 import signal
-import sys
 
 import structlog
 
 from src.domain import DomainEvent, EventPort, GoalStatus
 from src.domain.repositories import TaskRepositoryPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
+from src.domain.project_spec import ProjectSpec, ProjectSpecRepository
 from src.app.usecases.goal_merge_task import GoalMergeTaskUseCase
 from src.app.usecases.goal_cancel_task import GoalCancelTaskUseCase
+from src.app.usecases.load_project_spec import LoadProjectSpec
 
 log = structlog.get_logger(__name__)
 
@@ -55,11 +63,13 @@ class TaskGraphOrchestrator:
     Event-driven goal coordinator.
 
     Lifecycle:
-      - run(goal_id) subscribes to task events scoped to that goal
-      - run_forever() handles all goals (single orchestrator process)
+      - run_forever() subscribes to task events and dispatches to use cases
       - shutdown() gracefully stops the loop on SIGTERM/SIGINT
 
-    Both methods block until shutdown.
+    ProjectSpec:
+      Pass spec_repo so the orchestrator can load the spec at startup.
+      The loaded spec is injected into all downstream consumers; it is
+      never reloaded mid-run unless explicitly requested by the operator.
     """
 
     def __init__(
@@ -69,13 +79,61 @@ class TaskGraphOrchestrator:
         event_port: EventPort,
         merge_usecase: GoalMergeTaskUseCase,
         cancel_usecase: GoalCancelTaskUseCase,
+        spec_repo: ProjectSpecRepository | None = None,
+        project_name: str = "",
     ) -> None:
         self._task_repo     = task_repo
         self._goal_repo     = goal_repo
         self._events        = event_port
         self._merge         = merge_usecase
         self._cancel        = cancel_usecase
+        self._spec_repo     = spec_repo        # None → spec not loaded (dry-run / tests)
+        self._project_name  = project_name
         self._running       = False
+        self._spec: ProjectSpec | None = None
+
+    # ------------------------------------------------------------------
+    # ProjectSpec access
+    # ------------------------------------------------------------------
+
+    @property
+    def spec(self) -> ProjectSpec:
+        """
+        The active ProjectSpec for this project.
+
+        Raises RuntimeError if accessed before run_forever() has been called
+        (i.e. before _load_spec() has run).
+        """
+        if self._spec is None:
+            raise RuntimeError(
+                "ProjectSpec has not been loaded yet. "
+                "Call run_forever() or _load_spec() first."
+            )
+        return self._spec
+
+    def _load_spec(self) -> None:
+        """
+        Load and cache the ProjectSpec from the repository.
+
+        Called once at run_forever() startup. When no spec_repo is injected
+        (e.g. in tests or dry-run mode) the spec is skipped with a warning —
+        the orchestrator still runs, but spec-aware validation is unavailable.
+        """
+        if self._spec_repo is None:
+            log.warning(
+                "orchestrator.spec_not_configured",
+                hint="Inject spec_repo to enable spec-aware validation.",
+            )
+            return
+
+        load_uc = LoadProjectSpec(self._spec_repo)
+        self._spec = load_uc.execute(self._project_name)
+        log.info(
+            "orchestrator.spec_loaded",
+            project=self._project_name,
+            version=self._spec.meta.version,
+            domain=self._spec.objective.domain,
+        )
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -83,17 +141,23 @@ class TaskGraphOrchestrator:
 
     def run_forever(self) -> None:
         """
-        Subscribe to task events and dispatch to use cases indefinitely.
+        Load the ProjectSpec, then subscribe to task events indefinitely.
+
         Handles all goals currently managed by this orchestrator instance.
         Blocks until shutdown() is called or the process receives SIGTERM.
         """
         self._install_signal_handlers()
+
+        # spec must be loaded before any event processing begins
+        self._load_spec()
+
         self._running = True
         log.info(
             "orchestrator.starting",
             group=CONSUMER_GROUP,
             consumer=CONSUMER_NAME,
             events=WATCHED_EVENTS,
+            spec_version=self._spec.meta.version if self._spec else "none",
         )
 
         try:
@@ -137,9 +201,9 @@ class TaskGraphOrchestrator:
 
     def _on_task_assigned(self, event: DomainEvent) -> None:
         """
-        Transition the owning goal from PENDING → RUNNING on first assignment.
+        Transition the owning goal from PENDING -> RUNNING on first assignment.
         Uses the same CAS-retry pattern as the use cases so a concurrent
-        version bump doesn't silently leave the goal stuck in PENDING.
+        version bump does not silently leave the goal stuck in PENDING.
         """
         task_id = event.payload.get("task_id")
         if not task_id:

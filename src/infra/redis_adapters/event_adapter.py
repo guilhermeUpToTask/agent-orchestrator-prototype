@@ -24,14 +24,9 @@ _GLOBAL_STREAM = "events:all"
 
 
 class RedisEventAdapter(EventPort):
-    def __init__(self, redis_client: redis.Redis, journal_dir: str | None = None) -> None:
-        self._r = redis_client
+    def __init__(self, redis_client: redis.Redis, journal_dir: str) -> None:
         import pathlib
-
-        if journal_dir is None:
-            from src.infra.config import config
-
-            journal_dir = str(config.events_dir)
+        self._r = redis_client
         self._journal_dir = pathlib.Path(journal_dir)
         self._journal_dir.mkdir(parents=True, exist_ok=True)
 

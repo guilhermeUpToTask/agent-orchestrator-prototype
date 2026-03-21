@@ -22,11 +22,7 @@ from src.domain import AgentRegistryPort
 
 
 class JsonAgentRegistry(AgentRegistryPort):
-    def __init__(self, registry_path: str | Path | None = None) -> None:
-        if registry_path is None:
-            from src.infra.config import config
-
-            registry_path = config.registry_path
+    def __init__(self, registry_path: str | Path) -> None:
         self._path = Path(registry_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         if not self._path.exists():

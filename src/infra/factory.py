@@ -25,6 +25,33 @@ from src.domain import SchedulerService
 log = structlog.get_logger(__name__)
 
 from src.infra.config import config as app_config
+from src.infra.project_paths import ProjectPaths
+from src.infra.project_settings import ProjectSettingsManager
+
+
+def build_project_paths() -> ProjectPaths:
+    """
+    Build ProjectPaths for the active project.
+
+    This is the canonical way to get project-scoped paths.  All adapters
+    and use cases should receive paths via constructor injection from this
+    builder — never by importing config directly.
+    """
+    return ProjectPaths.for_project(
+        app_config.orchestrator_home,
+        app_config.project_name,
+    )
+
+
+def build_project_settings():
+    """
+    Load ProjectSettings for the active project.
+
+    Reads project.json from the project directory.  Falls back to defaults
+    (empty source_repo_url) when the file does not exist yet — safe to call
+    before 'orchestrate init' has completed.
+    """
+    return ProjectSettingsManager(build_project_paths().project_home).load()
 
 
 def _build_real_redis():
@@ -36,13 +63,13 @@ def _build_real_redis():
 def build_task_repo():
     from src.infra.fs.task_repository import YamlTaskRepository
 
-    return YamlTaskRepository(app_config.tasks_dir)
+    return YamlTaskRepository(build_project_paths().tasks_dir)
 
 
 def build_agent_registry():
     from src.infra.fs.agent_registry import JsonAgentRegistry
 
-    return JsonAgentRegistry(app_config.registry_path)
+    return JsonAgentRegistry(build_project_paths().registry_path)
 
 
 def build_event_port():
@@ -52,7 +79,10 @@ def build_event_port():
         return InMemoryEventAdapter()
     from src.infra.redis_adapters.event_adapter import RedisEventAdapter
 
-    return RedisEventAdapter(_build_real_redis())
+    return RedisEventAdapter(
+        _build_real_redis(),
+        journal_dir=str(build_project_paths().events_dir),
+    )
 
 
 def build_lease_port():
@@ -72,7 +102,10 @@ def build_git_workspace():
         return DryRunGitWorkspaceAdapter()
     from src.infra.git.workspace_adapter import GitWorkspaceAdapter
 
-    return GitWorkspaceAdapter(workspace_base=app_config.workspace_dir)
+    return GitWorkspaceAdapter(
+        workspace_base=build_project_paths().workspace_dir,
+        source_repo_url=build_project_settings().source_repo_url,
+    )
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
@@ -121,7 +154,7 @@ def build_worker_handler() -> WorkerHandler:
         lease_port=build_lease_port(),
         git_workspace=build_git_workspace(),
         runtime_factory=build_runtime_factory(),
-        logs_port=FilesystemTaskLogsAdapter(),
+        logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=app_config.task_timeout,
     )
@@ -212,7 +245,7 @@ def build_task_execute_usecase():
         lease_port=build_lease_port(),
         git_workspace=build_git_workspace(),
         runtime_factory=build_runtime_factory(),
-        logs_port=FilesystemTaskLogsAdapter(),
+        logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
         task_timeout_seconds=app_config.task_timeout,
     )
@@ -224,7 +257,7 @@ def build_task_execute_usecase():
 
 def build_goal_repo():
     from src.infra.fs.goal_repository import YamlGoalRepository
-    return YamlGoalRepository(app_config.goals_dir)
+    return YamlGoalRepository(build_project_paths().goals_dir)
 
 
 def build_goal_init_usecase():
@@ -277,4 +310,38 @@ def build_task_graph_orchestrator():
         event_port=build_event_port(),
         merge_usecase=build_goal_merge_task_usecase(),
         cancel_usecase=build_goal_cancel_task_usecase(),
+        spec_repo=build_spec_repo(),
+        project_name=app_config.project_name,
     )
+
+
+# ---------------------------------------------------------------------------
+# ProjectSpec layer
+# ---------------------------------------------------------------------------
+
+def build_spec_repo():
+    """Return the FileProjectSpecRepository for the active project."""
+    from src.infra.fs.project_spec_repository import FileProjectSpecRepository
+    return FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
+
+
+def build_load_project_spec():
+    from src.app.usecases.load_project_spec import LoadProjectSpec
+    return LoadProjectSpec(spec_repo=build_spec_repo())
+
+
+def build_validate_against_spec():
+    """
+    Load the active spec and return a ValidateAgainstSpec instance.
+
+    Callers that run many validations in a single process should build this
+    once and reuse it — loading the spec from disk each time is wasteful.
+    """
+    from src.app.usecases.validate_against_spec import ValidateAgainstSpec
+    spec = build_load_project_spec().execute(app_config.project_name)
+    return ValidateAgainstSpec(spec)
+
+
+def build_propose_spec_change():
+    from src.app.usecases.propose_spec_change import ProposeSpecChange
+    return ProposeSpecChange(spec_repo=build_spec_repo())

@@ -10,26 +10,41 @@ import structlog
 
 from src.domain import AgentExecutionResult
 from src.domain import TaskLogsPort, TestRunnerPort
-from src.infra.config import config
-
 log = structlog.get_logger(__name__)
 
 MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB per stream
 
-# Module-level alias — tests patch this directly via monkeypatch.setattr
-LOG_BASE = config.logs_dir
+
+def _default_log_base() -> Path:
+    """Resolve logs_dir lazily so the module can be imported without side-effects."""
+    from src.infra.config import config  # deferred — no module-level I/O
+    return config.logs_dir
+
+
+# Module-level alias — tests patch this via monkeypatch.setattr or by
+# constructing FilesystemTaskLogsAdapter(logs_base=tmp_path)
+LOG_BASE: Path | None = None  # resolved on first use if not set explicitly
 
 
 class FilesystemTaskLogsAdapter(TaskLogsPort):
     """
     Filesystem-backed implementation of TaskLogsPort.
-    Mirrors the previous behaviour in WorkerHandler._save_logs.
+
+    Args:
+      logs_base: Directory under which per-task log subdirectories are created.
+                 When not provided the global LOG_BASE is used (resolved lazily
+                 from OrchestratorConfig). Prefer passing logs_base explicitly
+                 so tests can use tmp_path without global state.
     """
+
+    def __init__(self, logs_base: Path | None = None) -> None:
+        self._logs_base = logs_base
 
     def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
         import src.infra.logs_and_tests as _m
 
-        log_dir = _m.LOG_BASE / task_id
+        base = self._logs_base or _m.LOG_BASE or _default_log_base()
+        log_dir = base / task_id
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
             (log_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")

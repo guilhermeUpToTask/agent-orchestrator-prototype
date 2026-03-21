@@ -39,11 +39,7 @@ class YamlTaskRepository(TaskRepositoryPort):
     replaced with a system supporting true atomic CAS (e.g. Postgres or Redis).
     """
 
-    def __init__(self, tasks_dir: str | Path | None = None) -> None:
-        if tasks_dir is None:
-            from src.infra.config import config
-
-            tasks_dir = config.tasks_dir
+    def __init__(self, tasks_dir: str | Path) -> None:
         self._dir = Path(tasks_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         # FIX #3.1: quarantine directory for corrupt task files

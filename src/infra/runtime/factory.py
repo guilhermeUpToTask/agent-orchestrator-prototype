@@ -94,8 +94,11 @@ def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
         base_runtime = builder(agent_props.runtime_config)
 
     # Wrap with logging for live observability
-    # Use logs_dir from config for JSON log storage
-    json_log_dir = str(app_config.logs_dir) if hasattr(app_config, 'logs_dir') else None
+    # Derive logs_dir via ProjectPaths — avoids coupling runtime factory to config shape
+    from src.infra.project_paths import ProjectPaths
+    json_log_dir = str(ProjectPaths.for_project(
+        app_config.orchestrator_home, app_config.project_name
+    ).logs_dir)
     logged_runtime = LoggingRuntimeWrapper(
         base_runtime=base_runtime,
         agent_name=agent_props.runtime_type,
