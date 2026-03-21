@@ -38,6 +38,7 @@ class ProjectPaths:
     logs_dir: Path
     events_dir: Path
     spec_path: Path         # project_spec.yaml canonical location
+    project_state_dir: Path # planner's persistent memory (~/<project>/project_state/)
 
     # ------------------------------------------------------------------
     # Factory
@@ -70,6 +71,7 @@ class ProjectPaths:
             logs_dir=base / "logs",
             events_dir=base / "events",
             spec_path=base / "project_spec.yaml",
+            project_state_dir=base / "project_state",
         )
 
     # ------------------------------------------------------------------
@@ -85,5 +87,6 @@ class ProjectPaths:
             self.workspace_dir,
             self.logs_dir,
             self.events_dir,
+            self.project_state_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)

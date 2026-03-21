@@ -16,6 +16,7 @@ import threading
 import structlog
 
 from src.domain import LeasePort
+from src.domain.ports.lease import LeaseRefresherPort
 
 log = structlog.get_logger(__name__)
 
@@ -23,7 +24,7 @@ _LEASE_REFRESH_INTERVAL = 60
 _LEASE_REFRESH_EXTENSION = 120
 
 
-class LeaseRefresher:
+class LeaseRefresher(LeaseRefresherPort):
     """
     Keeps a task lease alive in the background while the agent session runs.
 
