@@ -6,15 +6,10 @@ Phase 2 refactoring: all execution pipeline logic has been moved to:
     src/infra/redis_adapters/lease_refresher.py  (LeaseRefresher)
 
 This handler now has one responsibility: receive a task.assigned event and
-delegate processing to WorkerExecutionService.
+delegate processing to TaskExecuteUseCase.
 
 Handler contract:
     handle(event) → service.execute(event)
-
-Constructor accepts the same arguments as before so existing tests and the
-factory do not need updating. The handler internally constructs the service.
-_LeaseRefresher is re-exported here for backward compatibility with tests
-that patch "src.app.handlers.worker._LeaseRefresher".
 """
 from __future__ import annotations
 
@@ -28,13 +23,10 @@ from src.domain import (
     GitWorkspacePort, LeasePort, TaskLogsPort,
     TaskRepositoryPort, TestRunnerPort,
 )
+from src.domain.ports.lease import LeaseRefresherFactory
 from src.app.usecases.task_execute import TaskExecuteUseCase
-from src.infra.redis_adapters.lease_refresher import LeaseRefresher
 
 log = structlog.get_logger(__name__)
-
-# Re-export for backward compat (tests patch this path)
-_LeaseRefresher = LeaseRefresher
 
 
 class WorkerHandler:
@@ -43,10 +35,6 @@ class WorkerHandler:
 
     Receives task.assigned events from the CLI event loop and delegates
     the full execution pipeline to TaskExecuteUseCase.
-
-    Constructor signature is intentionally preserved from v1 so the factory
-    and existing unit tests require no changes. The handler constructs the
-    service internally from the provided ports.
     """
 
     def __init__(
@@ -61,6 +49,7 @@ class WorkerHandler:
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         logs_port: TaskLogsPort,
         test_runner: TestRunnerPort,
+        lease_refresher_factory: LeaseRefresherFactory,
         task_timeout_seconds: int = 600,
     ) -> None:
         self._agent_id = agent_id
@@ -74,6 +63,7 @@ class WorkerHandler:
             runtime_factory=runtime_factory,
             logs_port=logs_port,
             test_runner=test_runner,
+            lease_refresher_factory=lease_refresher_factory,
             task_timeout_seconds=task_timeout_seconds,
         )
 
