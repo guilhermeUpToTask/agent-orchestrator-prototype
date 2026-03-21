@@ -156,6 +156,7 @@ def build_worker_handler() -> WorkerHandler:
         runtime_factory=build_runtime_factory(),
         logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
+        lease_refresher_factory=build_lease_refresher_factory(),
         task_timeout_seconds=app_config.task_timeout,
     )
 
@@ -220,6 +221,22 @@ def build_task_unblock_usecase():
         assign_usecase=build_task_assign_usecase(),
     )
 
+def build_lease_refresher_factory():
+    """
+    Return a LeaseRefresherFactory callable.
+
+    The factory is the only place in the codebase that knows about the
+    concrete LeaseRefresher class.  The app layer (TaskExecuteUseCase)
+    receives this callable and calls it to create a refresher handle,
+    but never imports LeaseRefresher directly.
+    """
+    from src.infra.redis_adapters.lease_refresher import LeaseRefresher
+    return lambda lease_port, lease_token: LeaseRefresher(
+        lease_port=lease_port,
+        lease_token=lease_token,
+    )
+
+
 def build_task_execute_usecase():
     from src.app.usecases.task_execute import TaskExecuteUseCase
     from src.infra.logs_and_tests import (
@@ -236,6 +253,7 @@ def build_task_execute_usecase():
         runtime_factory=build_runtime_factory(),
         logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
+        lease_refresher_factory=build_lease_refresher_factory(),
         task_timeout_seconds=app_config.task_timeout,
     )
 
@@ -401,14 +419,6 @@ def build_sync_goal_pr_usecase():
     )
 
 
-def build_advance_goal_from_pr_usecase():
-    from src.app.usecases.advance_goal_from_pr import AdvanceGoalFromPRUseCase
-    return AdvanceGoalFromPRUseCase(
-        goal_repo=build_goal_repo(),
-        event_port=build_event_port(),
-    )
-
-
 def build_reconciler(
     interval_seconds: int = 60,
     stuck_task_min_age_seconds: int = 120,
@@ -449,4 +459,65 @@ def build_goal_finalize_usecase():
     return GoalFinalizeUseCase(
         goal_repo=build_goal_repo(),
         event_port=build_event_port(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project state
+# ---------------------------------------------------------------------------
+
+def build_project_state_adapter():
+    """
+    Return a ProjectStatePort adapter for the active project.
+    Dry-run mode uses the in-memory adapter (no disk I/O, no persistence).
+    """
+    if app_config.mode == "dry-run":
+        from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
+        return InMemoryProjectStateAdapter()
+    from src.infra.fs.project_state_adapter import FilesystemProjectStateAdapter
+    return FilesystemProjectStateAdapter(
+        state_dir=build_project_paths().project_state_dir,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unblock goals
+# ---------------------------------------------------------------------------
+
+def build_unblock_goals_usecase():
+    from src.app.usecases.unblock_goals import UnblockGoalsUseCase
+    return UnblockGoalsUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+    )
+
+
+def build_advance_goal_from_pr_usecase():
+    from src.app.usecases.advance_goal_from_pr import AdvanceGoalFromPRUseCase
+    return AdvanceGoalFromPRUseCase(
+        goal_repo=build_goal_repo(),
+        event_port=build_event_port(),
+        unblock_goals_usecase=build_unblock_goals_usecase(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Planner context
+# ---------------------------------------------------------------------------
+
+def build_planner_context_assembler():
+    """
+    Build a PlannerContextAssembler for the active project.
+
+    Loads the ProjectSpec eagerly — callers that need to assemble context
+    many times should reuse the returned assembler rather than calling this
+    builder repeatedly.
+    """
+    from src.app.services.planner_context import PlannerContextAssembler
+    spec = build_load_project_spec().execute(app_config.project_name)
+    return PlannerContextAssembler(
+        spec=spec,
+        project_state=build_project_state_adapter(),
+        goal_repo=build_goal_repo(),
+        task_repo=build_task_repo(),
     )
