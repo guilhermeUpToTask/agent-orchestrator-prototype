@@ -41,7 +41,9 @@ from src.domain.value_objects.status import TaskStatus
 log = structlog.get_logger(__name__)
 
 # Well-known project state keys the planner writes and reads.
-STATE_KEY_DECISIONS    = "decisions"
+# Well-known project state keys written and read by the planner.
+# STATE_KEY_DECISIONS is no longer used — decisions are now stored as
+# structured DecisionEntry objects via ProjectStatePort.write_decision().
 STATE_KEY_CURRENT_ARCH = "current_arch"
 STATE_KEY_CONTEXT      = "context"
 
