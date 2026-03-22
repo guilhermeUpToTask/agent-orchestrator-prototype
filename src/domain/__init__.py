@@ -152,3 +152,24 @@ from src.domain.ports.project_state import ProjectStatePort
 
 # Lease refresher port + factory type (drift fix — app layer no longer imports infra)
 from src.domain.ports.lease import LeaseRefresherPort, LeaseRefresherFactory
+
+# PlannerSession aggregate + status + turn
+from src.domain.aggregates.planner_session import (
+    PlannerSession,
+    PlannerSessionStatus,
+    SessionTurn,
+)
+
+# Planner ports
+from src.domain.ports.planner import (
+    PlannerRuntimePort,
+    PlannerRuntimeError,
+    PlannerOutput,
+    PlannerTool,
+)
+
+# Project state — DecisionEntry (already exported ProjectStatePort above)
+from src.domain.ports.project_state import DecisionEntry
+
+# Planner session repository port
+from src.domain.repositories.planner_session_repository import PlannerSessionRepositoryPort
