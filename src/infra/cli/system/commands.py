@@ -22,6 +22,7 @@ log = structlog.get_logger(__name__)
 
 # AGENT_ID and HEARTBEAT_INTERVAL_SECONDS are resolved lazily from OrchestratorConfig
 # inside each command that needs them — no module-level env reads.
+_HEARTBEAT_INTERVAL = 30  # seconds between registry heartbeat pings
 
 
 @click.group("system")
