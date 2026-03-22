@@ -216,6 +216,16 @@ class StubPlannerRuntime(PlannerRuntimePort):
         handler = tool_map.get("submit_final_roadmap")
         result_str = handler({"roadmap_json": roadmap_json}) if handler else json.dumps({"accepted": True})
 
+        try:
+            parsed = json.loads(result_str)
+            if not parsed.get("accepted"):
+                raise PlannerRuntimeError(
+                    f"StubPlannerRuntime: submit_final_roadmap rejected: "
+                    f"{parsed.get('error', 'unknown error')}"
+                )
+        except json.JSONDecodeError:
+            raise PlannerRuntimeError("StubPlannerRuntime: invalid JSON from submit_final_roadmap handler")
+
         tool_result_blocks = [
             {
                 "type": "tool_result",
