@@ -32,7 +32,7 @@ from typing import Any, Optional
 import structlog
 
 from src.domain.aggregates.goal import GoalStatus
-from src.domain.ports.project_state import ProjectStatePort
+from src.domain.ports.project_state import DecisionEntry, ProjectStatePort
 from src.domain.project_spec.aggregate import ProjectSpec
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 from src.domain.repositories import TaskRepositoryPort
@@ -70,7 +70,7 @@ class PlannerContext:
 
     Fields:
       architecture_constraints  — from ProjectSpec.get_architecture_constraints()
-      decisions                 — accumulated decisions markdown, or empty string
+      decisions                 — list of active DecisionEntry objects
       current_arch              — current architecture description, or empty string
       extra_context             — free-form context the planner accumulated, or ""
       goals                     — snapshot of all non-terminal goals
@@ -79,7 +79,7 @@ class PlannerContext:
       pending_goal_count        — number of goals still in PENDING state
     """
     architecture_constraints: dict[str, Any]
-    decisions: str
+    decisions: list[DecisionEntry]
     current_arch: str
     extra_context: str
     goals: list[GoalSnapshot]
@@ -110,10 +110,19 @@ class PlannerContext:
         if cst.get("required"):
             sections.append(f"**Required**: {', '.join(cst['required'])}")
 
-        # 2. Accumulated decisions
+        # 2. Accumulated decisions — grouped by domain
         if self.decisions:
             sections.append("\n## Architectural decisions")
-            sections.append(self.decisions)
+            # Group by domain
+            by_domain: dict[str, list[DecisionEntry]] = {}
+            for d in self.decisions:
+                by_domain.setdefault(d.domain or "general", []).append(d)
+            for domain, entries in sorted(by_domain.items()):
+                sections.append(f"\n### {domain.capitalize()}")
+                for entry in entries:
+                    tag = f" (feature: {entry.feature_tag})" if entry.feature_tag else ""
+                    sections.append(f"**[{entry.id}]**{tag} — {entry.date}")
+                    sections.append(entry.content)
 
         # 3. Current architecture description
         if self.current_arch:
@@ -176,7 +185,7 @@ class PlannerContextAssembler:
         constraints = self._spec.get_architecture_constraints()
 
         # 2. Persistent planner memory
-        decisions    = self._project_state.read_state(STATE_KEY_DECISIONS) or ""
+        decisions    = self._project_state.list_decisions(status="active")
         current_arch = self._project_state.read_state(STATE_KEY_CURRENT_ARCH) or ""
         extra_ctx    = self._project_state.read_state(STATE_KEY_CONTEXT) or ""
 
