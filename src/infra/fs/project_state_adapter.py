@@ -1,48 +1,78 @@
 """
 src/infra/fs/project_state_adapter.py — Filesystem adapter for ProjectStatePort.
-
-Stores each state document as a markdown file:
-  ~/.orchestrator/<project>/project_state/<key>.md
-
-Writes are atomic (temp-file + os.replace) so a crash mid-write never
-leaves a partially-written document.  Reads return None for missing keys
-rather than raising, matching the port contract.
-
-Well-known keys written and read by the planner:
-  "decisions"    — accumulated architectural decisions in markdown
-  "current_arch" — current system architecture description
-  "context"      — free-form project context the planner maintains
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
 
-from src.domain.ports.project_state import ProjectStatePort
+from src.domain.ports.project_state import DecisionEntry, ProjectStatePort
+
+_FRONTMATTER_SEP = "---"
+
+
+def _render_decision(entry: DecisionEntry) -> str:
+    """Serialise a DecisionEntry to YAML frontmatter + content."""
+    lines = [
+        _FRONTMATTER_SEP,
+        f"id: {entry.id}",
+        f"date: {entry.date}",
+        f"status: {entry.status}",
+        f"domain: {entry.domain}",
+        f"feature_tag: {entry.feature_tag}",
+        f"superseded_by: {entry.superseded_by or ''}",
+        _FRONTMATTER_SEP,
+        entry.content,
+    ]
+    return "\n".join(lines)
+
+
+def _parse_decision(text: str) -> DecisionEntry:
+    """Parse YAML frontmatter + content into a DecisionEntry."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != _FRONTMATTER_SEP:
+        raise ValueError("Decision file missing frontmatter separator")
+    end_idx = next(
+        (i for i, l in enumerate(lines[1:], 1) if l.strip() == _FRONTMATTER_SEP),
+        None,
+    )
+    if end_idx is None:
+        raise ValueError("Decision file frontmatter not closed")
+    fm_lines = lines[1:end_idx]
+    content = "\n".join(lines[end_idx + 1:])
+    meta: dict[str, str] = {}
+    for line in fm_lines:
+        if ":" in line:
+            k, _, v = line.partition(":")
+            meta[k.strip()] = v.strip()
+    return DecisionEntry(
+        id=meta.get("id", ""),
+        date=meta.get("date", ""),
+        status=meta.get("status", "active"),
+        domain=meta.get("domain", ""),
+        feature_tag=meta.get("feature_tag", ""),
+        content=content,
+        superseded_by=meta.get("superseded_by") or None,
+    )
 
 
 class FilesystemProjectStateAdapter(ProjectStatePort):
-    """
-    Stores project state documents as .md files under a dedicated directory.
-    """
+    """Stores project state documents as .md files under a dedicated directory."""
 
     def __init__(self, state_dir: str | Path) -> None:
         self._dir = Path(state_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._decisions_dir = self._dir / "decisions"
+        self._decisions_dir.mkdir(exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # ProjectStatePort
-    # ------------------------------------------------------------------
+    # -- free-form keys --
 
     def read_state(self, key: str) -> Optional[str]:
         path = self._key_path(key)
-        if not path.exists():
-            return None
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8") if path.exists() else None
 
     def write_state(self, key: str, content: str) -> None:
-        path = self._key_path(key)
-        _atomic_write(path, content)
+        _atomic_write(self._key_path(key), content)
 
     def list_keys(self) -> list[str]:
         return sorted(p.stem for p in self._dir.glob("*.md"))
@@ -54,14 +84,56 @@ class FilesystemProjectStateAdapter(ProjectStatePort):
         path.unlink()
         return True
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+    # -- structured decisions --
+
+    def write_decision(self, entry: DecisionEntry) -> None:
+        path = self._decision_path(entry.id)
+        _atomic_write(path, _render_decision(entry))
+
+    def list_decisions(
+        self,
+        domain: Optional[str] = None,
+        status: str = "active",
+    ) -> list[DecisionEntry]:
+        results: list[DecisionEntry] = []
+        for path in sorted(self._decisions_dir.glob("*.md")):
+            try:
+                entry = _parse_decision(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if status is not None and entry.status != status:
+                continue
+            if domain is not None and entry.domain != domain:
+                continue
+            results.append(entry)
+        return results
+
+    def supersede_decision(self, id: str, superseded_by: str, reason: str) -> bool:
+        path = self._decision_path(id)
+        if not path.exists():
+            return False
+        entry = _parse_decision(path.read_text(encoding="utf-8"))
+        updated = DecisionEntry(
+            id=entry.id,
+            date=entry.date,
+            status="superseded",
+            domain=entry.domain,
+            feature_tag=entry.feature_tag,
+            content=entry.content + f"\n\n**Superseded by {superseded_by}**: {reason}",
+            superseded_by=superseded_by,
+        )
+        _atomic_write(path, _render_decision(updated))
+        return True
+
+    # -- helpers --
 
     def _key_path(self, key: str) -> Path:
-        # Sanitise key to prevent path traversal — keep only alphanum + hyphen/underscore.
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         return self._dir / f"{safe}.md"
+
+    def _decision_path(self, decision_id: str) -> Path:
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in decision_id)
+        return self._decisions_dir / f"{safe}.md"
 
 
 # ---------------------------------------------------------------------------
@@ -69,13 +141,11 @@ class FilesystemProjectStateAdapter(ProjectStatePort):
 # ---------------------------------------------------------------------------
 
 class InMemoryProjectStateAdapter(ProjectStatePort):
-    """
-    Volatile in-memory adapter for tests and dry-run mode.
-    No disk I/O, no persistence across process restarts.
-    """
+    """Volatile in-memory adapter for tests and dry-run mode."""
 
     def __init__(self) -> None:
         self._store: dict[str, str] = {}
+        self._decisions: dict[str, DecisionEntry] = {}
 
     def read_state(self, key: str) -> Optional[str]:
         return self._store.get(key)
@@ -92,13 +162,45 @@ class InMemoryProjectStateAdapter(ProjectStatePort):
         del self._store[key]
         return True
 
+    def write_decision(self, entry: DecisionEntry) -> None:
+        self._decisions[entry.id] = entry
+
+    def list_decisions(
+        self,
+        domain: Optional[str] = None,
+        status: str = "active",
+    ) -> list[DecisionEntry]:
+        results = []
+        for entry in self._decisions.values():
+            if status is not None and entry.status != status:
+                continue
+            if domain is not None and entry.domain != domain:
+                continue
+            results.append(entry)
+        return sorted(results, key=lambda e: e.id)
+
+    def supersede_decision(self, id: str, superseded_by: str, reason: str) -> bool:
+        if id not in self._decisions:
+            return False
+        entry = self._decisions[id]
+        self._decisions[id] = DecisionEntry(
+            id=entry.id,
+            date=entry.date,
+            status="superseded",
+            domain=entry.domain,
+            feature_tag=entry.feature_tag,
+            content=entry.content + f"\n\n**Superseded by {superseded_by}**: {reason}",
+            superseded_by=superseded_by,
+        )
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Write content to path via a temp file + atomic rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     try:
         tmp.write_text(content, encoding="utf-8")
