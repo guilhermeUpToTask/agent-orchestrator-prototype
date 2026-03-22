@@ -209,5 +209,229 @@ def goal_finalize(goal_id: str, yes: bool):
         )
 
     usecase = build_goal_finalize_usecase()
-    sha = usecase.execute(goal_id)
-    ok(f"Merged '{goal.branch}' → main  (commit: {sha[:12]})")
+    result = usecase.execute(goal_id)
+    pr_info = f"  PR #{result['pr_number']}  {result['pr_url']}" if result.get("pr_number") else ""
+    ok(f"Goal '{goal.branch}' finalized  (status: {result['goal_status']}){pr_info}")
+
+
+# ---------------------------------------------------------------------------
+# plan
+# ---------------------------------------------------------------------------
+
+@goals_group.command("plan")
+@click.argument("user_input")
+@click.option(
+    "--dispatch", "-d",
+    is_flag=True,
+    default=False,
+    help="Dispatch goals immediately after planning (skips manual confirmation step).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Use stub runtime — shows what would be planned without calling the LLM.",
+)
+@catch_domain_errors
+def goal_plan(user_input: str, dispatch: bool, dry_run: bool):
+    """
+    Run the AI planner to generate a roadmap from USER_INPUT.
+
+    The planner analyses the project spec, existing goals, and accumulated
+    architectural decisions, then produces a validated goal roadmap via an
+    agentic loop (claude-opus-4-6 with extended thinking).
+
+    The roadmap is displayed for review. Use --dispatch to skip confirmation
+    and start executing goals immediately, or run:
+
+      orchestrator goals dispatch-roadmap <session-id>
+
+    after reviewing the plan.
+
+    Examples:
+      orchestrator goals plan "add OAuth2 login"
+      orchestrator goals plan "add OAuth2 login" --dispatch
+      orchestrator goals plan "stub the payment service" --dry-run
+    """
+    import os
+    from src.infra.config import config as app_config
+    from src.infra.factory import build_run_planning_session_usecase
+
+    if dry_run:
+        os.environ["AGENT_MODE"] = "dry-run"
+
+    if app_config.mode != "real" and not dry_run:
+        warn(
+            f"AGENT_MODE is not 'real' (current: '{app_config.mode}').\n"
+            "   The planner will use StubPlannerRuntime instead of the Anthropic API.\n"
+            "   Set AGENT_MODE=real or pass --dry-run to acknowledge."
+        )
+
+    info(f"Planning: \"{user_input}\"")
+    info("Assembling project context...")
+
+    usecase = build_run_planning_session_usecase()
+    result = usecase.execute(user_input, dispatch=dispatch)
+
+    click.echo()
+
+    if result.failure_reason:
+        die(f"Planning failed: {result.failure_reason}")
+        return
+
+    # Show the roadmap
+    if result.roadmap:
+        ok(f"Roadmap generated  (session: {result.session_id})")
+        click.echo()
+        for i, spec in enumerate(result.roadmap.topological_order(), 1):
+            feature = f"  [{spec.feature_tag}]" if spec.feature_tag else ""
+            deps = f"  depends: {', '.join(spec.depends_on)}" if spec.depends_on else ""
+            click.echo(f"  {i}. {spec.name}{feature}{deps}")
+            click.echo(f"     {spec.description}")
+            for task in spec.tasks:
+                tdeps = f" ← {', '.join(task.depends_on)}" if task.depends_on else ""
+                click.echo(f"       • [{task.capability}] {task.task_id}: {task.title}{tdeps}")
+        click.echo()
+    else:
+        warn("No roadmap in result — planning may have produced validation errors.")
+
+    if result.validation_errors:
+        click.echo("  ⚠  Validation errors:", err=True)
+        for e in result.validation_errors:
+            click.echo(f"    • {e}", err=True)
+        click.echo()
+
+    if result.validation_warnings:
+        click.echo("  ℹ  Warnings:")
+        for w in result.validation_warnings:
+            click.echo(f"    • {w}")
+        click.echo()
+
+    if dispatch:
+        if result.dispatched_count > 0:
+            ok(f"Dispatched {result.dispatched_count} goal(s) — task manager will pick them up.")
+        else:
+            warn("No goals dispatched (check validation errors above).")
+    elif result.roadmap and not result.has_errors:
+        info(
+            f"To execute this plan, run:\n"
+            f"  orchestrator goals dispatch-roadmap {result.session_id}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# dispatch-roadmap
+# ---------------------------------------------------------------------------
+
+@goals_group.command("dispatch-roadmap")
+@click.argument("session_id")
+@click.option(
+    "--yes", "-y",
+    is_flag=True,
+    default=False,
+    help="Skip confirmation prompt.",
+)
+@catch_domain_errors
+def goal_dispatch_roadmap(session_id: str, yes: bool):
+    """
+    Dispatch goals from a previously completed planning session.
+
+    SESSION_ID is printed by  orchestrator goals plan  after a successful run.
+    This is the human confirmation gate — review the plan first, then run this.
+
+    Idempotent: goals already dispatched in a prior call are skipped.
+
+    Example:
+      orchestrator goals dispatch-roadmap plan-abc123def456
+      orchestrator goals dispatch-roadmap plan-abc123def456 --yes
+    """
+    from src.infra.factory import build_run_planning_session_usecase, build_planner_session_repo
+
+    repo = build_planner_session_repo()
+    session = repo.get(session_id)
+
+    if session is None:
+        die(f"Planning session '{session_id}' not found.")
+        return
+
+    if not session.has_valid_roadmap():
+        die(
+            f"Session '{session_id}' does not have a valid roadmap.\n"
+            f"  status: {session.status.value}\n"
+            f"  errors: {session.validation_errors or 'none'}"
+        )
+        return
+
+    # Display roadmap summary before confirmation
+    from src.app.usecases.run_planning_session import _parse_goal_specs
+    from src.domain.value_objects.goal import Roadmap
+    specs = _parse_goal_specs(session.roadmap_data)
+    roadmap = Roadmap(goals=specs)
+
+    click.echo(f"\n  Session: {session_id}")
+    click.echo(f"  Input:   \"{session.user_input}\"")
+    click.echo(f"\n  Goals to dispatch ({len(roadmap.goals)}):")
+    for spec in roadmap.topological_order():
+        click.echo(f"    • {spec.name} — {spec.description[:60]}")
+    click.echo()
+
+    if not yes:
+        click.confirm("  Dispatch these goals?", abort=True)
+
+    usecase = build_run_planning_session_usecase()
+    result = usecase.dispatch_roadmap(session_id)
+
+    click.echo()
+    if result.dispatched_count > 0:
+        ok(f"Dispatched {result.dispatched_count} goal(s).")
+        for goal_id in result.goals_dispatched:
+            info(f"  → {goal_id}")
+    else:
+        warn("No goals were dispatched (may all have been dispatched already).")
+
+    if result.validation_errors:
+        click.echo("\n  ⚠  Dispatch errors:", err=True)
+        for e in result.validation_errors:
+            click.echo(f"    • {e}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sessions
+# ---------------------------------------------------------------------------
+
+@goals_group.command("sessions")
+@click.option("--limit", default=10, help="Number of recent sessions to show.")
+@catch_domain_errors
+def goal_sessions(limit: int):
+    """
+    List recent planning sessions and their status.
+
+    Shows the most recent sessions first. Use this to find a SESSION_ID
+    for  orchestrator goals dispatch-roadmap.
+
+    Example:
+      orchestrator goals sessions
+      orchestrator goals sessions --limit 5
+    """
+    from src.infra.factory import build_planner_session_repo
+
+    repo = build_planner_session_repo()
+    sessions = repo.list_all()[:limit]
+
+    if not sessions:
+        info("No planning sessions found.")
+        return
+
+    click.echo()
+    for s in sessions:
+        goals_info = f"  {len(s.goals_dispatched)} dispatched" if s.goals_dispatched else ""
+        errors_info = f"  {len(s.validation_errors)} errors" if s.validation_errors else ""
+        status_icon = {"completed": "✓", "failed": "✗", "running": "⋯", "pending": "○"}.get(
+            s.status.value, "?"
+        )
+        click.echo(
+            f"  {status_icon} {s.session_id}  [{s.status.value}]{goals_info}{errors_info}"
+        )
+        click.echo(f"    \"{s.user_input[:70]}\"")
+        click.echo(f"    {s.created_at.strftime('%Y-%m-%d %H:%M')} UTC")
+        click.echo()
