@@ -521,3 +521,51 @@ def build_planner_context_assembler():
         goal_repo=build_goal_repo(),
         task_repo=build_task_repo(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Planner sessions
+# ---------------------------------------------------------------------------
+
+def build_planner_session_repo():
+    """
+    Return a PlannerSessionRepositoryPort for the active project.
+    Dry-run mode uses the in-memory adapter.
+    """
+    if app_config.mode == "dry-run":
+        from src.infra.fs.planner_session_repository import InMemoryPlannerSessionRepository
+        return InMemoryPlannerSessionRepository()
+    from src.infra.fs.planner_session_repository import YamlPlannerSessionRepository
+    return YamlPlannerSessionRepository(build_project_paths().planner_sessions_dir)
+
+
+def build_planner_runtime():
+    """
+    Return a PlannerRuntimePort for the active project.
+    Dry-run mode uses the deterministic StubPlannerRuntime.
+    """
+    if app_config.mode == "dry-run":
+        from src.infra.runtime.planner_runtime import StubPlannerRuntime
+        return StubPlannerRuntime()
+    from src.infra.runtime.planner_runtime import AnthropicPlannerRuntime
+    return AnthropicPlannerRuntime(
+        api_key=app_config.anthropic_api_key.get_secret_value(),
+    )
+
+
+def build_run_planning_session_usecase():
+    """Wire all dependencies for RunPlanningSessionUseCase."""
+    from src.app.usecases.run_planning_session import RunPlanningSessionUseCase
+    from src.app.usecases.validate_against_spec import ValidateAgainstSpec
+
+    spec = build_load_project_spec().execute(app_config.project_name)
+    return RunPlanningSessionUseCase(
+        context_assembler=build_planner_context_assembler(),
+        planner_runtime=build_planner_runtime(),
+        session_repo=build_planner_session_repo(),
+        goal_init=build_goal_init_usecase(),
+        validator=ValidateAgainstSpec(spec),
+        project_state=build_project_state_adapter(),
+        agent_registry=build_agent_registry(),
+        goal_repo=build_goal_repo(),
+    )
