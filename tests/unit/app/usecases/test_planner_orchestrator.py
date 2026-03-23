@@ -7,16 +7,11 @@ import pytest
 
 from src.app.usecases.planner_orchestrator import (
     PlannerOrchestrator,
-    DiscoveryResult,
-    ArchitectureResult,
-    PhaseReviewResult,
-    ApprovalResult,
 )
 from src.app.services.planner_context import PlannerContextAssembler
 from src.domain.aggregates.planner_session import (
     PlannerMode,
     PlannerSession,
-    PlannerSessionStatus,
 )
 from src.domain.aggregates.project_plan import (
     Phase,
@@ -25,7 +20,7 @@ from src.domain.aggregates.project_plan import (
     ProjectPlan,
     ProjectPlanStatus,
 )
-from src.domain.ports.planner import PlannerRuntimePort, PlannerOutput
+from src.domain.ports.planner import PlannerRuntimePort
 
 
 class TestPlannerOrchestratorDiscovery:

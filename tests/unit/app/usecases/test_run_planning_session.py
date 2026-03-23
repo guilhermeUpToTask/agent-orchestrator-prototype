@@ -5,19 +5,15 @@ Tests for RunPlanningSessionUseCase with all external ports mocked.
 """
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 from src.app.usecases.run_planning_session import RunPlanningSessionUseCase, PlanningResult
 from src.app.usecases.validate_against_spec import ValidationResult
-from src.domain.aggregates.goal import GoalAggregate, GoalStatus
+from src.domain.aggregates.goal import GoalAggregate
 from src.domain.aggregates.planner_session import PlannerSession, PlannerSessionStatus
 from src.domain.entities.agent import AgentProps
-from src.domain.ports.planner import PlannerOutput, PlannerRuntimeError
-from src.domain.ports.project_state import DecisionEntry
-from src.domain.repositories.planner_session_repository import PlannerSessionRepositoryPort
-from src.domain.value_objects.goal import GoalSpec, GoalTaskDef, Roadmap
+from src.domain.ports.planner import PlannerRuntimeError
 from src.infra.fs.planner_session_repository import InMemoryPlannerSessionRepository
 from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
 from src.infra.runtime.planner_runtime import StubPlannerRuntime

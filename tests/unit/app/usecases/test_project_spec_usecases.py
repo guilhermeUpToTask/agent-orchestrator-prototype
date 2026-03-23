@@ -21,7 +21,6 @@ from src.app.usecases.validate_against_spec import ValidateAgainstSpec, Validati
 from src.app.usecases.propose_spec_change import (
     ChangeProposal,
     ProposeSpecChange,
-    ProposalResult,
 )
 from src.infra.fs.project_spec_repository import FileProjectSpecRepository
 

@@ -32,7 +32,7 @@ def _ci(*checks: str, min_approvals: int = 1) -> CIConfig:
 def _parse(yaml_text: str) -> dict:
     """Strip the banner comment lines and parse the YAML body."""
     lines = yaml_text.splitlines()
-    body_lines = [l for l in lines if not l.startswith("#")]
+    body_lines = [line for line in lines if not line.startswith("#")]
     return yaml.safe_load("\n".join(body_lines)) or {}
 
 
@@ -154,7 +154,7 @@ class TestBanner:
     def test_banner_is_comments_only(self):
         """All banner lines must start with # so YAML parsers ignore them."""
         text = render_project_ci(_ci("tests"), base_branch="main", project_name="p")
-        banner_lines = [l for l in text.splitlines() if l.startswith("#")]
+        banner_lines = [line for line in text.splitlines() if line.startswith("#")]
         assert len(banner_lines) > 5
 
     def test_banner_mentions_orchestrate_init(self):
@@ -238,7 +238,6 @@ class TestCISeparation:
     def test_orchestrator_ci_file_is_separate(self):
         """The orchestrator's own .github/workflows/ci.yml must exist and test itself."""
         from pathlib import Path
-        import yaml as _yaml
         ci_path = Path(__file__).parents[3] / ".github" / "workflows" / "ci.yml"
         assert ci_path.exists(), "Orchestrator CI file missing"
         text = ci_path.read_text()

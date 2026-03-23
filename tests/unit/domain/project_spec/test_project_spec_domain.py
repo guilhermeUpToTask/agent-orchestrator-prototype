@@ -14,15 +14,9 @@ from __future__ import annotations
 import pytest
 
 from src.domain.project_spec.value_objects import (
-    DirectoryRule,
-    SpecConstraints,
-    SpecObjective,
     SpecVersion,
-    StructureSpec,
-    TechStack,
 )
 from src.domain.project_spec.aggregate import ProjectSpec, _SpecMeta
-from src.domain.project_spec.errors import SpecValidationError
 
 
 # ---------------------------------------------------------------------------

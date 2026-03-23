@@ -34,10 +34,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
 
 import fakeredis
 import pytest
@@ -523,7 +521,7 @@ class TestFailurePaths:
         Agent writes outside the declared allowed files → task FAILED,
         no retry (it's a code contract violation, not a transient failure).
         """
-        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime, SimulatedSessionHandle
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
 
         task = make_task(files=["src/hello.py"])
         task_repo.save(task)

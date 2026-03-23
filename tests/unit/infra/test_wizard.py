@@ -4,17 +4,13 @@ tests/unit/infra/test_wizard.py
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
-from click.testing import CliRunner
 
 from src.infra.config_manager import OrchestratorConfigManager
 from src.infra.project_settings import ProjectSettingsManager
 from src.infra.cli.wizard import run_wizard
 from src.infra.cli.wizard.steps.deps     import check_and_report     as _check_and_report
-from src.infra.cli.wizard.steps.config   import collect_project_config as _collect_project_config
 from src.infra.cli.wizard.steps.registry import setup_registry         as _setup_registry
 from src.infra.cli.wizard.steps.registry import _interactive_register_agent
 from src.dependency_checker import DependencyReport, DepResult

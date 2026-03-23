@@ -1,10 +1,9 @@
 from pathlib import Path
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from pydantic import SecretStr
 from src.infra.factory import (
     build_task_repo,
-    build_agent_registry,
     build_event_port,
     build_lease_port,
     build_agent_runtime,
@@ -145,7 +144,6 @@ class TestFactory:
             runtime_type="pi",
             runtime_config={"model": "openrouter/hunter-alpha"},
         )
-        from src.infra.runtime.pi_runtime import PiAgentRuntime
         from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)
@@ -163,7 +161,6 @@ class TestFactory:
             runtime_type="pi",
             runtime_config={"model": "claude-sonnet-4-5", "backend": "anthropic"},
         )
-        from src.infra.runtime.pi_runtime import PiAgentRuntime
         from src.infra.logging import LoggingRuntimeWrapper
 
         runtime = build_agent_runtime(props)

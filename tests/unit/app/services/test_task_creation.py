@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock
 from src.app.services.task_creation import TaskCreationService
 from src.domain import TaskAggregate, TaskStatus

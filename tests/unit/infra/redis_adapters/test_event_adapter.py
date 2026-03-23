@@ -1,6 +1,9 @@
 import json
+from unittest.mock import patch
+
 import fakeredis
 import pytest
+
 from src.infra.redis_adapters.event_adapter import RedisEventAdapter
 from src.domain import DomainEvent
 
@@ -25,8 +28,6 @@ def test_publish(adapter, redis_client):
     # Check global stream
     msg_all = redis_client.xread({"events:all": "0"})
     assert len(msg_all) == 1
-
-from unittest.mock import patch, MagicMock
 
 def test_subscribe_many_yields_deserialized_event(adapter, redis_client):
     """subscribe_many() should deserialise the raw Redis message into a DomainEvent."""
