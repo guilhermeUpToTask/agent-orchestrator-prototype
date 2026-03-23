@@ -1,80 +1,186 @@
-## Architecture overview
+# Architecture overview
 
-This project follows a layered, hexagonal-style architecture with three primary layers:
+This repository currently follows a layered architecture with explicit boundaries between domain rules, application orchestration, and infrastructure adapters.
 
-- **Domain (`src/core`)**: Pure business logic and domain state.
-- **Application (`src/app`)**: Use-cases and orchestration, expressed in terms of domain types and ports.
-- **Infrastructure (`src/infra`)**: Adapters for storage, messaging, runtimes, git, and wiring of the system.
+## Layer map
 
-### Layering and dependencies
+### Domain layer — `src/domain`
 
-- **Domain layer (`src/core`)**
-  - Contains domain models and value objects in `core/models.py` such as `TaskAggregate`, `ExecutionSpec`, `RetryPolicy`, `TaskResult`, and `DomainEvent`.
-  - Encodes the task state machine and invariants via methods like `assign`, `start`, `complete`, `fail`, `requeue`, `cancel`, and `mark_merged`.
-  - Contains pure domain services in `core/services.py`, including:
-    - `SchedulerService` for agent selection.
-    - `LeaseService` for lease-expiry decisions.
-    - `AnomalyDetectionService` for detecting stuck tasks, dead agents, and expired leases.
-  - Defines ports (interfaces) in `core/ports.py` such as `TaskRepositoryPort`, `AgentRegistryPort`, `EventPort`, `LeasePort`, `GitWorkspacePort`, and `AgentRuntimePort` that abstract persistence, messaging, and runtimes.
-  - **Does not depend on** `src/app` or `src/infra`, and avoids framework-specific imports.
+The domain layer owns the system's business rules and state transitions.
 
-- **Application layer (`src/app`)**
-  - Implements use-cases and workflows using domain models and ports.
-  - Key components:
-    - `app/services/task_creation.py` (`TaskCreationService`): creates new `TaskAggregate` instances, persists them, and publishes `task.created` events.
-    - `app/handlers/task_manager.py` (`TaskManagerHandler`): event-driven coordinator for task lifecycle, handling `task.created`, `task.requeued`, `task.completed`, and `task.failed`.
-    - `app/handlers/worker.py` (`WorkerHandler`): orchestrates per-task execution, including workspace preparation, runtime session management, validation, tests, and persistence.
-    - `app/reconciler.py` (`Reconciler`): watchdog that periodically scans tasks and emits events for stuck or anomalous tasks.
-  - Application code is written **exclusively against ports and domain types**, and does not import concrete infra implementations.
+It includes:
 
-- **Infrastructure layer (`src/infra`)**
-  - Provides concrete implementations of the ports defined in `src/core` and wires the system together.
-  - Key areas:
-    - `infra/fs/*`: filesystem-based task repository and agent registry.
-    - `infra/redis_adapters/*`: Redis-backed and in-memory implementations of `EventPort` and `LeasePort`.
-    - `infra/git/workspace_adapter.py`: implementations of `GitWorkspacePort` (real git and dry-run).
-    - `infra/runtime/*`: implementations of `AgentRuntimePort` (dry-run, Gemini, Claude Code, generic CLI).
-    - `infra/config.py`: configuration for paths, URLs, and mode.
-    - `infra/factory.py`: composition root that builds repositories, ports, runtimes, and high-level handlers (`TaskManagerHandler`, `WorkerHandler`, `Reconciler`, `TaskCreationService`).
-  - **Depends on** `src/core` and `src/app` as expected for a composition root and adapters.
+- **Aggregates** such as tasks, goals, planner sessions, and project plans.
+- **Entities and value objects** for agents, execution state, PR state, statuses, and goal metadata.
+- **Repository and service ports** that define the contracts used by the application layer.
+- **Domain services and rules** such as scheduling, reconciliation, and task rule evaluation.
+- **Project spec domain models** for validating architecture constraints and spec changes.
 
-The intended dependency direction is:
+The domain layer should not depend on concrete filesystem, Redis, subprocess, git, or HTTP implementations.
+
+### Application layer — `src/app`
+
+The application layer coordinates workflows using domain objects and ports.
+
+It currently contains:
+
+- **Use cases** for task execution, retries, project reset, goal initialization/finalization, PR synchronization, spec validation, and spec change proposals.
+- **Handlers** for the task manager and worker processes.
+- **Reconciliation services** that detect expired leases, stuck tasks, and similar operational drift.
+- **Planning orchestration** that drives discovery, architecture, and phase review workflows.
+- **Goal orchestration** in `src/app/orchestrator.py`, which reacts to task and goal events to manage branch-level progress and PR-driven gating.
+
+Application code is the bridge between domain decisions and infrastructure side effects.
+
+### Infrastructure layer — `src/infra`
+
+The infrastructure layer implements ports and wires the application together.
+
+Key areas include:
+
+- **CLI** commands in `src/infra/cli`
+- **Filesystem repositories** in `src/infra/fs`
+- **Redis adapters** for events and leases in `src/infra/redis_adapters`
+- **Git workspace adapters** in `src/infra/git`
+- **Runtime adapters** in `src/infra/runtime`
+- **GitHub integration** in `src/infra/github`
+- **Configuration and project-path derivation** in `src/infra/config.py`, `src/infra/config_manager.py`, `src/infra/project_paths.py`, and `src/infra/project_settings.py`
+- **Observability** in `src/infra/logging` and `src/infra/logs_and_tests.py`
+
+### Composition root — `src/infra/factory.py`
+
+The factory module is the composition root. It chooses concrete adapters based on configuration and injects them into handlers and use cases.
+
+## Dependency direction
 
 ```mermaid
 flowchart LR
-  core[core (models, services, ports)]
-  app[app (handlers, use-cases)]
-  infra[infra (adapters, factory)]
+  cli[CLI / external entry points]
+  infra[Infrastructure adapters]
+  app[Application layer]
+  domain[Domain layer]
 
+  cli --> infra
   infra --> app
-  app --> core
+  app --> domain
 ```
 
-### High-level data flow
+The important rule is not the mermaid arrow style but the code dependency rule:
 
-- **Task creation**
-  - A client uses `TaskCreationService` to create a `TaskAggregate`, which is persisted via `TaskRepositoryPort` and emits a `task.created` `DomainEvent`.
-  - The `TaskManagerHandler` consumes `task.created`, selects an agent with `SchedulerService`, assigns the task, creates a lease, and emits `task.assigned`.
+- `src/domain` should stay independent.
+- `src/app` may depend on `src/domain`.
+- `src/infra` may depend on both `src/app` and `src/domain`.
 
-- **Task execution**
-  - A worker process, using `WorkerHandler`, consumes `task.assigned`, validates the assignment, and prepares a git workspace via `GitWorkspacePort`.
-  - `WorkerHandler` transitions the task to `IN_PROGRESS` with optimistic concurrency, builds an `ExecutionContext`, and delegates execution to a runtime via `AgentRuntimePort`.
-  - After completion, it validates file modifications via `ExecutionSpec`, optionally runs tests, commits and pushes via `GitWorkspacePort`, persists the result, and emits `task.completed` or `task.failed`.
+## Runtime state model
 
-- **Recovery and retries**
-  - The `Reconciler` periodically scans tasks through `TaskRepositoryPort`, using `AnomalyDetectionService` and `LeasePort`/`AgentRegistryPort` to detect stuck or unhealthy tasks.
-  - For stuck pending tasks, it republishs `task.created` or `task.requeued`. For dead agents or expired leases, it transitions tasks to `FAILED` and emits `task.failed`.
-  - The `TaskManagerHandler` reacts to `task.failed`, using the domain `RetryPolicy` on `TaskAggregate` to decide whether to requeue or cancel, emitting `task.requeued` or `task.canceled` accordingly.
+The current implementation is project-scoped. The active project is derived from `ORCHESTRATOR_HOME` and `PROJECT_NAME`, and `ProjectPaths` maps that into a stable directory layout.
 
-### Boundary conventions
+```text
+<orchestrator_home>/projects/<project_name>/
+  agents/registry.json
+  events/
+  goals/
+  logs/
+  planner_sessions/
+  project.json
+  project_plan.yaml
+  project_spec.yaml
+  project_state/
+  repo/
+  tasks/
+  workspaces/
+```
 
-- New business rules around task lifecycle, retries, dependencies, and anomaly detection should be expressed in:
-  - `src/core/models.py` (state machine, invariants, policies tied to `TaskAggregate`).
-  - `src/core/services.py` (pure domain services and policy helpers).
-- Application handlers in `src/app` should:
-  - Orchestrate workflows and side effects by calling domain services and ports.
-  - Avoid embedding low-level I/O (files, subprocesses, network) that can instead be expressed via new or existing ports.
-- Infrastructure in `src/infra` should:
-  - Implement ports and configuration decisions, but not duplicate or override domain rules.
-  - Keep runtime adapters focused on translating `ExecutionContext` to external process calls and back to domain types.
+This design separates three kinds of configuration/state:
 
+- **Machine-local orchestrator config** in `.orchestrator/config.json`
+- **Project operational settings** in `project.json`
+- **Project architecture constraints** in `project_spec.yaml`
+
+## Major runtime workflows
+
+### 1. Task lifecycle
+
+1. A task is created through the task CLI or a higher-level goal/planning use case.
+2. The task manager reacts to `task.created` or `task.requeued`.
+3. The scheduler selects an active compatible agent.
+4. The task is assigned and a lease is created.
+5. A worker consumes `task.assigned`, prepares a workspace, builds the correct runtime, and executes the task.
+6. The result is persisted and emitted as task events.
+7. The reconciler can requeue or fail stale work when leases expire or workers disappear.
+
+### 2. Goal lifecycle
+
+1. A goal definition is loaded and expanded into multiple tasks.
+2. Goal state is persisted separately from task state.
+3. The goal orchestrator listens to task events.
+4. Successful task completion triggers branch merge logic into the goal branch.
+5. When all goal tasks are merged, the system can emit `goal.ready_for_review`.
+6. Optional GitHub PR creation and PR-state polling drive approval/merge-based progress.
+7. Finalization merges the completed goal branch into the configured base branch.
+
+### 3. Planning lifecycle
+
+The planning subsystem is no longer just a simple roadmap generator. It persists and advances a structured project plan:
+
+- **Discovery** captures a project brief and open questions.
+- **Architecture** proposes decisions, spec changes, and phased execution.
+- **Phase review** records lessons learned and proposes the next phase.
+
+This planning state is stored through the project plan repository and linked to downstream goals/spec updates.
+
+### 4. Spec governance
+
+The spec flow is intentionally controlled:
+
+- show current spec
+- validate proposed work against the spec
+- stage a proposal
+- diff proposal vs live spec
+- apply the proposal only through an explicit operator step
+
+This prevents agents from silently mutating architectural constraints during execution.
+
+## Events and coordination
+
+The runtime uses event-driven coordination for long-running processes.
+
+Examples of events handled today include:
+
+- task events such as creation, assignment, completion, failure, cancellation, and requeueing
+- goal review events such as `goal.ready_for_review`, `goal.approved`, and `goal.merged`
+
+Redis-backed adapters are used in real mode. In-memory adapters are used in dry-run mode and tests.
+
+## Observability
+
+Observability is already part of the current system rather than a future concept.
+
+Implemented mechanisms include:
+
+- **event journaling** in the project `events/` directory
+- **runtime log wrapping** for all agent runtimes
+- **filesystem task logs** for execution output
+- **CLI and handler logging** via `structlog`
+
+## Current extension points
+
+If you are extending the system, these are the preferred seams:
+
+- add new business rules in `src/domain`
+- add orchestration flow in `src/app/usecases` or `src/app/handlers`
+- add new adapters in `src/infra`
+- update the factory to wire new infrastructure
+- keep spec-related write paths constrained to the explicit proposal/apply flow
+
+## Architecture notes on the current state
+
+Compared with earlier iterations of the project, the codebase has already moved beyond a task-only prototype:
+
+- goals are first-class aggregates
+- project planning is persisted and phase-based
+- project specs are validated and versioned through proposals
+- GitHub PR state is part of the broader orchestration model
+- logging and event persistence are integrated into runtime execution
+
+That broader orchestration model is what the current documentation should assume.
