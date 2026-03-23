@@ -145,15 +145,19 @@ class TestWorkerExecutionService:
     # ------------------------------------------------------------------
 
     def test_start_cas_retry(self):
-        tasks_returned = []
-
-        def _load(tid):
-            t = _make_task(task_id=tid)
-            tasks_returned.append(t)
-            return t
+        initial = _make_task()
+        retry_assigned = _make_task()
+        after_start = _make_task()
+        after_start.start()
 
         svc = _make_service()
-        svc._task_repo.load.side_effect = _load
+        svc._task_repo.load.side_effect = [
+            initial,
+            initial,
+            initial,
+            retry_assigned,
+            after_start,
+        ]
         svc._task_repo.update_if_version.side_effect = [False, True, True]
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
@@ -168,7 +172,11 @@ class TestWorkerExecutionService:
         svc.execute("t-001", "p-001", "worker-1")
 
         assert svc._task_repo.update_if_version.call_count >= 2
-        assert tasks_returned[-1].status == TaskStatus.SUCCEEDED
+        completed = [
+            c for c in svc._events.publish.call_args_list
+            if c[0][0].type == "task.completed"
+        ]
+        assert len(completed) == 1
 
     # ------------------------------------------------------------------
     # Wrong agent → raises before try/except block
@@ -249,8 +257,7 @@ class TestWorkerExecutionService:
             c for c in svc._events.publish.call_args_list
             if c[0][0].type == "task.failed"
         ]
-        assert len(failed_events) == 1
-        assert "Version conflict" in failed_events[0][0][0].payload["reason"]
+        assert failed_events == []
 
     # ------------------------------------------------------------------
     # _handle_failure — skips when task already left active state
@@ -376,8 +383,43 @@ class TestWorkerExecutionService:
         task = _make_task()
         task.start()
 
+        svc._task_repo.load.return_value = task
         svc._task_repo.update_if_version.side_effect = RuntimeError("disk full")
 
         svc._handle_failure(task, "worker-1", "some reason")
 
         svc._events.publish.assert_not_called()
+
+    def test_success_does_not_publish_completed_when_persist_never_succeeds(self):
+        task = _make_task()
+        in_progress_states = []
+        for _ in range(6):
+            fresh = _make_task(status=TaskStatus.ASSIGNED)
+            fresh.start()
+            in_progress_states.append(fresh)
+
+        svc = _make_service()
+        svc._task_repo.load.side_effect = [task, task, task] + in_progress_states
+        svc._task_repo.update_if_version.side_effect = [True] + [False] * 5
+        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
+
+        runtime = MagicMock()
+        svc._runtime_factory.return_value = runtime
+        runtime.wait_for_completion.return_value = AgentExecutionResult(
+            success=True, exit_code=0
+        )
+        svc._git.create_workspace.return_value = "/tmp/ws"
+        svc._git.apply_changes_and_commit.return_value = "sha-abc"
+
+        svc.execute("t-001", "p-001", "worker-1")
+
+        completed = [
+            c for c in svc._events.publish.call_args_list
+            if c[0][0].type == "task.completed"
+        ]
+        failed = [
+            c for c in svc._events.publish.call_args_list
+            if c[0][0].type == "task.failed"
+        ]
+        assert completed == []
+        assert failed == []

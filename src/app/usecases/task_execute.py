@@ -42,6 +42,21 @@ log = structlog.get_logger(__name__)
 MAX_UPDATE_RETRIES = 5
 
 
+class _NoOpLeaseRefresher(LeaseRefresherPort):
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+
+def _noop_lease_refresher_factory(
+    lease_port: LeasePort,
+    lease_token: str,
+) -> LeaseRefresherPort:
+    return _NoOpLeaseRefresher()
+
+
 class TaskExecuteUseCase:
     """
     Single-entry-point use case: run the full task execution pipeline.
@@ -67,7 +82,7 @@ class TaskExecuteUseCase:
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         logs_port: TaskLogsPort,
         test_runner: TestRunnerPort,
-        lease_refresher_factory: LeaseRefresherFactory,
+        lease_refresher_factory: LeaseRefresherFactory | None = None,
         task_timeout_seconds: int = 600,
     ) -> None:
         self._repo_url = repo_url
@@ -79,7 +94,9 @@ class TaskExecuteUseCase:
         self._runtime_factory = runtime_factory
         self._logs = logs_port
         self._tests = test_runner
-        self._lease_refresher_factory = lease_refresher_factory
+        self._lease_refresher_factory = (
+            lease_refresher_factory or _noop_lease_refresher_factory
+        )
         self._timeout = task_timeout_seconds
 
     # ------------------------------------------------------------------
@@ -141,12 +158,27 @@ class TaskExecuteUseCase:
             self._persist_success(task, agent_id, branch, commit_sha, actual_modified, result.artifacts)
 
         except ForbiddenFileEditError as exc:
-            self._handle_failure(task, agent_id, f"Forbidden file edits: {exc.violations}")
+            self._persist_failure_safely(
+                task_id,
+                agent_id,
+                f"Forbidden file edits: {exc.violations}",
+            )
         except _AgentFailed as exc:
-            self._handle_failure(task, agent_id, str(exc))
+            self._persist_failure_safely(task_id, agent_id, str(exc))
+        except _DurabilityError as exc:
+            log.error(
+                "worker.durability_error",
+                task_id=task_id,
+                agent_id=agent_id,
+                error=str(exc),
+            )
         except Exception as exc:
             log.exception("worker.unexpected_error", task_id=task_id, error=str(exc))
-            self._handle_failure(task, agent_id, f"Unexpected error: {exc}")
+            self._persist_failure_safely(
+                task_id,
+                agent_id,
+                f"Unexpected error: {exc}",
+            )
         finally:
             if lease_refresher:
                 lease_refresher.stop()
@@ -243,18 +275,13 @@ class TaskExecuteUseCase:
         return env
 
     def _handle_failure(self, task: TaskAggregate, agent_id: str, reason: str) -> None:
-        log.error("worker.task_failed", task_id=task.task_id, reason=reason)
+        """
+        Backward-compatible wrapper retained for unit tests and older callers.
+        """
         try:
             if task.status not in TaskStatus.active():
                 return
-            expected_v = task.state_version
-            task.fail(reason)
-            self._task_repo.update_if_version(task.task_id, task, expected_v)
-            self._events.publish(DomainEvent(
-                type="task.failed",
-                producer=agent_id,
-                payload={"task_id": task.task_id, "reason": reason},
-            ))
+            self._persist_failure(task.task_id, agent_id, reason)
         except Exception as exc:
             log.exception("worker.failure_handler_error", error=str(exc))
 
@@ -369,16 +396,86 @@ class TaskExecuteUseCase:
             modified_files=actual_modified,
             artifacts=artifacts,
         )
-        expected_v = task.state_version
-        task.complete(task_result)
-        self._task_repo.update_if_version(task.task_id, task, expected_v)
+        for attempt in range(MAX_UPDATE_RETRIES):
+            fresh = self._task_repo.load(task.task_id)
 
-        self._events.publish(DomainEvent(
-            type="task.completed",
-            producer=agent_id,
-            payload={"task_id": task.task_id, "commit_sha": commit_sha},
-        ))
-        log.info("worker.task_succeeded", task_id=task.task_id, commit_sha=commit_sha)
+            if fresh.status == TaskStatus.SUCCEEDED:
+                log.info("worker.success_already_persisted", task_id=task.task_id)
+                return
+            if fresh.status not in TaskStatus.active():
+                raise _DurabilityError(
+                    f"Cannot persist success for task {task.task_id}: "
+                    f"state changed to {fresh.status.value}"
+                )
+
+            expected_v = fresh.state_version
+            fresh.complete(task_result)
+            if self._task_repo.update_if_version(task.task_id, fresh, expected_v):
+                self._events.publish(DomainEvent(
+                    type="task.completed",
+                    producer=agent_id,
+                    payload={"task_id": task.task_id, "commit_sha": commit_sha},
+                ))
+                log.info("worker.task_succeeded", task_id=task.task_id, commit_sha=commit_sha)
+                return
+
+            log.warning(
+                "worker.success_persist_conflict",
+                task_id=task.task_id,
+                attempt=attempt,
+            )
+
+        raise _DurabilityError(
+            f"Version conflict completing task {task.task_id} after "
+            f"{MAX_UPDATE_RETRIES} retries"
+        )
+
+    def _persist_failure(self, task_id: str, agent_id: str, reason: str) -> None:
+        log.error("worker.task_failed", task_id=task_id, reason=reason)
+        for attempt in range(MAX_UPDATE_RETRIES):
+            task = self._task_repo.load(task_id)
+            if task.status == TaskStatus.FAILED:
+                log.info("worker.failure_already_persisted", task_id=task_id)
+                return
+            if task.status not in TaskStatus.active():
+                log.warning(
+                    "worker.failure_persist_skipped_not_active",
+                    task_id=task_id,
+                    status=task.status.value,
+                )
+                return
+
+            expected_v = task.state_version
+            task.fail(reason)
+            if self._task_repo.update_if_version(task.task_id, task, expected_v):
+                self._events.publish(DomainEvent(
+                    type="task.failed",
+                    producer=agent_id,
+                    payload={"task_id": task.task_id, "reason": reason},
+                ))
+                return
+
+            log.warning(
+                "worker.failure_persist_conflict",
+                task_id=task_id,
+                attempt=attempt,
+            )
+
+        raise _DurabilityError(
+            f"Version conflict failing task {task_id} after "
+            f"{MAX_UPDATE_RETRIES} retries"
+        )
+
+    def _persist_failure_safely(self, task_id: str, agent_id: str, reason: str) -> None:
+        try:
+            self._persist_failure(task_id, agent_id, reason)
+        except _DurabilityError as exc:
+            log.error(
+                "worker.failure_durability_error",
+                task_id=task_id,
+                agent_id=agent_id,
+                error=str(exc),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -386,4 +483,8 @@ class TaskExecuteUseCase:
 # ---------------------------------------------------------------------------
 
 class _AgentFailed(Exception):
+    pass
+
+
+class _DurabilityError(Exception):
     pass

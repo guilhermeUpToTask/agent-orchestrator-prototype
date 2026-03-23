@@ -11,6 +11,7 @@ so multiple agents with different LLM backends can coexist in the same system.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Callable
 
 import structlog
@@ -74,9 +75,7 @@ def build_agent_registry():
 
 def build_event_port():
     if app_config.mode == "dry-run":
-        from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
-
-        return InMemoryEventAdapter()
+        return _build_inmemory_event_port()
     from src.infra.redis_adapters.event_adapter import RedisEventAdapter
 
     return RedisEventAdapter(
@@ -87,9 +86,7 @@ def build_event_port():
 
 def build_lease_port():
     if app_config.mode == "dry-run":
-        from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
-
-        return InMemoryLeaseAdapter()
+        return _build_inmemory_lease_port()
     from src.infra.redis_adapters.lease_adapter import RedisLeaseAdapter
 
     return RedisLeaseAdapter(_build_real_redis())
@@ -106,6 +103,20 @@ def build_git_workspace():
         workspace_base=build_project_paths().workspace_dir,
         source_repo_url=build_project_settings().source_repo_url,
     )
+
+
+@lru_cache(maxsize=1)
+def _build_inmemory_event_port():
+    from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
+
+    return InMemoryEventAdapter()
+
+
+@lru_cache(maxsize=1)
+def _build_inmemory_lease_port():
+    from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
+
+    return InMemoryLeaseAdapter()
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:

@@ -381,6 +381,18 @@ class TestGoalMergeTaskUseCase:
         uc.execute("ghost-task")
         assert git.merges == []
 
+    def test_failed_task_does_not_merge_branch(self):
+        uc, _, _, _, git = self._build(task_status=TaskStatus.FAILED)
+        uc.execute("task-a")
+        assert git.merges == []
+
+    def test_already_merged_task_repairs_goal_without_remerging(self):
+        uc, _, goal_repo, _, git = self._build(task_status=TaskStatus.MERGED)
+        uc.execute("task-a")
+        assert git.merges == []
+        goal = goal_repo.load("goal-001")
+        assert goal.tasks["task-a"].status == TaskStatus.MERGED
+
 
 # ===========================================================================
 # GoalCancelTaskUseCase

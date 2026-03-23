@@ -91,6 +91,19 @@ class GoalMergeTaskUseCase:
             )
             return
 
+        if task.status == TaskStatus.MERGED:
+            log.info("goal_merge.task_already_merged", task_id=task_id)
+            self._update_goal(goal_id, task_id)
+            return
+
+        if task.status != TaskStatus.SUCCEEDED:
+            log.warning(
+                "goal_merge.task_not_mergeable",
+                task_id=task_id,
+                status=task.status.value,
+            )
+            return
+
         # ------------------------------------------------------------------
         # 3. Merge task branch into goal branch
         # ------------------------------------------------------------------
@@ -116,7 +129,8 @@ class GoalMergeTaskUseCase:
         # ------------------------------------------------------------------
         # 4. Transition TaskAggregate → MERGED (CAS)
         # ------------------------------------------------------------------
-        self._mark_task_merged(task_id)
+        if not self._mark_task_merged(task_id):
+            return
 
         # ------------------------------------------------------------------
         # 5 & 6. Update GoalAggregate (CAS) + emit goal.completed if done
@@ -127,28 +141,29 @@ class GoalMergeTaskUseCase:
     # Internal: CAS helpers
     # ------------------------------------------------------------------
 
-    def _mark_task_merged(self, task_id: str) -> None:
+    def _mark_task_merged(self, task_id: str) -> bool:
         for attempt in range(MAX_CAS_RETRIES):
             task = self._task_repo.load(task_id)
             if task.status == TaskStatus.MERGED:
-                return  # already done — idempotent
+                return True  # already done — idempotent
             if task.status != TaskStatus.SUCCEEDED:
                 log.warning(
                     "goal_merge.task_not_succeeded_skipping",
                     task_id=task_id,
                     status=task.status.value,
                 )
-                return
+                return False
             expected_v = task.state_version
             task.mark_merged()
             if self._task_repo.update_if_version(task_id, task, expected_v):
-                return
+                return True
             log.warning(
                 "goal_merge.task_cas_conflict",
                 task_id=task_id,
                 attempt=attempt,
             )
         log.error("goal_merge.task_cas_exhausted", task_id=task_id)
+        return False
 
     def _update_goal(self, goal_id: str, task_id: str) -> None:
         for attempt in range(MAX_CAS_RETRIES):

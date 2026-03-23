@@ -6,6 +6,7 @@ from src.infra.factory import (
     build_task_repo,
     build_agent_registry,
     build_event_port,
+    build_lease_port,
     build_agent_runtime,
 )
 from src.domain import AgentProps
@@ -28,6 +29,16 @@ class TestFactory:
         from src.infra.redis_adapters.event_adapter import InMemoryEventAdapter
 
         assert isinstance(port, InMemoryEventAdapter)
+
+    @patch("src.infra.factory.app_config")
+    def test_build_event_port_dry_run_reuses_singleton(self, mock_config):
+        mock_config.mode = "dry-run"
+        assert build_event_port() is build_event_port()
+
+    @patch("src.infra.factory.app_config")
+    def test_build_lease_port_dry_run_reuses_singleton(self, mock_config):
+        mock_config.mode = "dry-run"
+        assert build_lease_port() is build_lease_port()
 
     @patch("src.infra.runtime.factory.app_config")
     def test_build_agent_runtime_dry_run(self, mock_config):
