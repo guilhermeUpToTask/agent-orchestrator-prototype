@@ -395,17 +395,15 @@ class TestMergeTaskNotSucceeded:
         """
         uc, task_repo, goal_repo, git = self._build_merge_uc(TaskStatus.FAILED)
         uc.execute("t1")
-        # Git merge happened (git side is separate from task state guard)
-        # but task must NOT be MERGED
+        # No git merge should happen when the task is no longer mergeable.
         assert task_repo.load("t1").status == TaskStatus.FAILED
+        assert git.merges == []
 
     def test_already_merged_task_is_idempotent(self):
         """Calling execute on a task that is already MERGED must not re-merge."""
         uc, _, _, git = self._build_merge_uc(TaskStatus.MERGED)
         uc.execute("t1")
-        # Git merge should still happen (git side is idempotent no-ff merge)
-        # but the task CAS loop returns early without error
-        assert len(git.merges) == 1  # git merge still called — that's fine
+        assert git.merges == []
 
     def test_succeeded_task_is_marked_merged(self):
         uc, task_repo, _, _ = self._build_merge_uc(TaskStatus.SUCCEEDED)

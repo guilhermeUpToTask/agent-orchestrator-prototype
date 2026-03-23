@@ -49,7 +49,7 @@ class WorkerHandler:
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         logs_port: TaskLogsPort,
         test_runner: TestRunnerPort,
-        lease_refresher_factory: LeaseRefresherFactory,
+        lease_refresher_factory: LeaseRefresherFactory | None = None,
         task_timeout_seconds: int = 600,
     ) -> None:
         self._agent_id = agent_id
