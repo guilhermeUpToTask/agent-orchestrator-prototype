@@ -24,11 +24,15 @@ matching the spec requirement:
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import structlog
 
 from src.domain import DomainEvent, EventPort
 from src.domain.aggregates.goal import GoalStatus
+from src.domain.aggregates.project_plan import ProjectPlanStatus
 from src.domain.repositories.goal_repository import GoalRepositoryPort
+from src.domain.repositories.project_plan_repository import ProjectPlanRepositoryPort
 
 log = structlog.get_logger(__name__)
 
@@ -49,10 +53,12 @@ class AdvanceGoalFromPRUseCase:
         goal_repo: GoalRepositoryPort,
         event_port: EventPort,
         unblock_goals_usecase=None,   # UnblockGoalsUseCase | None
+        plan_repo: Optional[ProjectPlanRepositoryPort] = None,  # NEW — optional for backward compat
     ) -> None:
         self._goal_repo = goal_repo
         self._events    = event_port
         self._unblock   = unblock_goals_usecase
+        self._plan_repo = plan_repo
 
     def execute(self, goal_id: str) -> GoalStatus | None:
         """
@@ -99,6 +105,8 @@ class AdvanceGoalFromPRUseCase:
                 # whose prerequisites are now fully satisfied.
                 if new_status == GoalStatus.MERGED and self._unblock:
                     self._unblock.execute(goal_id)
+                    # Check if the active phase is now complete
+                    self._check_phase_completion()
                 return new_status
 
             log.warning(
@@ -112,6 +120,49 @@ class AdvanceGoalFromPRUseCase:
 
         log.error("advance_pr.cas_exhausted", goal_id=goal_id)
         return None
+
+    # ------------------------------------------------------------------
+    # Phase completion trigger
+    # ------------------------------------------------------------------
+
+    def _check_phase_completion(self) -> None:
+        """
+        Check if the active phase is complete and trigger PHASE_REVIEW if so.
+
+        Called when a goal reaches MERGED. If all goals in the active phase
+        have reached MERGED, transition the project plan to PHASE_REVIEW.
+        """
+        if self._plan_repo is None:
+            return  # Backward compatibility — no plan repo, nothing to check
+
+        plan = self._plan_repo.get()
+        if plan is None:
+            return  # No plan yet
+
+        if plan.status != ProjectPlanStatus.PHASE_ACTIVE:
+            return  # Not in PHASE_ACTIVE mode
+
+        active_phase = plan.current_phase()
+        if active_phase is None:
+            return  # No active phase
+
+        phase_goal_names = set(active_phase.goal_names)
+        if not phase_goal_names:
+            # Guard: don't trigger on empty phase
+            return
+
+        # Check if all goals in this phase have reached MERGED
+        all_goals = self._goal_repo.list_all()
+        phase_goals = [g for g in all_goals if g.name in phase_goal_names]
+        all_merged = all(g.status == GoalStatus.MERGED for g in phase_goals)
+
+        if all_merged and len(phase_goals) == len(phase_goal_names):
+            plan = plan.trigger_review()
+            self._plan_repo.save(plan)
+            log.info(
+                "project_plan.phase_review_triggered",
+                phase_index=plan.current_phase_index,
+            )
 
     # ------------------------------------------------------------------
     # Event emission
