@@ -12,7 +12,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, call
 
-import pytest
 
 from src.infra.redis_adapters.lease_refresher import LeaseRefresher
 

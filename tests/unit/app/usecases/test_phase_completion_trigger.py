@@ -3,7 +3,6 @@ Unit tests for phase completion trigger in AdvanceGoalFromPRUseCase.
 """
 from unittest.mock import MagicMock, Mock
 
-import pytest
 
 from src.app.usecases.advance_goal_from_pr import AdvanceGoalFromPRUseCase
 from src.domain.aggregates.goal import GoalStatus, GoalAggregate, TaskSummary

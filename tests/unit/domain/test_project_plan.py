@@ -1,7 +1,6 @@
 """
 Unit tests for ProjectPlan aggregate.
 """
-from datetime import datetime, timezone
 
 import pytest
 

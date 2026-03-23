@@ -56,5 +56,5 @@ def test_get_lease_agent_returns_none_when_no_lease(adapter):
 def test_get_lease_agent_returns_none_after_expiry(adapter):
     """get_lease_agent returns None after the lease has expired."""
     adapter.create_lease("t1", "a1", 0.01)
-    import time; time.sleep(0.02)
+    time.sleep(0.02)
     assert adapter.get_lease_agent("t1") is None

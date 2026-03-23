@@ -9,11 +9,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-import pytest
 
 from src.domain import (
-    AgentProps, AgentSelector, Assignment,
-    ExecutionSpec, TaskAggregate, TaskStatus,
+    AgentProps, AgentSelector, ExecutionSpec, TaskAggregate, TaskStatus,
 )
 from src.app.usecases.task_assign import (
     TaskAssignUseCase, AssignOutcome,

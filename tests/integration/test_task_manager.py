@@ -14,8 +14,6 @@ Covers:
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
 
 import pytest
 
@@ -24,11 +22,9 @@ from src.domain import (
     AgentSelector,
     Assignment,
     ExecutionSpec,
-    RetryPolicy,
     TaskAggregate,
     TaskStatus,
     TrustLevel,
-    DomainEvent,
 )
 from src.domain import SchedulerService
 
