@@ -11,7 +11,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 from src.domain.value_objects.status import TaskStatus

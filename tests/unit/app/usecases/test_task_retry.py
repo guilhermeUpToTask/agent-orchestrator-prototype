@@ -4,7 +4,7 @@ tests/unit/app/usecases/test_task_retry.py — TaskRetryUseCase tests.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from src.app.usecases.task_retry import TaskRetryUseCase, TaskRetryResult
 from src.domain import (

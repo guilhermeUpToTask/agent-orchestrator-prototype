@@ -12,7 +12,7 @@ No I/O, no Redis, no real GitHub API calls.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from src.app.usecases.advance_goal_from_pr import AdvanceGoalFromPRUseCase
 from src.app.usecases.create_goal_pr import CreateGoalPRUseCase

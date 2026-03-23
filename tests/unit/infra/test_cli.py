@@ -1,4 +1,3 @@
-import json
 import pytest
 from click.testing import CliRunner
 from unittest.mock import MagicMock, patch

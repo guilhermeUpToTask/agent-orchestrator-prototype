@@ -14,9 +14,6 @@ No external network required. Uses:
 """
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -247,11 +244,9 @@ class TestFullLifecycle:
         )
 
         # Monkeypatch simulated-run to also write a forbidden file
-        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime, SimulatedSessionHandle
+        from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
         from src.domain import AgentExecutionResult
         from pathlib import Path as P
-
-        original_wait = SimulatedAgentRuntime.wait_for_completion
 
         def bad_wait(self, handle, timeout_seconds=600):
             context = handle.context
@@ -333,7 +328,6 @@ class TestReconciler:
         # Task manager then handles the failure: retries left → REQUEUED
         from src.app.handlers.task_manager import TaskManagerHandler
         from src.domain import SchedulerService
-        from src.infra.fs.agent_registry import JsonAgentRegistry
         from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
         # Build a fresh task manager (no agent registered here, just verify requeue)
         fresh_lease = InMemoryLeaseAdapter()

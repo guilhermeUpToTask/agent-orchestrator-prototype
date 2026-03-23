@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 from src.domain.aggregates.task import TaskAggregate
@@ -268,7 +268,8 @@ class TestGoalInitImports:
 
     def test_no_unused_domain_imports(self):
         """AgentSelector and ExecutionSpec must not be imported in goal_init."""
-        import ast, pathlib
+        import ast
+        import pathlib
         src = pathlib.Path(
             "src/app/usecases/goal_init.py"
         ).read_text()
@@ -651,7 +652,6 @@ class TestPrepareWorkspaceBaseBranch:
 
         # Build a minimal task with goal constraints
         task_repo = _TaskRepo()
-        task = _make_task("t1", goal_id="g1", status=TaskStatus.SUCCEEDED)
         # Override to CREATED so task_execute can load and inspect constraints
         task2 = TaskAggregate.create(
             task_id="t1",
@@ -685,7 +685,6 @@ class TestPrepareWorkspaceBaseBranch:
             def create_goal_branch(self, *a): pass
             def merge_task_into_goal(self, *a, **kw): return "sha"
 
-        from unittest.mock import MagicMock
         uc = TaskExecuteUseCase(
             repo_url="file:///",
             task_repo=task_repo,
@@ -731,7 +730,6 @@ class TestPrepareWorkspaceBaseBranch:
             def create_goal_branch(self, *a): pass
             def merge_task_into_goal(self, *a, **kw): return "sha"
 
-        from unittest.mock import MagicMock
         uc = TaskExecuteUseCase(
             repo_url="file:///",
             task_repo=task_repo,

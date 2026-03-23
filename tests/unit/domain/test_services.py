@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-import pytest
 
 from src.domain import (
     AgentProps,
@@ -25,7 +24,7 @@ from src.domain import (
 )
 from src.domain import SchedulerService
 from src.domain.rules import TaskRules
-from src.domain.entities.agent import _parse_version, _satisfies_version
+from src.domain.entities.agent import _parse_version
 
 
 # ---------------------------------------------------------------------------

@@ -305,7 +305,6 @@ class TestAdvanceIdempotency:
         goal = _awaiting_pr_goal()
         goal.sync_pr_state(pr_status="open", checks_passed=False,
                            approved=False, head_sha="sha-0001")
-        v = goal.state_version
         goal.advance_from_pr_state()
         # No checks yet — status unchanged
         assert goal.status == GoalStatus.AWAITING_PR_APPROVAL
