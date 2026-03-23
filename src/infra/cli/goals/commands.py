@@ -215,7 +215,7 @@ def goal_finalize(goal_id: str, yes: bool):
 
 
 # ---------------------------------------------------------------------------
-# plan
+# plan (DEPRECATED)
 # ---------------------------------------------------------------------------
 
 @goals_group.command("plan")
@@ -235,24 +235,12 @@ def goal_finalize(goal_id: str, yes: bool):
 @catch_domain_errors
 def goal_plan(user_input: str, dispatch: bool, dry_run: bool):
     """
+    DEPRECATED: Use 'orchestrator plan init' instead.
+
     Run the AI planner to generate a roadmap from USER_INPUT.
-
-    The planner analyses the project spec, existing goals, and accumulated
-    architectural decisions, then produces a validated goal roadmap via an
-    agentic loop (claude-opus-4-6 with extended thinking).
-
-    The roadmap is displayed for review. Use --dispatch to skip confirmation
-    and start executing goals immediately, or run:
-
-      orchestrator goals dispatch-roadmap <session-id>
-
-    after reviewing the plan.
-
-    Examples:
-      orchestrator goals plan "add OAuth2 login"
-      orchestrator goals plan "add OAuth2 login" --dispatch
-      orchestrator goals plan "stub the payment service" --dry-run
     """
+    warn("DEPRECATED: Use 'orchestrator plan init' instead")
+    
     import os
     from src.infra.config import config as app_config
     from src.infra.factory import build_run_planning_session_usecase
@@ -320,7 +308,7 @@ def goal_plan(user_input: str, dispatch: bool, dry_run: bool):
 
 
 # ---------------------------------------------------------------------------
-# dispatch-roadmap
+# dispatch-roadmap (DEPRECATED)
 # ---------------------------------------------------------------------------
 
 @goals_group.command("dispatch-roadmap")
@@ -334,17 +322,12 @@ def goal_plan(user_input: str, dispatch: bool, dry_run: bool):
 @catch_domain_errors
 def goal_dispatch_roadmap(session_id: str, yes: bool):
     """
+    DEPRECATED: Use 'orchestrator plan architect' instead.
+
     Dispatch goals from a previously completed planning session.
-
-    SESSION_ID is printed by  orchestrator goals plan  after a successful run.
-    This is the human confirmation gate — review the plan first, then run this.
-
-    Idempotent: goals already dispatched in a prior call are skipped.
-
-    Example:
-      orchestrator goals dispatch-roadmap plan-abc123def456
-      orchestrator goals dispatch-roadmap plan-abc123def456 --yes
     """
+    warn("DEPRECATED: Use 'orchestrator plan architect' instead")
+    
     from src.infra.factory import build_run_planning_session_usecase, build_planner_session_repo
 
     repo = build_planner_session_repo()
@@ -396,7 +379,7 @@ def goal_dispatch_roadmap(session_id: str, yes: bool):
 
 
 # ---------------------------------------------------------------------------
-# sessions
+# sessions (DEPRECATED)
 # ---------------------------------------------------------------------------
 
 @goals_group.command("sessions")
@@ -404,15 +387,12 @@ def goal_dispatch_roadmap(session_id: str, yes: bool):
 @catch_domain_errors
 def goal_sessions(limit: int):
     """
+    DEPRECATED: Use 'orchestrator plan status' instead.
+
     List recent planning sessions and their status.
-
-    Shows the most recent sessions first. Use this to find a SESSION_ID
-    for  orchestrator goals dispatch-roadmap.
-
-    Example:
-      orchestrator goals sessions
-      orchestrator goals sessions --limit 5
     """
+    warn("DEPRECATED: Use 'orchestrator plan status' instead")
+    
     from src.infra.factory import build_planner_session_repo
 
     repo = build_planner_session_repo()

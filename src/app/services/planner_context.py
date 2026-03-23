@@ -36,6 +36,7 @@ from src.domain.ports.project_state import DecisionEntry, ProjectStatePort
 from src.domain.project_spec.aggregate import ProjectSpec
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 from src.domain.repositories import TaskRepositoryPort
+from src.domain.repositories.project_plan_repository import ProjectPlanRepositoryPort
 from src.domain.value_objects.status import TaskStatus
 
 log = structlog.get_logger(__name__)
@@ -79,6 +80,9 @@ class PlannerContext:
       merged_goal_names         — names of all goals that reached MERGED
       active_task_count         — number of tasks currently ASSIGNED or IN_PROGRESS
       pending_goal_count        — number of goals still in PENDING state
+      plan_status               — ProjectPlanStatus.value or None
+      current_phase_goal        — Phase.goal of active phase
+      planned_phases             — one-sentence goals of future phases
     """
     architecture_constraints: dict[str, Any]
     decisions: list[DecisionEntry]
@@ -88,6 +92,9 @@ class PlannerContext:
     merged_goal_names: list[str]
     active_task_count: int
     pending_goal_count: int
+    plan_status: Optional[str]
+    current_phase_goal: Optional[str]
+    planned_phases: list[str]
 
     def to_prompt_context(self) -> str:
         """
@@ -125,6 +132,19 @@ class PlannerContext:
                     tag = f" (feature: {entry.feature_tag})" if entry.feature_tag else ""
                     sections.append(f"**[{entry.id}]**{tag} — {entry.date}")
                     sections.append(entry.content)
+                    # Render spec_changes if present
+                    if entry.spec_changes and not entry.spec_changes.is_empty:
+                        sections.append("")
+                        sections.append("**Spec changes:**")
+                        sc = entry.spec_changes
+                        if sc.add_required:
+                            sections.append(f"  - Add required: {', '.join(sc.add_required)}")
+                        if sc.add_forbidden:
+                            sections.append(f"  - Add forbidden: {', '.join(sc.add_forbidden)}")
+                        if sc.remove_required:
+                            sections.append(f"  - Remove required: {', '.join(sc.remove_required)}")
+                        if sc.remove_forbidden:
+                            sections.append(f"  - Remove forbidden: {', '.join(sc.remove_forbidden)}")
 
         # 3. Current architecture description
         if self.current_arch:
@@ -136,7 +156,18 @@ class PlannerContext:
             sections.append("\n## Additional context")
             sections.append(self.extra_context)
 
-        # 5. Execution state summary
+        # 5. Project plan state
+        if self.plan_status:
+            sections.append("\n## Project plan")
+            sections.append(f"Status: {self.plan_status}")
+            if self.current_phase_goal:
+                sections.append(f'Current phase: "{self.current_phase_goal}"')
+            if self.planned_phases:
+                sections.append("Planned phases:")
+                for phase_desc in self.planned_phases:
+                    sections.append(f"  - {phase_desc}")
+
+        # 6. Execution state summary
         sections.append("\n## Current execution state")
         sections.append(
             f"- {self.pending_goal_count} goal(s) pending"
@@ -173,11 +204,13 @@ class PlannerContextAssembler:
         project_state: ProjectStatePort,
         goal_repo: GoalRepositoryPort,
         task_repo: TaskRepositoryPort,
+        plan_repo: ProjectPlanRepositoryPort,  # NEW
     ) -> None:
         self._spec          = spec
         self._project_state = project_state
         self._goal_repo     = goal_repo
         self._task_repo     = task_repo
+        self._plan_repo     = plan_repo
 
     def assemble(self) -> PlannerContext:
         """Build and return a PlannerContext snapshot."""
@@ -220,6 +253,21 @@ class PlannerContextAssembler:
             1 for t in all_tasks if t.status in TaskStatus.active()
         )
 
+        # 5. Project plan state
+        plan = self._plan_repo.get()
+        plan_status = None
+        current_phase_goal = None
+        planned_phases = []
+
+        if plan is not None:
+            plan_status = plan.status.value
+            current_phase = plan.current_phase()
+            if current_phase:
+                current_phase_goal = current_phase.goal
+            # Get planned phases (future phases with PLANNED status)
+            for phase in plan.planned_phases():
+                planned_phases.append(f"Phase {phase.index}: {phase.goal}")
+
         ctx = PlannerContext(
             architecture_constraints=constraints,
             decisions=decisions,
@@ -229,6 +277,9 @@ class PlannerContextAssembler:
             merged_goal_names=merged_names,
             active_task_count=active_task_count,
             pending_goal_count=pending_count,
+            plan_status=plan_status,
+            current_phase_goal=current_phase_goal,
+            planned_phases=planned_phases,
         )
 
         log.info(
@@ -238,5 +289,6 @@ class PlannerContextAssembler:
             active_tasks=active_task_count,
             has_decisions=bool(decisions),
             has_arch=bool(current_arch),
+            plan_status=plan_status,
         )
         return ctx

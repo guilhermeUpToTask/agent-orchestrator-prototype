@@ -40,6 +40,7 @@ class ProjectPaths:
     spec_path: Path         # project_spec.yaml canonical location
     project_state_dir: Path # planner's persistent memory (~/<project>/project_state/)
     planner_sessions_dir: Path  # planner session records (~/<project>/planner_sessions/)
+    plan_path: Path         # project_plan.yaml canonical location
 
     # ------------------------------------------------------------------
     # Factory
@@ -60,6 +61,7 @@ class ProjectPaths:
             logs/
             events/
             project_spec.yaml
+            project_plan.yaml
         """
         base = orchestrator_home / "projects" / project_name
         return cls(
@@ -74,6 +76,7 @@ class ProjectPaths:
             spec_path=base / "project_spec.yaml",
             project_state_dir=base / "project_state",
             planner_sessions_dir=base / "planner_sessions",
+            plan_path=base / "project_plan.yaml",
         )
 
     # ------------------------------------------------------------------

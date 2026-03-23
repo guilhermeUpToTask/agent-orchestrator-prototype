@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from src.domain.ports.project_state import DecisionEntry, ProjectStatePort
+from src.domain.ports.project_state import DecisionEntry, ProjectStatePort, SpecChanges
 
 _FRONTMATTER_SEP = "---"
 
@@ -21,9 +21,16 @@ def _render_decision(entry: DecisionEntry) -> str:
         f"domain: {entry.domain}",
         f"feature_tag: {entry.feature_tag}",
         f"superseded_by: {entry.superseded_by or ''}",
-        _FRONTMATTER_SEP,
-        entry.content,
     ]
+    # Serialize spec_changes if present
+    if entry.spec_changes is not None:
+        lines.append("spec_changes:")
+        lines.append(f"  add_required: [{', '.join(entry.spec_changes.add_required)}]")
+        lines.append(f"  add_forbidden: [{', '.join(entry.spec_changes.add_forbidden)}]")
+        lines.append(f"  remove_required: [{', '.join(entry.spec_changes.remove_required)}]")
+        lines.append(f"  remove_forbidden: [{', '.join(entry.spec_changes.remove_forbidden)}]")
+    lines.append(_FRONTMATTER_SEP)
+    lines.append(entry.content)
     return "\n".join(lines)
 
 
@@ -40,11 +47,45 @@ def _parse_decision(text: str) -> DecisionEntry:
         raise ValueError("Decision file frontmatter not closed")
     fm_lines = lines[1:end_idx]
     content = "\n".join(lines[end_idx + 1:])
+    
+    # Parse frontmatter key-value pairs
     meta: dict[str, str] = {}
-    for line in fm_lines:
-        if ":" in line:
+    i = 0
+    while i < len(fm_lines):
+        line = fm_lines[i]
+        if ":" in line and not line.strip().startswith(" "):
             k, _, v = line.partition(":")
             meta[k.strip()] = v.strip()
+        i += 1
+    
+    # Parse spec_changes if present
+    spec_changes = None
+    if "spec_changes:" in fm_lines:
+        sc_lines = [l for l in fm_lines if l.strip().startswith("add_required:") 
+                    or l.strip().startswith("add_forbidden:")
+                    or l.strip().startswith("remove_required:")
+                    or l.strip().startswith("remove_forbidden:")]
+        sc_dict = {}
+        for line in sc_lines:
+            if ":" in line:
+                k, _, v = line.partition(":")
+                k = k.strip().replace("  ", "").strip()
+                # Parse list like "[fastapi, django]"
+                v = v.strip()
+                if v.startswith("[") and v.endswith("]"):
+                    v = v[1:-1]
+                    items = [item.strip() for item in v.split(",") if item.strip()]
+                else:
+                    items = [v] if v else []
+                sc_dict[k] = items
+        
+        spec_changes = SpecChanges(
+            add_required=sc_dict.get("add_required", []),
+            add_forbidden=sc_dict.get("add_forbidden", []),
+            remove_required=sc_dict.get("remove_required", []),
+            remove_forbidden=sc_dict.get("remove_forbidden", []),
+        )
+    
     return DecisionEntry(
         id=meta.get("id", ""),
         date=meta.get("date", ""),
@@ -53,6 +94,7 @@ def _parse_decision(text: str) -> DecisionEntry:
         feature_tag=meta.get("feature_tag", ""),
         content=content,
         superseded_by=meta.get("superseded_by") or None,
+        spec_changes=spec_changes,
     )
 
 
