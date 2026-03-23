@@ -40,6 +40,16 @@ def test_create_lease_replaces_existing_lease(adapter):
     # New token must be valid
     assert adapter.refresh_lease(token2, 60) is True
 
+def test_revoke_old_token_after_replacement_returns_false(adapter):
+    """Revoking an evicted token must not delete the replacement lease."""
+    token1 = adapter.create_lease("t1", "a1", 60)
+    token2 = adapter.create_lease("t1", "a2", 60)
+
+    assert adapter.revoke_lease(token1) is False
+    assert adapter.is_lease_active("t1") is True
+    assert adapter.get_lease_agent("t1") == "a2"
+    assert adapter.revoke_lease(token2) is True
+
 def test_refresh_lease_returns_false_for_unknown_token(adapter):
     """refresh_lease returns False when the token doesn't exist (lease already revoked)."""
     assert adapter.refresh_lease("nonexistent-token", 60) is False
