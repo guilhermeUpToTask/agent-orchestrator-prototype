@@ -1,48 +1,56 @@
 # Agent Orchestrator Prototype
 
-A local Python prototype for coordinating CLI-based coding agents across tasks, goals, and higher-level project planning. The system combines a hexagonal core, project-scoped filesystem state, Redis-backed event orchestration, isolated git workspaces, and optional GitHub PR integration.
+A local Python prototype for **plan-driven software execution**. The center of the project is the planning layer: the `plan` workflow discovers requirements, proposes architecture, dispatches phase goals, and advances the project through review gates. Tasks, goals, workers, specs, and runtime adapters all exist to support that higher-level project plan.
 
-## What the project does today
+## What the project is for
 
-The current codebase supports four connected layers of work:
+The main objective of this codebase is **project-level orchestration**, not just task execution.
 
-- **Task orchestration**: create tasks, assign them to registered agents, execute them in isolated workspaces, retry failures, and reconcile stuck work.
-- **Goal orchestration**: group related tasks under a goal, merge completed task branches into a goal branch, and finalize the goal when all work is complete.
-- **Project specification enforcement**: maintain a canonical `project_spec.yaml`, validate work against architectural constraints, and stage spec changes through an approval flow.
-- **Strategic planning**: run a phase-based planning workflow that starts with discovery, moves into architecture planning, dispatches goals for active phases, and later advances through explicit phase review approvals.
+The current system combines:
+
+- **Strategic planning as the top-level workflow**: `plan init`, `plan architect`, `plan review`, `plan status`, and `plan decision` manage the lifecycle of a project plan.
+- **Goal orchestration underneath the plan**: approved phases dispatch goals, and goals coordinate dependent task work and branch-level progress.
+- **Task execution underneath goals**: workers execute assigned tasks in isolated workspaces, while the task manager and reconciler keep execution moving.
+- **Project spec governance**: `project_spec.yaml` constrains architecture and dependency choices, and spec changes are staged and operator-approved.
+
+If you want to understand the product from the top down, start with the **`plan` command group**.
 
 ## Current architecture snapshot
+
+```text
+plan workflow (primary operator interface)
+  ↓
+goals + project plan + spec governance
+  ↓
+task orchestration and worker execution
+  ↓
+runtimes, git workspaces, Redis/events, filesystem state
+```
+
+In code, that maps to:
 
 ```text
 CLI (src/infra/cli)
   ↓
 Application layer (src/app)
-  - use cases
-  - task manager / worker handlers
-  - goal orchestrator
-  - planning orchestration
+  - planner orchestration
+  - goal orchestration
+  - task handlers / use cases
   ↓
 Domain layer (src/domain)
-  - aggregates, entities, value objects
-  - repository ports
-  - domain services and rules
+  - project plan, goals, tasks, specs, value objects
   ↓
 Infrastructure layer (src/infra)
-  - filesystem repositories
-  - Redis adapters
-  - git workspace adapters
-  - agent runtimes
-  - GitHub client
-  - logging / observability
+  - repositories, runtimes, Redis adapters, git, logging, GitHub
 ```
 
 Key design choices:
 
+- **Plan-first workflow**: the project plan is the main control loop for the system.
 - **Project-scoped state** lives under `~/.orchestrator/projects/<project_name>/...`.
 - **Domain-first boundaries** keep business rules in `src/domain` and I/O in `src/infra`.
 - **Multiple runtime adapters** are supported per registered agent (`dry-run`, `claude`, `gemini`, `pi`).
 - **Execution observability** is built in through runtime logging and persisted event journals.
-- **Planning and execution are connected** through project plans, goals, tasks, and spec-aware validation.
 
 ## CLI entry points
 
@@ -58,20 +66,32 @@ A compatibility shim still exists, so this also works:
 python -m src.cli --help
 ```
 
+## CLI overview
+
 ### Top-level command groups
 
 | Group | Commands | Purpose |
 |---|---|---|
-| `init` | `--defaults` | Run the setup wizard or write a default `.orchestrator/config.json` |
-| `agents` | `create`, `list`, `edit`, `delete` | Manage the agent registry |
-| `tasks` | `create`, `list`, `retry`, `delete`, `prune` | Manage task records and retries |
-| `system` | `start`, `task-manager`, `worker`, `reconciler` | Run the long-lived orchestration processes |
-| `goals` | `init`, `run`, `status`, `finalize`, `plan`*, `dispatch-roadmap`*, `sessions`* | Manage goal execution and expose deprecated planning-era commands |
-| `spec` | `show`, `init`, `validate`, `propose`, `diff`, `apply` | Manage the canonical project specification |
-| `plan` | `init`, `architect`, `review`, `status`, `decision` | Run the current strategic planning workflow |
-| `project` | `reset` | Reset the active project state |
+| `plan` | `init`, `architect`, `review`, `status`, `decision` | **Primary project workflow** |
+| `goals` | `init`, `run`, `status`, `finalize`, `plan`*, `dispatch-roadmap`*, `sessions`* | Goal-level orchestration |
+| `tasks` | `create`, `list`, `retry`, `delete`, `prune` | Low-level task management |
+| `system` | `start`, `task-manager`, `worker`, `reconciler` | Long-running orchestration daemons |
+| `agents` | `create`, `list`, `edit`, `delete` | Agent registry management |
+| `spec` | `show`, `init`, `validate`, `propose`, `diff`, `apply` | Project-spec governance |
+| `project` | `reset` | Active project reset |
+| `init` | `--defaults` | Setup wizard / default config |
 
-`*` Deprecated commands still exist under `goals` for backward compatibility, but the primary planning interface is now the `plan` command group.
+`*` Deprecated commands still exist under `goals` for backward compatibility, but the main planning interface is the `plan` group.
+
+### The workflow hierarchy
+
+Think of the CLI in this order:
+
+1. **`plan`** decides what the project should do next.
+2. **`goals`** represent phase-approved chunks of work created or unlocked by the plan.
+3. **`tasks`** are the execution units inside goals.
+4. **`system`** runs the daemons that carry out assignments and recovery.
+5. **`agents`**, **`spec`**, and **`project`** support that lifecycle.
 
 ## Project layout on disk
 
@@ -99,11 +119,13 @@ Important files:
 
 - `.orchestrator/config.json` — local CLI config for the current working tree
 - `project.json` — per-project operational settings such as source repo and GitHub settings
-- `project_spec.yaml` — architectural and dependency constraints
-- `project_plan.yaml` — strategic plan state and phases
-- `planner_sessions/` — persisted discovery / architecture / phase-review sessions
+- `project_plan.yaml` — the persisted project plan and current phase state
+- `planner_sessions/` — discovery / architecture / phase-review session records
+- `project_spec.yaml` — architecture and dependency constraints used by validation and planning
 
-## Quick start
+## Plan-first quick start
+
+This is the recommended way to understand and use the project.
 
 ### 1. Install dependencies
 
@@ -125,9 +147,9 @@ For interactive setup instead:
 python -m src.infra.cli.main init
 ```
 
-### 3. Register an agent
+### 3. Register at least one agent
 
-A dry-run agent is the simplest way to exercise the workflow without external API access:
+A dry-run agent is the easiest starting point:
 
 ```bash
 python -m src.infra.cli.main agents create \
@@ -137,98 +159,37 @@ python -m src.infra.cli.main agents create \
   --runtime-type dry-run
 ```
 
-### 4. Create a task
+### 4. Start the plan workflow
+
+Begin with discovery:
 
 ```bash
-python -m src.infra.cli.main tasks create \
-  --title "Add health endpoint" \
-  --description "Implement a basic health endpoint and tests" \
-  --capability code:backend \
-  --allow src/api/health.py \
-  --allow tests/test_health.py \
-  --test "pytest tests/test_health.py"
+python -m src.infra.cli.main plan init --dry-run
 ```
 
-### 5. Inspect the queue
+That stage gathers requirements, produces a project brief, and asks for operator approval.
+
+After approving the brief, move into architecture planning:
 
 ```bash
-python -m src.infra.cli.main tasks list
-python -m src.infra.cli.main agents list
+python -m src.infra.cli.main plan architect --dry-run
 ```
 
-## Operating modes
+That stage proposes decisions and phases. When approved, it can dispatch the first phase's goals.
 
-### Dry-run mode
-
-Default mode is `dry-run`.
-
-Use it when you want to:
-
-- exercise the CLI and orchestration flow locally
-- run tests without Redis or live agent CLIs
-- develop planner and domain behavior with minimal external dependencies
-
-### Real mode
-
-Set `AGENT_MODE=real` to use Redis-backed events and live runtime adapters.
-
-Typical long-running processes:
+### 5. Inspect project-plan state
 
 ```bash
-AGENT_MODE=real python -m src.infra.cli.main system task-manager
-AGENT_MODE=real AGENT_ID=dry-run-001 python -m src.infra.cli.main system worker
-AGENT_MODE=real python -m src.infra.cli.main system reconciler
+python -m src.infra.cli.main plan status
 ```
 
-Or let the CLI boot all registered active workers plus supporting daemons:
+Use this command to understand where the project is in the lifecycle before reaching for lower-level `goals` or `tasks` commands.
 
-```bash
-AGENT_MODE=real python -m src.infra.cli.main system start
-```
+## Planning workflow
 
-`system start` reads the active agent registry, launches one worker per active agent, waits for heartbeats, and then starts the reconciler.
+The **main point of the project** is this planning loop.
 
-## Agent runtimes
-
-The runtime factory currently supports these runtime types:
-
-- `dry-run`
-- `gemini`
-- `claude`
-- `pi`
-
-Runtime-specific options are stored on each agent record in `runtime_config`, which allows multiple differently configured agents to coexist in the same registry.
-
-## Goals, planning, and spec management
-
-### Goals
-
-Goals coordinate a group of dependent tasks and track progress at the branch level.
-
-Core goal commands:
-
-```bash
-python -m src.infra.cli.main goals init <goal-file.yaml>
-python -m src.infra.cli.main goals status
-python -m src.infra.cli.main goals run
-python -m src.infra.cli.main goals finalize <goal_id>
-```
-
-Additional compatibility commands still exist:
-
-```bash
-python -m src.infra.cli.main goals plan <user_input>
-python -m src.infra.cli.main goals dispatch-roadmap <session_id>
-python -m src.infra.cli.main goals sessions
-```
-
-Those three commands are explicitly marked deprecated in the CLI and redirect users toward the `plan` command group.
-
-### Current planning workflow
-
-The primary planning workflow is **phase-based** and operator-approved. It is not a single command that immediately generates and runs a roadmap.
-
-#### 1. Discovery — `plan init`
+### 1. Discovery — `plan init`
 
 ```bash
 python -m src.infra.cli.main plan init
@@ -241,15 +202,15 @@ What it does:
 - prints a generated **project brief**
 - asks the operator whether to approve the brief
 
-If the brief is approved, the project plan transitions from `discovery` to `architecture`.
+If approved, the plan moves from `discovery` to `architecture`.
 
-You can also force dry-run behavior for this stage:
+Dry-run is supported:
 
 ```bash
 python -m src.infra.cli.main plan init --dry-run
 ```
 
-#### 2. Architecture planning — `plan architect`
+### 2. Architecture — `plan architect`
 
 ```bash
 python -m src.infra.cli.main plan architect
@@ -260,9 +221,9 @@ This command only runs when the project plan is already in `architecture` state.
 What it does:
 
 - runs the architecture planning session
-- shows **pending architectural decisions**
-- shows **proposed phases**
-- lets the operator approve decisions one by one
+- shows pending architectural decisions
+- shows proposed phases
+- asks the operator which decisions to approve
 - asks whether to approve the phase plan and start execution
 
 When approved, the orchestrator:
@@ -272,13 +233,13 @@ When approved, the orchestrator:
 - transitions the plan into `phase_active`
 - dispatches goals for the first approved phase
 
-Dry-run mode is also supported here:
+Dry-run is supported:
 
 ```bash
 python -m src.infra.cli.main plan architect --dry-run
 ```
 
-#### 3. Phase review — `plan review`
+### 3. Phase review — `plan review`
 
 ```bash
 python -m src.infra.cli.main plan review
@@ -299,37 +260,126 @@ Approval can either:
 - transition the plan back to `phase_active` and dispatch the next phase's goals, or
 - mark the project as `done`
 
-Dry-run mode is supported here too:
+Dry-run is supported:
 
 ```bash
 python -m src.infra.cli.main plan review --dry-run
 ```
 
-#### 4. Plan status — `plan status`
+### 4. Inspecting the plan — `plan status`
 
 ```bash
 python -m src.infra.cli.main plan status
 ```
 
-This shows the persisted plan ID, status, vision, and known phases, including which phase is active.
+This shows the persisted plan ID, status, vision, and known phases, including which phase is currently active.
 
-#### 5. Mid-phase questions — `plan decision`
+### 5. Mid-phase questions — `plan decision`
 
 ```bash
 python -m src.infra.cli.main plan decision "Should we split the API and worker services?"
 ```
 
-This command exists in the CLI, but the implementation currently only echoes the question and notes that the approval flow is not fully implemented yet.
+This command exists in the CLI, but today it is still a placeholder rather than a fully implemented decision-approval workflow.
 
-### Project spec
+## Supporting workflows under the plan
 
-The project spec is the canonical source of architectural constraints. Humans can inspect it directly, but the supported mutation flow is:
+### Goals
+
+Goals are the layer directly below the plan. Approved phases dispatch or unlock goals, and goals in turn manage grouped task execution.
+
+Core commands:
+
+```bash
+python -m src.infra.cli.main goals init <goal-file.yaml>
+python -m src.infra.cli.main goals status
+python -m src.infra.cli.main goals run
+python -m src.infra.cli.main goals finalize <goal_id>
+```
+
+Deprecated compatibility commands still exist:
+
+```bash
+python -m src.infra.cli.main goals plan <user_input>
+python -m src.infra.cli.main goals dispatch-roadmap <session_id>
+python -m src.infra.cli.main goals sessions
+```
+
+Those three commands are legacy planning-era commands; prefer `plan init`, `plan architect`, and `plan status`.
+
+### Tasks
+
+Tasks are the execution units below goals. They are useful for operators and debugging, but they are not the main project-level entry point.
+
+Representative commands:
+
+```bash
+python -m src.infra.cli.main tasks create \
+  --title "Add health endpoint" \
+  --description "Implement a basic health endpoint and tests" \
+  --capability code:backend \
+  --allow src/api/health.py \
+  --allow tests/test_health.py \
+  --test "pytest tests/test_health.py"
+
+python -m src.infra.cli.main tasks list
+python -m src.infra.cli.main tasks retry <task_id>
+```
+
+## Operating modes
+
+### Dry-run mode
+
+Default mode is `dry-run`.
+
+Use it when you want to:
+
+- exercise the planning workflow locally
+- run tests without Redis or live agent CLIs
+- develop planner and domain behavior with minimal external dependencies
+
+### Real mode
+
+Set `AGENT_MODE=real` to use Redis-backed events and live runtime adapters.
+
+Typical long-running processes:
+
+```bash
+AGENT_MODE=real python -m src.infra.cli.main system task-manager
+AGENT_MODE=real AGENT_ID=dry-run-001 python -m src.infra.cli.main system worker
+AGENT_MODE=real python -m src.infra.cli.main system reconciler
+```
+
+Or boot everything from the active registry:
+
+```bash
+AGENT_MODE=real python -m src.infra.cli.main system start
+```
+
+`system start` reads the active agent registry, launches one worker per active agent, waits for heartbeats, and then starts the reconciler.
+
+## Agent runtimes
+
+The runtime factory currently supports these runtime types:
+
+- `dry-run`
+- `gemini`
+- `claude`
+- `pi`
+
+Runtime-specific options are stored on each agent record in `runtime_config`, which allows multiple differently configured agents to coexist in the same registry.
+
+## Project spec workflow
+
+The project spec is the canonical source of architectural constraints used by planning and validation.
+
+Supported mutation flow:
 
 ```text
 spec propose → spec diff → spec apply
 ```
 
-Relevant commands:
+Representative commands:
 
 ```bash
 python -m src.infra.cli.main spec show
@@ -364,6 +414,7 @@ Representative test entry points:
 ```bash
 pytest
 pytest tests/unit/infra/test_cli_new_commands.py
+pytest tests/unit/app/usecases/test_planner_orchestrator.py
 pytest tests/integration/test_e2e_dry_run.py
 pytest tests/integration/test_e2e_full.py
 ```
@@ -375,6 +426,6 @@ The repository currently organizes tests under:
 
 ## Additional documentation
 
-- `docs/architecture.md` — updated architecture and data-flow notes
-- `roadmap.md` — current status summary and likely next areas of work
-- `src/infra/logging/README.md` — details of the runtime logging subsystem
+- `docs/architecture.md` — architecture, runtime workflows, and boundaries
+- `roadmap.md` — current-state roadmap and likely next milestones
+- `src/infra/logging/README.md` — runtime logging subsystem details
