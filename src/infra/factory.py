@@ -498,7 +498,64 @@ def build_advance_goal_from_pr_usecase():
         goal_repo=build_goal_repo(),
         event_port=build_event_port(),
         unblock_goals_usecase=build_unblock_goals_usecase(),
+        plan_repo=build_project_plan_repo(),
     )
+
+
+def build_interactive_planner_runtime(io_handler=None):
+    """
+    Return an InteractivePlannerRuntime for DISCOVERY mode.
+    Dry-run mode uses StubInteractivePlannerRuntime.
+    """
+    if app_config.mode == "dry-run":
+        from src.infra.runtime.interactive_planner_runtime import StubInteractivePlannerRuntime
+        return StubInteractivePlannerRuntime()
+    from src.infra.runtime.interactive_planner_runtime import InteractivePlannerRuntime
+    return InteractivePlannerRuntime(
+        api_key=app_config.anthropic_api_key.get_secret_value(),
+        io_handler=io_handler,
+    )
+
+
+def build_planner_orchestrator(io_handler=None):
+    """
+    Build PlannerOrchestrator with all dependencies wired.
+    """
+    from src.app.usecases.planner_orchestrator import PlannerOrchestrator
+    from src.app.services.decision_apply import apply_decision_to_spec
+    from src.app.usecases.validate_against_spec import ValidateAgainstSpec
+
+    spec = build_load_project_spec().execute(app_config.project_name)
+    return PlannerOrchestrator(
+        plan_repo=build_project_plan_repo(),
+        session_repo=build_planner_session_repo(),
+        context_assembler=build_planner_context_assembler(),
+        autonomous_runtime=build_planner_runtime(),
+        interactive_runtime=build_interactive_planner_runtime(io_handler),
+        goal_init=build_goal_init_usecase(),
+        validator=ValidateAgainstSpec(spec),
+        project_state=build_project_state_adapter(),
+        agent_registry=build_agent_registry(),
+        goal_repo=build_goal_repo(),
+        spec_repo=build_spec_repo(),
+        project_name=app_config.project_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project plan
+# ---------------------------------------------------------------------------
+
+def build_project_plan_repo():
+    """
+    Return a ProjectPlanRepositoryPort for the active project.
+    Dry-run mode uses the in-memory adapter.
+    """
+    if app_config.mode == "dry-run":
+        from src.infra.fs.project_plan_repository import InMemoryProjectPlanRepository
+        return InMemoryProjectPlanRepository()
+    from src.infra.fs.project_plan_repository import YamlProjectPlanRepository
+    return YamlProjectPlanRepository(build_project_paths().plan_path)
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +577,7 @@ def build_planner_context_assembler():
         project_state=build_project_state_adapter(),
         goal_repo=build_goal_repo(),
         task_repo=build_task_repo(),
+        plan_repo=build_project_plan_repo(),
     )
 
 
