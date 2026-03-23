@@ -128,6 +128,18 @@ __all__ = [
     "SpecValidationError",
     "SpecVersionMismatchError",
     "ForbiddenMutationError",
+    # ProjectPlan
+    "ProjectPlan",
+    "ProjectPlanStatus",
+    "Phase",
+    "PhaseStatus",
+    "ProjectBrief",
+    # ProjectPlanRepositoryPort
+    "ProjectPlanRepositoryPort",
+    # SpecChanges
+    "SpecChanges",
+    # PlannerMode
+    "PlannerMode",
 ]
 
 # PR value objects
@@ -153,10 +165,11 @@ from src.domain.ports.project_state import ProjectStatePort
 # Lease refresher port + factory type (drift fix — app layer no longer imports infra)
 from src.domain.ports.lease import LeaseRefresherPort, LeaseRefresherFactory
 
-# PlannerSession aggregate + status + turn
+# PlannerSession aggregate + status + turn + mode
 from src.domain.aggregates.planner_session import (
     PlannerSession,
     PlannerSessionStatus,
+    PlannerMode,
     SessionTurn,
 )
 
@@ -173,3 +186,16 @@ from src.domain.ports.project_state import DecisionEntry
 
 # Planner session repository port
 from src.domain.repositories.planner_session_repository import PlannerSessionRepositoryPort
+
+# ProjectPlan aggregate and repository
+from src.domain.aggregates.project_plan import (
+    ProjectPlan,
+    ProjectPlanStatus,
+    Phase,
+    PhaseStatus,
+    ProjectBrief,
+)
+from src.domain.repositories.project_plan_repository import ProjectPlanRepositoryPort
+
+# SpecChanges (new field on DecisionEntry)
+from src.domain.ports.project_state import SpecChanges

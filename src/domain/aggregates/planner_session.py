@@ -30,6 +30,13 @@ class PlannerSessionStatus(str, Enum):
     FAILED    = "failed"
 
 
+class PlannerMode(str, Enum):
+    DISCOVERY     = "discovery"
+    ARCHITECTURE  = "architecture"
+    PHASE_REVIEW  = "phase_review"
+    TACTICAL      = "tactical"     # for future issue/bug use
+
+
 class SessionTurn(BaseModel):
     """One turn of the multi-turn planning conversation."""
     role: str                   # "assistant" | "tool_result"
@@ -51,6 +58,7 @@ class PlannerSession(BaseModel):
     session_id: str
     user_input: str
     status: PlannerSessionStatus = PlannerSessionStatus.PENDING
+    mode: PlannerMode = PlannerMode.DISCOVERY
     reasoning: str = ""
     raw_llm_output: str = ""
     roadmap_data: Optional[dict] = None
@@ -69,10 +77,11 @@ class PlannerSession(BaseModel):
     # ------------------------------------------------------------------
 
     @classmethod
-    def create(cls, user_input: str) -> "PlannerSession":
+    def create(cls, user_input: str, mode: PlannerMode = PlannerMode.DISCOVERY) -> "PlannerSession":
         return cls(
             session_id=f"plan-{uuid4().hex[:12]}",
             user_input=user_input,
+            mode=mode,
         )
 
     # ------------------------------------------------------------------
