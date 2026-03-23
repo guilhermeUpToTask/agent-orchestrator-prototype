@@ -28,11 +28,7 @@ Reconciler tests:
 """
 from __future__ import annotations
 
-import os
-import tempfile
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -41,7 +37,6 @@ from src.domain import (
     AgentProps,
     AgentSelector,
     Assignment,
-    DomainEvent,
     ExecutionSpec,
     RetryPolicy,
     TaskAggregate,
@@ -793,7 +788,6 @@ class TestReconcilerFailEdgeCases:
         on successive calls.
         """
         from src.domain.value_objects.task import TaskResult
-        from unittest.mock import patch
 
         task_assigned = TaskAggregate(
             task_id="task-race",

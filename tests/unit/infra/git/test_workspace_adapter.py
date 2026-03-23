@@ -1,6 +1,5 @@
 import pytest
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from src.infra.git.workspace_adapter import GitWorkspaceAdapter, _parse_git_porcelain
 
@@ -12,7 +11,7 @@ class TestGitWorkspaceAdapter:
 
     def test_init_creates_base_dir(self, tmp_path):
         base = tmp_path / "workspaces"
-        adapter = GitWorkspaceAdapter(workspace_base=base)
+        GitWorkspaceAdapter(workspace_base=base)
         assert base.exists()
 
     def test_cleanup_workspace(self, tmp_path):

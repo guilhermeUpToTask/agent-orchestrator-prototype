@@ -3,7 +3,6 @@ tests/unit/infra/test_config.py — Unit tests for OrchestratorConfig.
 """
 
 from pathlib import Path
-import pytest
 from pydantic import SecretStr
 from src.infra.config import OrchestratorConfig
 

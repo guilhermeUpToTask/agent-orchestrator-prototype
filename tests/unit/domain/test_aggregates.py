@@ -12,24 +12,19 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
 
 import pytest
 
 from src.domain import (
     AgentExecutionResult,
-    AgentProps,
     AgentSelector,
     Assignment,
     DomainEvent,
-    ExecutionContext,
     ExecutionSpec,
-    HistoryEntry,
     RetryPolicy,
     TaskAggregate,
     TaskResult,
     TaskStatus,
-    TrustLevel,
 )
 
 

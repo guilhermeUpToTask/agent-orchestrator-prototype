@@ -7,18 +7,17 @@ Unit tests for the Phase 5 use cases:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.domain import (
-    AgentProps, AgentSelector, Assignment,
-    ExecutionSpec, TaskAggregate, TaskStatus,
+    AgentProps, AgentSelector, ExecutionSpec, TaskAggregate, TaskStatus,
 )
 from src.app.usecases.task_delete  import TaskDeleteUseCase,  TaskDeleteResult
-from src.app.usecases.task_prune   import TaskPruneUseCase,   TaskPruneResult
+from src.app.usecases.task_prune   import TaskPruneUseCase
 from src.app.usecases.agent_register import AgentRegisterUseCase, AgentRegisterResult
-from src.app.usecases.project_reset  import ProjectResetUseCase,  ProjectResetResult
+from src.app.usecases.project_reset  import ProjectResetUseCase
 
 
 # ---------------------------------------------------------------------------

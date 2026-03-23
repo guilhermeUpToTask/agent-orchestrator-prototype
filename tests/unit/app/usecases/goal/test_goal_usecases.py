@@ -8,7 +8,7 @@ no filesystem.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 from src.domain.aggregates.task import TaskAggregate
@@ -365,7 +365,6 @@ class TestGoalMergeTaskUseCase:
             execution=ExecutionSpec(type="coding"),
         )
         # task has no feature_id
-        from src.infra.fs.task_repository import YamlTaskRepository  # avoid direct import
         # inject it manually
         uc._task_repo.save(task_no_goal)
         uc.execute(task_no_goal.task_id)
