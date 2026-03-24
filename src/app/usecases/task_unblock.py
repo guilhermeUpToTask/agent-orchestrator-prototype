@@ -65,7 +65,7 @@ class TaskUnblockUseCase:
             if completed_task_id not in task.depends_on:
                 continue
 
-            if not task.is_ready_for_dispatch(succeeded_ids):
+            if not task.is_assignable() or not task.is_unblocked(succeeded_ids):
                 result.skipped.append(task.task_id)
                 continue
 

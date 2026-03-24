@@ -25,6 +25,7 @@ Design note on "no direct agent writes":
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from src.domain.project_spec.aggregate import ProjectSpec
 
@@ -76,3 +77,21 @@ class ProjectSpecRepository(ABC):
             return True
         except SpecNotFoundError:
             return False
+
+    def proposal_path(self, project_name: str) -> Path:
+        """
+        Return the canonical path for the staged proposal file.
+
+        Default implementation is intentionally unsupported so adapters
+        that persist to non-filesystem backends can override explicitly.
+        """
+        raise NotImplementedError("proposal_path is not implemented for this repository")
+
+    def save_proposal(self, project_name: str, content: str) -> Path:
+        """
+        Persist a staged proposal payload and return the written path.
+
+        Default implementation is intentionally unsupported so adapters
+        can choose an appropriate persistence strategy.
+        """
+        raise NotImplementedError("save_proposal is not implemented for this repository")

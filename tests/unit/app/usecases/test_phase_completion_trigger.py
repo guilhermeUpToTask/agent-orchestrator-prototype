@@ -23,6 +23,7 @@ class TestPhaseCompletionTrigger:
         self.event_port = MagicMock()
         self.unblock_goals_usecase = MagicMock()
         self.plan_repo = MagicMock()
+        self.plan_repo.update_if_version.return_value = True
 
         self.usecase = AdvanceGoalFromPRUseCase(
             goal_repo=self.goal_repo,
@@ -90,10 +91,9 @@ class TestPhaseCompletionTrigger:
         # Execute the use case (simulating a goal reaching MERGED)
         self.usecase._check_phase_completion()
 
-        # Verify that plan.trigger_review() was called by checking plan_repo.save
-        # (trigger_review returns a new plan instance)
-        self.plan_repo.save.assert_called()
-        saved_plan = self.plan_repo.save.call_args[0][0]
+        # Verify optimistic-concurrency update path was used.
+        self.plan_repo.update_if_version.assert_called()
+        _, saved_plan = self.plan_repo.update_if_version.call_args[0]
         assert saved_plan.status == ProjectPlanStatus.PHASE_REVIEW
 
     def test_does_not_trigger_when_some_goals_not_merged(self):
@@ -154,8 +154,8 @@ class TestPhaseCompletionTrigger:
         # Execute the use case
         self.usecase._check_phase_completion()
 
-        # Verify that plan was NOT saved (no status change)
-        self.plan_repo.save.assert_not_called()
+        # Verify no project-plan write occurred
+        self.plan_repo.update_if_version.assert_not_called()
 
     def test_does_not_trigger_on_empty_phase(self):
         """When phase has no goals, don't trigger review."""
@@ -186,8 +186,8 @@ class TestPhaseCompletionTrigger:
         # Execute the use case
         self.usecase._check_phase_completion()
 
-        # Verify that plan was NOT saved
-        self.plan_repo.save.assert_not_called()
+        # Verify no project-plan write occurred
+        self.plan_repo.update_if_version.assert_not_called()
 
     def test_does_not_trigger_when_not_in_phase_active(self):
         """When plan is not in PHASE_ACTIVE status, don't trigger."""
@@ -197,8 +197,8 @@ class TestPhaseCompletionTrigger:
         # Execute the use case
         self.usecase._check_phase_completion()
 
-        # Verify that plan was NOT saved
-        self.plan_repo.save.assert_not_called()
+        # Verify no project-plan write occurred
+        self.plan_repo.update_if_version.assert_not_called()
 
     def test_does_nothing_when_plan_repo_is_none(self):
         """When plan_repo is None (backward compatibility), do nothing."""

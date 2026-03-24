@@ -33,6 +33,7 @@ from src.infra.fs.atomic_writer import AtomicFileWriter
 
 
 _SPEC_FILENAME = "project_spec.yaml"
+_PROPOSED_FILENAME = "project_spec.proposed.yaml"
 
 
 class FileProjectSpecRepository(ProjectSpecRepository):
@@ -59,6 +60,9 @@ class FileProjectSpecRepository(ProjectSpecRepository):
 
     def _spec_path(self, project_name: str) -> Path:
         return self._project_dir(project_name) / _SPEC_FILENAME
+
+    def proposal_path(self, project_name: str) -> Path:
+        return self._project_dir(project_name) / _PROPOSED_FILENAME
 
     # ------------------------------------------------------------------
     # Port implementation
@@ -97,6 +101,12 @@ class FileProjectSpecRepository(ProjectSpecRepository):
     def exists(self, project_name: str) -> bool:
         """Cheap existence check — does not deserialise the file."""
         return self._spec_path(project_name).exists()
+
+    def save_proposal(self, project_name: str, content: str) -> Path:
+        path = self.proposal_path(project_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        AtomicFileWriter.write_text(path, content)
+        return path
 
     # ------------------------------------------------------------------
     # Serialization / deserialization

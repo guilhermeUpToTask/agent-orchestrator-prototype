@@ -71,11 +71,12 @@ def test_subscribe_many_accepts_string_fields(adapter, redis_client):
 
         assert received.type == "task.created"
         assert received.payload["task_id"] == "t1"
+        adapter.ack(received, group="grp-test")
         gen.close()
         mock_ack.assert_called_once_with("events:task.created", "grp-test", "msg-1")
 
-def test_subscribe_many_acks_before_reraising_invalid_payload(adapter, redis_client):
-    """Invalid payloads should still be ACKed so Redis does not redeliver poison messages."""
+def test_subscribe_many_does_not_ack_invalid_payload(adapter, redis_client):
+    """Invalid payloads are not auto-ACKed; caller controls acknowledgment."""
     with patch.object(redis_client, "xreadgroup") as mock_read, patch.object(
         redis_client, "xack"
     ) as mock_ack:
@@ -88,7 +89,22 @@ def test_subscribe_many_acks_before_reraising_invalid_payload(adapter, redis_cli
         with pytest.raises(json.JSONDecodeError):
             next(gen)
 
-        mock_ack.assert_called_once_with("events:task.created", "grp-test", b"msg-1")
+        mock_ack.assert_not_called()
+
+def test_subscribe_many_requires_explicit_ack(adapter, redis_client):
+    """Adapter should not ACK automatically on yield; caller must invoke ack()."""
+    event = DomainEvent(type="task.created", producer="p1", payload={"task_id": "t1"})
+    with patch.object(redis_client, "xreadgroup") as mock_read, patch.object(
+        redis_client, "xack"
+    ) as mock_ack:
+        mock_read.return_value = [
+            (b"events:task.created", [(b"msg-1", {b"data": json.dumps(event.model_dump(mode="json"))})])
+        ]
+
+        gen = adapter.subscribe_many(["task.created"], "grp-test", "consumer-1")
+        received = next(gen)
+        assert received.type == "task.created"
+        mock_ack.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_publish_journal_created(adapter, tmp_path):
