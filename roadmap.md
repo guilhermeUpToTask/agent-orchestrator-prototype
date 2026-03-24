@@ -38,10 +38,9 @@ Implemented today:
 Implemented today:
 
 - persisted project plan aggregate and repository
-- discovery, architecture, phase review, status, and placeholder decision CLI flows
+- discovery, architecture, and phase review CLI flows
 - architectural decisions and phase proposal handling
 - planning sessions and project-state persistence hooks
-- a transition from older `goals plan` / `goals dispatch-roadmap` commands toward the newer `plan` command group
 
 ### 5. Project spec governance
 
@@ -82,8 +81,7 @@ The registry supports multiple agents and runtime types, but there is not yet a 
 ### Near-term
 
 - consolidate duplicate or transitional infrastructure pieces
-- continue retiring or folding deprecated planning commands under `goals` into the `plan` workflow
-- improve end-user documentation around goal files, project plans, operator approvals, and PR flows
+- improve end-user documentation around goal files, project plans, and PR flows
 - add richer status/reporting commands for planners, goals, and task execution history
 - formalize replay/debugging workflows from stored logs and events
 

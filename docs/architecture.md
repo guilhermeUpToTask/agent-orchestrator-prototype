@@ -121,27 +121,17 @@ This design separates three kinds of configuration/state:
 
 ### 3. Planning lifecycle
 
-The planning subsystem is no longer just a simple roadmap generator. It persists and advances a structured project plan with explicit statuses and operator approval gates.
+The planning subsystem is no longer just a simple roadmap generator. It persists and advances a structured project plan:
 
-Current plan state progression:
+- **Discovery** captures a project brief and open questions.
+- **Architecture** proposes decisions, spec changes, and phased execution.
+- **Phase review** records lessons learned and proposes the next phase.
 
-```text
-discovery -> architecture -> phase_active -> phase_review -> phase_active ... -> done
-```
-
-The CLI maps onto that lifecycle directly:
-
-- **`plan init`** runs discovery, prints a project brief, and on approval moves the plan from `discovery` to `architecture`.
-- **`plan architect`** runs only in `architecture`, proposes decisions and phases, and on approval dispatches the first phase's goals and transitions the plan to `phase_active`.
-- **`plan review`** runs only in `phase_review`, records lessons learned, and on approval either dispatches the next phase or marks the plan `done`.
-- **`plan status`** reads the persisted plan aggregate and shows the current phase and goal names recorded on each phase.
-- **`plan decision`** exists in the CLI but is currently only a placeholder for a richer mid-phase decision flow.
-
-This planning state is stored through the project plan repository and linked to downstream goals, spec updates, and project-state decisions.
+This planning state is stored through the project plan repository and linked to downstream goals/spec updates.
 
 ### 4. Spec governance
 
-The spec flow is intentionally controlled and operator-mediated:
+The spec flow is intentionally controlled:
 
 - show current spec
 - validate proposed work against the spec
@@ -159,7 +149,6 @@ Examples of events handled today include:
 
 - task events such as creation, assignment, completion, failure, cancellation, and requeueing
 - goal review events such as `goal.ready_for_review`, `goal.approved`, and `goal.merged`
-- project-plan progression that indirectly depends on goal completion and review approvals before new phases are started
 
 Redis-backed adapters are used in real mode. In-memory adapters are used in dry-run mode and tests.
 
