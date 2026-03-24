@@ -84,12 +84,24 @@ class CreateGoalPRUseCase:
             base=self._base_branch,
         )
 
-        pr_number = self._github.create_pr(
+        existing_pr = self._github.find_open_pr(
             head_branch=head_branch,
             base_branch=self._base_branch,
-            title=title,
-            body=body,
         )
+        if existing_pr is not None:
+            log.info(
+                "create_goal_pr.found_existing_open_pr",
+                goal_id=goal_id,
+                pr_number=existing_pr,
+            )
+            pr_number = existing_pr
+        else:
+            pr_number = self._github.create_pr(
+                head_branch=head_branch,
+                base_branch=self._base_branch,
+                title=title,
+                body=body,
+            )
 
         # Fetch PR info to capture the current head SHA
         pr_info = self._github.get_pr_info(pr_number)

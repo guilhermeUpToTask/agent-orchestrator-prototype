@@ -38,7 +38,6 @@ from src.domain.project_spec import (
     ProjectSpecRepository,
     SpecNotFoundError,
 )
-from src.infra.fs.atomic_writer import AtomicFileWriter
 
 log = structlog.get_logger(__name__)
 
@@ -187,20 +186,10 @@ class ProposeSpecChange:
         The repository owns path knowledge; we ask it for the spec path and
         replace the filename — no independent path logic here.
         """
-        from src.infra.fs.project_spec_repository import FileProjectSpecRepository
-
-        if isinstance(self._repo, FileProjectSpecRepository):
-            return self._repo._spec_path(project_name).parent / _PROPOSED_FILENAME
-
-        # Fallback for non-file repos (e.g. in-memory test doubles):
-        # derive from orchestrator_home via config
-        from src.infra.config import config as app_config
-        return (
-            Path(app_config.orchestrator_home)
-            / "projects"
-            / project_name
-            / _PROPOSED_FILENAME
-        )
+        try:
+            return self._repo.proposal_path(project_name)
+        except NotImplementedError:
+            return Path.cwd() / _PROPOSED_FILENAME
 
     def _write_proposal(
         self,
@@ -228,7 +217,10 @@ class ProposeSpecChange:
             indent=2,
         )
 
-        path = self._proposal_path(project_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        AtomicFileWriter.write_text(path, content)
-        return path
+        try:
+            return self._repo.save_proposal(project_name, content)
+        except NotImplementedError:
+            path = self._proposal_path(project_name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return path

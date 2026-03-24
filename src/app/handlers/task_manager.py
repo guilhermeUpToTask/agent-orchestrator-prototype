@@ -53,13 +53,13 @@ class TaskManagerHandler:
         self._fail    = TaskFailHandlingUseCase(task_repo=task_repo, event_port=event_port)
 
     def handle_task_created(self, task_id: str) -> bool:
-        log.info("task_manager.handling_created", task_id=task_id)
-        from src.app.usecases.task_assign import AssignOutcome
-        result = self._assign.execute(task_id)
-        return result.outcome == AssignOutcome.ASSIGNED
+        return self._handle_assignable_task(task_id, event_type="task.created")
 
     def handle_task_requeued(self, task_id: str) -> bool:
-        log.info("task_manager.handling_requeued", task_id=task_id)
+        return self._handle_assignable_task(task_id, event_type="task.requeued")
+
+    def _handle_assignable_task(self, task_id: str, event_type: str) -> bool:
+        log.info("task_manager.handling_assignable", task_id=task_id, event_type=event_type)
         from src.app.usecases.task_assign import AssignOutcome
         result = self._assign.execute(task_id)
         return result.outcome == AssignOutcome.ASSIGNED

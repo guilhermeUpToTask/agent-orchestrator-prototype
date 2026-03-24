@@ -39,3 +39,17 @@ class ProjectPlanRepositoryPort(ABC):
     def get(self) -> Optional[ProjectPlan]:
         """Return the plan if it exists, None otherwise."""
         ...
+
+    @abstractmethod
+    def update_if_version(
+        self,
+        expected_version: int,
+        plan: ProjectPlan,
+    ) -> bool:
+        """
+        Optimistic-concurrency update for the singleton project plan.
+
+        Returns True when the current persisted plan matches expected_version
+        and the new plan is persisted. Returns False on version mismatch.
+        """
+        ...

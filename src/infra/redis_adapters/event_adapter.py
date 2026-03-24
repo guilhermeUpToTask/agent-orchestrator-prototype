@@ -29,6 +29,7 @@ class RedisEventAdapter(EventPort):
         self._r = redis_client
         self._journal_dir = pathlib.Path(journal_dir)
         self._journal_dir.mkdir(parents=True, exist_ok=True)
+        self._pending: dict[str, tuple[str, str, str]] = {}
 
     def publish(self, event: DomainEvent) -> None:
         payload = event.model_dump(mode="json")
@@ -88,16 +89,26 @@ class RedisEventAdapter(EventPort):
             for stream_key, messages in results:
                 stream_name = stream_key.decode() if isinstance(stream_key, bytes) else stream_key
                 for msg_id, fields in messages:
-                    try:
-                        data_raw = fields.get(b"data") or fields.get("data", b"{}")
-                        if isinstance(data_raw, bytes):
-                            data_raw = data_raw.decode()
-                        data = json.loads(data_raw)
-                        yield DomainEvent.model_validate(data)
-                    finally:
-                        # Always ack so Redis doesn't redeliver on reconnect.
-                        # Recovery on processing failure is handled by the reconciler.
-                        self._r.xack(stream_name, group, msg_id)
+                    data_raw = fields.get(b"data") or fields.get("data", b"{}")
+                    if isinstance(data_raw, bytes):
+                        data_raw = data_raw.decode()
+                    data = json.loads(data_raw)
+                    event = DomainEvent.model_validate(data)
+                    msg_id_str = (
+                        msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id)
+                    )
+                    self._pending[event.event_id] = (stream_name, group, msg_id_str)
+                    yield event
+
+    def ack(self, event: DomainEvent, group: str) -> None:
+        pending = self._pending.get(event.event_id)
+        if pending is None:
+            return
+        stream_name, pending_group, msg_id = pending
+        if pending_group != group:
+            return
+        self._r.xack(stream_name, group, msg_id)
+        self._pending.pop(event.event_id, None)
 
     # ------------------------------------------------------------------
     # Internal
@@ -140,6 +151,9 @@ class InMemoryEventAdapter(EventPort):
     ) -> Iterator[DomainEvent]:
         for et in event_types:
             yield from self._subscribers.get(et, [])
+
+    def ack(self, event: DomainEvent, group: str) -> None:  # noqa: ARG002
+        return None
 
     @property
     def all_events(self) -> list[DomainEvent]:

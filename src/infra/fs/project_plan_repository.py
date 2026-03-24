@@ -51,6 +51,15 @@ class YamlProjectPlanRepository(ProjectPlanRepositoryPort):
         except KeyError:
             return None
 
+    def update_if_version(self, expected_version: int, plan: ProjectPlan) -> bool:
+        current = self.get()
+        if current is None:
+            return False
+        if current.state_version != expected_version:
+            return False
+        self.save(plan)
+        return True
+
     def _atomic_write(self, path: Path, plan: ProjectPlan) -> None:
         tmp = path.with_suffix(".tmp")
         try:
@@ -82,6 +91,14 @@ class InMemoryProjectPlanRepository(ProjectPlanRepositoryPort):
 
     def get(self) -> Optional[ProjectPlan]:
         return self._plan
+
+    def update_if_version(self, expected_version: int, plan: ProjectPlan) -> bool:
+        if self._plan is None:
+            return False
+        if self._plan.state_version != expected_version:
+            return False
+        self._plan = plan
+        return True
 
 
 # ---------------------------------------------------------------------------

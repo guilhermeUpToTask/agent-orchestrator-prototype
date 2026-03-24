@@ -37,7 +37,7 @@ ProjectSpec integration:
 from __future__ import annotations
 
 import signal
-from typing import Optional
+from typing import Callable, Optional
 
 import structlog
 
@@ -162,12 +162,21 @@ class TaskGraphOrchestrator:
         )
 
         try:
+            handlers = {
+                "task.assigned": self._on_task_assigned,
+                "task.completed": self._on_task_completed,
+                "task.canceled": self._on_task_canceled,
+                "goal.ready_for_review": self._on_goal_ready_for_review,
+                "goal.approved": self._on_goal_unlocked,
+                "goal.merged": self._on_goal_unlocked,
+            }
             for event in self._events.subscribe_many(
                 WATCHED_EVENTS, CONSUMER_GROUP, CONSUMER_NAME
             ):
                 if not self._running:
                     break
-                self._dispatch(event)
+                self._dispatch(event, handlers)
+                self._events.ack(event, group=CONSUMER_GROUP)
         except Exception as exc:
             log.exception("orchestrator.fatal_error", error=str(exc))
             raise
@@ -182,19 +191,25 @@ class TaskGraphOrchestrator:
     # Event dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch(self, event: DomainEvent) -> None:
+    def _dispatch(
+        self,
+        event: DomainEvent,
+        handlers: dict[str, Callable[[DomainEvent], None]] | None = None,
+    ) -> None:
+        if handlers is None:
+            handlers = {
+                "task.assigned": self._on_task_assigned,
+                "task.completed": self._on_task_completed,
+                "task.canceled": self._on_task_canceled,
+                "goal.ready_for_review": self._on_goal_ready_for_review,
+                "goal.approved": self._on_goal_unlocked,
+                "goal.merged": self._on_goal_unlocked,
+            }
         trace = self._telemetry.start_trace(correlation_id=event.payload.get("goal_id") or event.payload.get("task_id"))
         try:
-            if event.type == "task.assigned":
-                self._on_task_assigned(event)
-            elif event.type == "task.completed":
-                self._on_task_completed(event)
-            elif event.type == "task.canceled":
-                self._on_task_canceled(event)
-            elif event.type == "goal.ready_for_review":
-                self._on_goal_ready_for_review(event)
-            elif event.type in ("goal.approved", "goal.merged"):
-                self._on_goal_unlocked(event)
+            fn = handlers.get(event.type)
+            if fn:
+                fn(event)
         except Exception as exc:
             log.exception(
                 "orchestrator.dispatch_error",
