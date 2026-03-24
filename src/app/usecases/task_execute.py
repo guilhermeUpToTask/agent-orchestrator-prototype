@@ -27,13 +27,15 @@ from typing import Any, Callable
 
 import structlog
 
+from src.app.telemetry.runtime_wrappers import TelemetryAgentRuntimeWrapper
+from src.app.telemetry.service import TelemetryService
 from src.domain import (
     AgentExecutionResult, AgentProps, DomainEvent, ExecutionContext,
     ForbiddenFileEditError, TaskAggregate, TaskResult, TaskStatus,
 )
 from src.domain import (
     AgentRegistryPort, AgentRuntimePort, EventPort, GitWorkspacePort,
-    LeasePort, TaskLogsPort, TaskRepositoryPort, TestRunnerPort,
+    LeasePort, TaskLogsPort, TaskRepositoryPort, TelemetryEmitterPort, TestRunnerPort,
 )
 from src.domain.ports.lease import LeaseRefresherFactory, LeaseRefresherPort
 
@@ -82,6 +84,7 @@ class TaskExecuteUseCase:
         runtime_factory: Callable[[AgentProps], AgentRuntimePort],
         logs_port: TaskLogsPort,
         test_runner: TestRunnerPort,
+        telemetry_emitter: TelemetryEmitterPort | None = None,
         lease_refresher_factory: LeaseRefresherFactory | None = None,
         task_timeout_seconds: int = 600,
     ) -> None:
@@ -94,6 +97,7 @@ class TaskExecuteUseCase:
         self._runtime_factory = runtime_factory
         self._logs = logs_port
         self._tests = test_runner
+        self._telemetry = TelemetryService(telemetry_emitter, producer="task-execute")
         self._lease_refresher_factory = (
             lease_refresher_factory or _noop_lease_refresher_factory
         )
@@ -109,6 +113,7 @@ class TaskExecuteUseCase:
         All side effects (git, agent, persistence) go through ports.
         """
         log.info("worker.process_start", task_id=task_id, agent_id=agent_id)
+        trace = self._telemetry.start_trace(correlation_id=task_id)
 
         task = self._task_repo.load(task_id)
         self._validate_assignment(task, agent_id)
@@ -119,7 +124,12 @@ class TaskExecuteUseCase:
         if agent_props is None:
             raise RuntimeError(f"Agent {agent_id} not found in registry")
 
-        runtime = self._runtime_factory(agent_props)
+        runtime = TelemetryAgentRuntimeWrapper(
+            wrapped=self._runtime_factory(agent_props),
+            telemetry=self._telemetry,
+            trace_context=trace,
+            agent_id=agent_id,
+        )
         log.info(
             "worker.runtime_selected",
             task_id=task_id,
@@ -135,6 +145,13 @@ class TaskExecuteUseCase:
             ws_path, branch = self._prepare_workspace(task_id)
 
             task = self._start_task_with_retry(task_id, agent_id)
+            self._telemetry.emit(
+                "state.updated",
+                self._telemetry.start_span(trace),
+                payload={"entity": "task", "task_id": task_id, "field": "status", "from": "assigned", "to": "in_progress"},
+                task_id=task_id,
+                agent_id=agent_id,
+            )
             self._events.publish(DomainEvent(
                 type="task.started",
                 producer=agent_id,
@@ -156,14 +173,35 @@ class TaskExecuteUseCase:
             )
 
             self._persist_success(task, agent_id, branch, commit_sha, actual_modified, result.artifacts)
+            self._telemetry.emit(
+                "state.updated",
+                self._telemetry.start_span(trace),
+                payload={"entity": "task", "task_id": task_id, "field": "status", "to": "succeeded"},
+                task_id=task_id,
+                agent_id=agent_id,
+            )
 
         except ForbiddenFileEditError as exc:
+            self._telemetry.emit(
+                "unexpected.error",
+                self._telemetry.start_span(trace),
+                metadata={"error_type": type(exc).__name__, "message": str(exc)},
+                task_id=task_id,
+                agent_id=agent_id,
+            )
             self._persist_failure_safely(
                 task_id,
                 agent_id,
                 f"Forbidden file edits: {exc.violations}",
             )
         except _AgentFailed as exc:
+            self._telemetry.emit(
+                "unexpected.error",
+                self._telemetry.start_span(trace),
+                metadata={"error_type": type(exc).__name__, "message": str(exc)},
+                task_id=task_id,
+                agent_id=agent_id,
+            )
             self._persist_failure_safely(task_id, agent_id, str(exc))
         except _DurabilityError as exc:
             log.error(
@@ -174,6 +212,13 @@ class TaskExecuteUseCase:
             )
         except Exception as exc:
             log.exception("worker.unexpected_error", task_id=task_id, error=str(exc))
+            self._telemetry.emit(
+                "unexpected.error",
+                self._telemetry.start_span(trace),
+                metadata={"error_type": type(exc).__name__, "message": str(exc)},
+                task_id=task_id,
+                agent_id=agent_id,
+            )
             self._persist_failure_safely(
                 task_id,
                 agent_id,

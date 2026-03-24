@@ -79,6 +79,10 @@ The current implementation is project-scoped. The active project is derived from
 <orchestrator_home>/projects/<project_name>/
   agents/registry.json
   events/
+  telemetry/
+    events/
+    logs/
+    metrics/
   goals/
   logs/
   planner_sessions/

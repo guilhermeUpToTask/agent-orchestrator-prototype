@@ -84,6 +84,25 @@ def build_event_port():
     )
 
 
+def build_telemetry_emitter():
+    if app_config.mode == "dry-run":
+        return _build_inmemory_telemetry_emitter()
+    from src.infra.redis_adapters.telemetry_adapter import (
+        CompositeTelemetryEmitter,
+        FileTelemetryLogEmitter,
+        JsonLoggerTelemetryEmitter,
+        RedisTelemetryEmitter,
+    )
+    return CompositeTelemetryEmitter([
+        RedisTelemetryEmitter(
+            _build_real_redis(),
+            journal_dir=build_project_paths().telemetry_events_dir,
+        ),
+        JsonLoggerTelemetryEmitter(),
+        FileTelemetryLogEmitter(build_project_paths().telemetry_logs_dir / "telemetry.jsonl"),
+    ])
+
+
 def build_lease_port():
     if app_config.mode == "dry-run":
         return _build_inmemory_lease_port()
@@ -117,6 +136,12 @@ def _build_inmemory_lease_port():
     from src.infra.redis_adapters.lease_memory import InMemoryLeaseAdapter
 
     return InMemoryLeaseAdapter()
+
+
+@lru_cache(maxsize=1)
+def _build_inmemory_telemetry_emitter():
+    from src.infra.redis_adapters.telemetry_adapter import InMemoryTelemetryEmitter
+    return InMemoryTelemetryEmitter()
 
 
 def build_agent_runtime(agent_props: AgentProps) -> AgentRuntimePort:
@@ -167,6 +192,7 @@ def build_worker_handler() -> WorkerHandler:
         runtime_factory=build_runtime_factory(),
         logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
+        telemetry_emitter=build_telemetry_emitter(),
         lease_refresher_factory=build_lease_refresher_factory(),
         task_timeout_seconds=app_config.task_timeout,
     )
@@ -264,6 +290,7 @@ def build_task_execute_usecase():
         runtime_factory=build_runtime_factory(),
         logs_port=FilesystemTaskLogsAdapter(logs_base=build_project_paths().logs_dir),
         test_runner=SubprocessTestRunnerAdapter(),
+        telemetry_emitter=build_telemetry_emitter(),
         lease_refresher_factory=build_lease_refresher_factory(),
         task_timeout_seconds=app_config.task_timeout,
     )
@@ -298,6 +325,7 @@ def build_goal_merge_task_usecase():
         event_port=build_event_port(),
         git_workspace=build_git_workspace(),
         repo_url=app_config.repo_url,
+        telemetry_emitter=build_telemetry_emitter(),
     )
 
 
@@ -307,6 +335,7 @@ def build_goal_cancel_task_usecase():
         task_repo=build_task_repo(),
         goal_repo=build_goal_repo(),
         event_port=build_event_port(),
+        telemetry_emitter=build_telemetry_emitter(),
     )
 
 
@@ -325,6 +354,7 @@ def build_task_graph_orchestrator():
         spec_repo=build_spec_repo(),
         project_name=app_config.project_name,
         create_pr_usecase=None,
+        telemetry_emitter=build_telemetry_emitter(),
     )
 
 
@@ -462,6 +492,7 @@ def build_task_graph_orchestrator_with_pr():
         spec_repo=build_spec_repo(),
         project_name=app_config.project_name,
         create_pr_usecase=build_create_goal_pr_usecase(),
+        telemetry_emitter=build_telemetry_emitter(),
     )
 
 
@@ -484,11 +515,17 @@ def build_project_state_adapter():
     """
     if app_config.mode == "dry-run":
         from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
-        return InMemoryProjectStateAdapter()
-    from src.infra.fs.project_state_adapter import FilesystemProjectStateAdapter
-    return FilesystemProjectStateAdapter(
+        base = InMemoryProjectStateAdapter()
+    else:
+        from src.infra.fs.project_state_adapter import FilesystemProjectStateAdapter
+        base = FilesystemProjectStateAdapter(
         state_dir=build_project_paths().project_state_dir,
-    )
+        )
+    from src.app.telemetry.project_state_wrapper import TelemetryProjectStateAdapter
+    from src.app.telemetry.service import TelemetryService
+    telemetry = TelemetryService(build_telemetry_emitter(), producer="project-state")
+    trace = telemetry.start_trace(correlation_id=app_config.project_name)
+    return TelemetryProjectStateAdapter(base, telemetry=telemetry, trace_context=trace)
 
 
 # ---------------------------------------------------------------------------
@@ -535,14 +572,18 @@ def build_planner_orchestrator(io_handler=None):
     from src.app.usecases.planner_orchestrator import PlannerOrchestrator
     from src.app.services.decision_apply import apply_decision_to_spec
     from src.app.usecases.validate_against_spec import ValidateAgainstSpec
+    from src.app.telemetry.runtime_wrappers import TelemetryPlannerRuntimeWrapper
+    from src.app.telemetry.service import TelemetryService
 
     spec = build_load_project_spec().execute(app_config.project_name)
+    telemetry = TelemetryService(build_telemetry_emitter(), producer="planner-orchestrator")
+    trace = telemetry.start_trace(correlation_id=app_config.project_name)
     return PlannerOrchestrator(
         plan_repo=build_project_plan_repo(),
         session_repo=build_planner_session_repo(),
         context_assembler=build_planner_context_assembler(),
-        autonomous_runtime=build_planner_runtime(),
-        interactive_runtime=build_interactive_planner_runtime(io_handler),
+        autonomous_runtime=TelemetryPlannerRuntimeWrapper(build_planner_runtime(), telemetry, trace),
+        interactive_runtime=TelemetryPlannerRuntimeWrapper(build_interactive_planner_runtime(io_handler), telemetry, trace),
         goal_init=build_goal_init_usecase(),
         validator=ValidateAgainstSpec(spec),
         project_state=build_project_state_adapter(),
