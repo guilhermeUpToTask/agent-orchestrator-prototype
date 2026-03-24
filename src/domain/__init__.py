@@ -11,6 +11,7 @@ from src.domain.value_objects.status import TaskStatus, TrustLevel
 
 # Events
 from src.domain.events.domain_event import DomainEvent
+from src.domain.events.telemetry_event import TelemetryEvent
 
 # Execution value objects
 from src.domain.value_objects.execution import AgentExecutionResult, ExecutionContext
@@ -51,6 +52,7 @@ from src.domain.value_objects.goal import GoalSpec, GoalTaskDef
 from src.domain.ports import (
     AgentRuntimePort,
     EventPort,
+    TelemetryEmitterPort,
     GitWorkspacePort,
     LeasePort,
     SessionHandle,
@@ -89,7 +91,7 @@ __all__ = [
     # status
     "TaskStatus", "TrustLevel",
     # events
-    "DomainEvent",
+    "DomainEvent", "TelemetryEvent",
     # execution
     "AgentExecutionResult", "ExecutionContext",
     # errors
@@ -108,7 +110,7 @@ __all__ = [
     # repositories
     "AgentRegistryPort", "TaskRepositoryPort", "GoalRepositoryPort",
     # ports
-    "AgentRuntimePort", "EventPort", "GitWorkspacePort",
+    "AgentRuntimePort", "EventPort", "TelemetryEmitterPort", "GitWorkspacePort",
     "LeasePort", "SessionHandle", "TaskLogsPort", "TestRunnerPort",
     # services
     "ReconciliationAction", "ReconciliationDecision", "ReconciliationService",

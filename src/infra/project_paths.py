@@ -37,6 +37,10 @@ class ProjectPaths:
     workspace_dir: Path
     logs_dir: Path
     events_dir: Path
+    telemetry_dir: Path
+    telemetry_events_dir: Path
+    telemetry_logs_dir: Path
+    telemetry_metrics_dir: Path
     spec_path: Path         # project_spec.yaml canonical location
     project_state_dir: Path # planner's persistent memory (~/<project>/project_state/)
     planner_sessions_dir: Path  # planner session records (~/<project>/planner_sessions/)
@@ -60,6 +64,10 @@ class ProjectPaths:
             workspaces/
             logs/
             events/
+            telemetry/
+              events/
+              logs/
+              metrics/
             project_spec.yaml
             project_plan.yaml
         """
@@ -73,6 +81,10 @@ class ProjectPaths:
             workspace_dir=base / "workspaces",
             logs_dir=base / "logs",
             events_dir=base / "events",
+            telemetry_dir=base / "telemetry",
+            telemetry_events_dir=base / "telemetry" / "events",
+            telemetry_logs_dir=base / "telemetry" / "logs",
+            telemetry_metrics_dir=base / "telemetry" / "metrics",
             spec_path=base / "project_spec.yaml",
             project_state_dir=base / "project_state",
             planner_sessions_dir=base / "planner_sessions",
@@ -92,6 +104,10 @@ class ProjectPaths:
             self.workspace_dir,
             self.logs_dir,
             self.events_dir,
+            self.telemetry_dir,
+            self.telemetry_events_dir,
+            self.telemetry_logs_dir,
+            self.telemetry_metrics_dir,
             self.project_state_dir,
             self.planner_sessions_dir,
         ):
