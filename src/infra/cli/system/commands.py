@@ -149,6 +149,13 @@ def run_task_manager():
         "task.created / task.requeued / task.completed / task.failed"
     )
 
+    handlers = {
+        "task.created": handler.handle_task_created,
+        "task.requeued": handler.handle_task_requeued,
+        "task.completed": handler.handle_task_completed,
+        "task.failed": handler.handle_task_failed,
+    }
+
     try:
         for event in events.subscribe_many(
             ["task.created", "task.requeued", "task.completed", "task.failed"],
@@ -158,14 +165,11 @@ def run_task_manager():
             task_id = event.payload.get("task_id")
             if not task_id:
                 continue
-            if event.type == "task.created":
-                handler.handle_task_created(task_id)
-            elif event.type == "task.requeued":
-                handler.handle_task_requeued(task_id)
-            elif event.type == "task.completed":
-                handler.handle_task_completed(task_id)
-            elif event.type == "task.failed":
-                handler.handle_task_failed(task_id)
+            fn = handlers.get(event.type)
+            if fn is None:
+                continue
+            fn(task_id)
+            events.ack(event, group="task-manager")
     except KeyboardInterrupt:
         click.echo("\nTask Manager stopped.")
     except Exception as exc:
@@ -202,9 +206,11 @@ def run_worker():
 
             if assigned_to != agent_id:
                 log.info("worker.skip_not_mine", task_id=task_id, assigned_to=assigned_to)
+                events.ack(event, group="workers")
                 continue
 
             handler.process(task_id=task_id, project_id=project_id)
+            events.ack(event, group="workers")
     except KeyboardInterrupt:
         click.echo(f"\nWorker {agent_id} stopped.")
     except Exception as exc:

@@ -40,3 +40,13 @@ class EventPort(ABC):
         generators means only the first stream is ever consumed.
         """
         ...
+
+    @abstractmethod
+    def ack(self, event: DomainEvent, group: str) -> None:
+        """
+        Acknowledge successful processing of *event* for consumer *group*.
+
+        Redis-backed adapters use this to mark stream messages as processed.
+        In-memory adapters may implement this as a no-op.
+        """
+        ...

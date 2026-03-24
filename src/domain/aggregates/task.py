@@ -235,6 +235,14 @@ class TaskAggregate(BaseModel):
         return self
 
     def cancel(self, reason: str = "") -> "TaskAggregate":
+        self._assert_status(
+            TaskStatus.CREATED,
+            TaskStatus.REQUEUED,
+            TaskStatus.ASSIGNED,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.FAILED,
+        )
+        self.assignment = None
         self.status = TaskStatus.CANCELED
         self._bump("task.canceled", "system", {"reason": reason})
         return self

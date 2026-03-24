@@ -38,6 +38,7 @@ log = structlog.get_logger(__name__)
 
 PRODUCER        = "goal-orchestrator"
 MAX_CAS_RETRIES = 5
+MAX_PLAN_CAS_RETRIES = 5
 
 
 class AdvanceGoalFromPRUseCase:
@@ -135,34 +136,41 @@ class AdvanceGoalFromPRUseCase:
         if self._plan_repo is None:
             return  # Backward compatibility — no plan repo, nothing to check
 
-        plan = self._plan_repo.get()
-        if plan is None:
-            return  # No plan yet
+        for attempt in range(MAX_PLAN_CAS_RETRIES):
+            plan = self._plan_repo.get()
+            if plan is None:
+                return  # No plan yet
 
-        if plan.status != ProjectPlanStatus.PHASE_ACTIVE:
-            return  # Not in PHASE_ACTIVE mode
+            if plan.status != ProjectPlanStatus.PHASE_ACTIVE:
+                return  # Not in PHASE_ACTIVE mode
 
-        active_phase = plan.current_phase()
-        if active_phase is None:
-            return  # No active phase
+            active_phase = plan.current_phase()
+            if active_phase is None:
+                return  # No active phase
 
-        phase_goal_names = set(active_phase.goal_names)
-        if not phase_goal_names:
-            # Guard: don't trigger on empty phase
-            return
+            phase_goal_names = set(active_phase.goal_names)
+            if not phase_goal_names:
+                return  # Guard: don't trigger on empty phase
 
-        # Check if all goals in this phase have reached MERGED
-        all_goals = self._goal_repo.list_all()
-        phase_goals = [g for g in all_goals if g.name in phase_goal_names]
-        all_merged = all(g.status == GoalStatus.MERGED for g in phase_goals)
+            # Check if all goals in this phase have reached MERGED
+            all_goals = self._goal_repo.list_all()
+            phase_goals = [g for g in all_goals if g.name in phase_goal_names]
+            all_merged = all(g.status == GoalStatus.MERGED for g in phase_goals)
+            if not (all_merged and len(phase_goals) == len(phase_goal_names)):
+                return
 
-        if all_merged and len(phase_goals) == len(phase_goal_names):
-            plan = plan.trigger_review()
-            self._plan_repo.save(plan)
-            log.info(
-                "project_plan.phase_review_triggered",
-                phase_index=plan.current_phase_index,
-            )
+            expected_v = plan.state_version
+            next_plan = plan.trigger_review()
+            if self._plan_repo.update_if_version(expected_v, next_plan):
+                log.info(
+                    "project_plan.phase_review_triggered",
+                    phase_index=next_plan.current_phase_index,
+                )
+                return
+
+            log.warning("advance_pr.phase_review_cas_conflict", attempt=attempt)
+
+        log.error("advance_pr.phase_review_cas_exhausted")
 
     # ------------------------------------------------------------------
     # Event emission
