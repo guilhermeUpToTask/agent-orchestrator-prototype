@@ -41,7 +41,9 @@ from typing import Optional
 
 import structlog
 
+from src.app.telemetry.service import TelemetryService
 from src.domain import DomainEvent, EventPort, GoalStatus
+from src.domain import TelemetryEmitterPort
 from src.domain.repositories import TaskRepositoryPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 from src.domain.project_spec import ProjectSpec, ProjectSpecRepository
@@ -97,6 +99,7 @@ class TaskGraphOrchestrator:
         spec_repo: Optional[ProjectSpecRepository] = None,
         project_name: str = "",
         create_pr_usecase=None,  # CreateGoalPRUseCase | None
+        telemetry_emitter: TelemetryEmitterPort | None = None,
     ) -> None:
         self._task_repo     = task_repo
         self._goal_repo     = goal_repo
@@ -106,6 +109,7 @@ class TaskGraphOrchestrator:
         self._spec_repo     = spec_repo
         self._project_name  = project_name
         self._create_pr     = create_pr_usecase
+        self._telemetry     = TelemetryService(telemetry_emitter, producer="goal-orchestrator")
         self._running       = False
         self._spec: Optional[ProjectSpec] = None
 
@@ -179,6 +183,7 @@ class TaskGraphOrchestrator:
     # ------------------------------------------------------------------
 
     def _dispatch(self, event: DomainEvent) -> None:
+        trace = self._telemetry.start_trace(correlation_id=event.payload.get("goal_id") or event.payload.get("task_id"))
         try:
             if event.type == "task.assigned":
                 self._on_task_assigned(event)
@@ -196,6 +201,14 @@ class TaskGraphOrchestrator:
                 event_type=event.type,
                 payload=event.payload,
                 error=str(exc),
+            )
+            self._telemetry.emit(
+                "unexpected.error",
+                self._telemetry.start_span(trace),
+                payload={"event_type": event.type},
+                metadata={"error_type": type(exc).__name__, "message": str(exc)},
+                goal_id=event.payload.get("goal_id"),
+                task_id=event.payload.get("task_id"),
             )
 
     # ------------------------------------------------------------------
@@ -216,6 +229,7 @@ class TaskGraphOrchestrator:
         goal_id = task.feature_id
         if not goal_id:
             return
+        trace = self._telemetry.start_trace(goal_id=goal_id, correlation_id=goal_id)
 
         for attempt in range(5):
             goal = self._goal_repo.get(goal_id)
@@ -225,6 +239,13 @@ class TaskGraphOrchestrator:
             goal.start()
             if self._goal_repo.update_if_version(goal_id, goal, expected_v):
                 log.info("orchestrator.goal_started", goal_id=goal_id)
+                self._telemetry.emit(
+                    "goal.started",
+                    self._telemetry.start_span(trace),
+                    payload={"goal_id": goal_id, "trigger_task_id": task_id},
+                    goal_id=goal_id,
+                    task_id=task_id,
+                )
                 return
             log.warning(
                 "orchestrator.goal_start_cas_conflict",

@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import structlog
 
+from src.app.telemetry.service import TelemetryService
 from src.domain import (
     DomainEvent,
     EventPort,
     GitWorkspacePort,
     GoalStatus,
+    TelemetryEmitterPort,
     TaskStatus,
 )
 from src.domain.repositories import TaskRepositoryPort
@@ -48,12 +50,14 @@ class GoalMergeTaskUseCase:
         event_port: EventPort,
         git_workspace: GitWorkspacePort,
         repo_url: str,
+        telemetry_emitter: TelemetryEmitterPort | None = None,
     ) -> None:
         self._task_repo  = task_repo
         self._goal_repo  = goal_repo
         self._events     = event_port
         self._git        = git_workspace
         self._repo_url   = repo_url
+        self._telemetry  = TelemetryService(telemetry_emitter, producer=PRODUCER)
 
     def execute(self, task_id: str) -> None:
         """Handle a task.completed event for task_id."""
@@ -166,6 +170,7 @@ class GoalMergeTaskUseCase:
         return False
 
     def _update_goal(self, goal_id: str, task_id: str) -> None:
+        trace = self._telemetry.start_trace(goal_id=goal_id, correlation_id=goal_id)
         for attempt in range(MAX_CAS_RETRIES):
             goal = self._goal_repo.load(goal_id)
             if goal.is_terminal():
@@ -175,6 +180,13 @@ class GoalMergeTaskUseCase:
             if self._goal_repo.update_if_version(goal_id, goal, expected_v):
                 if goal.status == GoalStatus.READY_FOR_REVIEW:
                     merged, total = goal.progress()
+                    self._telemetry.emit(
+                        "goal.completed",
+                        self._telemetry.start_span(trace),
+                        payload={"goal_id": goal_id, "merged": merged, "total": total},
+                        goal_id=goal_id,
+                        task_id=task_id,
+                    )
                     self._events.publish(DomainEvent(
                         type="goal.ready_for_review",
                         producer=PRODUCER,

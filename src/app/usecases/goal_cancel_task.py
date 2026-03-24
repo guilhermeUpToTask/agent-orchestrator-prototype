@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import structlog
 
+from src.app.telemetry.service import TelemetryService
 from src.domain import DomainEvent, EventPort
+from src.domain import TelemetryEmitterPort
 from src.domain.repositories import TaskRepositoryPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 
@@ -31,10 +33,12 @@ class GoalCancelTaskUseCase:
         task_repo: TaskRepositoryPort,
         goal_repo: GoalRepositoryPort,
         event_port: EventPort,
+        telemetry_emitter: TelemetryEmitterPort | None = None,
     ) -> None:
         self._task_repo = task_repo
         self._goal_repo = goal_repo
         self._events    = event_port
+        self._telemetry = TelemetryService(telemetry_emitter, producer=PRODUCER)
 
     def execute(self, task_id: str, reason: str) -> None:
         try:
@@ -46,6 +50,7 @@ class GoalCancelTaskUseCase:
         goal_id = task.feature_id
         if not goal_id:
             return
+        trace = self._telemetry.start_trace(goal_id=goal_id, correlation_id=goal_id)
 
         for attempt in range(MAX_CAS_RETRIES):
             goal = self._goal_repo.get(goal_id)
@@ -54,6 +59,13 @@ class GoalCancelTaskUseCase:
             expected_v = goal.state_version
             goal.record_task_canceled(task_id, reason)
             if self._goal_repo.update_if_version(goal_id, goal, expected_v):
+                self._telemetry.emit(
+                    "goal.failed",
+                    self._telemetry.start_span(trace),
+                    payload={"goal_id": goal_id, "task_id": task_id, "reason": reason},
+                    goal_id=goal_id,
+                    task_id=task_id,
+                )
                 self._events.publish(DomainEvent(
                     type="goal.failed",
                     producer=PRODUCER,
