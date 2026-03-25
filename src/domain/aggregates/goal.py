@@ -34,12 +34,13 @@ Invariants:
 """
 from __future__ import annotations
 
+import warnings
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.domain.value_objects.status import TaskStatus
 from src.domain.value_objects.task import HistoryEntry
@@ -84,6 +85,22 @@ class GoalAggregate(BaseModel):
     description: str
     branch: str                                     # goal/<n>
     status: GoalStatus = GoalStatus.PENDING
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_completed_to_merged(cls, values: Any) -> Any:
+        """Normalize legacy COMPLETED status to MERGED on deserialization."""
+        if isinstance(values, dict):
+            raw = values.get("status")
+            if raw == "completed" or raw == GoalStatus.COMPLETED:
+                warnings.warn(
+                    "GoalStatus.COMPLETED is deprecated; use MERGED instead. "
+                    "Update the persisted YAML to 'status: merged'.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                values["status"] = GoalStatus.MERGED.value
+        return values
     tasks: dict[str, TaskSummary] = Field(default_factory=dict)
     state_version: int = 1
     history: list[HistoryEntry] = Field(default_factory=list)
@@ -391,6 +408,19 @@ class GoalAggregate(BaseModel):
         if self.pr_number is None or self.is_terminal():
             return self
 
+        # Merged must be checked BEFORE closed: GitHub treats "merged" and
+        # "closed" as mutually exclusive, but checking "closed" first would
+        # swallow a legitimate merge if any integration ever normalises a
+        # merged PR as "closed".
+        if self.pr_status == "merged":
+            self.status = GoalStatus.MERGED
+            self._bump(
+                "goal.merged",
+                "orchestrator",
+                {"pr_number": self.pr_number, "head_sha": self.pr_head_sha},
+            )
+            return self
+
         if self.pr_status == "closed":
             self.status = GoalStatus.FAILED
             self.failure_reason = (
@@ -400,15 +430,6 @@ class GoalAggregate(BaseModel):
                 "goal.failed",
                 "orchestrator",
                 {"reason": self.failure_reason, "pr_number": self.pr_number},
-            )
-            return self
-
-        if self.pr_status == "merged":
-            self.status = GoalStatus.MERGED
-            self._bump(
-                "goal.merged",
-                "orchestrator",
-                {"pr_number": self.pr_number, "head_sha": self.pr_head_sha},
             )
             return self
 
