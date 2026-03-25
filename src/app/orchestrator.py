@@ -162,20 +162,12 @@ class TaskGraphOrchestrator:
         )
 
         try:
-            handlers = {
-                "task.assigned": self._on_task_assigned,
-                "task.completed": self._on_task_completed,
-                "task.canceled": self._on_task_canceled,
-                "goal.ready_for_review": self._on_goal_ready_for_review,
-                "goal.approved": self._on_goal_unlocked,
-                "goal.merged": self._on_goal_unlocked,
-            }
             for event in self._events.subscribe_many(
                 WATCHED_EVENTS, CONSUMER_GROUP, CONSUMER_NAME
             ):
                 if not self._running:
                     break
-                self._dispatch(event, handlers)
+                self._dispatch(event)
                 self._events.ack(event, group=CONSUMER_GROUP)
         except Exception as exc:
             log.exception("orchestrator.fatal_error", error=str(exc))
@@ -191,20 +183,21 @@ class TaskGraphOrchestrator:
     # Event dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch(
-        self,
-        event: DomainEvent,
-        handlers: dict[str, Callable[[DomainEvent], None]] | None = None,
-    ) -> None:
-        if handlers is None:
-            handlers = {
-                "task.assigned": self._on_task_assigned,
-                "task.completed": self._on_task_completed,
-                "task.canceled": self._on_task_canceled,
-                "goal.ready_for_review": self._on_goal_ready_for_review,
-                "goal.approved": self._on_goal_unlocked,
-                "goal.merged": self._on_goal_unlocked,
-            }
+    # Canonical handler map — single source of truth for event routing.
+    # Previously duplicated between run_forever() and _dispatch(); now
+    # lives only here to prevent silent divergence.
+    def _build_handlers(self) -> dict[str, Callable[[DomainEvent], None]]:
+        return {
+            "task.assigned": self._on_task_assigned,
+            "task.completed": self._on_task_completed,
+            "task.canceled": self._on_task_canceled,
+            "goal.ready_for_review": self._on_goal_ready_for_review,
+            "goal.approved": self._on_goal_unlocked,
+            "goal.merged": self._on_goal_unlocked,
+        }
+
+    def _dispatch(self, event: DomainEvent) -> None:
+        handlers = self._build_handlers()
         trace = self._telemetry.start_trace(correlation_id=event.payload.get("goal_id") or event.payload.get("task_id"))
         try:
             fn = handlers.get(event.type)
