@@ -1,5 +1,5 @@
 """
-tests/unit/app/usecases/test_run_planning_session.py
+tests/regression/app/usecases/test_run_planning_session.py
 
 Tests for RunPlanningSessionUseCase with all external ports mocked.
 """
