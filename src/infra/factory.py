@@ -16,6 +16,9 @@ from typing import Callable
 
 import structlog
 
+from src.infra.config import config as app_config
+from src.infra.project_paths import ProjectPaths
+from src.infra.project_settings import ProjectSettingsManager
 from src.app.handlers.task_manager import TaskManagerHandler
 from src.app.handlers.worker import WorkerHandler
 from src.app.reconciliation import Reconciler
@@ -24,10 +27,6 @@ from src.domain import AgentRuntimePort
 from src.domain import SchedulerService
 
 log = structlog.get_logger(__name__)
-
-from src.infra.config import config as app_config
-from src.infra.project_paths import ProjectPaths
-from src.infra.project_settings import ProjectSettingsManager
 
 
 def build_project_paths() -> ProjectPaths:
@@ -419,8 +418,6 @@ def build_github_client():
     token = settings.github_token        or os.environ.get("GITHUB_TOKEN", "")
     owner = settings.github_owner        or os.environ.get("GITHUB_OWNER", "")
     repo  = settings.github_repo         or os.environ.get("GITHUB_REPO", "")
-    base  = settings.github_base_branch
-
     if not all([token, owner, repo]):
         log.warning(
             "factory.github_not_configured",
@@ -570,7 +567,6 @@ def build_planner_orchestrator(io_handler=None):
     Build PlannerOrchestrator with all dependencies wired.
     """
     from src.app.usecases.planner_orchestrator import PlannerOrchestrator
-    from src.app.services.decision_apply import apply_decision_to_spec
     from src.app.usecases.validate_against_spec import ValidateAgainstSpec
     from src.app.telemetry.runtime_wrappers import TelemetryPlannerRuntimeWrapper
     from src.app.telemetry.service import TelemetryService
@@ -660,22 +656,4 @@ def build_planner_runtime():
     from src.infra.runtime.planner_runtime import AnthropicPlannerRuntime
     return AnthropicPlannerRuntime(
         api_key=app_config.anthropic_api_key.get_secret_value(),
-    )
-
-
-def build_run_planning_session_usecase():
-    """Wire all dependencies for RunPlanningSessionUseCase."""
-    from src.app.usecases.run_planning_session import RunPlanningSessionUseCase
-    from src.app.usecases.validate_against_spec import ValidateAgainstSpec
-
-    spec = build_load_project_spec().execute(app_config.project_name)
-    return RunPlanningSessionUseCase(
-        context_assembler=build_planner_context_assembler(),
-        planner_runtime=build_planner_runtime(),
-        session_repo=build_planner_session_repo(),
-        goal_init=build_goal_init_usecase(),
-        validator=ValidateAgainstSpec(spec),
-        project_state=build_project_state_adapter(),
-        agent_registry=build_agent_registry(),
-        goal_repo=build_goal_repo(),
     )
