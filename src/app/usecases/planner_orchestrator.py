@@ -162,8 +162,10 @@ class PlannerOrchestrator:
             session.start()
             self._session_repo.save(session)
 
-        # Reconstruct message history for context
-        messages = self._build_resume_messages(session)
+        # TODO: session resumption is incomplete — _build_resume_messages()
+        # reconstructs conversation history, but PlannerRuntimePort.run_session()
+        # does not accept a `messages` parameter.  Until the port interface is
+        # extended, resumed sessions start a fresh LLM conversation.
 
         # Build tools for discovery mode
         tools = self._build_discovery_tools(session, io_handler)
