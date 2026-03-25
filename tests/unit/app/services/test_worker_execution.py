@@ -152,10 +152,9 @@ class TestWorkerExecutionService:
 
         svc = _make_service()
         svc._task_repo.load.side_effect = [
-            initial,
-            initial,
-            initial,
-            retry_assigned,
+            initial, # 1. _start_task_with_retry (fails CAS)
+            initial, # 2. _start_task_with_retry (retry, succeeds CAS)
+            retry_assigned, # 3. _persist_success (succeeds CAS)
             after_start,
         ]
         svc._task_repo.update_if_version.side_effect = [False, True, True]
