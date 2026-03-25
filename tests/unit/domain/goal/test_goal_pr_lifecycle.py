@@ -133,55 +133,8 @@ class TestFullLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# 2. Regression detection
+# 2. Regression coverage moved to tests/regression/domain/goal/test_goal_pr_lifecycle.py
 # ---------------------------------------------------------------------------
-
-class TestRegression:
-    def test_new_commit_resets_approved_to_awaiting(self):
-        goal = _awaiting_pr_goal()
-        goal.sync_pr_state(
-            pr_status="open", checks_passed=True, approved=True,
-            head_sha="sha-0001", approval_count=1,
-        )
-        goal.advance_from_pr_state()
-        assert goal.status == GoalStatus.APPROVED
-
-        # New commit pushed
-        goal.sync_pr_state(
-            pr_status="open", checks_passed=False, approved=False,
-            head_sha="sha-0002", approval_count=0,
-        )
-        assert goal.status == GoalStatus.AWAITING_PR_APPROVAL
-        assert not goal.pr_checks_passed
-        assert not goal.pr_approved
-        assert goal.pr_head_sha == "sha-0002"
-
-    def test_same_sha_does_not_trigger_regression(self):
-        goal = _awaiting_pr_goal()
-        goal.sync_pr_state(
-            pr_status="open", checks_passed=True, approved=True,
-            head_sha="sha-0001", approval_count=1,
-        )
-        goal.advance_from_pr_state()
-        assert goal.status == GoalStatus.APPROVED
-
-        # Sync again with same SHA — should NOT regress
-        goal.sync_pr_state(
-            pr_status="open", checks_passed=True, approved=True,
-            head_sha="sha-0001", approval_count=1,
-        )
-        assert goal.status == GoalStatus.APPROVED
-
-    def test_regression_history_entry_recorded(self):
-        goal = _awaiting_pr_goal()
-        goal.sync_pr_state(pr_status="open", checks_passed=True, approved=True,
-                           head_sha="sha-0001", approval_count=1)
-        goal.advance_from_pr_state()
-        goal.sync_pr_state(pr_status="open", checks_passed=False, approved=False,
-                           head_sha="sha-0002", approval_count=0)
-        events = [h.event for h in goal.history]
-        assert "goal.pr_regression" in events
-
 
 # ---------------------------------------------------------------------------
 # 3. Failure paths

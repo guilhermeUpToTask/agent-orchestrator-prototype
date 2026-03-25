@@ -1,10 +1,9 @@
 """
-tests/unit/test_bug_audit_fixes.py
+tests/regression/test_bugfix_regressions.py
 
-Audit/Regression tests for the fixes applied to the reported bugs.
+Regression tests for historical bug fixes and compatibility behavior.
 """
 import pytest
-import warnings
 from unittest.mock import MagicMock, patch, ANY
 
 from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
