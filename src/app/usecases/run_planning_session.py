@@ -82,6 +82,13 @@ class RunPlanningSessionUseCase:
         agent_registry: AgentRegistryPort,
         goal_repo: Optional[GoalRepositoryPort] = None,
     ) -> None:
+        import warnings
+        warnings.warn(
+            "RunPlanningSessionUseCase is deprecated; "
+            "use PlannerOrchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._context_assembler = context_assembler
         self._runtime = planner_runtime
         self._session_repo = session_repo
