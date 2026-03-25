@@ -142,9 +142,8 @@ class TaskExecuteUseCase:
         lease_refresher: LeaseRefresherPort | None = None
 
         try:
-            ws_path, branch = self._prepare_workspace(task_id)
-
             task = self._start_task_with_retry(task_id, agent_id)
+            ws_path, branch = self._prepare_workspace(task_id, task.execution.constraints)
             self._telemetry.emit(
                 "state.updated",
                 self._telemetry.start_span(trace),
@@ -330,14 +329,19 @@ class TaskExecuteUseCase:
         except Exception as exc:
             log.exception("worker.failure_handler_error", error=str(exc))
 
-    def _prepare_workspace(self, task_id: str) -> tuple[str, str]:
+    def _prepare_workspace(
+        self, task_id: str, constraints: dict[str, Any] | None = None,
+    ) -> tuple[str, str]:
         log.info("worker.preparing_workspace", task_id=task_id, repo_url=self._repo_url)
         ws_path = self._git.create_workspace(self._repo_url, task_id)
 
         # Goal-managed tasks carry explicit branch names in constraints.
         # Standalone tasks fall back to the legacy "task/<id>" scheme.
-        task = self._task_repo.load(task_id)
-        constraints = task.execution.constraints
+        # If constraints are not passed, we load from the repo (e.g. legacy/tests).
+        if constraints is None:
+            task = self._task_repo.load(task_id)
+            constraints = task.execution.constraints
+
         branch      = constraints.get("task_branch", f"task/{task_id}")
         base_branch = constraints.get("goal_branch", "main")
 
