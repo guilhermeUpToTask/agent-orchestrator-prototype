@@ -9,7 +9,7 @@ Pipeline:
   3. Merge task branch → goal branch on the target repo
   4. Transition TaskAggregate → MERGED (CAS with retry)
   5. Update GoalAggregate via record_task_merged() (CAS with retry)
-  6. If goal is now COMPLETED, emit goal.completed
+  6. If goal is now READY_FOR_REVIEW, emit goal.ready_for_review
 
 CAS retries follow the same pattern as TaskAssignUseCase: reload on version
 conflict, up to MAX_CAS_RETRIES attempts. A persistent conflict after all
