@@ -10,16 +10,14 @@ Commands:
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-from typing import Optional
 
 import click
 
 from src.infra.factory import build_planner_orchestrator, build_project_plan_repo
 from src.infra.config import config as app_config
-from src.infra.cli.error_handler import die, ok, warn
+from src.infra.cli.error_handler import die
 
 
 def _require_project() -> str:
@@ -112,13 +110,13 @@ def plan_init(dry_run: bool) -> None:
         click.echo("=" * 60)
         click.echo(f"Vision: {result.brief.vision}")
         if result.brief.constraints:
-            click.echo(f"\nConstraints:")
+            click.echo("\nConstraints:")
             for c in result.brief.constraints:
                 click.echo(f"  - {c}")
         if result.brief.phase_1_exit_criteria:
             click.echo(f"\nPhase 1 exit criteria: {result.brief.phase_1_exit_criteria}")
         if result.brief.open_questions:
-            click.echo(f"\nOpen questions:")
+            click.echo("\nOpen questions:")
             for q in result.brief.open_questions:
                 click.echo(f"  - {q}")
         click.echo("=" * 60)
@@ -229,7 +227,7 @@ def plan_architect(dry_run: bool) -> None:
 
     if click.confirm("\nApprove phase plan and start execution?"):
         result = orchestrator.approve_architecture(approved_ids)
-        click.echo(f"\nArchitecture approved!")
+        click.echo("\nArchitecture approved!")
         click.echo(f"Plan status: {result.plan_status}")
         click.echo(f"Decisions applied: {result.decisions_applied}")
         click.echo(f"Spec changes applied: {result.spec_changes_applied}")
@@ -314,7 +312,7 @@ def plan_review(dry_run: bool) -> None:
 
     if approve_next or click.confirm("Mark project as done?"):
         result = orchestrator.approve_phase_review(approve_next=approve_next)
-        click.echo(f"\nPhase review approved!")
+        click.echo("\nPhase review approved!")
         click.echo(f"Plan status: {result.plan_status}")
         click.echo(f"Decisions applied: {result.decisions_applied}")
         click.echo(f"Goals dispatched: {len(result.goals_dispatched)}")
