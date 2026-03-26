@@ -1,15 +1,17 @@
 """
-src/infra/config_manager.py — Manages the local .orchestrator/config.json.
+src/infra/config_manager.py — Manages ~/.orchestrator/config.json.
 
-This is the project-scoped config file (think `.git/config`) that persists the
-values a user sets during `orchestrator init` so they never have to touch .env
-or environment variables for basic setup.
+This is the global orchestrator config file that persists the values a user
+sets during `orchestrator init` so they never have to touch .env or environment
+variables for basic setup.
+
+Location: ~/.orchestrator/config.json  (same root as OrchestratorConfig.orchestrator_home)
 
 Priority order for OrchestratorConfig resolution:
   1. Constructor arguments / unit-test overrides  (highest)
   2. Environment variables
   3. .env file
-  4. .orchestrator/config.json              ← this module owns this layer
+  4. ~/.orchestrator/config.json            ← this module owns this layer
   5. Field defaults                          (lowest)
 
 Keys stored in config.json (orchestrator-global, per-machine):
@@ -28,31 +30,51 @@ from typing import Any
 ORCHESTRATOR_DIR = ".orchestrator"
 CONFIG_FILENAME = "config.json"
 
+
+def _resolve_orchestrator_home() -> Path:
+    """
+    Resolve the orchestrator home from ORCHESTRATOR_HOME env var,
+    falling back to ~/.orchestrator.
+    """
+    import os
+    raw = os.environ.get("ORCHESTRATOR_HOME")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".orchestrator"
+
 # Keys managed by the wizard — any extras written by users are preserved.
 MANAGED_KEYS = {"project_name", "redis_url"}
 
 DEFAULTS: dict[str, Any] = {
-    "project_name": "default",
+    "project_name": None,  # Must be set explicitly via `orchestrator init`
     "redis_url": "redis://localhost:6379/0",
 }
 
 
 class OrchestratorConfigManager:
     """
-    Read/write .orchestrator/config.json relative to a working directory.
+    Read/write ~/.orchestrator/config.json (the global orchestrator config).
+
+    The config file always lives at:
+        <orchestrator_home>/config.json
+    where orchestrator_home defaults to ~/.orchestrator, matching
+    OrchestratorConfig.orchestrator_home — so both always point at the
+    same file.
 
     Typical usage:
-        manager = OrchestratorConfigManager()          # uses Path.cwd()
-        manager = OrchestratorConfigManager(cwd=some_path)  # tests
+        manager = OrchestratorConfigManager()                    # ~/.orchestrator
+        manager = OrchestratorConfigManager(home=some_path)     # tests / custom home
 
         data = manager.load()                          # returns dict (or defaults)
         manager.save({"project_name": "my-project"})  # creates dir if needed
         manager.generate_defaults()                    # write defaults, no wizard
     """
 
-    def __init__(self, cwd: Path | None = None) -> None:
-        self._cwd = Path(cwd) if cwd is not None else Path.cwd()
-        self._config_path = self._cwd / ORCHESTRATOR_DIR / CONFIG_FILENAME
+    def __init__(self, home: Path | None = None) -> None:
+        # Default to the same location OrchestratorConfig uses.
+        # The `home` parameter exists only for testing and custom ORCHESTRATOR_HOME overrides.
+        self._home = Path(home) if home is not None else _resolve_orchestrator_home()
+        self._config_path = self._home / CONFIG_FILENAME
 
     # ------------------------------------------------------------------
     # Properties
@@ -64,7 +86,7 @@ class OrchestratorConfigManager:
 
     @property
     def orchestrator_dir(self) -> Path:
-        return self._config_path.parent
+        return self._home
 
     # ------------------------------------------------------------------
     # Core operations
@@ -106,8 +128,11 @@ class OrchestratorConfigManager:
         """
         Write a config.json populated with DEFAULTS and return it.
         Called when a user runs a CLI command without having run `init` first.
+
+        Note: project_name is intentionally left as None in defaults.
+        Users must run `orchestrator init` to configure a project.
         """
-        data = dict(DEFAULTS)
+        data = {k: v for k, v in DEFAULTS.items() if v is not None}
         self.save(data)
         return data
 

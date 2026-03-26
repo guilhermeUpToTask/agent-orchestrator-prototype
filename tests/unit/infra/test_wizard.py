@@ -152,7 +152,7 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     # Orchestrator config → .orchestrator/config.json (no source_repo_url)
     from src.infra.config import OrchestratorConfig
     orch_cfg = OrchestratorConfig(project_name="my-project")
-    mgr = OrchestratorConfigManager(cwd=tmp_path)
+    mgr = OrchestratorConfigManager(home=tmp_path)
     data = mgr.load()
     assert data["project_name"] == "my-project"
     assert "source_repo_url" not in data  # moved to project.json
@@ -179,12 +179,12 @@ def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
 
     assert result is False
     # Config must NOT be written if deps failed
-    assert not OrchestratorConfigManager(cwd=tmp_path).exists()
+    assert not OrchestratorConfigManager(home=tmp_path).exists()
 
 
 def test_run_wizard_pre_fills_existing_config(tmp_path, monkeypatch):
     # Write an existing orchestrator config (no source_repo_url — that's in project.json now)
-    mgr = OrchestratorConfigManager(cwd=tmp_path)
+    mgr = OrchestratorConfigManager(home=tmp_path)
     mgr.save({"project_name": "existing", "redis_url": "redis://old:6379/0"})
 
     captured_defaults = {}

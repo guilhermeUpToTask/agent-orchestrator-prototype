@@ -24,7 +24,7 @@ from src.infra.config_manager import OrchestratorConfigManager
 
 
 def run_wizard(
-    cwd: Path | None = None,
+    home: Path | None = None,
     *,
     registry_factory: Callable | None = None,
     skip_spec: bool = False,
@@ -35,6 +35,8 @@ def run_wizard(
 
     Parameters
     ----------
+    home         : Override for the orchestrator home directory (default: ~/.orchestrator).
+                   Used in tests. In production this should always be None.
     skip_spec    : Skip the ProjectSpec step (Step 4).
     github_only  : Re-run only Step 6 (GitHub Setup). Useful when adding
                    GitHub integration to an existing project, or after
@@ -43,7 +45,7 @@ def run_wizard(
     Returns True on success, False on failure/abort.
     """
     total_steps = 6 if not skip_spec else 5
-    manager = OrchestratorConfigManager(cwd)
+    manager = OrchestratorConfigManager(home)
 
     _print_banner()
 
@@ -55,20 +57,24 @@ def run_wizard(
     orch_data = collect_orchestrator_config(manager)
     click.echo()
 
+    # Persist orchestrator config IMMEDIATELY after Step 1 so it is never
+    # lost — even if the dep check or later steps fail.  Re-running `init`
+    # will pick up these values as defaults.
+    manager.save(orch_data)
+    click.echo(f"  ✓ Orchestrator config written → {manager.config_path}")
+    click.echo(f"  ✓ Active project: {orch_data['project_name']}")
+
     # ------------------------------------------------------------------
     # Step 2 — Dependency check
     # ------------------------------------------------------------------
     click.echo(_section(f"Step 2 of {total_steps} — Dependency Check"))
     if not check_and_report(orch_data["redis_url"]):
         click.echo(
-            "\n✗  Fix the issues above then re-run:  orchestrate init\n",
+            "\n⚠  Fix the issues above then re-run:  orchestrator init\n"
+            "   Your config has been saved — project and Redis URL are already set.\n",
             err=True,
         )
         return False
-
-    # Persist orchestrator config before continuing
-    manager.save(orch_data)
-    click.echo(f"\n  ✓ Orchestrator config written → {manager.config_path}")
 
     # ------------------------------------------------------------------
     # Step 3 — Project settings (per-project operational config)
@@ -118,7 +124,13 @@ def run_wizard(
             "orchestrator_home": str(orch_cfg.orchestrator_home),
         })
 
-    click.echo("\n✓  Setup complete!  Run:  orchestrate system start\n")
+    click.echo(f"\n✓  Setup complete! Active project: {orch_data['project_name']}")
+    click.echo("\n  Useful next steps:")
+    click.echo(f"    orchestrator project status          — confirm active project")
+    click.echo(f"    orchestrator project list            — see all projects")
+    click.echo(f"    orchestrator project use <n>      — switch project")
+    click.echo(f"    orchestrator plan init               — start planning")
+    click.echo(f"    orchestrator system start            — boot daemons\n")
     return True
 
 
