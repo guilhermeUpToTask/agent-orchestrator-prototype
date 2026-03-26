@@ -11,8 +11,6 @@ Fixes applied vs v1:
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
