@@ -66,7 +66,7 @@ def collect_project_settings(project_name: str, orchestrator_home: Path) -> dict
 
     Reads the existing project.json as defaults so re-running init is safe.
     """
-    from src.infra.project_settings import ProjectSettingsManager, ProjectSettings
+    from src.infra.project_settings import ProjectSettingsManager
 
     project_home = orchestrator_home / "projects" / project_name
     manager = ProjectSettingsManager(project_home)
