@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import structlog
 
 from src.domain import DomainEvent, EventPort
-from src.domain.aggregates.goal import GoalAggregate, GoalStatus
+from src.domain.aggregates.goal import GoalStatus
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 
 log = structlog.get_logger(__name__)
