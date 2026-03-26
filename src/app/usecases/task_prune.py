@@ -3,7 +3,7 @@ src/app/usecases/task_prune.py — Bulk-delete tasks use case.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from src.domain import TaskStatus
 from src.domain.repositories import TaskRepositoryPort
