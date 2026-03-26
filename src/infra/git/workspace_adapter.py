@@ -350,7 +350,8 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
         commit_message: str = "",
     ) -> str:
         # Return a fake sha in dry-run
-        import hashlib, time
+        import hashlib
+        import time
         fake = hashlib.sha1(f"{task_branch}{goal_branch}{time.time()}".encode()).hexdigest()
         return fake
 
