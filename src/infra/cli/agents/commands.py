@@ -10,11 +10,10 @@ Commands:
 from __future__ import annotations
 
 import json
-import sys
 
 import click
 
-from src.infra.cli.error_handler import catch_domain_errors, die, ok, warn
+from src.infra.cli.error_handler import catch_domain_errors, die, ok
 
 
 @click.group("agents")
