@@ -13,11 +13,8 @@ Fixes applied vs v1:
 
 from __future__ import annotations
 
-import os
 import shutil
-import tempfile
 from pathlib import Path
-from typing import Any
 
 import yaml
 
