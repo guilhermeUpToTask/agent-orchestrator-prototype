@@ -27,7 +27,6 @@ Usage (called by the GitHub wizard step):
 """
 from __future__ import annotations
 
-import textwrap
 from typing import Any
 
 import yaml
