@@ -109,7 +109,7 @@ def project_list():
     if active:
         click.echo(f"\n  * = active project  (config: {mgr.config_path})")
     else:
-        click.echo(f"\n  No active project set. Run: orchestrator project use <name>")
+        click.echo("\n  No active project set. Run: orchestrator project use <name>")
 
 
 @project_group.command("use")
