@@ -220,7 +220,6 @@ def _validate_github_access(
     """
     try:
         from src.infra.github.client import GitHubClient
-        from src.domain.ports.github import GitHubError
         client = GitHubClient(token=token, owner=owner, repo=repo, timeout=10)
         # The cheapest way to validate access: list open PRs (max 1 result)
         client.find_open_pr("__nonexistent__", "main")
