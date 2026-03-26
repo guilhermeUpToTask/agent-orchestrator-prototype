@@ -1,112 +1,181 @@
-# Roadmap and current status
+# ✅ Roadmap Checklist (Current State)
 
-This file now reflects the **current state of the prototype** rather than an older purely aspirational phase list.
+## ✅ Implemented / Substantially Present
 
-## Implemented or substantially present
+### 🔧 Foundation and Orchestration Core
 
-### 1. Foundation and orchestration core
+* [x] Hexagonal/layered architecture (`domain`, `app`, `infra`)
+* [x] Project-scoped filesystem state (`~/.orchestrator/projects/<project_name>/`)
+* [x] Task lifecycle:
 
-Implemented today:
+  * [x] Creation
+  * [x] Assignment
+  * [x] Execution
+  * [x] Retry
+  * [x] Pruning
+  * [x] Reset
+* [x] Long-running processes:
 
-- hexagonal/layered separation across `src/domain`, `src/app`, and `src/infra`
-- project-scoped filesystem state under `~/.orchestrator/projects/<project_name>/`
-- task creation, assignment, execution, retry, pruning, and reset flows
-- long-running task manager, worker, and reconciler processes
-- dry-run and real runtime modes
+  * [x] Task manager
+  * [x] Worker
+  * [x] Reconciler
+* [x] Runtime modes:
 
-### 2. Observability and execution logging
+  * [x] Dry-run
+  * [x] Real execution
 
-Implemented today:
+---
 
-- runtime logging wrapper for all agent runtimes
-- JSON and terminal-oriented live logs
-- event journaling under each project's `events/` directory
-- filesystem-backed execution logs and subprocess test execution adapters
+### 📊 Observability and Execution Logging
 
-### 3. Goal-driven execution
+* [x] Runtime logging wrapper for agent runtimes
+* [x] JSON logs
+* [x] Terminal live logs
+* [x] Event journaling (`events/` per project)
+* [x] Filesystem-backed execution logs
+* [x] Subprocess test execution adapters
 
-Implemented today:
+---
 
-- goal aggregates and repositories
-- goal initialization from goal files
-- goal status inspection and finalization
-- event-driven goal orchestration through `TaskGraphOrchestrator`
-- branch-level merging of successful task work into goal branches
+### 🎯 Goal-Driven Execution
 
-### 4. Strategic planning workflow
+* [x] Goal aggregates and repositories
+* [x] Goal initialization from goal files
+* [x] Goal status inspection
+* [x] Goal finalization
+* [x] Event-driven orchestration (`TaskGraphOrchestrator`)
+* [x] Branch-level merging of successful task work
 
-Implemented today:
+---
 
-- persisted project plan aggregate and repository
-- discovery, architecture, phase review, status, and placeholder decision CLI flows
-- architectural decisions and phase proposal handling
-- planning sessions and project-state persistence hooks
-- a transition from older `goals plan` / `goals dispatch-roadmap` commands toward the newer `plan` command group
+### 🧠 Strategic Planning Workflow
 
-### 5. Project spec governance
+* [x] Project plan aggregate + repository
+* [x] CLI flows:
 
-Implemented today:
+  * [x] Discovery
+  * [x] Architecture
+  * [x] Phase review
+  * [x] Status
+  * [x] Decision (placeholder)
+* [x] Architectural decision handling
+* [x] Phase proposal handling
+* [x] Planning sessions persistence
+* [x] Migration toward `plan` command group
 
-- canonical project spec loading and validation
-- proposal, diff, and apply workflow for spec changes
-- spec-aware validation hooks for planning and execution paths
+---
 
-### 6. GitHub PR integration
+### 📜 Project Spec Governance
 
-Implemented today:
+* [x] Canonical spec loading
+* [x] Spec validation
+* [x] Spec change workflow:
 
-- GitHub client adapters for PR creation and status lookup
-- goal review events that support PR-based approval/merge gating
-- project-level GitHub settings stored separately from orchestrator config
+  * [x] Proposal
+  * [x] Diff
+  * [x] Apply
+* [x] Spec-aware validation hooks
 
-## Partially implemented or still evolving
+---
 
-### Repository-aware planning context
+### 🔀 GitHub PR Integration
 
-The codebase has planning and project-state primitives, but it does **not yet** expose a full repository indexing/search subsystem with symbol graphs and targeted context packaging.
+* [x] GitHub client adapters:
 
-### Replay and audit tooling
+  * [x] PR creation
+  * [x] Status lookup
+* [x] PR-based approval/merge gating
+* [x] Project-level GitHub settings separation
 
-Logging and event persistence exist, but there is no polished end-user `replay` command yet that reconstructs an entire execution from stored artifacts.
+---
 
-### Autonomous continuous loop
+## ⚠️ Partially Implemented / Evolving
 
-The pieces for tasks, goals, planning, and reviews are present, but the system still relies on explicit operator-driven commands and approvals rather than a completely autonomous continuous development loop.
+### 📦 Repository-Aware Planning Context
 
-### Specialized multi-agent collaboration
+* [ ] Repository indexing subsystem
+* [ ] Symbol graph generation
+* [ ] Targeted context packaging for agents
 
-The registry supports multiple agents and runtime types, but there is not yet a built-in collaboration model such as voting, adjudication, or ensemble task solving.
+---
 
-## Suggested next milestones
+### 🔁 Replay and Audit Tooling
 
-### Near-term
+* [ ] End-user `replay` command
+* [ ] Full execution reconstruction from logs/events
+* [ ] Developer-friendly debugging workflows
 
-- consolidate duplicate or transitional infrastructure pieces
-- continue retiring or folding deprecated planning commands under `goals` into the `plan` workflow
-- improve end-user documentation around goal files, project plans, operator approvals, and PR flows
-- add richer status/reporting commands for planners, goals, and task execution history
-- formalize replay/debugging workflows from stored logs and events
+---
 
-### Mid-term
+### 🔄 Autonomous Continuous Loop
 
-- build repository indexing and targeted context assembly for planner/worker prompts
-- improve policy enforcement around test requirements and allowed-file validation
-- expand PR synchronization and review automation
+* [ ] Fully autonomous execution loop
+* [ ] Reduced operator intervention
+* [ ] Automated approvals/decision policies
 
-### Longer-term
+---
 
-- move from operator-steered planning phases to a more continuous adaptive loop
-- add more explicit agent specialization and collaboration strategies
-- support larger-scale projects with richer planning memory and code intelligence
+### 🤖 Specialized Multi-Agent Collaboration
 
-## Summary
+* [ ] Agent collaboration model
+* [ ] Voting/adjudication mechanisms
+* [ ] Ensemble task solving strategies
 
-The prototype is no longer just a task queue for coding agents. Its current state is:
+---
 
-- a task orchestrator
-- a goal coordinator
-- a spec-governed project execution system
-- an early strategic planning engine
-- a logging and PR-aware multi-agent workflow foundation
+## 🚧 Next Milestones
 
-Future roadmap work should build on that reality rather than assuming those capabilities are still missing.
+### 🚀 Near-Term
+
+* [ ] Consolidate duplicated / transitional infrastructure
+* [ ] Fully migrate deprecated `goals` planning commands → `plan`
+* [ ] Improve documentation:
+
+  * [ ] Goal files
+  * [ ] Project plans
+  * [ ] Operator approvals
+  * [ ] PR workflows
+* [ ] Add richer status/reporting:
+
+  * [ ] Planner state
+  * [ ] Goal progress
+  * [ ] Task execution history
+* [ ] Formalize replay/debug workflows
+
+---
+
+### 🏗️ Mid-Term
+
+* [ ] Repository indexing + context assembly
+* [ ] Stronger policy enforcement:
+
+  * [ ] Test requirements
+  * [ ] Allowed file validation
+* [ ] Expand PR automation:
+
+  * [ ] Sync
+  * [ ] Review workflows
+
+---
+
+### 🌐 Long-Term
+
+* [ ] Continuous adaptive planning loop
+* [ ] Explicit agent specialization
+* [ ] Advanced collaboration strategies
+* [ ] Scale support:
+
+  * [ ] Larger projects
+  * [ ] Persistent planning memory
+  * [ ] Code intelligence layer
+
+---
+
+## 🧾 System Positioning (Reality Check)
+
+* [x] Task orchestrator
+* [x] Goal coordinator
+* [x] Spec-governed execution system
+* [x] Early strategic planning engine
+* [x] Logging + PR-aware multi-agent workflow foundation
+
