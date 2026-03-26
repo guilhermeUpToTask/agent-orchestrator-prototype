@@ -126,11 +126,11 @@ def run_wizard(
 
     click.echo(f"\n✓  Setup complete! Active project: {orch_data['project_name']}")
     click.echo("\n  Useful next steps:")
-    click.echo(f"    orchestrator project status          — confirm active project")
-    click.echo(f"    orchestrator project list            — see all projects")
-    click.echo(f"    orchestrator project use <n>      — switch project")
-    click.echo(f"    orchestrator plan init               — start planning")
-    click.echo(f"    orchestrator system start            — boot daemons\n")
+    click.echo("    orchestrator project status          — confirm active project")
+    click.echo("    orchestrator project list            — see all projects")
+    click.echo("    orchestrator project use <n>      — switch project")
+    click.echo("    orchestrator plan init               — start planning")
+    click.echo("    orchestrator system start            — boot daemons\n")
     return True
 
 
