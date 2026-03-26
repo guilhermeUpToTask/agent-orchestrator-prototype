@@ -15,18 +15,14 @@ from __future__ import annotations
 
 import select
 import subprocess
-import sys
-import threading
 import time
-from typing import Any, Iterator, Optional, TextIO
+from typing import Iterator, Optional
 
 from src.domain import AgentExecutionResult, AgentProps, ExecutionContext
 from src.domain import AgentRuntimePort, SessionHandle
 
 from .live_logger import get_logger
 from .log_events import (
-    LogEvent,
-    LogEventType,
     build_agent_end_event,
     build_agent_start_event,
     build_stderr_event,
