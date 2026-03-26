@@ -28,15 +28,13 @@ BUG 2 — `plan init` crashes with raw SpecNotFoundError when no project configu
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 from src.infra.config_manager import OrchestratorConfigManager, _resolve_orchestrator_home
-from src.infra.config import OrchestratorConfig, LocalJsonConfigSource
+from src.infra.config import OrchestratorConfig
 from src.infra.cli.plan.commands import plan_group
 
 
