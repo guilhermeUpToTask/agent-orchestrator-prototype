@@ -17,9 +17,8 @@ from __future__ import annotations
 import sys
 
 import click
-import yaml
 
-from src.infra.cli.error_handler import catch_domain_errors, die, ok, warn
+from src.infra.cli.error_handler import catch_domain_errors, die, ok
 
 
 @click.group("spec")
@@ -207,7 +206,7 @@ def spec_propose(
       orchestrate spec propose --bump-version minor
       orchestrate spec propose --remove-forbidden flask --add-required fastapi
     """
-    from src.infra.factory import build_propose_spec_change, build_spec_repo
+    from src.infra.factory import build_propose_spec_change
     from src.infra.config import config as app_config
     from src.app.usecases.propose_spec_change import ChangeProposal
 
@@ -325,7 +324,7 @@ def spec_apply(yes: bool):
     """
     from src.infra.config import config as app_config
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
-    from src.domain.project_spec.errors import SpecNotFoundError, SpecValidationError
+    from src.domain.project_spec.errors import SpecValidationError
 
     repo = FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
     proposed_path = (
