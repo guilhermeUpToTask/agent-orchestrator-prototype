@@ -6,7 +6,6 @@ Follows the same atomic-write and quarantine patterns as YamlGoalRepository.
 """
 from __future__ import annotations
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -153,7 +152,6 @@ def _serialize_phase(phase: Phase) -> dict:
 
 def _deserialize_plan(data: dict) -> ProjectPlan:
     """Deserialize dict to ProjectPlan."""
-    from datetime import datetime, timezone
 
     # Parse phases
     phases = []
