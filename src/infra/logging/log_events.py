@@ -183,7 +183,7 @@ def build_agent_output_event(agent_name: str, output: str) -> LogEvent:
         event_type=LogEventType.AGENT_OUTPUT,
         agent_name=agent_name,
         timestamp=0.0,
-        message=f"Agent output captured",
+        message="Agent output captured",
         details={
             "output_preview": output[:200] + "..." if len(output) > 200 else output,
         },
