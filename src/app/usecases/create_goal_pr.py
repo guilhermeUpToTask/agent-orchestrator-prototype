@@ -26,7 +26,7 @@ import structlog
 
 from src.domain import DomainEvent, EventPort
 from src.domain.aggregates.goal import GoalStatus
-from src.domain.ports.github import GitHubError, GitHubPort
+from src.domain.ports.github import GitHubPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 
 log = structlog.get_logger(__name__)
