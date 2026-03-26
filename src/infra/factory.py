@@ -37,6 +37,10 @@ def build_project_paths() -> ProjectPaths:
     and use cases should receive paths via constructor injection from this
     builder — never by importing config directly.
     """
+    if not app_config.project_name:
+        raise RuntimeError(
+            "No project configured. Run `orchestrator init` first."
+        )
     return ProjectPaths.for_project(
         app_config.orchestrator_home,
         app_config.project_name,
@@ -570,6 +574,11 @@ def build_planner_orchestrator(io_handler=None):
     from src.app.usecases.validate_against_spec import ValidateAgainstSpec
     from src.app.telemetry.runtime_wrappers import TelemetryPlannerRuntimeWrapper
     from src.app.telemetry.service import TelemetryService
+
+    if not app_config.project_name:
+        raise RuntimeError(
+            "No project configured. Run `orchestrator init` first."
+        )
 
     spec = build_load_project_spec().execute(app_config.project_name)
     telemetry = TelemetryService(build_telemetry_emitter(), producer="planner-orchestrator")

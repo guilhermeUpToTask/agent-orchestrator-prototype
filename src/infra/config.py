@@ -51,7 +51,12 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 class LocalJsonConfigSource(PydanticBaseSettingsSource):
     """
-    Loads project-scoped config from .orchestrator/config.json in the CWD.
+    Loads orchestrator config from ~/.orchestrator/config.json.
+
+    This is the same file written by OrchestratorConfigManager — both must
+    resolve to the same path.  The location is:
+        <ORCHESTRATOR_HOME>/config.json
+    where ORCHESTRATOR_HOME defaults to ~/.orchestrator.
 
     Priority is below env vars / .env but above field defaults, so the wizard
     values persist without ever touching environment variables.
@@ -61,12 +66,24 @@ class LocalJsonConfigSource(PydanticBaseSettingsSource):
       redis_url         → OrchestratorConfig.redis_url
     """
 
+    @staticmethod
+    def _resolve_home() -> Path:
+        """
+        Resolve the orchestrator home from ORCHESTRATOR_HOME env var,
+        falling back to ~/.orchestrator.
+        """
+        import os
+        raw = os.environ.get("ORCHESTRATOR_HOME")
+        if raw:
+            return Path(raw).expanduser()
+        return Path.home() / ".orchestrator"
+
     def _read(self) -> dict[str, Any]:
-        path = Path.cwd() / ".orchestrator" / "config.json"
-        if not path.exists():
+        config_path = self._resolve_home() / "config.json"
+        if not config_path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(config_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -149,11 +166,11 @@ class OrchestratorConfig(BaseSettings):
         validation_alias=AliasChoices("ORCHESTRATOR_HOME", "orchestrator_home"),
         description="Global home dir — same role as ~/.gemini or ~/.claude.",
     )
-
-    project_name: str = Field(
+    project_name: Optional[str] = Field(
+        None,
         "default",
         validation_alias=AliasChoices("PROJECT_NAME", "project_name"),
-        description="Active project context. All paths are scoped under projects/<name>/.",
+        description="Active project context. All paths are scoped under projects/<n>/. Must be configured via `orchestrator init`.",
     )
 
     # ── Paths (all derived from orchestrator_home/projects/project_name) ─────
@@ -225,6 +242,8 @@ class OrchestratorConfig(BaseSettings):
         Any field set explicitly (via env var or constructor) is left as-is —
         overrides still work for power users and tests.
         """
+        if not self.project_name:
+            return self
         paths = ProjectPaths.for_project(self.orchestrator_home, self.project_name)
 
         if self.tasks_dir is None:
@@ -246,6 +265,8 @@ class OrchestratorConfig(BaseSettings):
     @property
     def project_home(self) -> Path:
         """Convenience accessor for the active project directory."""
+        if not self.project_name:
+            raise ValueError("No project configured. Run `orchestrator init` first.")
         return self.orchestrator_home / "projects" / self.project_name
 
     @property

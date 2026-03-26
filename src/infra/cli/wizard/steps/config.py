@@ -34,10 +34,17 @@ def collect_orchestrator_config(manager: OrchestratorConfigManager) -> dict[str,
     """
     existing = manager.load()
 
+    # DEFAULTS["project_name"] is intentionally None — no silent fallback.
+    # If there is no existing project name the user must type one explicitly.
+    existing_project = existing.get("project_name")
     project_name: str = click.prompt(
         "  Project name",
-        default=existing.get("project_name") or DEFAULTS["project_name"],
+        default=existing_project if existing_project else None,
+        prompt_suffix=" (required): " if not existing_project else ": ",
     )
+    if not project_name or not project_name.strip():
+        raise click.UsageError("Project name cannot be empty.")
+    project_name = project_name.strip()
 
     redis_url: str = click.prompt(
         "  Redis URL",

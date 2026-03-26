@@ -19,6 +19,24 @@ import click
 
 from src.infra.factory import build_planner_orchestrator, build_project_plan_repo
 from src.infra.config import config as app_config
+from src.infra.cli.error_handler import die, ok, warn
+
+
+def _require_project() -> str:
+    """
+    Abort with a helpful message when no project is configured.
+
+    Returns the active project name so callers can display it.
+    Raises SystemExit(1) when project_name is None or 'default'.
+    """
+    project = app_config.project_name
+    if not project:
+        die(
+            "No project configured.\n"
+            "  Run: orchestrator init\n"
+            "  Then try again."
+        )
+    return project
 
 
 def _io_handler(question: str) -> str:
@@ -49,6 +67,9 @@ def plan_init(dry_run: bool) -> None:
         # Override to dry-run mode for this command
         os.environ["AGENT_MODE"] = "dry-run"
 
+    project = _require_project()
+    click.echo(f"Project: {project}")
+
     repo = build_project_plan_repo()
     plan = repo.get()
 
@@ -64,7 +85,19 @@ def plan_init(dry_run: bool) -> None:
     # Build orchestrator with dry-run mode if needed
     if dry_run:
         os.environ["AGENT_MODE"] = "dry-run"
-    orchestrator = build_planner_orchestrator(io_handler=_io_handler)
+
+    try:
+        orchestrator = build_planner_orchestrator(io_handler=_io_handler)
+    except Exception as exc:
+        # Catch SpecNotFoundError and similar setup errors and surface them cleanly
+        exc_name = type(exc).__name__
+        if "SpecNotFound" in exc_name or "NotFound" in exc_name:
+            die(
+                f"No project spec found for project '{project}'.\n"
+                "  Run: orchestrator init\n"
+                "  to create a project spec before running `plan init`."
+            )
+        raise
 
     click.echo("Starting discovery phase...")
     result = orchestrator.start_discovery(io_handler=_io_handler)
@@ -110,6 +143,9 @@ def plan_architect(dry_run: bool) -> None:
     """
     if dry_run:
         os.environ["AGENT_MODE"] = "dry-run"
+
+    project = _require_project()
+    click.echo(f"Project: {project}")
 
     repo = build_project_plan_repo()
     plan = repo.get()
@@ -215,6 +251,9 @@ def plan_review(dry_run: bool) -> None:
     if dry_run:
         os.environ["AGENT_MODE"] = "dry-run"
 
+    project = _require_project()
+    click.echo(f"Project: {project}")
+
     repo = build_project_plan_repo()
     plan = repo.get()
 
@@ -286,6 +325,8 @@ def plan_status() -> None:
     """
     Show current project plan status.
     """
+    project = _require_project()
+    click.echo(f"Project: {project}")
     orchestrator = build_planner_orchestrator()
     plan = orchestrator.get_status()
 
