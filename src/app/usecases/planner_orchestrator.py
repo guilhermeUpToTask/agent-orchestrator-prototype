@@ -7,7 +7,7 @@ It replaces RunPlanningSessionUseCase as the user-facing planning interface.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable, Optional
 
@@ -17,7 +17,6 @@ from src.app.services.decision_apply import apply_decision_to_spec
 from src.app.services.planner_context import PlannerContextAssembler
 from src.app.usecases.goal_init import GoalInitUseCase
 from src.app.usecases.validate_against_spec import ValidateAgainstSpec
-from src.domain.aggregates.goal import GoalStatus
 from src.domain.aggregates.planner_session import (
     PlannerMode,
     PlannerSession,
