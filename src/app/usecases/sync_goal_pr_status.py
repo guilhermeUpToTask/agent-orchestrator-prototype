@@ -22,11 +22,10 @@ from __future__ import annotations
 import structlog
 
 from src.domain import DomainEvent, EventPort
-from src.domain.aggregates.goal import GoalAggregate, GoalStatus
+from src.domain.aggregates.goal import GoalStatus
 from src.domain.ports.github import GitHubError, GitHubPort
 from src.domain.project_spec.aggregate import ProjectSpec
 from src.domain.repositories.goal_repository import GoalRepositoryPort
-from src.domain.value_objects.pr import PRStatus
 
 log = structlog.get_logger(__name__)
 
