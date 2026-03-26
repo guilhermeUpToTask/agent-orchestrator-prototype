@@ -34,7 +34,7 @@ def collect_and_write_spec(config_data: dict[str, Any]) -> bool:
       False — user skipped or an error occurred.
     """
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
-    from src.domain.project_spec import ProjectSpec, SpecNotFoundError
+    from src.domain.project_spec import ProjectSpec
 
     project_name: str = config_data["project_name"]
 
