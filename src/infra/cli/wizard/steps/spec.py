@@ -42,7 +42,8 @@ def collect_and_write_spec(config_data: dict[str, Any]) -> bool:
     try:
         orchestrator_home = Path(config_data["orchestrator_home"])
     except KeyError:
-        from src.infra.config import config as app_config
+        from src.infra.settings import SettingsService
+        app_config = SettingsService().load().machine
         orchestrator_home = Path(app_config.orchestrator_home)
 
     repo = FileProjectSpecRepository(orchestrator_home=orchestrator_home)

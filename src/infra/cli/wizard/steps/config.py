@@ -18,14 +18,15 @@ from typing import Any
 
 import click
 
-from src.infra.config_manager import DEFAULTS, OrchestratorConfigManager
+from src.infra.settings import GlobalConfigStore
+from src.infra.settings.defaults import MACHINE_DEFAULTS as DEFAULTS
 
 
-def collect_orchestrator_config(manager: OrchestratorConfigManager) -> dict[str, Any]:
+def collect_orchestrator_config(manager: GlobalConfigStore) -> dict[str, Any]:
     """
     Step 1 — Prompt for orchestrator-global settings.
 
-    Returns a dict suitable for OrchestratorConfigManager.save():
+    Returns a dict suitable for GlobalConfigStore.save():
       project_name  — which project directory to use
       redis_url     — broker connection string
 
@@ -66,10 +67,10 @@ def collect_project_settings(project_name: str, orchestrator_home: Path) -> dict
 
     Reads the existing project.json as defaults so re-running init is safe.
     """
-    from src.infra.project_settings import ProjectSettingsManager
+    from src.infra.settings import ProjectConfigStore
 
     project_home = orchestrator_home / "projects" / project_name
-    manager = ProjectSettingsManager(project_home)
+    manager = ProjectConfigStore(project_home)
     existing = manager.load()
 
     source_repo_url: str = click.prompt(
@@ -86,7 +87,7 @@ def collect_project_settings(project_name: str, orchestrator_home: Path) -> dict
 # Backward-compat shim — tests and external code still call collect_project_config
 # ---------------------------------------------------------------------------
 
-def collect_project_config(manager: OrchestratorConfigManager) -> dict[str, Any]:
+def collect_project_config(manager: GlobalConfigStore) -> dict[str, Any]:
     """
     Backward-compatible wrapper that returns all fields in a single dict.
 
@@ -102,7 +103,7 @@ def collect_project_config(manager: OrchestratorConfigManager) -> dict[str, Any]
     # here for backward compat — the wizard will save it to project.json
     source_repo_url: str = click.prompt(
         "  Source repository URL  (blank → empty local repo)",
-        default=manager.load().get("source_repo_url") or "",
+        default=manager.load().source_repo_url or "",
     )
 
     return {

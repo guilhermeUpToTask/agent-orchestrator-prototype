@@ -83,7 +83,7 @@ def collect_and_setup_github(
     # ------------------------------------------------------------------
     click.echo("\n  Validating GitHub access…")
     ok, error = _validate_github_access(
-        token=settings["github_token"],
+        token=os.environ.get("GITHUB_TOKEN", ""),
         owner=settings["github_owner"],
         repo=settings["github_repo"],
     )
@@ -115,8 +115,8 @@ def collect_and_setup_github(
     try:
         orchestrator_home = Path(config_data["orchestrator_home"])
     except KeyError:
-        from src.infra.config import config as app_config
-        orchestrator_home = Path(app_config.orchestrator_home)
+        from src.infra.settings import SettingsService as _SS
+        orchestrator_home = _SS().load().machine.orchestrator_home
 
     spec = _load_spec(project_name, orchestrator_home)
     if spec is None:
@@ -175,7 +175,7 @@ def _collect_github_settings(config_data: dict[str, Any]) -> dict[str, Any] | No
 
     token: str = click.prompt(
         "  GitHub personal access token (needs 'repo' scope)",
-        default=existing.get("github_token") or os.environ.get("GITHUB_TOKEN", ""),
+        default=os.environ.get("GITHUB_TOKEN", ""),
         hide_input=True,
     )
     if not token.strip():
@@ -204,7 +204,7 @@ def _collect_github_settings(config_data: dict[str, Any]) -> dict[str, Any] | No
     )
 
     return {
-        "github_token":       token.strip(),
+        # github_token intentionally omitted — env-only (GITHUB_TOKEN), never persisted
         "github_owner":       owner.strip(),
         "github_repo":        repo.strip(),
         "github_base_branch": base_branch.strip(),
@@ -234,21 +234,21 @@ def _persist_github_settings(
     settings: dict[str, Any],
 ) -> None:
     """Write GitHub settings into the project's project.json."""
-    from src.infra.project_settings import ProjectSettingsManager, ProjectSettings
+    from src.infra.settings import ProjectConfigStore, ProjectSettings
     try:
         orchestrator_home = Path(config_data["orchestrator_home"])
     except KeyError:
-        from src.infra.config import config as app_config
-        orchestrator_home = Path(app_config.orchestrator_home)
+        from src.infra.settings import SettingsService as _SS
+        orchestrator_home = _SS().load().machine.orchestrator_home
 
     project_name: str = config_data["project_name"]
     project_home = orchestrator_home / "projects" / project_name
-    manager = ProjectSettingsManager(project_home)
+    manager = ProjectConfigStore(project_home)
     existing = manager.load()
 
     updated = ProjectSettings(
         source_repo_url=existing.source_repo_url,
-        github_token=settings["github_token"],
+        github_token=os.environ.get("GITHUB_TOKEN", ""),
         github_owner=settings["github_owner"],
         github_repo=settings["github_repo"],
         github_base_branch=settings["github_base_branch"],
@@ -290,15 +290,15 @@ def _write_ci_workflow(
     try:
         orchestrator_home = Path(config_data["orchestrator_home"])
     except KeyError:
-        from src.infra.config import config as app_config
-        orchestrator_home = Path(app_config.orchestrator_home)
+        from src.infra.settings import SettingsService as _SS
+        orchestrator_home = _SS().load().machine.orchestrator_home
 
     project_name: str = config_data["project_name"]
 
     # Derive the target repo path from project settings
-    from src.infra.project_settings import ProjectSettingsManager
+    from src.infra.settings import ProjectConfigStore
     project_home = orchestrator_home / "projects" / project_name
-    ps = ProjectSettingsManager(project_home).load()
+    ps = ProjectConfigStore(project_home).load()
 
     if ps.source_repo_url and not ps.source_repo_url.startswith("file://"):
         # Remote repo: we can't write directly — guide the operator instead
@@ -335,11 +335,11 @@ def _load_existing_github_settings(config_data: dict[str, Any]) -> dict[str, Any
     try:
         orchestrator_home = Path(config_data["orchestrator_home"])
         project_name = config_data["project_name"]
-        from src.infra.project_settings import ProjectSettingsManager
+        from src.infra.settings import ProjectConfigStore
         project_home = orchestrator_home / "projects" / project_name
-        settings = ProjectSettingsManager(project_home).load()
+        settings = ProjectConfigStore(project_home).load()
         return {
-            "github_token":       getattr(settings, "github_token", ""),
+            # github_token is env-only — not stored in project.json
             "github_owner":       getattr(settings, "github_owner", ""),
             "github_repo":        getattr(settings, "github_repo", ""),
             "github_base_branch": getattr(settings, "github_base_branch", "main"),
