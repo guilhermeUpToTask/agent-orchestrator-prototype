@@ -40,7 +40,8 @@ def spec_show():
       orchestrate spec show
     """
     from src.infra.factory import build_load_project_spec
-    from src.infra.config import config as app_config
+    from src.infra.settings import SettingsService as _SS
+    app_config = _SS().load().machine
 
     spec = build_load_project_spec().execute(app_config.project_name)
     ac = spec.get_architecture_constraints()
@@ -91,7 +92,8 @@ def spec_init(overwrite: bool):
       orchestrate spec init
       orchestrate spec init --overwrite
     """
-    from src.infra.config import config as app_config
+    from src.infra.settings import SettingsService as _SS
+    app_config = _SS().load().machine
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
 
     repo = FileProjectSpecRepository(
@@ -207,7 +209,8 @@ def spec_propose(
       orchestrate spec propose --remove-forbidden flask --add-required fastapi
     """
     from src.infra.factory import build_propose_spec_change
-    from src.infra.config import config as app_config
+    from src.infra.settings import SettingsService as _SS
+    app_config = _SS().load().machine
     from src.app.usecases.propose_spec_change import ChangeProposal
 
     # Resolve new version string from bump type
@@ -260,7 +263,8 @@ def spec_diff():
       orchestrate spec diff
     """
     import difflib
-    from src.infra.config import config as app_config
+    from src.infra.settings import SettingsService as _SS
+    app_config = _SS().load().machine
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
 
     repo = FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
@@ -322,7 +326,8 @@ def spec_apply(yes: bool):
       orchestrate spec apply
       orchestrate spec apply --yes
     """
-    from src.infra.config import config as app_config
+    from src.infra.settings import SettingsService as _SS
+    app_config = _SS().load().machine
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
     from src.domain.project_spec.errors import SpecValidationError
 

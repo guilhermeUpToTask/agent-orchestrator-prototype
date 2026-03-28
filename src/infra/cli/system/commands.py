@@ -52,22 +52,22 @@ def system_start(
     Boot order is enforced: workers must heartbeat before reconciler starts.
     """
     import subprocess
-    from src.infra.config_manager import OrchestratorConfigManager
+    from src.infra.settings import GlobalConfigStore, SettingsService
 
-    manager = OrchestratorConfigManager()
-    if not manager.exists():
-        manager.generate_defaults()
+    store = GlobalConfigStore()
+    if not store.exists():
+        store.generate_defaults()
         click.echo(
             "  ℹ  No .orchestrator/config.json found — generated with defaults.\n"
             "     Run  orchestrator init  for interactive setup.\n"
         )
 
     if not skip_dep_check:
-        from src.infra.config import config as app_config
+        from src.infra.settings import SettingsService
         from src.infra.cli.wizard.steps.deps import print_dep_table
 
         click.echo("Checking dependencies...")
-        report = print_dep_table(app_config.redis_url)
+        report = print_dep_table(SettingsService().load().machine.redis_url)
         if not report.can_start:
             die(
                 "Required dependencies are not available. "
@@ -186,8 +186,8 @@ def run_worker():
     """
     from src.infra.factory import build_event_port, build_worker_handler, build_agent_registry
 
-    from src.infra.config import config as app_config
-    agent_id = os.getenv("AGENT_ID") or app_config.agent_id
+    from src.infra.settings import SettingsService
+    agent_id = os.getenv("AGENT_ID") or SettingsService().load().machine.agent_id
     events   = build_event_port()
     registry = build_agent_registry()
     handler  = build_worker_handler()
