@@ -16,7 +16,7 @@ import tempfile
 import click
 
 from src.infra.factory import build_planner_orchestrator, build_project_plan_repo
-from src.infra.config import config as app_config
+from src.infra.settings import SettingsService as _SettingsSvc
 from src.infra.cli.error_handler import die
 
 
@@ -27,7 +27,7 @@ def _require_project() -> str:
     Returns the active project name so callers can display it.
     Raises SystemExit(1) when project_name is None or 'default'.
     """
-    project = app_config.project_name
+    project = _SettingsSvc().load().machine.project_name
     if not project:
         die(
             "No project configured.\n"

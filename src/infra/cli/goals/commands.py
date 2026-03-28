@@ -36,8 +36,8 @@ def goal_init(goal_file: str):
     from src.infra.goal_file import load_goal_file
     from src.infra.factory import build_goal_init_usecase
 
-    from src.infra.config import config as app_config
-    mode = app_config.mode
+    from src.infra.settings import SettingsService
+    mode = SettingsService().load().machine.mode
     if mode != "real":
         warn(
             f"AGENT_MODE is not 'real' (current: '{mode}').\n"
@@ -75,8 +75,8 @@ def goal_run():
     """
     from src.infra.factory import build_task_graph_orchestrator
 
-    from src.infra.config import config as app_config
-    mode = app_config.mode
+    from src.infra.settings import SettingsService
+    mode = SettingsService().load().machine.mode
     if mode != "real":
         warn(
             f"AGENT_MODE is not 'real' (current: '{mode}').\n"
@@ -178,8 +178,8 @@ def goal_finalize(goal_id: str, yes: bool):
     """
     from src.infra.factory import build_goal_repo, build_goal_finalize_usecase
 
-    from src.infra.config import config as app_config
-    mode = app_config.mode
+    from src.infra.settings import SettingsService
+    mode = SettingsService().load().machine.mode
     if mode != "real":
         warn(
             f"AGENT_MODE is not 'real' (current: '{mode}').\n"
