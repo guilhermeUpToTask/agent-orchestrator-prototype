@@ -20,7 +20,7 @@ from src.infra.cli.wizard.steps.deps     import check_and_report
 from src.infra.cli.wizard.steps.github   import collect_and_setup_github
 from src.infra.cli.wizard.steps.registry import setup_registry
 from src.infra.cli.wizard.steps.spec     import collect_and_write_spec
-from src.infra.config_manager import OrchestratorConfigManager
+from src.infra.settings import GlobalConfigStore, SettingsService, ProjectSettings, ProjectConfigStore
 
 
 def run_wizard(
@@ -45,7 +45,7 @@ def run_wizard(
     Returns True on success, False on failure/abort.
     """
     total_steps = 6 if not skip_spec else 5
-    manager = OrchestratorConfigManager(home)
+    store = GlobalConfigStore(home)
 
     _print_banner()
 
@@ -60,8 +60,8 @@ def run_wizard(
     # Persist orchestrator config IMMEDIATELY after Step 1 so it is never
     # lost — even if the dep check or later steps fail.  Re-running `init`
     # will pick up these values as defaults.
-    manager.save(orch_data)
-    click.echo(f"  ✓ Orchestrator config written → {manager.config_path}")
+    store.save(orch_data)
+    click.echo(f"  ✓ Orchestrator config written → {store.config_path}")
     click.echo(f"  ✓ Active project: {orch_data['project_name']}")
 
     # ------------------------------------------------------------------
@@ -82,19 +82,22 @@ def run_wizard(
     click.echo(_section(f"Step 3 of {total_steps} — Project Settings"))
     click.echo("  These settings belong to this project, not the machine.\n")
 
-    from src.infra.config import OrchestratorConfig
-    orch_cfg = OrchestratorConfig(**orch_data)   # ephemeral — just for path resolution
+    # resolve orchestrator_home from the data collected in step 1
     project_settings_data = collect_project_settings(
         project_name=orch_data["project_name"],
         orchestrator_home=orch_cfg.orchestrator_home,
     )
 
     # Persist project settings
-    from src.infra.project_settings import ProjectSettings, ProjectSettingsManager
-    project_home = orch_cfg.orchestrator_home / "projects" / orch_data["project_name"]
-    ps_manager = ProjectSettingsManager(project_home)
-    ps_manager.save(ProjectSettings(**project_settings_data))
-    click.echo(f"  ✓ Project settings written → {ps_manager.settings_path}")
+    import os
+    from pathlib import Path
+    home_raw = orch_data.get("orchestrator_home") or os.environ.get("ORCHESTRATOR_HOME")
+    orch_home = Path(home_raw).expanduser() if home_raw else Path.home() / ".orchestrator"
+    project_home = orch_home / "projects" / orch_data["project_name"]
+    from src.infra.settings import ProjectConfigStore, ProjectSettings
+    ps_store = ProjectConfigStore(project_home)
+    ps_store.save(ProjectSettings(**project_settings_data))
+    click.echo(f"  ✓ Project settings written → {ps_store.settings_path}")
 
     # ------------------------------------------------------------------
     # Step 4 — Project spec (domain/architecture constraints)
