@@ -16,8 +16,8 @@ MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB per stream
 
 def _default_log_base() -> Path:
     """Resolve logs_dir lazily so the module can be imported without side-effects."""
-    from src.infra.config import config  # deferred — no module-level I/O
-    return config.logs_dir
+    from src.infra.settings import SettingsService
+    return SettingsService().load().machine.orchestrator_home
 
 
 # Module-level alias — tests patch this via monkeypatch.setattr or by
