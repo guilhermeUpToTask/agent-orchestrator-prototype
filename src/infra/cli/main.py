@@ -2,9 +2,7 @@
 src/infra/cli/main.py — CLI root group and entry point.
 """
 from __future__ import annotations
-
 import sys
-
 import click
 import structlog
 
@@ -29,16 +27,12 @@ def cli():
 @click.option("--defaults", is_flag=True, default=False,
               help="Write a config.json with defaults (skips interactive prompts).")
 def init_wizard(defaults: bool):
-    """
-    Run the setup wizard to create .orchestrator/config.json.
-
-    Use --defaults to generate a non-interactive config (useful in CI).
-    """
+    """Run the setup wizard to create .orchestrator/config.json."""
     from src.infra.settings import GlobalConfigStore
 
     if defaults:
         store = GlobalConfigStore()
-        data  = store.generate_defaults()
+        data  = store.initialize()
         click.echo(f"✓  Default config written → {store.config_path}")
         for k, v in data.items():
             click.echo(f"   {k}: {v}")

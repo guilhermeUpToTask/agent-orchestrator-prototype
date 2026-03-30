@@ -15,8 +15,8 @@ import tempfile
 
 import click
 
-from src.infra.factory import build_planner_orchestrator, build_project_plan_repo
-from src.infra.settings import SettingsService as _SettingsSvc
+from src.infra.container import AppContainer
+from src.infra.container import AppContainer as _AppContainer
 from src.infra.cli.error_handler import die
 
 
@@ -27,7 +27,7 @@ def _require_project() -> str:
     Returns the active project name so callers can display it.
     Raises SystemExit(1) when project_name is None or 'default'.
     """
-    project = _SettingsSvc().load().machine.project_name
+    project = _AppContainer.from_env().ctx.machine.project_name
     if not project:
         die(
             "No project configured.\n"
@@ -68,7 +68,7 @@ def plan_init(dry_run: bool) -> None:
     project = _require_project()
     click.echo(f"Project: {project}")
 
-    repo = build_project_plan_repo()
+    repo = AppContainer.from_env().project_plan_repo
     plan = repo.get()
 
     # Check if we can start discovery
@@ -145,7 +145,7 @@ def plan_architect(dry_run: bool) -> None:
     project = _require_project()
     click.echo(f"Project: {project}")
 
-    repo = build_project_plan_repo()
+    repo = AppContainer.from_env().project_plan_repo
     plan = repo.get()
 
     if plan is None or plan.status != "architecture":
@@ -252,7 +252,7 @@ def plan_review(dry_run: bool) -> None:
     project = _require_project()
     click.echo(f"Project: {project}")
 
-    repo = build_project_plan_repo()
+    repo = AppContainer.from_env().project_plan_repo
     plan = repo.get()
 
     if plan is None or plan.status != "phase_review":
@@ -325,7 +325,7 @@ def plan_status() -> None:
     """
     project = _require_project()
     click.echo(f"Project: {project}")
-    orchestrator = build_planner_orchestrator()
+    orchestrator = AppContainer.from_env().planner_orchestrator
     plan = orchestrator.get_status()
 
     click.echo(f"\nPlan: {plan.plan_id}")
