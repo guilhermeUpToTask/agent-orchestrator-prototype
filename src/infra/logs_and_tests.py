@@ -13,11 +13,16 @@ log = structlog.get_logger(__name__)
 
 MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB per stream
 
+#TODO: refactor this to be only logging system
 
 def _default_log_base() -> Path:
     """Resolve logs_dir lazily so the module can be imported without side-effects."""
-    from src.infra.settings import SettingsService
-    return SettingsService().load().machine.orchestrator_home
+    from src.infra.settings.service import SettingsService
+    from src.infra.project_paths import ProjectPaths
+    ctx = SettingsService().load()
+    return ProjectPaths.for_project(
+        ctx.machine.orchestrator_home, ctx.machine.project_name
+    ).logs_dir
 
 
 # Module-level alias — tests patch this via monkeypatch.setattr or by
