@@ -1,12 +1,7 @@
 """
 src/infra/settings/defaults.py — Default values and schema constants.
-
-Single source of truth for default configuration values.
-Import these constants instead of duplicating literals across the codebase.
 """
-
 from __future__ import annotations
-
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -22,8 +17,12 @@ MACHINE_DEFAULTS: dict = {
     "project_name": None,
 }
 
-# Keys persisted by the wizard in config.json (subset of MachineSettings)
-MACHINE_MANAGED_KEYS: frozenset[str] = frozenset({"project_name", "redis_url"})
+# Keys persisted by the wizard in config.json — subset of MachineSettings.
+# Schema metadata lives here, not on the dataclass.
+MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset({"project_name", "redis_url"})
+
+# Backward-compat alias used by a few test files
+MACHINE_MANAGED_KEYS = MACHINE_PERSISTABLE_KEYS
 
 # ---------------------------------------------------------------------------
 # ProjectSettings defaults
@@ -36,7 +35,6 @@ PROJECT_DEFAULTS: dict = {
     "github_base_branch": "main",
 }
 
-# Keys managed in project.json (excludes secrets like github_token)
 PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
     {"source_repo_url", "github_owner", "github_repo", "github_base_branch"}
 )
