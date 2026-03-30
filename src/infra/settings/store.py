@@ -1,19 +1,16 @@
 """
 src/infra/settings/store.py — JSON persistence for configuration files.
 
-A single reusable abstraction for reading and writing JSON config files.
-All file-system details stay inside this module.
-
 Two concrete stores:
   GlobalConfigStore   — manages ~/.orchestrator/config.json  (MachineSettings)
   ProjectConfigStore  — manages <project_home>/project.json  (ProjectSettings)
 
-Rules enforced here:
-  - Secret fields are stripped before any write operation.
+Rules:
+  - Secret fields are stripped before any write (defense-in-depth).
   - Extra keys written by users are preserved on round-trip loads.
+  - Writes are atomic via AtomicFileWriter (fsync + rename).
   - Errors are handled consistently (corrupt/missing → return defaults).
 """
-
 from __future__ import annotations
 
 import json
@@ -21,24 +18,22 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.infra.fs.atomic_writer import AtomicFileWriter
 from src.infra.settings.defaults import (
     GLOBAL_CONFIG_FILENAME,
     MACHINE_DEFAULTS,
-    MACHINE_MANAGED_KEYS,
+    MACHINE_PERSISTABLE_KEYS,
     PROJECT_CONFIG_FILENAME,
     PROJECT_DEFAULTS,
-    PROJECT_MANAGED_KEYS,
 )
 from src.infra.settings.models import MachineSettings, ProjectSettings
 
-# Keys that must never appear in any persisted file
 _SECRET_KEYS: frozenset[str] = frozenset(
     {"github_token", "anthropic_api_key", "gemini_api_key", "openrouter_api_key"}
 )
 
 
 def _strip_secrets(data: dict[str, Any]) -> dict[str, Any]:
-    """Remove any secret key from *data* before writing to disk."""
     return {k: v for k, v in data.items() if k not in _SECRET_KEYS}
 
 
@@ -57,17 +52,13 @@ class GlobalConfigStore:
     """
     Read/write ~/.orchestrator/config.json.
 
-    Only stores the ``MACHINE_MANAGED_KEYS`` subset of MachineSettings.
-    Preserves extra keys added manually by users.
+    Writes are atomic — a crash mid-write leaves the previous file intact.
+    Only stores MACHINE_PERSISTABLE_KEYS (project_name, redis_url).
     """
 
     def __init__(self, home: Path | None = None) -> None:
         self._home = Path(home) if home is not None else _resolve_orchestrator_home()
         self._path = self._home / GLOBAL_CONFIG_FILENAME
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     @property
     def config_path(self) -> Path:
@@ -80,54 +71,53 @@ class GlobalConfigStore:
     def exists(self) -> bool:
         return self._path.exists()
 
-    def load_raw(self) -> dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         """
-        Return the raw JSON dict from disk.  Missing keys are filled from
-        MACHINE_DEFAULTS.  Returns defaults unchanged if the file is absent.
+        Return the raw JSON dict from disk, merged with defaults.
+        Returns defaults unchanged if the file is absent or corrupt.
+        Secrets are stripped on read as defense-in-depth.
         """
+        base = {k: v for k, v in MACHINE_DEFAULTS.items() if k in MACHINE_PERSISTABLE_KEYS}
         if not self._path.exists():
-            return {k: v for k, v in MACHINE_DEFAULTS.items()
-                    if k in MACHINE_MANAGED_KEYS}
+            return base
         try:
             on_disk = json.loads(self._path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return {k: v for k, v in MACHINE_DEFAULTS.items()
-                    if k in MACHINE_MANAGED_KEYS}
+            return base
 
-        result = {k: v for k, v in MACHINE_DEFAULTS.items()
-                  if k in MACHINE_MANAGED_KEYS}
-        result.update(_strip_secrets(on_disk))
-        return result
+        base.update(_strip_secrets(on_disk))
+        return base
+
+    # Alias kept for callers that used the old name
+    def load_raw(self) -> dict[str, Any]:
+        return self.load()
 
     def save(self, data: dict[str, Any]) -> None:
         """
-        Persist *data* to config.json.  Secrets are stripped before writing.
-        Creates the .orchestrator directory if it does not exist.
+        Atomically persist data to config.json. Secrets are stripped.
         """
         safe = _strip_secrets(data)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(safe, indent=2, default=str),
-            encoding="utf-8",
-        )
+        AtomicFileWriter.write_text(self._path, json.dumps(safe, indent=2, default=str))
 
     def update(self, **kwargs: Any) -> None:
-        """Merge *kwargs* into the existing config, preserving unknown keys."""
-        current = self.load_raw()
-        current.update({k: v for k, v in _strip_secrets(kwargs).items()
-                        if v is not None})
+        """Merge kwargs into the existing config, preserving unknown keys."""
+        current = self.load()
+        current.update({k: v for k, v in _strip_secrets(kwargs).items() if v is not None})
         self.save(current)
 
-    def generate_defaults(self) -> dict[str, Any]:
-        """Write defaults and return the result.  Called on first run."""
+    def initialize(self) -> dict[str, Any]:
+        """
+        Write defaults and return them. Called on first run / --defaults flag.
+        Replaces the old generate_defaults() name.
+        """
         data = {k: v for k, v in MACHINE_DEFAULTS.items()
-                if k in MACHINE_MANAGED_KEYS and v is not None}
+                if k in MACHINE_PERSISTABLE_KEYS and v is not None}
         self.save(data)
         return data
 
-    # Backward-compat alias used by legacy OrchestratorConfigManager callers
-    def load(self) -> dict[str, Any]:
-        return self.load_raw()
+    # Backward-compat alias
+    def generate_defaults(self) -> dict[str, Any]:
+        return self.initialize()
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +128,7 @@ class ProjectConfigStore:
     """
     Read/write <project_home>/project.json.
 
-    Only stores non-secret ProjectSettings fields.
-    github_token is explicitly excluded from persistence.
+    Writes are atomic. github_token is never persisted.
     """
 
     def __init__(self, project_home: Path) -> None:
@@ -153,9 +142,7 @@ class ProjectConfigStore:
         return self._path.exists()
 
     def load(self) -> ProjectSettings:
-        """
-        Return ProjectSettings from disk.  Falls back to defaults on error.
-        """
+        """Return ProjectSettings from disk. Falls back to defaults on error."""
         if not self._path.exists():
             return ProjectSettings(**PROJECT_DEFAULTS)
         try:
@@ -169,11 +156,9 @@ class ProjectConfigStore:
 
     def save(self, settings: ProjectSettings) -> None:
         """
-        Persist settings to project.json.  Secrets are stripped.
-        Preserves extra keys already in the file.
+        Atomically persist settings to project.json.
+        Secrets stripped. Extra user keys preserved.
         """
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-
         existing: dict[str, Any] = {}
         if self._path.exists():
             try:
@@ -181,11 +166,6 @@ class ProjectConfigStore:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Merge, then strip any secrets that might have crept in
         existing.update(settings.to_dict())
         safe = _strip_secrets(existing)
-
-        self._path.write_text(
-            json.dumps(safe, indent=2, default=str),
-            encoding="utf-8",
-        )
+        AtomicFileWriter.write_text(self._path, json.dumps(safe, indent=2, default=str))

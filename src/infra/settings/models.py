@@ -1,114 +1,63 @@
 """
 src/infra/settings/models.py — Typed configuration models.
-
-Three explicit concerns, kept separate:
-
-  MachineSettings   — global orchestrator behaviour (mode, timeouts, redis_url,
-                       orchestrator_home, project_name).  Persisted in config.json.
-  ProjectSettings   — non-secret, per-project data (source_repo_url, github_owner,
-                       github_repo, github_base_branch).  Persisted in project.json.
-  SecretSettings    — credentials that must NEVER be written to any JSON file.
-                       Loaded only from env / .env / Docker secrets.
-  ProjectPaths      — derived filesystem layout; computed, never stored.
-
-Rule: only MachineSettings and ProjectSettings may be persisted.
-      SecretSettings is env-only.  ProjectPaths is computed on demand.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from functools import cached_property
 
 
 # ---------------------------------------------------------------------------
-# MachineSettings — orchestrator-global, per-machine, non-secret
+# Errors
+# ---------------------------------------------------------------------------
+
+class ConfigurationError(RuntimeError):
+    """Raised when a required configuration value is missing."""
+
+
+# ---------------------------------------------------------------------------
+# MachineSettings
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class MachineSettings:
     """
-    Global orchestrator runtime settings.
-
-    These are shared across all projects on this machine and are safe to
-    persist in ~/.orchestrator/config.json (they contain no secrets).
-
-    Attributes
-    ----------
-    mode:
-        "dry-run" uses in-memory stubs; "real" activates Redis and live CLIs.
-    agent_id:
-        Identity of this worker process (used for lease ownership).
-    redis_url:
-        Redis connection string; only relevant in "real" mode.
-    task_timeout:
-        Maximum seconds to wait for an agent CLI to complete a task.
-    orchestrator_home:
-        Global home directory; mirrors ~/.gemini or ~/.claude conventions.
-    project_name:
-        Active project context.  All project-scoped paths are derived from this.
+    Global orchestrator runtime settings. Safe to persist in config.json.
     """
-
     mode: str = "dry-run"
     agent_id: str = "agent-worker-001"
     redis_url: str = "redis://localhost:6379/0"
     task_timeout: int = 600
-    orchestrator_home: Path = field(
-        default_factory=lambda: Path.home() / ".orchestrator"
-    )
+    orchestrator_home: Path = field(default_factory=lambda: Path.home() / ".orchestrator")
     project_name: str | None = None
-
-    # Keys that the config store is allowed to persist (no secrets, no derived values)
-    PERSISTABLE_KEYS: frozenset[str] = field(
-        default=frozenset({"project_name", "redis_url"}),
-        init=False,
-        repr=False,
-        compare=False,
-    )
 
     def to_persistable_dict(self) -> dict:
         """Return only the keys safe to write to config.json."""
-        return {
-            k: v
-            for k, v in {
-                "project_name": self.project_name,
-                "redis_url": self.redis_url,
-            }.items()
-            if v is not None
-        }
+        return {k: v for k, v in {
+            "project_name": self.project_name,
+            "redis_url": self.redis_url,
+        }.items() if v is not None}
 
 
 # ---------------------------------------------------------------------------
-# ProjectSettings — per-project, non-secret
+# ProjectSettings
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ProjectSettings:
     """
-    Non-secret settings specific to a single orchestrated project.
-
-    Safe to persist in project.json.  Must NOT contain any credentials.
-
-    Attributes
-    ----------
-    source_repo_url:
-        Upstream git repo cloned on first init (SSH or HTTPS URL).
-    github_owner:
-        GitHub owner (username or org) for the target repository.
-    github_repo:
-        GitHub repository name, without the owner prefix.
-    github_base_branch:
-        Branch that goal PRs target (default: "main").
+    Non-secret, per-project settings. Safe to persist in project.json.
+    Must NOT contain any credentials.
     """
-
     source_repo_url: str | None = None
     github_owner: str | None = None
     github_repo: str | None = None
     github_base_branch: str = "main"
 
     @property
-    def github_configured(self) -> bool:
-        """Return True if the non-secret GitHub fields are set."""
+    def github_repo_configured(self) -> bool:
+        """True if the non-secret GitHub fields (owner + repo) are set."""
         return bool(self.github_owner and self.github_repo)
 
     def to_dict(self) -> dict:
@@ -130,36 +79,62 @@ class ProjectSettings:
 
 
 # ---------------------------------------------------------------------------
-# SecretSettings — env-only, never persisted
+# SecretSettings
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SecretSettings:
     """
-    Credentials and tokens loaded exclusively from environment variables.
-
-    This dataclass must NEVER be serialised or written to any file.
-
-    Attributes
-    ----------
-    anthropic_api_key:
-        Used by "claude" and "pi (anthropic)" runtimes.  Env: ANTHROPIC_API_KEY.
-    gemini_api_key:
-        Used by "gemini" and "pi (gemini)" runtimes.  Env: GEMINI_API_KEY.
-    openrouter_api_key:
-        Used by "pi (openrouter)" runtime.  Env: OPENROUTER_API_KEY.
-    github_token:
-        GitHub PAT for the PR-driven workflow.  Env: GITHUB_TOKEN.
-        Moved here from ProjectSettings to prevent accidental persistence.
+    Credentials loaded exclusively from environment variables.
+    MUST NEVER be serialised or written to any file.
     """
-
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
     github_token: str = ""
 
+    # ------------------------------------------------------------------
+    # Explicit validation — fail fast with clear messages
+    # ------------------------------------------------------------------
+
+    def require_github_token(self) -> str:
+        """Return the token or raise ConfigurationError with an actionable message."""
+        if not self.github_token:
+            raise ConfigurationError(
+                "GITHUB_TOKEN is not set.\n"
+                "Export it before running this command:\n"
+                "  export GITHUB_TOKEN=ghp_..."
+            )
+        return self.github_token
+
+    def require_anthropic_key(self) -> str:
+        if not self.anthropic_api_key:
+            raise ConfigurationError(
+                "ANTHROPIC_API_KEY is not set.\n"
+                "Export it before running this command:\n"
+                "  export ANTHROPIC_API_KEY=sk-ant-..."
+            )
+        return self.anthropic_api_key
+
+    def require_gemini_key(self) -> str:
+        if not self.gemini_api_key:
+            raise ConfigurationError(
+                "GEMINI_API_KEY is not set.\n"
+                "Export it before running this command:\n"
+                "  export GEMINI_API_KEY=..."
+            )
+        return self.gemini_api_key
+
+    def require_openrouter_key(self) -> str:
+        if not self.openrouter_api_key:
+            raise ConfigurationError(
+                "OPENROUTER_API_KEY is not set.\n"
+                "Export it before running this command:\n"
+                "  export OPENROUTER_API_KEY=..."
+            )
+        return self.openrouter_api_key
+
     def __repr__(self) -> str:
-        """Never expose secret values in repr output."""
         fields = ", ".join(
             f"{k}={'***' if v else 'unset'}"
             for k, v in {
@@ -173,33 +148,45 @@ class SecretSettings:
 
 
 # ---------------------------------------------------------------------------
-# SettingsContext — the single injectable unit
+# SettingsContext
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SettingsContext:
     """
-    Single object that bundles all configuration concerns.
+    Single injectable bundle of all configuration concerns.
 
-    Application code should receive this via constructor injection.
-    It must not import any settings module directly.
-
-    Attributes
-    ----------
-    machine:
-        Global, per-machine orchestrator settings.
-    project:
-        Per-project non-secret settings.
-    secrets:
-        Credentials loaded from environment only.
+    Application code receives this via constructor injection — never imports
+    settings modules directly.
     """
-
     machine: MachineSettings = field(default_factory=MachineSettings)
     project: ProjectSettings = field(default_factory=ProjectSettings)
     secrets: SecretSettings = field(default_factory=SecretSettings)
 
     # ------------------------------------------------------------------
-    # Convenience delegations (avoids double-indirection at call sites)
+    # Derived paths — computed once, cached
+    # ------------------------------------------------------------------
+
+    @cached_property
+    def paths(self):
+        """
+        Fully-resolved ProjectPaths for the active project.
+
+        Computed once on first access and cached.  Raises ValueError if
+        no project is configured.
+        """
+        from src.infra.project_paths import ProjectPaths
+        if not self.machine.project_name:
+            raise ValueError(
+                "No project configured. Run `orchestrator init` first."
+            )
+        return ProjectPaths.for_project(
+            self.machine.orchestrator_home,
+            self.machine.project_name,
+        )
+
+    # ------------------------------------------------------------------
+    # Convenience delegations
     # ------------------------------------------------------------------
 
     @property
@@ -219,3 +206,11 @@ class SettingsContext:
         if not self.machine.project_name:
             raise ValueError("No project configured. Run `orchestrator init` first.")
         return self.machine.orchestrator_home / "projects" / self.machine.project_name
+
+    # ------------------------------------------------------------------
+    # GitHub convenience — full check (repo config + secret)
+    # ------------------------------------------------------------------
+
+    def github_fully_configured(self) -> bool:
+        """True when non-secret fields AND the token are all present."""
+        return self.project.github_repo_configured and bool(self.secrets.github_token)
