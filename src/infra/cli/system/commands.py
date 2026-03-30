@@ -52,7 +52,8 @@ def system_start(
     Boot order is enforced: workers must heartbeat before reconciler starts.
     """
     import subprocess
-    from src.infra.settings import GlobalConfigStore, SettingsService
+    from src.infra.settings import GlobalConfigStore
+from src.infra.container import AppContainer
 
     store = GlobalConfigStore()
     if not store.exists():
@@ -63,11 +64,11 @@ def system_start(
         )
 
     if not skip_dep_check:
-        from src.infra.settings import SettingsService
+        from src.infra.container import AppContainer
         from src.infra.cli.wizard.steps.deps import print_dep_table
 
         click.echo("Checking dependencies...")
-        report = print_dep_table(SettingsService().load().machine.redis_url)
+        report = print_dep_table(AppContainer.from_env().ctx.machine.redis_url)
         if not report.can_start:
             die(
                 "Required dependencies are not available. "
@@ -186,8 +187,8 @@ def run_worker():
     """
     from src.infra.factory import build_event_port, build_worker_handler, build_agent_registry
 
-    from src.infra.settings import SettingsService
-    agent_id = os.getenv("AGENT_ID") or SettingsService().load().machine.agent_id
+    from src.infra.container import AppContainer
+    agent_id = os.getenv("AGENT_ID") or AppContainer.from_env().ctx.machine.agent_id
     events   = build_event_port()
     registry = build_agent_registry()
     handler  = build_worker_handler()
