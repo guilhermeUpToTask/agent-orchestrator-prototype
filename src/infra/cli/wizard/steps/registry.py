@@ -1,6 +1,7 @@
 """
 src/infra/cli/wizard/steps/registry.py — Wizard Step 3: agent registry setup.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -17,11 +18,12 @@ def setup_registry(
     register a first agent so `orchestrator start` can succeed immediately.
     """
     if registry_factory is None:
-        import os
-        os.environ.setdefault("PROJECT_NAME", config_data["project_name"])
-        os.environ.setdefault("REDIS_URL", config_data["redis_url"])
-        from src.infra.factory import build_agent_registry  # noqa: PLC0415
-        registry_factory = build_agent_registry
+        from src.infra.container import AppContainer
+
+        def _factory():
+            return AppContainer.from_env(project_name=config_data["project_name"]).agent_registry
+
+        registry_factory = _factory
 
     try:
         registry = registry_factory()
