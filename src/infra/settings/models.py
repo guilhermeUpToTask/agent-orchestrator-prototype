@@ -1,6 +1,7 @@
 """
 src/infra/settings/models.py — Typed configuration models.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from functools import cached_property
 # Errors
 # ---------------------------------------------------------------------------
 
+
 class ConfigurationError(RuntimeError):
     """Raised when a required configuration value is missing."""
 
@@ -20,13 +22,14 @@ class ConfigurationError(RuntimeError):
 # MachineSettings
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class MachineSettings:
     """
     Global orchestrator runtime settings. Safe to persist in config.json.
     """
+
     mode: str = "dry-run"
-    agent_id: str = "agent-worker-001"
     redis_url: str = "redis://localhost:6379/0"
     task_timeout: int = 600
     orchestrator_home: Path = field(default_factory=lambda: Path.home() / ".orchestrator")
@@ -34,15 +37,21 @@ class MachineSettings:
 
     def to_persistable_dict(self) -> dict:
         """Return only the keys safe to write to config.json."""
-        return {k: v for k, v in {
-            "project_name": self.project_name,
-            "redis_url": self.redis_url,
-        }.items() if v is not None}
+        return {
+            k: v
+            for k, v in {
+                "project_name": self.project_name,
+                "redis_url": self.redis_url,
+                "task_timeout": self.task_timeout,
+            }.items()
+            if v is not None
+        }
 
 
 # ---------------------------------------------------------------------------
 # ProjectSettings
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ProjectSettings:
@@ -50,6 +59,7 @@ class ProjectSettings:
     Non-secret, per-project settings. Safe to persist in project.json.
     Must NOT contain any credentials.
     """
+
     source_repo_url: str | None = None
     github_owner: str | None = None
     github_repo: str | None = None
@@ -82,12 +92,14 @@ class ProjectSettings:
 # SecretSettings
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SecretSettings:
     """
     Credentials loaded exclusively from environment variables.
     MUST NEVER be serialised or written to any file.
     """
+
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
@@ -151,6 +163,7 @@ class SecretSettings:
 # SettingsContext
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SettingsContext:
     """
@@ -159,6 +172,7 @@ class SettingsContext:
     Application code receives this via constructor injection — never imports
     settings modules directly.
     """
+
     machine: MachineSettings = field(default_factory=MachineSettings)
     project: ProjectSettings = field(default_factory=ProjectSettings)
     secrets: SecretSettings = field(default_factory=SecretSettings)
@@ -176,10 +190,9 @@ class SettingsContext:
         no project is configured.
         """
         from src.infra.project_paths import ProjectPaths
+
         if not self.machine.project_name:
-            raise ValueError(
-                "No project configured. Run `orchestrator init` first."
-            )
+            raise ValueError("No project configured. Run `orchestrator init` first.")
         return ProjectPaths.for_project(
             self.machine.orchestrator_home,
             self.machine.project_name,
