@@ -8,6 +8,7 @@ Steps:
   4. Project spec         — tech stack, constraints  → projects/<n>/project_spec.yaml
   5. Agent registry       — register first agent (optional)
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,12 +16,12 @@ from typing import Callable
 
 import click
 
-from src.infra.cli.wizard.steps.config   import collect_orchestrator_config, collect_project_settings
-from src.infra.cli.wizard.steps.deps     import check_and_report
-from src.infra.cli.wizard.steps.github   import collect_and_setup_github
+from src.infra.cli.wizard.steps.config import collect_orchestrator_config, collect_project_settings
+from src.infra.cli.wizard.steps.deps import check_and_report
+from src.infra.cli.wizard.steps.github import collect_and_setup_github
 from src.infra.cli.wizard.steps.registry import setup_registry
-from src.infra.cli.wizard.steps.spec     import collect_and_write_spec
-from src.infra.settings import GlobalConfigStore, SettingsService, ProjectSettings, ProjectConfigStore
+from src.infra.cli.wizard.steps.spec import collect_and_write_spec
+from src.infra.settings import GlobalConfigStore, ProjectSettings, ProjectConfigStore
 
 
 def run_wizard(
@@ -46,6 +47,7 @@ def run_wizard(
     """
     total_steps = 6 if not skip_spec else 5
     store = GlobalConfigStore(home)
+    orch_home = store.orchestrator_dir
 
     _print_banner()
 
@@ -54,7 +56,7 @@ def run_wizard(
     # ------------------------------------------------------------------
     click.echo(_section(f"Step 1 of {total_steps} — Orchestrator Configuration"))
     click.echo("  These settings apply to this machine, not just this project.\n")
-    orch_data = collect_orchestrator_config(manager)
+    orch_data = collect_orchestrator_config(store)
     click.echo()
 
     # Persist orchestrator config IMMEDIATELY after Step 1 so it is never
@@ -82,19 +84,14 @@ def run_wizard(
     click.echo(_section(f"Step 3 of {total_steps} — Project Settings"))
     click.echo("  These settings belong to this project, not the machine.\n")
 
-    # resolve orchestrator_home from the data collected in step 1
+    # resolve orchestrator_home from the store directly
     project_settings_data = collect_project_settings(
         project_name=orch_data["project_name"],
-        orchestrator_home=orch_cfg.orchestrator_home,
+        orchestrator_home=orch_home,
     )
 
     # Persist project settings
-    import os
-    from pathlib import Path
-    home_raw = orch_data.get("orchestrator_home") or os.environ.get("ORCHESTRATOR_HOME")
-    orch_home = Path(home_raw).expanduser() if home_raw else Path.home() / ".orchestrator"
     project_home = orch_home / "projects" / orch_data["project_name"]
-    from src.infra.settings import ProjectConfigStore, ProjectSettings
     ps_store = ProjectConfigStore(project_home)
     ps_store.save(ProjectSettings(**project_settings_data))
     click.echo(f"  ✓ Project settings written → {ps_store.settings_path}")
@@ -122,10 +119,12 @@ def run_wizard(
     # ------------------------------------------------------------------
     if not skip_spec:
         click.echo(_section(f"Step 6 of {total_steps} — GitHub Setup"))
-        collect_and_setup_github({
-            "project_name":    orch_data["project_name"],
-            "orchestrator_home": str(orch_cfg.orchestrator_home),
-        })
+        collect_and_setup_github(
+            {
+                "project_name": orch_data["project_name"],
+                "orchestrator_home": str(orch_home),
+            }
+        )
 
     click.echo(f"\n✓  Setup complete! Active project: {orch_data['project_name']}")
     click.echo("\n  Useful next steps:")
