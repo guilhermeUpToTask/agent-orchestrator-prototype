@@ -1,6 +1,7 @@
 """
 src/infra/settings/defaults.py — Default values and schema constants.
 """
+
 from __future__ import annotations
 from pathlib import Path
 
@@ -10,7 +11,6 @@ from pathlib import Path
 
 MACHINE_DEFAULTS: dict = {
     "mode": "dry-run",
-    "agent_id": "agent-worker-001",
     "redis_url": "redis://localhost:6379/0",
     "task_timeout": 600,
     "orchestrator_home": Path.home() / ".orchestrator",
@@ -19,7 +19,7 @@ MACHINE_DEFAULTS: dict = {
 
 # Keys persisted by the wizard in config.json — subset of MachineSettings.
 # Schema metadata lives here, not on the dataclass.
-MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset({"project_name", "redis_url"})
+MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset({"project_name", "redis_url", "task_timeout"})
 
 # Backward-compat alias used by a few test files
 MACHINE_MANAGED_KEYS = MACHINE_PERSISTABLE_KEYS

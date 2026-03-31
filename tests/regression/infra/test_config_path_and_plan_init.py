@@ -12,6 +12,7 @@ BUG 2 — `plan init` crashes with raw SpecNotFoundError when no project configu
   Fixed: plan commands call _require_project() first and wrap
   build_planner_orchestrator() to catch SpecNotFoundError.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,11 @@ from src.infra.cli.plan.commands import plan_group
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_orchestrator_home() -> Path:
     """Mirror of the internal helper — used in tilde-expansion test."""
     import os
+
     raw = os.environ.get("ORCHESTRATOR_HOME")
     if raw:
         return Path(raw).expanduser()
@@ -41,8 +44,8 @@ def _resolve_orchestrator_home() -> Path:
 # BUG 1 — config.json path resolution
 # ===========================================================================
 
-class TestConfigPathResolution:
 
+class TestConfigPathResolution:
     def test_store_uses_orchestrator_home_env_not_cwd(self, tmp_path, monkeypatch):
         """
         REGRESSION: manager used Path.cwd() so the file ended up in a random
@@ -134,11 +137,13 @@ class TestConfigPathResolution:
         prompts = iter(["testing", "redis://localhost:6379/0", ""])
         monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
 
-        failing_report = DependencyReport(results=[
-            DepResult("redis", ok=False, message="Connection refused"),
-            DepResult("git",   ok=True,  message="ok"),
-            DepResult("gemini-cli", ok=True, message="ok", is_runtime=True),
-        ])
+        failing_report = DependencyReport(
+            results=[
+                DepResult("redis", ok=False, message="Connection refused"),
+                DepResult("git", ok=True, message="ok"),
+                DepResult("gemini-cli", ok=True, message="ok", is_runtime=True),
+            ]
+        )
 
         with patch("src.infra.cli.wizard.steps.deps.DependencyChecker") as MockChecker:
             MockChecker.return_value.run.return_value = failing_report
@@ -179,11 +184,13 @@ class TestConfigPathResolution:
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(home))
 
         store = GlobalConfigStore()
-        store.save({
-            "project_name": "p",
-            "github_token": "ghp_SHOULD_NOT_PERSIST",
-            "anthropic_api_key": "sk-SHOULD_NOT_PERSIST",
-        })
+        store.save(
+            {
+                "project_name": "p",
+                "github_token": "ghp_SHOULD_NOT_PERSIST",
+                "anthropic_api_key": "sk-SHOULD_NOT_PERSIST",
+            }
+        )
 
         on_disk = json.loads(store.config_path.read_text())
         assert "github_token" not in on_disk
@@ -194,8 +201,8 @@ class TestConfigPathResolution:
 # BUG 2 — `plan init` crashing with raw SpecNotFoundError
 # ===========================================================================
 
-class TestPlanInitNoProject:
 
+class TestPlanInitNoProject:
     def test_plan_init_exits_cleanly_when_no_project_configured(self):
         """
         REGRESSION: without a project_name, plan init raised SpecNotFoundError
@@ -228,7 +235,11 @@ class TestPlanInitNoProject:
         """When a valid project IS configured, plan init must display the project name."""
         home = tmp_path / "orch_home"
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(home))
-        monkeypatch.setenv("PROJECT_NAME", "testing")
+
+        from src.infra.settings.store import GlobalConfigStore
+
+        store = GlobalConfigStore(home=home)
+        store.save({"project_name": "testing"})
 
         project_dir = home / "projects" / "testing"
         project_dir.mkdir(parents=True)
@@ -241,6 +252,7 @@ class TestPlanInitNoProject:
             "directories": [],
         }
         import yaml
+
         (project_dir / "project_spec.yaml").write_text(yaml.dump(spec_data), encoding="utf-8")
 
         runner = CliRunner()
@@ -255,7 +267,7 @@ class TestPlanInitNoProject:
             result = runner.invoke(
                 plan_group,
                 ["init"],
-                env={"AGENT_MODE": "dry-run", "PROJECT_NAME": "testing"},
+                env={"AGENT_MODE": "dry-run"},
                 catch_exceptions=False,
             )
 
@@ -264,8 +276,10 @@ class TestPlanInitNoProject:
     def test_plan_architect_exits_cleanly_when_no_project(self):
         runner = CliRunner()
         result = runner.invoke(
-            plan_group, ["architect"],
-            env={"AGENT_MODE": "dry-run"}, catch_exceptions=False,
+            plan_group,
+            ["architect"],
+            env={"AGENT_MODE": "dry-run"},
+            catch_exceptions=False,
         )
         assert result.exit_code != 0
         assert "SpecNotFoundError" not in (result.output + str(result.exception or ""))
@@ -274,8 +288,10 @@ class TestPlanInitNoProject:
     def test_plan_review_exits_cleanly_when_no_project(self):
         runner = CliRunner()
         result = runner.invoke(
-            plan_group, ["review"],
-            env={"AGENT_MODE": "dry-run"}, catch_exceptions=False,
+            plan_group,
+            ["review"],
+            env={"AGENT_MODE": "dry-run"},
+            catch_exceptions=False,
         )
         assert result.exit_code != 0
         assert "SpecNotFoundError" not in (result.output + str(result.exception or ""))
@@ -284,8 +300,10 @@ class TestPlanInitNoProject:
     def test_plan_status_exits_cleanly_when_no_project(self):
         runner = CliRunner()
         result = runner.invoke(
-            plan_group, ["status"],
-            env={"AGENT_MODE": "dry-run"}, catch_exceptions=False,
+            plan_group,
+            ["status"],
+            env={"AGENT_MODE": "dry-run"},
+            catch_exceptions=False,
         )
         assert result.exit_code != 0
         assert "SpecNotFoundError" not in (result.output + str(result.exception or ""))

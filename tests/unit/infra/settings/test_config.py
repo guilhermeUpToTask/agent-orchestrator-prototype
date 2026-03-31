@@ -1,3 +1,4 @@
+```python
 """
 tests/unit/infra/test_config.py — Regression tests for SettingsService / MachineSettings.
 
@@ -13,13 +14,14 @@ from pathlib import Path
 import pytest
 
 from src.infra.settings import SettingsService
-from src.infra.settings.models import MachineSettings, SecretSettings
+from src.infra.settings.models import ConfigurationError, MachineSettings, SecretSettings
 from src.infra.project_paths import ProjectPaths
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _svc(tmp_path: Path) -> SettingsService:
     """SettingsService pointed at tmp_path so no real ~/.orchestrator is touched."""
@@ -30,16 +32,12 @@ def _svc(tmp_path: Path) -> SettingsService:
 # MachineSettings defaults
 # ---------------------------------------------------------------------------
 
+
 class TestMachineSettingsDefaults:
     def test_default_mode(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
         ctx = _svc(tmp_path).load()
         assert ctx.machine.mode == "dry-run"
-
-    def test_default_agent_id(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        ctx = _svc(tmp_path).load()
-        assert ctx.machine.agent_id == "agent-worker-001"
 
     def test_default_redis_url(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -60,6 +58,7 @@ class TestMachineSettingsDefaults:
 # ---------------------------------------------------------------------------
 # SecretSettings defaults
 # ---------------------------------------------------------------------------
+
 
 class TestSecretSettingsDefaults:
     def test_api_keys_empty_by_default(self, tmp_path, monkeypatch):
@@ -84,8 +83,9 @@ class TestSecretSettingsDefaults:
 
 
 # ---------------------------------------------------------------------------
-# Env-var priority
+# Env-var constraints and explicit priorities
 # ---------------------------------------------------------------------------
+
 
 class TestEnvVarPriority:
     def test_mode_from_env(self, tmp_path, monkeypatch):
@@ -93,12 +93,6 @@ class TestEnvVarPriority:
         monkeypatch.setenv("AGENT_MODE", "real")
         ctx = _svc(tmp_path).load()
         assert ctx.machine.mode == "real"
-
-    def test_agent_id_from_env(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("AGENT_ID", "worker-99")
-        ctx = _svc(tmp_path).load()
-        assert ctx.machine.agent_id == "worker-99"
 
     def test_redis_url_from_env(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -111,12 +105,6 @@ class TestEnvVarPriority:
         monkeypatch.setenv("TASK_TIMEOUT_SECONDS", "120")
         ctx = _svc(tmp_path).load()
         assert ctx.machine.task_timeout == 120
-
-    def test_project_name_from_env(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "my-api")
-        ctx = _svc(tmp_path).load()
-        assert ctx.machine.project_name == "my-api"
 
     def test_anthropic_api_key_from_env(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -156,11 +144,11 @@ class TestEnvVarPriority:
 # Path derivation
 # ---------------------------------------------------------------------------
 
+
 class TestPathDerivation:
     def test_paths_scoped_under_project(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "my-api")
-        ctx = _svc(tmp_path).load()
+        ctx = _svc(tmp_path).load(project_name="my-api")
         paths = ProjectPaths.for_project(ctx.machine.orchestrator_home, ctx.machine.project_name)
         project = tmp_path / "projects" / "my-api"
         assert paths.tasks_dir == project / "tasks"
@@ -172,21 +160,21 @@ class TestPathDerivation:
 
     def test_project_home(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "my-api")
-        ctx = _svc(tmp_path).load()
+        ctx = _svc(tmp_path).load(project_name="my-api")
         assert ctx.project_home == tmp_path / "projects" / "my-api"
 
     def test_project_home_raises_without_project_name(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.delenv("PROJECT_NAME", raising=False)
+        monkeypatch.delenv("PROJECT_NAME", raising=False)  # Harmless extra step
         ctx = _svc(tmp_path).load()
-        with pytest.raises(ValueError, match="No project configured"):
+        with pytest.raises(ConfigurationError, match="No active project configured"):
             _ = ctx.project_home
 
 
 # ---------------------------------------------------------------------------
 # for_testing factory
 # ---------------------------------------------------------------------------
+
 
 class TestForTesting:
     def test_builds_context_without_disk_io(self, tmp_path):

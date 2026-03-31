@@ -50,6 +50,7 @@ from src.infra.settings.store import GlobalConfigStore, ProjectConfigStore
 
 
 class SettingsService:
+    # TODO: Update containered doc.
     """
     Assembles a SettingsContext from all configuration sources.
 
@@ -77,8 +78,7 @@ class SettingsService:
         Parameters
         ----------
         project_name:
-            Override the project name from the environment/config.json.
-            Useful for CLI commands that accept --project.
+            Override the project name from config.json.
         """
         machine = self._load_machine(project_name_override=project_name)
         project = self._load_project(machine)
@@ -166,40 +166,29 @@ class SettingsService:
     # ------------------------------------------------------------------
 
     def _load_machine(self, project_name_override: str | None = None) -> MachineSettings:
-        """Build MachineSettings from env > config.json > defaults."""
+        """Build MachineSettings from explicitly allowed env vars > config.json > overrides > defaults."""
         stored = self._global_store.load_raw()
 
-        # Env vars override config.json values
+        # Only AGENT_MODE and ORCHESTRATOR_HOME read from os.environ
         mode = os.environ.get("AGENT_MODE") or stored.get("mode") or MACHINE_DEFAULTS["mode"]
-        agent_id = os.environ.get("AGENT_ID") or MACHINE_DEFAULTS["agent_id"]
-        redis_url = (
-            os.environ.get("REDIS_URL")
-            or stored.get("redis_url")
-            or MACHINE_DEFAULTS["redis_url"]
-        )
-        task_timeout_raw = os.environ.get("TASK_TIMEOUT_SECONDS")
-        task_timeout = (
-            int(task_timeout_raw) if task_timeout_raw else MACHINE_DEFAULTS["task_timeout"]
-        )
 
         home_raw = os.environ.get("ORCHESTRATOR_HOME")
         orchestrator_home = (
-            Path(home_raw).expanduser()
-            if home_raw
-            else MACHINE_DEFAULTS["orchestrator_home"]
+            Path(home_raw).expanduser() if home_raw else MACHINE_DEFAULTS["orchestrator_home"]
         )
 
-        project_name = (
-            project_name_override
-            or os.environ.get("PROJECT_NAME")
-            or stored.get("project_name")
-        )
+        redis_url = stored.get("redis_url") or MACHINE_DEFAULTS["redis_url"]
+        task_timeout = stored.get("task_timeout") or MACHINE_DEFAULTS["task_timeout"]
+
+        # Strictly ignore os.environ["PROJECT_NAME"].
+        # The active context MUST come from explicit CLI overrides or config.json.
+        # This prevents sticky container environment variables from hijacking the context.
+        project_name = project_name_override or stored.get("project_name")
 
         return MachineSettings(
             mode=mode,
-            agent_id=agent_id,
             redis_url=redis_url,
-            task_timeout=task_timeout,
+            task_timeout=int(task_timeout),
             orchestrator_home=orchestrator_home,
             project_name=project_name,
         )
@@ -208,9 +197,7 @@ class SettingsService:
         """Build ProjectSettings from project.json > defaults."""
         if not machine.project_name:
             return ProjectSettings(**PROJECT_DEFAULTS)
-        project_home = (
-            machine.orchestrator_home / "projects" / machine.project_name
-        )
+        project_home = machine.orchestrator_home / "projects" / machine.project_name
         return ProjectConfigStore(project_home).load()
 
     @staticmethod

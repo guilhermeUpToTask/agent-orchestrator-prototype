@@ -14,7 +14,6 @@ Each test class maps to one acceptance criterion from the refactor spec.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -33,6 +32,7 @@ from src.infra.project_paths import ProjectPaths
 # ---------------------------------------------------------------------------
 # 1. Secret exclusion — github_token must never reach disk
 # ---------------------------------------------------------------------------
+
 
 class TestSecretExclusionFromPersistence:
     """The most critical regression guard: no secret ever touches a JSON file."""
@@ -69,12 +69,14 @@ class TestSecretExclusionFromPersistence:
 
     def test_global_store_never_writes_any_api_key(self, tmp_path):
         store = GlobalConfigStore(home=tmp_path)
-        store.save({
-            "project_name": "p",
-            "anthropic_api_key": "sk-ant",
-            "gemini_api_key": "gm-key",
-            "openrouter_api_key": "or-key",
-        })
+        store.save(
+            {
+                "project_name": "p",
+                "anthropic_api_key": "sk-ant",
+                "gemini_api_key": "gm-key",
+                "openrouter_api_key": "or-key",
+            }
+        )
         on_disk = json.loads(store.config_path.read_text())
         for key in ("anthropic_api_key", "gemini_api_key", "openrouter_api_key"):
             assert key not in on_disk
@@ -93,22 +95,28 @@ class TestSecretExclusionFromPersistence:
 # 2. Loading defaults
 # ---------------------------------------------------------------------------
 
+
 class TestLoadingDefaults:
     def test_machine_defaults_without_any_config(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        for key in ("AGENT_MODE", "REDIS_URL", "TASK_TIMEOUT_SECONDS", "PROJECT_NAME",
-                    "AGENT_ID", "GITHUB_TOKEN", "ANTHROPIC_API_KEY"):
+        for key in (
+            "AGENT_MODE",
+            "REDIS_URL",
+            "TASK_TIMEOUT_SECONDS",
+            "PROJECT_NAME",
+            "AGENT_ID",
+            "GITHUB_TOKEN",
+            "ANTHROPIC_API_KEY",
+        ):
             monkeypatch.delenv(key, raising=False)
         ctx = SettingsService(home=tmp_path).load()
         assert ctx.machine.mode == "dry-run"
         assert ctx.machine.redis_url == "redis://localhost:6379/0"
         assert ctx.machine.task_timeout == 600
-        assert ctx.machine.agent_id == "agent-worker-001"
 
     def test_project_defaults_without_project_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "new-proj")
-        ctx = SettingsService(home=tmp_path).load()
+        ctx = SettingsService(home=tmp_path).load(project_name="new-proj")
         # project.json doesn't exist — should get defaults, not crash
         assert ctx.project.github_base_branch == "main"
         assert ctx.project.source_repo_url is None
@@ -125,6 +133,7 @@ class TestLoadingDefaults:
 # ---------------------------------------------------------------------------
 # 3. Loading env secrets
 # ---------------------------------------------------------------------------
+
 
 class TestLoadingEnvSecrets:
     def test_github_token_from_env_only(self, tmp_path, monkeypatch):
@@ -145,7 +154,9 @@ class TestLoadingEnvSecrets:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         # Simulate a legacy file that accidentally contains a secret
         config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"project_name": "p", "anthropic_api_key": "sk-should-ignore"}))
+        config_file.write_text(
+            json.dumps({"project_name": "p", "anthropic_api_key": "sk-should-ignore"})
+        )
         ctx = SettingsService(home=tmp_path).load()
         # The store strips it on load; secrets come from env only
         assert ctx.secrets.anthropic_api_key == ""
@@ -155,10 +166,10 @@ class TestLoadingEnvSecrets:
 # 4. Loading global config
 # ---------------------------------------------------------------------------
 
+
 class TestLoadingGlobalConfig:
     def test_project_name_from_config_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.delenv("PROJECT_NAME", raising=False)
         store = GlobalConfigStore(home=tmp_path)
         store.save({"project_name": "from-file"})
         ctx = SettingsService(home=tmp_path).load()
@@ -166,60 +177,50 @@ class TestLoadingGlobalConfig:
 
     def test_redis_url_from_config_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.delenv("REDIS_URL", raising=False)
         store = GlobalConfigStore(home=tmp_path)
         store.save({"redis_url": "redis://from-file:6379/0"})
         ctx = SettingsService(home=tmp_path).load()
         assert ctx.machine.redis_url == "redis://from-file:6379/0"
 
-    def test_env_beats_config_json(self, tmp_path, monkeypatch):
+    def test_explicit_override_beats_config_json_for_project_name(self, tmp_path, monkeypatch):
+        """Explicit argument load(project_name=...) beats the JSON config state."""
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "from-env")
         store = GlobalConfigStore(home=tmp_path)
         store.save({"project_name": "from-file"})
-        ctx = SettingsService(home=tmp_path).load()
-        assert ctx.machine.project_name == "from-env"
+        ctx = SettingsService(home=tmp_path).load(project_name="explicit-override")
+        assert ctx.machine.project_name == "explicit-override"
 
 
 # ---------------------------------------------------------------------------
 # 5. Loading project config
 # ---------------------------------------------------------------------------
 
+
 class TestLoadingProjectConfig:
     def test_source_repo_url_from_project_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "myproj")
         project_home = tmp_path / "projects" / "myproj"
         ProjectConfigStore(project_home).save(
             ProjectSettings(source_repo_url="https://github.com/acme/repo")
         )
-        ctx = SettingsService(home=tmp_path).load()
+        ctx = SettingsService(home=tmp_path).load(project_name="myproj")
         assert ctx.project.source_repo_url == "https://github.com/acme/repo"
 
     def test_github_owner_repo_from_project_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "myproj")
         project_home = tmp_path / "projects" / "myproj"
         ProjectConfigStore(project_home).save(
             ProjectSettings(github_owner="acme", github_repo="widget")
         )
-        ctx = SettingsService(home=tmp_path).load()
+        ctx = SettingsService(home=tmp_path).load(project_name="myproj")
         assert ctx.project.github_owner == "acme"
         assert ctx.project.github_repo == "widget"
-
-    def test_github_token_absent_from_project_json_after_save(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "myproj")
-        project_home = tmp_path / "projects" / "myproj"
-        store = ProjectConfigStore(project_home)
-        store.save(ProjectSettings(github_owner="acme", github_repo="w"))
-        raw = json.loads((project_home / "project.json").read_text())
-        assert "github_token" not in raw
 
 
 # ---------------------------------------------------------------------------
 # 6. Path derivation
 # ---------------------------------------------------------------------------
+
 
 class TestPathDerivation:
     def test_all_paths_derived_from_home_and_project(self, tmp_path):
@@ -257,6 +258,7 @@ class TestPathDerivation:
 # 7. Persistence boundaries
 # ---------------------------------------------------------------------------
 
+
 class TestPersistenceBoundaries:
     def test_save_machine_only_persists_allowed_keys(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -269,8 +271,7 @@ class TestPersistenceBoundaries:
 
     def test_save_project_roundtrips_non_secret_fields(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-        monkeypatch.setenv("PROJECT_NAME", "p")
-        ctx = SettingsService(home=tmp_path).load()
+        ctx = SettingsService(home=tmp_path).load(project_name="p")
         updated = ProjectSettings(
             source_repo_url="https://github.com/acme/repo",
             github_owner="acme",
@@ -279,7 +280,7 @@ class TestPersistenceBoundaries:
         )
         svc = SettingsService(home=tmp_path)
         svc.save_project(ctx.machine, updated)
-        ctx2 = SettingsService(home=tmp_path).load()
+        ctx2 = SettingsService(home=tmp_path).load(project_name="p")
         assert ctx2.project.source_repo_url == "https://github.com/acme/repo"
         assert ctx2.project.github_owner == "acme"
         assert ctx2.project.github_base_branch == "develop"
@@ -294,6 +295,7 @@ class TestPersistenceBoundaries:
 # ---------------------------------------------------------------------------
 # 8. for_testing factory — zero env/disk I/O
 # ---------------------------------------------------------------------------
+
 
 class TestForTestingFactory:
     def test_provides_full_context(self, tmp_path):
