@@ -7,6 +7,7 @@ Commands:
   orchestrator system worker         — run a worker event loop
   orchestrator system reconciler     — run the reconciler loop
 """
+
 from __future__ import annotations
 
 import os
@@ -15,7 +16,7 @@ import time
 import click
 import structlog
 
-from src.infra.cli.error_handler import die, warn, ok
+from src.infra.cli.error_handler import catch_domain_errors, die, warn, ok
 
 log = structlog.get_logger(__name__)
 
@@ -30,9 +31,10 @@ def system_group():
 
 
 @system_group.command("start")
-@click.option("--reconciler-interval", default=60,  help="Reconciler poll interval (seconds)")
+@catch_domain_errors
+@click.option("--reconciler-interval", default=60, help="Reconciler poll interval (seconds)")
 @click.option("--reconciler-stuck-age", default=120, help="Stuck-task threshold (seconds)")
-@click.option("--heartbeat-timeout",   default=30,  help="Worker heartbeat wait (seconds)")
+@click.option("--heartbeat-timeout", default=30, help="Worker heartbeat wait (seconds)")
 @click.option(
     "--skip-dep-check",
     is_flag=True,
@@ -53,7 +55,6 @@ def system_start(
     """
     import subprocess
     from src.infra.settings import GlobalConfigStore
-from src.infra.container import AppContainer
 
     store = GlobalConfigStore()
     if not store.exists():
@@ -63,28 +64,26 @@ from src.infra.container import AppContainer
             "     Run  orchestrator init  for interactive setup.\n"
         )
 
+    from src.infra.container import AppContainer
+
+    app = AppContainer.from_env()
+
     if not skip_dep_check:
-        from src.infra.container import AppContainer
         from src.infra.cli.wizard.steps.deps import print_dep_table
 
         click.echo("Checking dependencies...")
-        report = print_dep_table(AppContainer.from_env().ctx.machine.redis_url)
+        report = print_dep_table(app.ctx.machine.redis_url)
         if not report.can_start:
-            die(
-                "Required dependencies are not available. "
-                "Run  orchestrator init  to diagnose."
-            )
+            die("Required dependencies are not available. Run  orchestrator init  to diagnose.")
         click.echo()
 
-    from src.infra.factory import build_agent_registry
-
-    registry     = build_agent_registry()
+    registry = app.agent_registry
     active_agents = [a for a in registry.list_agents() if a.active]
 
     if not active_agents:
         die("No active agents found in registry. Register agents first.")
 
-    env   = {**os.environ, "AGENT_MODE": "real"}
+    env = {**os.environ, "AGENT_MODE": "real"}
     procs = []
 
     try:
@@ -95,9 +94,17 @@ from src.infra.container import AppContainer
         ok("TaskManager started")
 
         for agent in active_agents:
-            worker_env = {**env, "AGENT_ID": agent.agent_id}
             p = subprocess.Popen(
-                ["python", "-m", "src.infra.cli.main", "system", "worker"], env=worker_env
+                [
+                    "python",
+                    "-m",
+                    "src.infra.cli.main",
+                    "system",
+                    "worker",
+                    "--agent-id",
+                    agent.agent_id,
+                ],
+                env=env,
             )
             procs.append((agent.agent_id, p))
             ok(f"Worker started: {agent.agent_id}")
@@ -107,7 +114,11 @@ from src.infra.container import AppContainer
 
         p = subprocess.Popen(
             [
-                "python", "-m", "src.infra.cli.main", "system", "reconciler",
+                "python",
+                "-m",
+                "src.infra.cli.main",
+                "system",
+                "reconciler",
                 f"--interval={reconciler_interval}",
                 f"--stuck-age={reconciler_stuck_age}",
             ],
@@ -137,12 +148,14 @@ from src.infra.container import AppContainer
 
 
 @system_group.command("task-manager")
+@catch_domain_errors
 def run_task_manager():
     """Subscribe to task events and coordinate task lifecycle."""
-    from src.infra.factory import build_task_manager_handler, build_event_port
+    from src.infra.container import AppContainer
 
-    handler = build_task_manager_handler()
-    events  = build_event_port()
+    app = AppContainer.from_env()
+    handler = app.task_manager_handler
+    events = app.event_port
 
     click.echo(
         "Task Manager started — listening for "
@@ -178,20 +191,28 @@ def run_task_manager():
 
 
 @system_group.command("worker")
-def run_worker():
+@catch_domain_errors
+@click.option("--agent-id", required=True, envvar="AGENT_ID", help="Worker identity (required)")
+def run_worker(agent_id: str):
     """
     Subscribe to task.assigned events and execute tasks for this agent.
-
-    The worker identity is read from the AGENT_ID environment variable
-    (default: agent-worker-001).
     """
-    from src.infra.factory import build_event_port, build_worker_handler, build_agent_registry
-
     from src.infra.container import AppContainer
-    agent_id = os.getenv("AGENT_ID") or AppContainer.from_env().ctx.machine.agent_id
-    events   = build_event_port()
-    registry = build_agent_registry()
-    handler  = build_worker_handler()
+
+    app = AppContainer.from_env()
+    registry = app.agent_registry
+    events = app.event_port
+
+    # Validate the provided agent_id actually exists and is active
+    agent = registry.get(agent_id)
+    if not agent:
+        die(f"Agent '{agent_id}' not found in registry. Run `orchestrator agents create` first.")
+        return
+    if not agent.active:
+        die(f"Agent '{agent_id}' is marked as inactive in the registry.")
+        return
+
+    handler = app.get_worker_handler(agent_id)
 
     click.echo(f"Worker {agent_id} started — listening for task.assigned")
 
@@ -201,8 +222,8 @@ def run_worker():
     try:
         for event in events.subscribe("task.assigned", group="workers", consumer=agent_id):
             assigned_to = event.payload.get("agent_id")
-            task_id     = event.payload.get("task_id")
-            project_id  = event.payload.get("project_id", "")
+            task_id = event.payload.get("task_id")
+            project_id = event.payload.get("project_id", "")
 
             if assigned_to != agent_id:
                 log.info("worker.skip_not_mine", task_id=task_id, assigned_to=assigned_to)
@@ -219,13 +240,15 @@ def run_worker():
 
 
 @system_group.command("reconciler")
-@click.option("--interval",   default=60,  help="Seconds between reconcile passes")
-@click.option("--stuck-age",  default=120, help="Seconds before republishing stuck tasks")
+@click.option("--interval", default=60, help="Seconds between reconcile passes")
+@click.option("--stuck-age", default=120, help="Seconds before republishing stuck tasks")
+@catch_domain_errors
 def run_reconciler(interval: int, stuck_age: int):
     """Run the reconciler loop (detects expired leases, dead agents, stuck tasks)."""
-    from src.infra.factory import build_reconciler
+    from src.infra.container import AppContainer
 
-    reconciler = build_reconciler(
+    app = AppContainer.from_env()
+    reconciler = app.get_reconciler(
         interval_seconds=interval,
         stuck_task_min_age_seconds=stuck_age,
     )
@@ -243,6 +266,7 @@ def run_reconciler(interval: int, stuck_age: int):
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _wait_for_heartbeats(registry, agents, timeout: int = 30) -> None:
     deadline = time.time() + timeout

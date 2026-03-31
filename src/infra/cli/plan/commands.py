@@ -8,6 +8,7 @@ Commands:
   status       — Show project plan status
   decision     — Surface mid-phase architectural question
 """
+
 from __future__ import annotations
 
 import os
@@ -29,11 +30,8 @@ def _require_project() -> str:
     """
     project = _AppContainer.from_env().ctx.machine.project_name
     if not project:
-        die(
-            "No project configured.\n"
-            "  Run: orchestrator init\n"
-            "  Then try again."
-        )
+        die("No project configured.\n  Run: orchestrator init\n  Then try again.")
+        return ""
     return project
 
 
@@ -85,7 +83,7 @@ def plan_init(dry_run: bool) -> None:
         os.environ["AGENT_MODE"] = "dry-run"
 
     try:
-        orchestrator = build_planner_orchestrator(io_handler=_io_handler)
+        orchestrator = AppContainer.from_env().planner_orchestrator
     except Exception as exc:
         # Catch SpecNotFoundError and similar setup errors and surface them cleanly
         exc_name = type(exc).__name__
@@ -155,7 +153,7 @@ def plan_architect(dry_run: bool) -> None:
             click.echo("No plan found. Run 'orchestrator plan init' first.")
         return
 
-    orchestrator = build_planner_orchestrator(io_handler=_io_handler)
+    orchestrator = AppContainer.from_env().planner_orchestrator
 
     click.echo("Running architecture planning...")
     result = orchestrator.run_architecture(io_handler=_io_handler)
@@ -262,7 +260,7 @@ def plan_review(dry_run: bool) -> None:
             click.echo("No plan found. Run 'orchestrator plan init' first.")
         return
 
-    orchestrator = build_planner_orchestrator(io_handler=_io_handler)
+    orchestrator = AppContainer.from_env().planner_orchestrator
 
     click.echo("Running phase review...")
     result = orchestrator.run_phase_review(io_handler=_io_handler)

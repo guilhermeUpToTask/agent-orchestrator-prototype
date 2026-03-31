@@ -7,6 +7,7 @@ Commands:
   orchestrator agents delete  — deregister an agent
   orchestrator agents edit    — update agent fields
 """
+
 from __future__ import annotations
 
 import json
@@ -22,12 +23,12 @@ def agents_group():
 
 
 @agents_group.command("create")
-@click.option("--agent-id",      required=True)
-@click.option("--name",          required=True)
-@click.option("--capabilities",  required=True, help="Comma-separated, e.g. code:backend")
-@click.option("--version",       default="1.0.0")
+@click.option("--agent-id", required=True)
+@click.option("--name", required=True)
+@click.option("--capabilities", required=True, help="Comma-separated, e.g. code:backend")
+@click.option("--version", default="1.0.0")
 @click.option("--active/--inactive", default=True, help="Include in scheduling")
-@click.option("--runtime-type",  default="gemini", help="gemini | claude | pi | dry-run")
+@click.option("--runtime-type", default="gemini", help="gemini | claude | pi | dry-run")
 @click.option(
     "--runtime-config",
     default="{}",
@@ -45,7 +46,7 @@ def agent_create(
 ):
     """Register a new agent in the registry."""
     from src.domain import AgentProps
-    from src.infra.factory import build_agent_register_usecase
+    from src.infra.container import AppContainer
 
     try:
         config = json.loads(runtime_config)
@@ -61,7 +62,7 @@ def agent_create(
         runtime_type=runtime_type,
         runtime_config=config,
     )
-    result = build_agent_register_usecase().execute(agent)
+    result = AppContainer.from_env().agent_register_usecase.execute(agent)
     status = "active" if result.active else "inactive"
     ok(f"Agent registered: {result.agent_id}  ({status}, runtime: {result.runtime_type})")
 
@@ -70,9 +71,9 @@ def agent_create(
 @catch_domain_errors
 def agent_list():
     """List all registered agents."""
-    from src.infra.factory import build_agent_registry
+    from src.infra.container import AppContainer
 
-    agents = build_agent_registry().list_agents()
+    agents = AppContainer.from_env().agent_registry.list_agents()
 
     if not agents:
         click.echo("No agents registered.")
@@ -82,10 +83,8 @@ def agent_list():
     click.echo("-" * 80)
     for a in agents:
         status = "active" if a.active else "inactive"
-        caps   = ", ".join(a.capabilities) or "-"
-        click.echo(
-            f"{a.agent_id:<25} {status:<10} {a.runtime_type:<12} {a.version:<10} {caps}"
-        )
+        caps = ", ".join(a.capabilities) or "-"
+        click.echo(f"{a.agent_id:<25} {status:<10} {a.runtime_type:<12} {a.version:<10} {caps}")
 
 
 @agents_group.command("delete")
@@ -94,12 +93,13 @@ def agent_list():
 @catch_domain_errors
 def agent_delete(agent_id: str, yes: bool):
     """Deregister an agent from the registry."""
-    from src.infra.factory import build_agent_registry
+    from src.infra.container import AppContainer
 
-    registry = build_agent_registry()
+    registry = AppContainer.from_env().agent_registry
     agent = registry.get(agent_id)
     if agent is None:
         die(f"Agent not found: {agent_id}")
+        return
 
     if not yes:
         click.confirm(
@@ -113,9 +113,9 @@ def agent_delete(agent_id: str, yes: bool):
 
 @agents_group.command("edit")
 @click.argument("agent_id")
-@click.option("--name",         default=None, help="New display name")
+@click.option("--name", default=None, help="New display name")
 @click.option("--capabilities", default=None, help="New capabilities (comma-separated)")
-@click.option("--version",      default=None, help="New version string")
+@click.option("--version", default=None, help="New version string")
 @click.option("--active/--inactive", default=None, help="Enable or disable the agent")
 @click.option("--runtime-type", default=None, help="New runtime type")
 @click.option("--runtime-config", default=None, help="New runtime config JSON")
@@ -130,20 +130,25 @@ def agent_edit(
     runtime_config: str | None,
 ):
     """Update one or more fields of an existing agent."""
-    from src.infra.factory import build_agent_registry
+    from src.infra.container import AppContainer
 
-    registry = build_agent_registry()
-    agent    = registry.get(agent_id)
+    registry = AppContainer.from_env().agent_registry
+    agent = registry.get(agent_id)
     if agent is None:
         die(f"Agent not found: {agent_id}")
+        return
 
     # Build an updated copy by merging provided fields
     data = agent.model_dump()
-    if name          is not None: data["name"]          = name
-    if version       is not None: data["version"]       = version
-    if runtime_type  is not None: data["runtime_type"]  = runtime_type
-    if active        is not None: data["active"]        = active
-    if capabilities  is not None:
+    if name is not None:
+        data["name"] = name
+    if version is not None:
+        data["version"] = version
+    if runtime_type is not None:
+        data["runtime_type"] = runtime_type
+    if active is not None:
+        data["active"] = active
+    if capabilities is not None:
         data["capabilities"] = [c.strip() for c in capabilities.split(",") if c.strip()]
     if runtime_config is not None:
         try:
@@ -152,6 +157,7 @@ def agent_edit(
             die(f"Invalid --runtime-config JSON: {exc}")
 
     from src.domain import AgentProps
+
     updated = AgentProps(**data)
     registry.register(updated)
     ok(f"Agent {agent_id} updated")

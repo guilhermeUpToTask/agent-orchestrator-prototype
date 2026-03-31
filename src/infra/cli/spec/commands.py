@@ -12,6 +12,7 @@ Commands:
 These commands are the only approved path for humans to modify project_spec.yaml.
 Agents must go through ProposeSpecChange (which writes only .proposed.yaml).
 """
+
 from __future__ import annotations
 
 import sys
@@ -30,6 +31,7 @@ def spec_group():
 # spec show
 # ---------------------------------------------------------------------------
 
+
 @spec_group.command("show")
 @catch_domain_errors
 def spec_show():
@@ -39,11 +41,11 @@ def spec_show():
     Example:
       orchestrate spec show
     """
-    from src.infra.factory import build_load_project_spec
     from src.infra.container import AppContainer
-    app_config = AppContainer.from_env().ctx.machine
 
-    spec = build_load_project_spec().execute(app_config.project_name)
+    app = AppContainer.from_env()
+
+    spec = app.load_project_spec_usecase.execute(app.get_required_project())
     ac = spec.get_architecture_constraints()
 
     click.echo(f"\n  Project:  {ac['project']}")
@@ -72,6 +74,7 @@ def spec_show():
 # spec init  (run outside the wizard — e.g. when spec was skipped)
 # ---------------------------------------------------------------------------
 
+
 @spec_group.command("init")
 @click.option(
     "--overwrite",
@@ -93,16 +96,18 @@ def spec_init(overwrite: bool):
       orchestrate spec init --overwrite
     """
     from src.infra.container import AppContainer
-    app_config = AppContainer.from_env().ctx.machine
+
+    container = AppContainer.from_env()
+    app_config = container.ctx.machine
+    project_name = container.get_required_project()
+
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
 
-    repo = FileProjectSpecRepository(
-        orchestrator_home=app_config.orchestrator_home
-    )
+    repo = FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
 
-    if repo.exists(app_config.project_name) and not overwrite:
+    if repo.exists(project_name) and not overwrite:
         click.echo(
-            f"  project_spec.yaml already exists for '{app_config.project_name}'.\n"
+            f"  project_spec.yaml already exists for '{project_name}'.\n"
             "  Use --overwrite to replace it, or  orchestrate spec propose  "
             "to stage a change."
         )
@@ -110,15 +115,16 @@ def spec_init(overwrite: bool):
 
     from src.infra.cli.wizard.steps.spec import collect_and_write_spec
 
-    success = collect_and_write_spec({"project_name": app_config.project_name})
+    success = collect_and_write_spec({"project_name": project_name})
     if not success:
         die("Spec creation failed.")
-    ok(f"Project spec created for '{app_config.project_name}'")
+    ok(f"Project spec created for '{project_name}'")
 
 
 # ---------------------------------------------------------------------------
 # spec validate
 # ---------------------------------------------------------------------------
+
 
 @spec_group.command("validate")
 @click.option("--description", "-d", default="", help="Task description to validate.")
@@ -146,11 +152,11 @@ def spec_validate(description: str, dependencies: tuple, directories: tuple):
       orchestrate spec validate --dir src/legacy
       orchestrate spec validate -d "add redis cache" --dep redis --dir src/infra
     """
-    from src.infra.factory import build_validate_against_spec
+    from src.infra.container import AppContainer
     from src.domain.project_spec.errors import SpecNotFoundError
 
     try:
-        uc = build_validate_against_spec()
+        uc = AppContainer.from_env().validate_against_spec_usecase
     except SpecNotFoundError as exc:
         die(str(exc))
         return  # unreachable, die() exits
@@ -181,6 +187,7 @@ def spec_validate(description: str, dependencies: tuple, directories: tuple):
 # spec propose
 # ---------------------------------------------------------------------------
 
+
 @spec_group.command("propose")
 @click.option("--bump-version", type=click.Choice(["patch", "minor", "major"]), default=None)
 @click.option("--add-forbidden", multiple=True, help="Add a forbidden pattern.")
@@ -208,16 +215,16 @@ def spec_propose(
       orchestrate spec propose --bump-version minor
       orchestrate spec propose --remove-forbidden flask --add-required fastapi
     """
-    from src.infra.factory import build_propose_spec_change
     from src.infra.container import AppContainer
-    app_config = AppContainer.from_env().ctx.machine
     from src.app.usecases.propose_spec_change import ChangeProposal
 
+    app = AppContainer.from_env()
+    project_name = app.get_required_project()
     # Resolve new version string from bump type
+
     new_version: str | None = None
     if bump_version is not None:
-        from src.infra.factory import build_load_project_spec
-        spec = build_load_project_spec().execute(app_config.project_name)
+        spec = app.load_project_spec_usecase.execute(project_name)
         v = spec.version
         if bump_version == "patch":
             new_version = v.bump_patch().raw
@@ -235,14 +242,11 @@ def spec_propose(
         rationale=rationale,
     )
 
-    result = build_propose_spec_change().execute(app_config.project_name, proposal)
+    result = app.propose_spec_change_usecase.execute(project_name, proposal)
 
     if result.accepted:
         ok(f"Proposal staged → {result.proposal_path}")
-        click.echo(
-            "  Review: orchestrate spec diff\n"
-            "  Apply:  orchestrate spec apply"
-        )
+        click.echo("  Review: orchestrate spec diff\n  Apply:  orchestrate spec apply")
     else:
         die(f"Proposal rejected: {result.rejection_reason}")
 
@@ -250,6 +254,7 @@ def spec_propose(
 # ---------------------------------------------------------------------------
 # spec diff
 # ---------------------------------------------------------------------------
+
 
 @spec_group.command("diff")
 @catch_domain_errors
@@ -264,16 +269,17 @@ def spec_diff():
     """
     import difflib
     from src.infra.container import AppContainer
-    app_config = AppContainer.from_env().ctx.machine
+
+    container = AppContainer.from_env()
+    app_config = container.ctx.machine
+    project_name = container.get_required_project()
+
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
 
     repo = FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
-    proposed_path = (
-        repo._spec_path(app_config.project_name).parent
-        / "project_spec.proposed.yaml"
-    )
+    proposed_path = repo._spec_path(project_name).parent / "project_spec.proposed.yaml"
 
-    if not repo.exists(app_config.project_name):
+    if not repo.exists(project_name):
         die("No project_spec.yaml found. Run  orchestrate spec init  first.")
         return
 
@@ -282,7 +288,7 @@ def spec_diff():
         click.echo("  Use  orchestrate spec propose  to stage a change.")
         return
 
-    live_text = repo._spec_path(app_config.project_name).read_text().splitlines(keepends=True)
+    live_text = repo._spec_path(project_name).read_text().splitlines(keepends=True)
     proposed_text = proposed_path.read_text().splitlines(keepends=True)
 
     diff = list(
@@ -312,6 +318,7 @@ def spec_diff():
 # spec apply
 # ---------------------------------------------------------------------------
 
+
 @spec_group.command("apply")
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation.")
 @catch_domain_errors
@@ -327,30 +334,30 @@ def spec_apply(yes: bool):
       orchestrate spec apply --yes
     """
     from src.infra.container import AppContainer
-    app_config = AppContainer.from_env().ctx.machine
+
+    container = AppContainer.from_env()
+    app_config = container.ctx.machine
+    project_name = container.get_required_project()
+
     from src.infra.fs.project_spec_repository import FileProjectSpecRepository
     from src.domain.project_spec.errors import SpecValidationError
 
     repo = FileProjectSpecRepository(orchestrator_home=app_config.orchestrator_home)
-    proposed_path = (
-        repo._spec_path(app_config.project_name).parent
-        / "project_spec.proposed.yaml"
-    )
+    proposed_path = repo._spec_path(project_name).parent / "project_spec.proposed.yaml"
 
     if not proposed_path.exists():
-        die(
-            "No pending proposal found. "
-            "Use  orchestrate spec propose  to stage a change first."
-        )
+        die("No pending proposal found. Use  orchestrate spec propose  to stage a change first.")
         return
 
     # Load and validate the proposed spec before promoting it
     try:
         import yaml as _yaml
+
         raw = _yaml.safe_load(proposed_path.read_text())
         # Strip the rationale comment key — not part of the schema
         raw.pop("_proposal_rationale", None)
         from src.domain.project_spec.aggregate import ProjectSpec
+
         proposed_spec = ProjectSpec.from_dict(raw)
     except (SpecValidationError, ValueError) as exc:
         die(f"Proposed spec is invalid and cannot be applied: {exc}")
@@ -367,7 +374,4 @@ def spec_apply(yes: bool):
     repo.save(proposed_spec)
     proposed_path.unlink()
 
-    ok(
-        f"Spec updated to v{proposed_spec.meta.version} "
-        f"for project '{app_config.project_name}'"
-    )
+    ok(f"Spec updated to v{proposed_spec.meta.version} for project '{app_config.project_name}'")
