@@ -169,20 +169,30 @@ class SettingsService:
         """Build MachineSettings from explicitly allowed env vars > config.json > overrides > defaults."""
         stored = self._global_store.load_raw()
 
-        # Only AGENT_MODE and ORCHESTRATOR_HOME read from os.environ
-        mode = os.environ.get("AGENT_MODE") or stored.get("mode") or MACHINE_DEFAULTS["mode"]
+        # Helper to safely get an env var ONLY if it has a truthy value
+        def _env(key: str) -> str | None:
+            val = os.environ.get(key)
+            return val if val and val.strip() else None
 
-        home_raw = os.environ.get("ORCHESTRATOR_HOME")
+        # Hierarchy: ENV > JSON File > Default
+        mode = _env("AGENT_MODE") or stored.get("mode") or MACHINE_DEFAULTS["mode"]
+
+        home_raw = _env("ORCHESTRATOR_HOME")
         orchestrator_home = (
             Path(home_raw).expanduser() if home_raw else MACHINE_DEFAULTS["orchestrator_home"]
         )
 
-        redis_url = stored.get("redis_url") or MACHINE_DEFAULTS["redis_url"]
-        task_timeout = stored.get("task_timeout") or MACHINE_DEFAULTS["task_timeout"]
+        redis_url = _env("REDIS_URL") or stored.get("redis_url") or MACHINE_DEFAULTS["redis_url"]
+
+        timeout_raw = _env("TASK_TIMEOUT_SECONDS")
+        task_timeout = (
+            int(timeout_raw)
+            if timeout_raw
+            else (stored.get("task_timeout") or MACHINE_DEFAULTS["task_timeout"])
+        )
 
         # Strictly ignore os.environ["PROJECT_NAME"].
         # The active context MUST come from explicit CLI overrides or config.json.
-        # This prevents sticky container environment variables from hijacking the context.
         project_name = project_name_override or stored.get("project_name")
 
         return MachineSettings(

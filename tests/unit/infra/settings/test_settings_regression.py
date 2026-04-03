@@ -170,6 +170,8 @@ class TestLoadingEnvSecrets:
 class TestLoadingGlobalConfig:
     def test_project_name_from_config_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+        monkeypatch.delenv("PROJECT_NAME", raising=False)  # <-- Shield from host
+
         store = GlobalConfigStore(home=tmp_path)
         store.save({"project_name": "from-file"})
         ctx = SettingsService(home=tmp_path).load()
@@ -177,14 +179,17 @@ class TestLoadingGlobalConfig:
 
     def test_redis_url_from_config_json(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+        monkeypatch.delenv("REDIS_URL", raising=False)  # <-- Shield from host
+
         store = GlobalConfigStore(home=tmp_path)
         store.save({"redis_url": "redis://from-file:6379/0"})
         ctx = SettingsService(home=tmp_path).load()
         assert ctx.machine.redis_url == "redis://from-file:6379/0"
 
     def test_explicit_override_beats_config_json_for_project_name(self, tmp_path, monkeypatch):
-        """Explicit argument load(project_name=...) beats the JSON config state."""
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+        monkeypatch.delenv("PROJECT_NAME", raising=False)
+
         store = GlobalConfigStore(home=tmp_path)
         store.save({"project_name": "from-file"})
         ctx = SettingsService(home=tmp_path).load(project_name="explicit-override")
@@ -263,11 +268,13 @@ class TestPersistenceBoundaries:
     def test_save_machine_only_persists_allowed_keys(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
         svc = SettingsService(home=tmp_path)
-        svc.save_machine(project_name="p", redis_url="redis://x:6379/0")
+        svc.save_machine(project_name="p", redis_url="redis://x:6379/0", task_timeout=120)
         on_disk = json.loads((tmp_path / "config.json").read_text())
         # Only allowed keys should be present
         for key in on_disk:
-            assert key in ("project_name", "redis_url"), f"Unexpected key persisted: {key}"
+            assert key in ("project_name", "redis_url", "task_timeout"), (
+                f"Unexpected key persisted: {key}"
+            )
 
     def test_save_project_roundtrips_non_secret_fields(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
