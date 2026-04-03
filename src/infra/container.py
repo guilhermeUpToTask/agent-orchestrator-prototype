@@ -341,7 +341,6 @@ class AppContainer:
             runtime_factory=self.runtime_factory,
             logs_port=self.logs_adapter,
             test_runner=self.test_runner,
-            telemetry_emitter=self.telemetry_emitter,
             lease_refresher_factory=self.lease_refresher_factory,
             task_timeout_seconds=self._ctx.machine.task_timeout,
         )
