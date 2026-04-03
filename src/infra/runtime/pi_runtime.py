@@ -26,6 +26,7 @@ Example AgentProps.runtime_config:
   { "model": "anthropic/claude-sonnet-4-5", "backend": "openrouter" }
   { "model": "openai/gpt-4o", "backend": "openrouter" }
 """
+
 from __future__ import annotations
 
 import os
@@ -38,13 +39,14 @@ from src.infra.runtime.agent_runtime import CliAgentRuntime, CliSessionHandle
 
 log = structlog.get_logger(__name__)
 
+# TODO: check if the correct backend is passin to pi runtime, no default backends should be setted, as we read from the agent registry, if there is none we raise a error
 Backend = Literal["anthropic", "gemini", "openrouter"]
 
 # Maps backend name → the env var name pi reads for that provider.
 # Source: pi-mono/packages/ai/src/env-api-keys.ts
 _BACKEND_ENV_VAR: dict[str, str] = {
-    "anthropic":  "ANTHROPIC_API_KEY",
-    "gemini":     "GEMINI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
 }
 
@@ -131,8 +133,9 @@ class PiAgentRuntime(CliAgentRuntime):
         live in the workspace AGENTS.md — not in this prompt — so that they
         are applied consistently across all agents regardless of runtime.
         """
-        allowed = "\n".join(f"  - {f}" for f in context.allowed_files) \
-                  or "  - any files in the workspace"
+        allowed = (
+            "\n".join(f"  - {f}" for f in context.allowed_files) or "  - any files in the workspace"
+        )
 
         criteria = ""
         if context.execution.acceptance_criteria:

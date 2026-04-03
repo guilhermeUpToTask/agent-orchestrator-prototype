@@ -3,8 +3,10 @@ tests/unit/infra/runtime/test_pi_runtime.py — Unit tests for PiAgentRuntime.
 
 Follows the same pattern as test_gemini_runtime.py and test_claude_code_runtime.py.
 """
+
 import pytest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from src.domain import AgentProps, ExecutionContext, ExecutionSpec
 from src.infra.runtime.pi_runtime import PiAgentRuntime
@@ -13,6 +15,7 @@ from src.infra.runtime.pi_runtime import PiAgentRuntime
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_context(**overrides) -> ExecutionContext:
     defaults = dict(
@@ -37,6 +40,7 @@ def _make_agent(**overrides) -> AgentProps:
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
+
 
 class TestPiAgentRuntimeInit:
     def test_requires_api_key(self):
@@ -74,6 +78,7 @@ class TestPiAgentRuntimeInit:
 # ---------------------------------------------------------------------------
 # Session lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestPiAgentRuntimeSession:
     @patch("subprocess.run")
@@ -125,6 +130,7 @@ class TestPiAgentRuntimeSession:
 # Command building
 # ---------------------------------------------------------------------------
 
+
 class TestPiAgentRuntimeBuildCmd:
     @patch("subprocess.run")
     def test_default_model_not_passed_as_flag(self, mock_run):
@@ -175,6 +181,7 @@ class TestPiAgentRuntimeBuildCmd:
 # ---------------------------------------------------------------------------
 # Prompt building
 # ---------------------------------------------------------------------------
+
 
 class TestPiAgentRuntimeBuildPrompt:
     def _build(self, **ctx_overrides) -> str:
@@ -243,6 +250,7 @@ class TestPiAgentRuntimeBuildPrompt:
 # Failure & timeout
 # ---------------------------------------------------------------------------
 
+
 class TestPiAgentRuntimeFailures:
     @patch("subprocess.run")
     def test_non_zero_exit_returns_failure(self, mock_run):
@@ -264,6 +272,7 @@ class TestPiAgentRuntimeFailures:
     @patch("subprocess.run")
     def test_timeout_returns_failure_result(self, mock_run):
         import subprocess as sp
+
         mock_run.side_effect = sp.TimeoutExpired(cmd=["pi"], timeout=1)
 
         runtime = PiAgentRuntime(api_key="key")
@@ -280,23 +289,28 @@ class TestPiAgentRuntimeFailures:
 # Factory integration
 # ---------------------------------------------------------------------------
 
+
 class TestPiRuntimeFactory:
     def test_factory_builds_pi_runtime_anthropic_backend(self):
-        from unittest.mock import patch
-        from pydantic import SecretStr
-        from src.infra.factory import build_agent_runtime
-        import src.infra.factory as factory_module
+        from src.infra.runtime.factory import build_agent_runtime
+        from src.infra.settings import SettingsService
         from src.infra.logging import LoggingRuntimeWrapper
 
-        with patch.object(factory_module.app_config, "mode", "real"), \
-             patch.object(factory_module.app_config, "anthropic_api_key", SecretStr("ant-key")):
-            agent = AgentProps(
-                agent_id="pi-001",
-                name="Pi",
-                runtime_type="pi",
-                runtime_config={"model": "claude-sonnet-4-5", "backend": "anthropic"},
-            )
-            runtime = build_agent_runtime(agent)
+        # Use the canonical testing context factory, no monkeypatching required
+        ctx = SettingsService.for_testing(
+            orchestrator_home=Path("/tmp"),
+            mode="real",
+            anthropic_api_key="ant-key",
+            project_name="test",
+        )
+
+        agent = AgentProps(
+            agent_id="pi-001",
+            name="Pi",
+            runtime_type="pi",
+            runtime_config={"model": "claude-sonnet-4-5", "backend": "anthropic"},
+        )
+        runtime = build_agent_runtime(agent, ctx)
 
         # Runtime is now wrapped with LoggingRuntimeWrapper
         assert isinstance(runtime, LoggingRuntimeWrapper)
@@ -305,23 +319,25 @@ class TestPiRuntimeFactory:
         assert runtime._base_runtime._api_key == "ant-key"
 
     def test_factory_builds_pi_runtime_openrouter_backend(self):
-        from unittest.mock import patch
-        from pydantic import SecretStr
-        from src.infra.factory import build_agent_runtime
-        import src.infra.factory as factory_module
+        from src.infra.runtime.factory import build_agent_runtime
+        from src.infra.settings import SettingsService
         from src.infra.logging import LoggingRuntimeWrapper
 
-        with patch.object(factory_module.app_config, "mode", "real"), \
-             patch.object(factory_module.app_config, "openrouter_api_key", SecretStr("sk-or-key")):
-            agent = AgentProps(
-                agent_id="pi-003",
-                name="Pi OpenRouter",
-                runtime_type="pi",
-                runtime_config={"model": "anthropic/claude-sonnet-4-5", "backend": "openrouter"},
-            )
-            runtime = build_agent_runtime(agent)
+        ctx = SettingsService.for_testing(
+            orchestrator_home=Path("/tmp"),
+            mode="real",
+            openrouter_api_key="sk-or-key",
+            project_name="test",
+        )
 
-        # Runtime is now wrapped with LoggingRuntimeWrapper
+        agent = AgentProps(
+            agent_id="pi-003",
+            name="Pi OpenRouter",
+            runtime_type="pi",
+            runtime_config={"model": "anthropic/claude-sonnet-4-5", "backend": "openrouter"},
+        )
+        runtime = build_agent_runtime(agent, ctx)
+
         assert isinstance(runtime, LoggingRuntimeWrapper)
         assert isinstance(runtime._base_runtime, PiAgentRuntime)
         assert runtime._base_runtime._backend == "openrouter"
