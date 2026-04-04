@@ -65,9 +65,12 @@ class ProjectSettings:
     github_repo: str | None = None
     github_base_branch: str = "main"
 
+    # --- NEW PLANNER FIELDS ---
+    planner_provider: str = "anthropic"
+    planner_model: str = "claude-3-5-sonnet-20241022"
+
     @property
     def github_repo_configured(self) -> bool:
-        """True if the non-secret GitHub fields (owner + repo) are set."""
         return bool(self.github_owner and self.github_repo)
 
     def to_dict(self) -> dict:
@@ -76,6 +79,8 @@ class ProjectSettings:
             "github_owner": self.github_owner,
             "github_repo": self.github_repo,
             "github_base_branch": self.github_base_branch,
+            "planner_provider": self.planner_provider,
+            "planner_model": self.planner_model,
         }
 
     @classmethod
@@ -85,6 +90,8 @@ class ProjectSettings:
             github_owner=data.get("github_owner"),
             github_repo=data.get("github_repo"),
             github_base_branch=data.get("github_base_branch", "main"),
+            planner_provider=data.get("planner_provider", "anthropic"),
+            planner_model=data.get("planner_model", "claude-3-5-sonnet-20241022"),
         )
 
 

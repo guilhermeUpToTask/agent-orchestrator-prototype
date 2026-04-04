@@ -33,10 +33,19 @@ PROJECT_DEFAULTS: dict = {
     "github_owner": None,
     "github_repo": None,
     "github_base_branch": "main",
+    "planner_provider": "anthropic",
+    "planner_model": "claude-3-5-sonnet-20241022",
 }
 
 PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
-    {"source_repo_url", "github_owner", "github_repo", "github_base_branch"}
+    {
+        "source_repo_url",
+        "github_owner",
+        "github_repo",
+        "github_base_branch",
+        "planner_provider",
+        "planner_model",
+    }
 )
 
 # ---------------------------------------------------------------------------
