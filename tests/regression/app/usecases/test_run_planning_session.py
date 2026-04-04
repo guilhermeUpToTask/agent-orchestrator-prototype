@@ -3,6 +3,7 @@ tests/regression/app/usecases/test_run_planning_session.py
 
 Tests for RunPlanningSessionUseCase with all external ports mocked.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -16,7 +17,7 @@ from src.domain.entities.agent import AgentProps
 from src.domain.ports.planner import PlannerRuntimeError
 from src.infra.fs.planner_session_repository import InMemoryPlannerSessionRepository
 from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
-from src.infra.runtime.planner_runtime import StubPlannerRuntime
+from src.infra.runtime.planners.anthropic_planner_runtime import StubPlannerRuntime
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +48,13 @@ VALID_ROADMAP = {
 def _make_goal_aggregate(name: str = "setup-db") -> GoalAggregate:
     from src.domain.aggregates.goal import TaskSummary
     from src.domain.value_objects.status import TaskStatus
-    ts = TaskSummary(task_id="create-schema", title="Create schema",
-                     status=TaskStatus.CREATED, branch="goal/setup-db/task/create-schema")
+
+    ts = TaskSummary(
+        task_id="create-schema",
+        title="Create schema",
+        status=TaskStatus.CREATED,
+        branch="goal/setup-db/task/create-schema",
+    )
     return GoalAggregate.create(
         name=name,
         description="desc",
@@ -127,6 +133,7 @@ def _make_usecase(
 # execute() — happy path (no dispatch)
 # ---------------------------------------------------------------------------
 
+
 def test_execute_returns_planning_result():
     uc = _make_usecase()
     result = uc.execute("add oauth login")
@@ -162,6 +169,7 @@ def test_execute_no_validation_errors_on_clean_roadmap():
 # execute() — with dispatch=True
 # ---------------------------------------------------------------------------
 
+
 def test_execute_dispatch_true_dispatches_goals():
     repo = InMemoryPlannerSessionRepository()
     goal = _make_goal_aggregate()
@@ -193,6 +201,7 @@ def test_execute_dispatch_skipped_when_validation_errors():
 # execute() — LLM failure
 # ---------------------------------------------------------------------------
 
+
 def test_execute_runtime_error_fails_session():
     class ErrorRuntime(StubPlannerRuntime):
         def run_session(self, prompt, tools, max_turns=15, session_callback=None):
@@ -210,6 +219,7 @@ def test_execute_runtime_error_fails_session():
 # ---------------------------------------------------------------------------
 # execute() — capability mismatch
 # ---------------------------------------------------------------------------
+
 
 def test_execute_capability_mismatch_adds_errors():
     # Agent registry has no agents → capability errors suppressed (test env)
@@ -236,6 +246,7 @@ def test_execute_capability_mismatch_with_populated_registry():
 # execute() — spec validation violations
 # ---------------------------------------------------------------------------
 
+
 def test_execute_validator_violations_recorded():
     uc = _make_usecase(validator_passes=False)
     result = uc.execute("add oauth")
@@ -246,6 +257,7 @@ def test_execute_validator_violations_recorded():
 # ---------------------------------------------------------------------------
 # Idempotent re-dispatch via dispatch_roadmap()
 # ---------------------------------------------------------------------------
+
 
 def test_dispatch_roadmap_idempotent():
     repo = InMemoryPlannerSessionRepository()
@@ -286,6 +298,7 @@ def test_dispatch_roadmap_invalid_session_raises():
 # ---------------------------------------------------------------------------
 # Session turn persistence
 # ---------------------------------------------------------------------------
+
 
 def test_turns_are_persisted_in_session():
     repo = InMemoryPlannerSessionRepository()
