@@ -34,13 +34,16 @@ log = structlog.get_logger(__name__)
 class AppContainer:
     """
     Dependency-injection container for one CLI invocation.
-
     All properties are lazy (cached_property) — nothing is built until
     first access, and each thing is built at most once.
     """
 
     def __init__(self, ctx: SettingsContext) -> None:
         self._ctx = ctx
+
+        # Elegantly shield against missing directories on fresh machines.
+        # This silently ensures ~/.orchestrator exists immediately.
+        self._ctx.machine.orchestrator_home.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Entry-point factory
@@ -231,26 +234,28 @@ class AppContainer:
     @cached_property
     def planner_runtime(self):
         if self._ctx.machine.mode == "dry-run":
-            from src.infra.runtime.planner_runtime import StubPlannerRuntime
+            from src.infra.runtime.planners.anthropic_planner_runtime import StubPlannerRuntime
 
             return StubPlannerRuntime()
-        from src.infra.runtime.planner_runtime import AnthropicPlannerRuntime
 
-        return AnthropicPlannerRuntime(
-            api_key=self._ctx.secrets.require_anthropic_key(),
-        )
+        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+
+        strategy = get_planner_strategy(self._ctx)
+        return strategy.build_autonomous(self._ctx)
 
     @cached_property
     def interactive_planner_runtime(self):
         if self._ctx.machine.mode == "dry-run":
-            from src.infra.runtime.interactive_planner_runtime import StubInteractivePlannerRuntime
+            from src.infra.runtime.planners.anthropic_interactive_planner_runtime import (
+                StubInteractivePlannerRuntime,
+            )
 
             return StubInteractivePlannerRuntime()
-        from src.infra.runtime.interactive_planner_runtime import InteractivePlannerRuntime
 
-        return InteractivePlannerRuntime(
-            api_key=self._ctx.secrets.require_anthropic_key(),
-        )
+        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+
+        strategy = get_planner_strategy(self._ctx)
+        return strategy.build_interactive(self._ctx)
 
     # ------------------------------------------------------------------
     # Infrastructure: misc
