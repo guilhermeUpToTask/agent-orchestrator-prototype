@@ -30,6 +30,7 @@ dependencies = [
     "pytest-cov==7.0.0",
     "ruff==0.15.5",
     "sortedcontainers==2.3.0",
+    "openai>=2.30.0",
 ]
 
 [project.optional-dependencies]
