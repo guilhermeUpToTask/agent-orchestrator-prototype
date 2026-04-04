@@ -5,6 +5,7 @@ This runtime is for DISCOVERY mode. Unlike AnthropicPlannerRuntime which
 loops autonomously, this one pauses and yields to the caller after each
 ask_question tool call, waits for human input, then continues.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,7 @@ log = logging.getLogger(__name__)
 _DEFAULT_MODEL = "claude-opus-4-6"
 
 
-class InteractivePlannerRuntime(PlannerRuntimePort):
+class AnthropicInteractivePlannerRuntime(PlannerRuntimePort):
     """
     Agentic loop that pauses for human input after ask_question tool calls.
 
@@ -142,11 +143,13 @@ class InteractivePlannerRuntime(PlannerRuntimePort):
                     except Exception as exc:
                         result_str = json.dumps({"error": str(exc)})
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result_str,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_str,
+                    }
+                )
 
                 # Check if submit_project_brief was called → break loop
                 if block.name == "submit_project_brief":
@@ -183,7 +186,7 @@ class InteractivePlannerRuntime(PlannerRuntimePort):
         )
 
 
-class StubInteractivePlannerRuntime(InteractivePlannerRuntime):
+class StubInteractivePlannerRuntime(AnthropicInteractivePlannerRuntime):
     """
     For tests. Immediately calls submit_project_brief with a minimal valid
     brief. Does not call ask_question.
@@ -223,7 +226,9 @@ class StubInteractivePlannerRuntime(InteractivePlannerRuntime):
 
         # Execute the tool
         handler = tool_map.get("submit_project_brief")
-        result_str = handler({"brief_json": brief_json}) if handler else json.dumps({"accepted": True})
+        result_str = (
+            handler({"brief_json": brief_json}) if handler else json.dumps({"accepted": True})
+        )
 
         try:
             parsed = json.loads(result_str)
@@ -233,7 +238,9 @@ class StubInteractivePlannerRuntime(InteractivePlannerRuntime):
                     f"{parsed.get('error', 'unknown error')}"
                 )
         except json.JSONDecodeError:
-            raise PlannerRuntimeError("StubInteractivePlannerRuntime: invalid JSON from submit_project_brief handler")
+            raise PlannerRuntimeError(
+                "StubInteractivePlannerRuntime: invalid JSON from submit_project_brief handler"
+            )
 
         tool_result_blocks = [
             {
@@ -256,6 +263,7 @@ class StubInteractivePlannerRuntime(InteractivePlannerRuntime):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _tool_to_api(tool: PlannerTool) -> dict:
     return {
@@ -289,7 +297,9 @@ def _extract_brief_from_history(messages: list[dict]) -> dict:
             btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
             bname = block.get("name") if isinstance(block, dict) else getattr(block, "name", None)
             if btype == "tool_use" and bname == "submit_project_brief":
-                binput = block.get("input") if isinstance(block, dict) else getattr(block, "input", {})
+                binput = (
+                    block.get("input") if isinstance(block, dict) else getattr(block, "input", {})
+                )
                 raw = binput.get("brief_json", "") if isinstance(binput, dict) else ""
                 try:
                     return json.loads(raw)
