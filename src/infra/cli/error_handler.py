@@ -21,16 +21,19 @@ Usage:
         result = usecase.execute(task_id)
         ok(f"Task {task_id} requeued")
 """
+
 from __future__ import annotations
 
 import sys
 import functools
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, cast
 
 import click
 import structlog
 
 from src.domain.errors import DomainError
+from src.infra.settings.models import ConfigurationError
+
 
 log = structlog.get_logger(__name__)
 
@@ -40,6 +43,7 @@ F = TypeVar("F", bound=Callable)
 # ---------------------------------------------------------------------------
 # Output helpers — single source of truth for CLI formatting
 # ---------------------------------------------------------------------------
+
 
 def ok(message: str) -> None:
     """Print a success line to stdout."""
@@ -70,36 +74,31 @@ def info(message: str) -> None:
 # ---------------------------------------------------------------------------
 # Decorator — catch domain errors at the command boundary
 # ---------------------------------------------------------------------------
-
 def catch_domain_errors(fn: F) -> F:
     """
     Decorator for Click command functions.
-
     Catches the standard domain exception types and converts them to
-    consistent CLI error output + sys.exit(1), so individual commands
-    never need bare try/except blocks for these cases.
-
-    Caught:
-      KeyError        → "Not found: <message>"
-      ValueError      → "<message>"   (InvalidStatusTransitionError, MaxRetriesExceededError)
-      DomainError     → "<message>"
-      click.Abort     → re-raised (user pressed Ctrl+C on a confirm prompt)
-      Exception       → unexpected error logged + generic message
+    consistent CLI error output + sys.exit(1).
     """
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except click.Abort:
-            click.echo()          # newline after ^C
+            click.echo()
             raise
         except click.exceptions.Exit:
             raise
         except KeyError as exc:
             die(f"Not found: {exc.args[0] if exc.args else exc}")
-        except (ValueError, DomainError) as exc:
+
+        # Add ConfigurationError to the clean catch block
+        except (ValueError, DomainError, ConfigurationError) as exc:
             die(str(exc))
+
         except Exception as exc:
             log.exception("cli.unexpected_error", error=str(exc))
             die(f"Unexpected error: {exc}")
-    return wrapper  # type: ignore[return-value]
+
+    return cast(F, wrapper)
