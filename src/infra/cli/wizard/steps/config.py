@@ -11,6 +11,7 @@ This separation makes the boundary explicit to the user: the orchestrator
 setup questions are about the machine; the project setup questions are about
 what project is being worked on.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -78,35 +79,20 @@ def collect_project_settings(project_name: str, orchestrator_home: Path) -> dict
         default=existing.source_repo_url or "",
     )
 
-    return {
-        "source_repo_url": source_repo_url.strip() or None,
-    }
+    planner_provider: str = click.prompt(
+        "  Planner Provider (anthropic, openai, openrouter)",
+        type=click.Choice(["anthropic", "openai", "openrouter"]),
+        default=existing.planner_provider or "anthropic",
+    )
 
-
-# ---------------------------------------------------------------------------
-# Backward-compat shim — tests and external code still call collect_project_config
-# ---------------------------------------------------------------------------
-
-def collect_project_config(manager: GlobalConfigStore) -> dict[str, Any]:
-    """
-    Backward-compatible wrapper that returns all fields in a single dict.
-
-    Combines orchestrator config + project settings into one dict so that
-    existing callers (test_wizard.py, etc.) still work during the transition.
-    The wizard __init__.py uses the split functions directly.
-
-    Deprecated: prefer collect_orchestrator_config + collect_project_settings.
-    """
-    orch_data = collect_orchestrator_config(manager)
-
-    # source_repo_url is now a project setting, but we still prompt for it
-    # here for backward compat — the wizard will save it to project.json
-    source_repo_url: str = click.prompt(
-        "  Source repository URL  (blank → empty local repo)",
-        default=manager.load().source_repo_url or "",
+    default_model = "claude-3-5-sonnet-20241022" if planner_provider == "anthropic" else "gpt-4o"
+    planner_model: str = click.prompt(
+        "  Planner Model",
+        default=existing.planner_model or default_model,
     )
 
     return {
-        **orch_data,
         "source_repo_url": source_repo_url.strip() or None,
+        "planner_provider": planner_provider,
+        "planner_model": planner_model.strip(),
     }
