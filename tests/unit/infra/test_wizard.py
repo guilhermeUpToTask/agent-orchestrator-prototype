@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from src.infra.settings import GlobalConfigStore, ProjectConfigStore
+from src.infra.settings import GlobalConfigStore
 from src.infra.cli.wizard import run_wizard
-from src.infra.cli.wizard.steps.deps     import check_and_report     as _check_and_report
-from src.infra.cli.wizard.steps.registry import setup_registry         as _setup_registry
+from src.infra.cli.wizard.steps.deps import check_and_report as _check_and_report
+from src.infra.cli.wizard.steps.registry import setup_registry as _setup_registry
 from src.infra.cli.wizard.steps.registry import _interactive_register_agent
 from src.dependency_checker import DependencyReport, DepResult
 
@@ -121,12 +121,16 @@ def test_interactive_register_agent(monkeypatch):
 
 def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     # Step 1: project_name, redis_url  (orchestrator-global)
-    # Step 3: source_repo_url          (project-scoped, written to project.json)
-    prompts = iter([
-        "my-project",             # step 1 — project name
-        "redis://localhost:6379",  # step 1 — redis URL
-        "https://github.com/x",   # step 3 — source_repo_url
-    ])
+    # Step 3: source_repo_url, planner_provider, planner_model (project-scoped)
+    prompts = iter(
+        [
+            "my-project",  # step 1 — project name
+            "redis://localhost:6379",  # step 1 — redis URL
+            "https://github.com/x",  # step 3 — source_repo_url
+            "openai",  # step 3 — planner_provider
+            "gpt-4o",  # step 3 — planner_model
+        ]
+    )
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
     monkeypatch.setattr("click.confirm", lambda *a, **kw: False)  # skip agent reg
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -142,6 +146,8 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     assert result is True
 
     # Orchestrator config → config.json (no source_repo_url, no secrets)
+    from src.infra.settings import GlobalConfigStore, ProjectConfigStore
+
     store = GlobalConfigStore(home=tmp_path)
     data = store.load_raw()
     assert data["project_name"] == "my-project"
@@ -152,6 +158,8 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     project_home = tmp_path / "projects" / "my-project"
     ps = ProjectConfigStore(project_home).load()
     assert ps.source_repo_url == "https://github.com/x"
+    assert ps.planner_provider == "openai"
+    assert ps.planner_model == "gpt-4o"
 
 
 def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):
