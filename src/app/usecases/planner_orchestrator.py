@@ -4,6 +4,7 @@ src/app/usecases/planner_orchestrator.py — Primary entry point for all plannin
 This orchestrator reads ProjectPlan.status and routes to the correct mode.
 It replaces RunPlanningSessionUseCase as the user-facing planning interface.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,6 +54,13 @@ log = structlog.get_logger(__name__)
 # Result dataclasses
 # ---------------------------------------------------------------------------
 
+# TODO: refactor and break this orchestrator in uses cases
+# TODO: enrich the error handleling to differenciate wrong json schemas, llm calling timout, token limit exceed, etc...
+# TODO: wrap all error in telemetry aswell
+# TODO: Should inject project spec aswell to enrich the planing mode, because its making the same questions we alredy answered in the project spec.
+# TODO: show more logs of lllm clas in the architect mode
+
+
 @dataclass
 class DiscoveryResult:
     session_id: str
@@ -92,6 +100,7 @@ class ApprovalResult:
 # PlannerOrchestrator
 # ---------------------------------------------------------------------------
 
+
 class PlannerOrchestrator:
     """
     Primary entry point for all planning operations.
@@ -106,8 +115,8 @@ class PlannerOrchestrator:
         plan_repo: ProjectPlanRepositoryPort,
         session_repo: PlannerSessionRepositoryPort,
         context_assembler: PlannerContextAssembler,
-        autonomous_runtime: PlannerRuntimePort,      # AnthropicPlannerRuntime
-        interactive_runtime: PlannerRuntimePort,     # InteractivePlannerRuntime
+        autonomous_runtime: PlannerRuntimePort,  # AnthropicPlannerRuntime
+        interactive_runtime: PlannerRuntimePort,  # InteractivePlannerRuntime
         goal_init: GoalInitUseCase,
         validator: ValidateAgainstSpec,
         project_state: ProjectStatePort,
@@ -149,7 +158,7 @@ class PlannerOrchestrator:
                 session_id="",
                 brief=None,
                 needs_approval=False,
-                failure_reason=f"Cannot start discovery: plan is in {plan.status.value} state"
+                failure_reason=f"Cannot start discovery: plan is in {plan.status.value} state",
             )
 
         # Find resumable session or create new one
@@ -188,11 +197,22 @@ class PlannerOrchestrator:
                 failure_reason=str(exc),
             )
 
-        # Parse brief from output
-        brief = self._parse_brief(output.roadmap_raw)
+        # Parse brief from output (NOW WITH STRICT VALIDATION)
+        try:
+            brief = self._parse_brief(output.roadmap_raw)
+        except ValueError as exc:
+            session.fail(reason=f"Failed to parse brief: {exc}")
+            self._session_repo.save(session)
+            return DiscoveryResult(
+                session_id=session.session_id,
+                brief=None,
+                needs_approval=False,
+                failure_reason=f"LLM returned invalid schema: {exc}",
+            )
 
         # Store brief in session before completing
         session.record_roadmap_candidate({"brief": output.roadmap_raw})
+
         self._session_repo.save(session)
 
         # Update session as completed
@@ -207,6 +227,12 @@ class PlannerOrchestrator:
         # Create plan if it doesn't exist
         if plan is None:
             plan = ProjectPlan.create(brief.vision)
+            # FIX: We must attach the brief to the plan before saving it!
+            plan = plan.model_copy(update={"brief": brief})
+            self._plan_repo.save(plan)
+        else:
+            # If the plan already exists, we still need to update the brief on it
+            plan = plan.model_copy(update={"brief": brief})
             self._plan_repo.save(plan)
 
         return DiscoveryResult(
@@ -235,7 +261,9 @@ class PlannerOrchestrator:
     # Architecture mode
     # ------------------------------------------------------------------
 
-    def run_architecture(self, io_handler: Optional[Callable[[str], str]] = None) -> ArchitectureResult:
+    def run_architecture(
+        self, io_handler: Optional[Callable[[str], str]] = None
+    ) -> ArchitectureResult:
         """
         Run architecture planning mode.
 
@@ -248,7 +276,7 @@ class PlannerOrchestrator:
                 pending_decisions=[],
                 pending_phases=[],
                 needs_approval=False,
-                failure_reason=f"Plan must be in ARCHITECTURE state, got {plan.status.value}"
+                failure_reason=f"Plan must be in ARCHITECTURE state, got {plan.status.value}",
             )
 
         # Find resumable session or create new one
@@ -390,7 +418,9 @@ class PlannerOrchestrator:
     # Phase review mode
     # ------------------------------------------------------------------
 
-    def run_phase_review(self, io_handler: Optional[Callable[[str], str]] = None) -> PhaseReviewResult:
+    def run_phase_review(
+        self, io_handler: Optional[Callable[[str], str]] = None
+    ) -> PhaseReviewResult:
         """
         Run phase review mode.
 
@@ -404,7 +434,7 @@ class PlannerOrchestrator:
                 next_phase_proposal=None,
                 pending_decisions=[],
                 needs_approval=False,
-                failure_reason=f"Plan must be in PHASE_REVIEW state, got {plan.status.value}"
+                failure_reason=f"Plan must be in PHASE_REVIEW state, got {plan.status.value}",
             )
 
         # Find resumable session or create new one
@@ -568,9 +598,7 @@ class PlannerOrchestrator:
             messages.append({"role": turn.role, "content": turn.content})
         return messages
 
-    def _make_session_callback(
-        self, session: PlannerSession
-    ) -> Callable[[str, list[dict]], None]:
+    def _make_session_callback(self, session: PlannerSession) -> Callable[[str, list[dict]], None]:
         """Create a session callback for persisting turns."""
 
         def callback(role: str, content_blocks: list[dict]) -> None:
@@ -592,46 +620,66 @@ class PlannerOrchestrator:
             # Note: The actual I/O happens in the runtime, not here
             return json.dumps({"asked": True, "question": question})
 
-        tools.append(PlannerTool(
-            name="ask_question",
-            description="Ask the user a clarifying question about the project.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string", "description": "Question to ask the user"}
+        tools.append(
+            PlannerTool(
+                name="ask_question",
+                description="Ask the user a clarifying question about the project.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string", "description": "Question to ask the user"}
+                    },
+                    "required": ["question"],
                 },
-                "required": ["question"],
-            },
-            handler=ask_question_handler,
-        ))
+                handler=ask_question_handler,
+            )
+        )
 
         # submit_project_brief tool
         def submit_brief_handler(inp: dict) -> str:
             brief_json = inp.get("brief_json", "")
             try:
                 data = json.loads(brief_json)
+
+                # STRICT VALIDATION: Force the LLM to self-correct if it hallucinates keys
+                required_keys = {"vision", "constraints", "phase_1_exit_criteria", "open_questions"}
+                missing = required_keys - set(data.keys())
+                if missing:
+                    raise ValueError(
+                        f"Missing required keys in JSON: {missing}. You must use the exact keys requested."
+                    )
+
                 # Store in session data for later extraction
                 session.record_roadmap_candidate({"brief": data})
                 self._session_repo.save(session)
                 return json.dumps({"accepted": True})
             except Exception as exc:
+                # Returning the error feeds it back to the LLM so it can try again
                 return json.dumps({"accepted": False, "error": str(exc)})
 
-        tools.append(PlannerTool(
-            name="submit_project_brief",
-            description="Submit the final project brief after gathering requirements.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "brief_json": {
-                        "type": "string",
-                        "description": "JSON string with brief data"
-                    }
+        tools.append(
+            PlannerTool(
+                name="submit_project_brief",
+                description="Submit the final project brief after gathering requirements.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "brief_json": {
+                            "type": "string",
+                            "description": (
+                                "JSON string with brief data. MUST strictly follow this format: "
+                                '{"vision": "High level summary", '
+                                '"constraints": ["Limits"], '
+                                '"phase_1_exit_criteria": "What defines MVP", '
+                                '"open_questions": ["Pending items"]}'
+                            ),
+                        }
+                    },
+                    "required": ["brief_json"],
                 },
-                "required": ["brief_json"],
-            },
-            handler=submit_brief_handler,
-        ))
+                handler=submit_brief_handler,
+            )
+        )
 
         return tools
 
@@ -644,20 +692,24 @@ class PlannerOrchestrator:
             plan = self._plan_repo.get()
             if plan and plan.brief:
                 brief = plan.brief
-                return json.dumps({
-                    "vision": brief.vision,
-                    "constraints": brief.constraints,
-                    "phase_1_exit_criteria": brief.phase_1_exit_criteria,
-                    "open_questions": brief.open_questions,
-                })
+                return json.dumps(
+                    {
+                        "vision": brief.vision,
+                        "constraints": brief.constraints,
+                        "phase_1_exit_criteria": brief.phase_1_exit_criteria,
+                        "open_questions": brief.open_questions,
+                    }
+                )
             return json.dumps({"error": "No brief found"})
 
-        tools.append(PlannerTool(
-            name="read_project_brief",
-            description="Read the approved project brief.",
-            input_schema={"type": "object", "properties": {}},
-            handler=read_brief_handler,
-        ))
+        tools.append(
+            PlannerTool(
+                name="read_project_brief",
+                description="Read the approved project brief.",
+                input_schema={"type": "object", "properties": {}},
+                handler=read_brief_handler,
+            )
+        )
 
         # propose_decision tool
         def propose_decision_handler(inp: dict) -> str:
@@ -671,34 +723,55 @@ class PlannerOrchestrator:
                 spec_changes=self._parse_spec_changes(inp.get("spec_changes_json")),
             )
             # Store in session data for later extraction
-            decisions = session.roadmap_data.get("pending_decisions", []) if session.roadmap_data else []
+            decisions = (
+                session.roadmap_data.get("pending_decisions", []) if session.roadmap_data else []
+            )
             decisions.append(entry.model_dump(mode="json"))
             session.record_roadmap_candidate({"pending_decisions": decisions})
             self._session_repo.save(session)
             return json.dumps({"proposed": True, "id": entry.id})
 
-        tools.append(PlannerTool(
-            name="propose_decision",
-            description="Propose an architectural decision for approval.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "domain": {"type": "string"},
-                    "feature_tag": {"type": "string"},
-                    "content": {"type": "string"},
-                    "spec_changes_json": {"type": "string"},
+        tools.append(
+            PlannerTool(
+                name="propose_decision",
+                description="Propose an architectural decision for approval.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "Short slug, e.g. 'use-fastapi'"},
+                        "domain": {"type": "string", "description": "e.g. 'backend' or 'infra'"},
+                        "feature_tag": {"type": "string"},
+                        "content": {"type": "string", "description": "Markdown explanation"},
+                        "spec_changes_json": {
+                            "type": "string",
+                            "description": (
+                                "Optional JSON string for spec changes: "
+                                '{"add_required": [], "add_forbidden": [], '
+                                '"remove_required": [], "remove_forbidden": []}'
+                            ),
+                        },
+                    },
+                    "required": ["id", "domain", "content"],
                 },
-                "required": ["id", "domain", "content"],
-            },
-            handler=propose_decision_handler,
-        ))
+                handler=propose_decision_handler,
+            )
+        )
 
         # propose_phase_plan tool
         def propose_phase_plan_handler(inp: dict) -> str:
             phases_json = inp.get("phases_json", "[]")
             try:
                 phases_data = json.loads(phases_json)
+                if not isinstance(phases_data, list):
+                    raise ValueError("phases_json must be a JSON array of objects.")
+
+                # STRICT VALIDATION
+                required = {"index", "name", "goal", "goal_names", "exit_criteria"}
+                for i, phase in enumerate(phases_data):
+                    missing = required - set(phase.keys())
+                    if missing:
+                        raise ValueError(f"Phase at index {i} is missing required keys: {missing}")
+
                 # Store in session data for later extraction
                 session.record_roadmap_candidate({"pending_phases": phases_data})
                 self._session_repo.save(session)
@@ -706,18 +779,28 @@ class PlannerOrchestrator:
             except Exception as exc:
                 return json.dumps({"proposed": False, "error": str(exc)})
 
-        tools.append(PlannerTool(
-            name="propose_phase_plan",
-            description="Propose the phase plan for approval.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "phases_json": {"type": "string"}
+        tools.append(
+            PlannerTool(
+                name="propose_phase_plan",
+                description="Propose the phase plan for approval.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "phases_json": {
+                            "type": "string",
+                            "description": (
+                                "JSON string array of phases. Format: "
+                                '[{"index": 0, "name": "Foundation", '
+                                '"goal": "Setup base", "goal_names": ["setup-db"], '
+                                '"exit_criteria": "DB is up"}]'
+                            ),
+                        }
+                    },
+                    "required": ["phases_json"],
                 },
-                "required": ["phases_json"],
-            },
-            handler=propose_phase_plan_handler,
-        ))
+                handler=propose_phase_plan_handler,
+            )
+        )
 
         # submit_architecture tool
         def submit_architecture_handler(inp: dict) -> str:
@@ -731,12 +814,14 @@ class PlannerOrchestrator:
                 return json.dumps({"accepted": False, "error": "No phases proposed"})
             return json.dumps({"accepted": True})
 
-        tools.append(PlannerTool(
-            name="submit_architecture",
-            description="Submit the architecture for approval. Requires at least one decision and one phase.",
-            input_schema={"type": "object", "properties": {}},
-            handler=submit_architecture_handler,
-        ))
+        tools.append(
+            PlannerTool(
+                name="submit_architecture",
+                description="Submit the architecture for approval. Requires at least one decision and one phase.",
+                input_schema={"type": "object", "properties": {}},
+                handler=submit_architecture_handler,
+            )
+        )
 
         return tools
 
@@ -757,25 +842,31 @@ class PlannerOrchestrator:
             for goal_name in current_phase.goal_names:
                 goal = self._goal_repo.get_by_name(goal_name)
                 if goal:
-                    goals.append({
-                        "name": goal.name,
-                        "status": goal.status.value,
-                        "description": goal.description,
-                    })
+                    goals.append(
+                        {
+                            "name": goal.name,
+                            "status": goal.status.value,
+                            "description": goal.description,
+                        }
+                    )
 
-            return json.dumps({
-                "phase_name": current_phase.name,
-                "phase_goal": current_phase.goal,
-                "goals": goals,
-                "goal_names": current_phase.goal_names,
-            })
+            return json.dumps(
+                {
+                    "phase_name": current_phase.name,
+                    "phase_goal": current_phase.goal,
+                    "goals": goals,
+                    "goal_names": current_phase.goal_names,
+                }
+            )
 
-        tools.append(PlannerTool(
-            name="read_phase_summary",
-            description="Read summary of the completed phase.",
-            input_schema={"type": "object", "properties": {}},
-            handler=read_phase_summary_handler,
-        ))
+        tools.append(
+            PlannerTool(
+                name="read_phase_summary",
+                description="Read summary of the completed phase.",
+                input_schema={"type": "object", "properties": {}},
+                handler=read_phase_summary_handler,
+            )
+        )
 
         # propose_decision tool (same as architecture mode)
         def propose_decision_handler(inp: dict) -> str:
@@ -788,28 +879,32 @@ class PlannerOrchestrator:
                 content=inp["content"],
                 spec_changes=self._parse_spec_changes(inp.get("spec_changes_json")),
             )
-            decisions = session.roadmap_data.get("pending_decisions", []) if session.roadmap_data else []
+            decisions = (
+                session.roadmap_data.get("pending_decisions", []) if session.roadmap_data else []
+            )
             decisions.append(entry.model_dump(mode="json"))
             session.record_roadmap_candidate({"pending_decisions": decisions})
             self._session_repo.save(session)
             return json.dumps({"proposed": True, "id": entry.id})
 
-        tools.append(PlannerTool(
-            name="propose_decision",
-            description="Propose an architectural decision for approval.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "domain": {"type": "string"},
-                    "feature_tag": {"type": "string"},
-                    "content": {"type": "string"},
-                    "spec_changes_json": {"type": "string"},
+        tools.append(
+            PlannerTool(
+                name="propose_decision",
+                description="Propose an architectural decision for approval.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "domain": {"type": "string"},
+                        "feature_tag": {"type": "string"},
+                        "content": {"type": "string"},
+                        "spec_changes_json": {"type": "string"},
+                    },
+                    "required": ["id", "domain", "content"],
                 },
-                "required": ["id", "domain", "content"],
-            },
-            handler=propose_decision_handler,
-        ))
+                handler=propose_decision_handler,
+            )
+        )
 
         # propose_next_phase tool
         def propose_next_phase_handler(inp: dict) -> str:
@@ -823,53 +918,66 @@ class PlannerOrchestrator:
             self._session_repo.save(session)
             return json.dumps({"proposed": True})
 
-        tools.append(PlannerTool(
-            name="propose_next_phase",
-            description="Propose the next phase for approval.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "goal": {"type": "string"},
-                    "exit_criteria": {"type": "string"},
+        tools.append(
+            PlannerTool(
+                name="propose_next_phase",
+                description="Propose the next phase for approval.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "goal": {"type": "string"},
+                        "exit_criteria": {"type": "string"},
+                    },
+                    "required": ["name", "goal", "exit_criteria"],
                 },
-                "required": ["name", "goal", "exit_criteria"],
-            },
-            handler=propose_next_phase_handler,
-        ))
+                handler=propose_next_phase_handler,
+            )
+        )
 
         # submit_review tool
         def submit_review_handler(inp: dict) -> str:
             lessons = inp.get("lessons", "")
             architecture_summary = inp.get("architecture_summary", "")
-            session.record_roadmap_candidate({
-                "lessons": lessons,
-                "architecture_summary": architecture_summary,
-            })
+            session.record_roadmap_candidate(
+                {
+                    "lessons": lessons,
+                    "architecture_summary": architecture_summary,
+                }
+            )
             self._session_repo.save(session)
             return json.dumps({"accepted": True})
 
-        tools.append(PlannerTool(
-            name="submit_review",
-            description="Submit the phase review with lessons and architecture update.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "lessons": {"type": "string"},
-                    "architecture_summary": {"type": "string"},
+        tools.append(
+            PlannerTool(
+                name="submit_review",
+                description="Submit the phase review with lessons and architecture update.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "lessons": {"type": "string"},
+                        "architecture_summary": {"type": "string"},
+                    },
+                    "required": ["lessons", "architecture_summary"],
                 },
-                "required": ["lessons", "architecture_summary"],
-            },
-            handler=submit_review_handler,
-        ))
+                handler=submit_review_handler,
+            )
+        )
 
         return tools
 
     def _parse_brief(self, roadmap_raw: dict) -> ProjectBrief:
         """Extract ProjectBrief from roadmap_raw data."""
         brief_data = roadmap_raw.get("brief", roadmap_raw)  # Handle both formats
+
+        vision = brief_data.get("vision")
+        if not vision:
+            raise ValueError(
+                "The generated brief is missing a 'vision' statement. The LLM failed to generate the correct schema."
+            )
+
         return ProjectBrief(
-            vision=brief_data.get("vision", ""),
+            vision=vision,
             constraints=brief_data.get("constraints", []),
             phase_1_exit_criteria=brief_data.get("phase_1_exit_criteria", ""),
             open_questions=brief_data.get("open_questions", []),
@@ -898,15 +1006,17 @@ class PlannerOrchestrator:
         entries = []
         for d in decisions_data:
             sc = self._parse_spec_changes(d.get("spec_changes_json"))
-            entries.append(DecisionEntry(
-                id=d["id"],
-                date=d.get("date", str(date.today())),
-                status=d.get("status", "active"),
-                domain=d["domain"],
-                feature_tag=d.get("feature_tag", ""),
-                content=d["content"],
-                spec_changes=sc,
-            ))
+            entries.append(
+                DecisionEntry(
+                    id=d["id"],
+                    date=d.get("date", str(date.today())),
+                    status=d.get("status", "active"),
+                    domain=d["domain"],
+                    feature_tag=d.get("feature_tag", ""),
+                    content=d["content"],
+                    spec_changes=sc,
+                )
+            )
         return entries
 
     def _extract_pending_phases(self, session: PlannerSession) -> list[Phase]:
@@ -916,15 +1026,17 @@ class PlannerOrchestrator:
         phases_data = session.roadmap_data.get("pending_phases", [])
         phases = []
         for p in phases_data:
-            phases.append(Phase(
-                index=p.get("index", 0),
-                name=p.get("name", ""),
-                goal=p.get("goal", ""),
-                goal_names=p.get("goal_names", []),
-                status=PhaseStatus.PLANNED,
-                lessons="",
-                exit_criteria=p.get("exit_criteria", ""),
-            ))
+            phases.append(
+                Phase(
+                    index=p.get("index", 0),
+                    name=p.get("name", ""),
+                    goal=p.get("goal", ""),
+                    goal_names=p.get("goal_names", []),
+                    status=PhaseStatus.PLANNED,
+                    lessons="",
+                    exit_criteria=p.get("exit_criteria", ""),
+                )
+            )
         return phases
 
     def _extract_review_lessons(self, session: PlannerSession) -> str:
