@@ -7,27 +7,27 @@ Commands:
   review       — Run phase review
   status       — Show project plan status
   decision     — Surface mid-phase architectural question
+  logs         — Display or tail a planning session log
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import tempfile
+import threading
+import time
+import uuid
 
 import click
 
 from src.infra.container import AppContainer
 from src.infra.container import AppContainer as _AppContainer
-from src.infra.cli.error_handler import die
+from src.infra.cli.error_handler import die, err, info, ok, warn, catch_domain_errors
 
 
 def _require_project() -> str:
-    """
-    Abort with a helpful message when no project is configured.
-
-    Returns the active project name so callers can display it.
-    Raises SystemExit(1) when project_name is None or 'default'.
-    """
     project = _AppContainer.from_env().ctx.machine.project_name
     if not project:
         die("No project configured.\n  Run: orchestrator init\n  Then try again.")
@@ -36,8 +36,68 @@ def _require_project() -> str:
 
 
 def _io_handler(question: str) -> str:
-    """Default I/O handler that prompts the user."""
     return click.prompt(question, type=str)
+
+
+def _print_section(title: str) -> None:
+    width = 60
+    click.echo()
+    click.echo("─" * width)
+    click.echo(f"  {title}")
+    click.echo("─" * width)
+
+
+@contextlib.contextmanager
+def _spinner(message: str):
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    stop_event = threading.Event()
+
+    def _spin():
+        i = 0
+        while not stop_event.is_set():
+            click.echo(f"\r{frames[i % len(frames)]}  {message}", nl=False, err=False)
+            stop_event.wait(0.1)
+            i += 1
+        click.echo(f"\r   {message} … done", nl=True)
+
+    if not sys.stdout.isatty():
+        click.echo(f"   {message}...")
+        yield
+        return
+
+    t = threading.Thread(target=_spin, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        t.join()
+
+
+def _make_planner_logger(container: AppContainer, mode: str):
+    from src.infra.logging.live_logger import LiveLogger
+    from src.infra.logging.planner_logger import PlannerLiveLogger
+
+    log_dir = container.paths.logs_dir / "planner"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    session_id = str(uuid.uuid4())[:8]
+    live = LiveLogger(json_log_dir=log_dir)
+    return PlannerLiveLogger(live, session_id, mode, log_dir), session_id
+
+
+def _bind_planner_hooks(orchestrator, planner_log) -> None:
+    from src.infra.logging.planner_callback import StreamingPlannerCallback
+
+    callback = StreamingPlannerCallback(planner_log)
+    orchestrator.set_turn_callback(callback.on_turn)
+
+    def event_hook(event_type: str, data: dict) -> None:
+        if event_type == "decision_proposed":
+            planner_log.on_decision_proposed(data.get("id", ""), data.get("domain", ""))
+        elif event_type == "phase_proposed":
+            planner_log.on_phase_proposed(data.get("name", ""), data.get("goal_names", []))
+
+    orchestrator.set_planner_event_hook(event_hook)
 
 
 @click.group(name="plan")
@@ -47,11 +107,8 @@ def plan_group() -> None:
 
 
 @plan_group.command(name="init")
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Use dry-run mode (no actual planning)",
-)
+@click.option("--dry-run", is_flag=True, help="Use dry-run mode (no actual planning)")
+@catch_domain_errors
 def plan_init(dry_run: bool) -> None:
     """
     Start or resume discovery phase.
@@ -60,32 +117,25 @@ def plan_init(dry_run: bool) -> None:
     and create a project brief.
     """
     if dry_run:
-        # Override to dry-run mode for this command
         os.environ["AGENT_MODE"] = "dry-run"
 
     project = _require_project()
-    click.echo(f"Project: {project}")
+    ok(f"Project: {project}")
 
-    repo = AppContainer.from_env().project_plan_repo
+    container = AppContainer.from_env()
+    repo = container.project_plan_repo
     plan = repo.get()
 
-    # Check if we can start discovery
     if plan is not None:
         if plan.status != "discovery":
-            click.echo(f"Plan is currently in '{plan.status}' state.")
+            warn(f"Plan is currently in '{plan.status}' state.")
             if not click.confirm("Start over and create a new plan?"):
                 return
-            # Clear the existing plan for restart
             plan = None
 
-    # Build orchestrator with dry-run mode if needed
-    if dry_run:
-        os.environ["AGENT_MODE"] = "dry-run"
-
     try:
-        orchestrator = AppContainer.from_env().planner_orchestrator
+        orchestrator = container.planner_orchestrator
     except Exception as exc:
-        # Catch SpecNotFoundError and similar setup errors and surface them cleanly
         exc_name = type(exc).__name__
         if "SpecNotFound" in exc_name or "NotFound" in exc_name:
             die(
@@ -95,42 +145,47 @@ def plan_init(dry_run: bool) -> None:
             )
         raise
 
-    click.echo("Starting discovery phase...")
-    result = orchestrator.start_discovery(io_handler=_io_handler)
+    planner_log, session_id = _make_planner_logger(container, "discovery")
+    _bind_planner_hooks(orchestrator, planner_log)
+    planner_log.session_start()
+    _start = time.monotonic()
 
-    if result.failure_reason:
-        click.echo(f"Discovery failed: {result.failure_reason}")
-        return
+    try:
+        with _spinner("Running discovery session"):
+            result = orchestrator.start_discovery(io_handler=_io_handler)
+
+        if result.failure_reason:
+            planner_log.session_end(success=False)
+            die(f"Discovery failed: {result.failure_reason}")
+            return
+
+        planner_log.session_end(success=True)
+    finally:
+        planner_log.close()
 
     if result.brief:
-        click.echo("\n" + "=" * 60)
-        click.echo("PROJECT BRIEF")
-        click.echo("=" * 60)
-        click.echo(f"Vision: {result.brief.vision}")
+        _print_section("PROJECT BRIEF")
+        info(f"Vision: {result.brief.vision}")
         if result.brief.constraints:
-            click.echo("\nConstraints:")
+            info("Constraints:")
             for c in result.brief.constraints:
-                click.echo(f"  - {c}")
+                info(f"  - {c}")
         if result.brief.phase_1_exit_criteria:
-            click.echo(f"\nPhase 1 exit criteria: {result.brief.phase_1_exit_criteria}")
+            info(f"Phase 1 exit criteria: {result.brief.phase_1_exit_criteria}")
         if result.brief.open_questions:
-            click.echo("\nOpen questions:")
+            info("Open questions:")
             for q in result.brief.open_questions:
-                click.echo(f"  - {q}")
-        click.echo("=" * 60)
+                info(f"  - {q}")
 
         if click.confirm("\nApprove this project brief?"):
             plan = orchestrator.approve_brief()
-            click.echo(f"Brief approved. Plan status: {plan.status.value}")
-            click.echo("Run: orchestrator plan architect")
+            ok(f"Brief approved — status: {plan.status.value}")
+            info("Run: orchestrator plan architect")
 
 
 @plan_group.command(name="architect")
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Use dry-run mode",
-)
+@click.option("--dry-run", is_flag=True, help="Use dry-run mode")
+@catch_domain_errors
 def plan_architect(dry_run: bool) -> None:
     """
     Run architecture planning phase.
@@ -141,62 +196,72 @@ def plan_architect(dry_run: bool) -> None:
         os.environ["AGENT_MODE"] = "dry-run"
 
     project = _require_project()
-    click.echo(f"Project: {project}")
+    ok(f"Project: {project}")
 
-    repo = AppContainer.from_env().project_plan_repo
+    container = AppContainer.from_env()
+    repo = container.project_plan_repo
     plan = repo.get()
 
     if plan is None or plan.status != "architecture":
         if plan:
-            click.echo(f"Plan is in '{plan.status}' state (expected 'architecture').")
+            warn(f"Plan is in '{plan.status}' state (expected 'architecture').")
         else:
-            click.echo("No plan found. Run 'orchestrator plan init' first.")
+            warn("No plan found. Run 'orchestrator plan init' first.")
         return
 
-    orchestrator = AppContainer.from_env().planner_orchestrator
+    orchestrator = container.planner_orchestrator
 
-    click.echo("Running architecture planning...")
-    result = orchestrator.run_architecture(io_handler=_io_handler)
+    planner_log, session_id = _make_planner_logger(container, "architecture")
+    _bind_planner_hooks(orchestrator, planner_log)
+    planner_log.session_start()
+    _start = time.monotonic()
 
-    if result.failure_reason:
-        click.echo(f"Architecture planning failed: {result.failure_reason}")
-        return
+    try:
+        with _spinner("Running architecture planning"):
+            result = orchestrator.run_architecture(io_handler=_io_handler)
 
-    # Display pending decisions
+        if result.failure_reason:
+            planner_log.session_end(success=False)
+            die(f"Architecture planning failed: {result.failure_reason}")
+            return
+
+        planner_log.session_end(success=True)
+    finally:
+        planner_log.close()
+
     if result.pending_decisions:
-        click.echo("\n" + "=" * 60)
-        click.echo("PROPOSED DECISIONS")
-        click.echo("=" * 60)
+        _print_section("PROPOSED DECISIONS")
         for i, decision in enumerate(result.pending_decisions, 1):
-            click.echo(f"\n{i}. [{decision.id}] {decision.domain}")
-            click.echo(f"   Date: {decision.date}")
-            click.echo(f"   Content: {decision.content[:100]}...")
+            info(f"{i}. [{decision.id}] {decision.domain}")
+            info(f"   Date: {decision.date}")
+            for line in decision.content.splitlines():
+                info(f"   {line}")
             if decision.spec_changes and not decision.spec_changes.is_empty:
                 sc = decision.spec_changes
-                click.echo("   Spec changes:")
+                info("   Spec changes:")
                 if sc.add_required:
-                    click.echo(f"     Add required: {', '.join(sc.add_required)}")
+                    info(f"     Add required: {', '.join(sc.add_required)}")
                 if sc.add_forbidden:
-                    click.echo(f"     Add forbidden: {', '.join(sc.add_forbidden)}")
+                    info(f"     Add forbidden: {', '.join(sc.add_forbidden)}")
                 if sc.remove_required:
-                    click.echo(f"     Remove required: {', '.join(sc.remove_required)}")
+                    info(f"     Remove required: {', '.join(sc.remove_required)}")
                 if sc.remove_forbidden:
-                    click.echo(f"     Remove forbidden: {', '.join(sc.remove_forbidden)}")
+                    info(f"     Remove forbidden: {', '.join(sc.remove_forbidden)}")
 
-    # Display proposed phases
     if result.pending_phases:
-        click.echo("\n" + "=" * 60)
-        click.echo("PROPOSED PHASES")
-        click.echo("=" * 60)
+        _print_section("PROPOSED PHASES")
         for phase in result.pending_phases:
-            click.echo(f"\nPhase {phase.index}: {phase.name}")
-            click.echo(f"  Goal: {phase.goal}")
+            info(f"Phase {phase.index}: {phase.name}")
+            info(f"  Goal: {phase.goal}")
+            if phase.goal_names:
+                for gn in phase.goal_names:
+                    info(f"    • {gn}")
             if phase.exit_criteria:
-                click.echo(f"  Exit criteria: {phase.exit_criteria}")
+                info(f"  Exit criteria: {phase.exit_criteria}")
 
-    # Decision approval loop
+    approved_ids = []
     if result.pending_decisions:
-        approved_ids = []
+        _print_section("DECISION APPROVAL")
         for decision in result.pending_decisions:
             action = click.prompt(
                 f"\nApprove decision '{decision.id}'? (y/n/edit)",
@@ -205,39 +270,37 @@ def plan_architect(dry_run: bool) -> None:
             )
             if action.lower() == "y":
                 approved_ids.append(decision.id)
+                ok(f"✓ {decision.id}")
             elif action.lower() == "edit":
-                # Open editor with decision content
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
                     f.write(decision.content)
                     temp_path = f.name
                 try:
                     editor = os.environ.get("EDITOR", "vim")
                     os.system(f"{editor} {temp_path}")
-                    with open(temp_path, "r") as f:
-                        new_content = f.read()
-                    # Update decision content (in a real implementation, this would update the session)
-                    click.echo(f"Edited decision: {decision.id}")
+                    info(f"Edited decision: {decision.id}")
                 finally:
                     os.unlink(temp_path)
-        click.echo(f"\nApproved {len(approved_ids)} decisions.")
-    else:
-        approved_ids = []
+            else:
+                warn(f"✗ {decision.id}")
+
+        info(f"\nApproved {len(approved_ids)} decisions.")
 
     if click.confirm("\nApprove phase plan and start execution?"):
-        result = orchestrator.approve_architecture(approved_ids)
-        click.echo("\nArchitecture approved!")
-        click.echo(f"Plan status: {result.plan_status}")
-        click.echo(f"Decisions applied: {result.decisions_applied}")
-        click.echo(f"Spec changes applied: {result.spec_changes_applied}")
-        click.echo(f"Goals dispatched: {len(result.goals_dispatched)}")
+        approval = orchestrator.approve_architecture(approved_ids)
+        elapsed = time.monotonic() - _start
+        _print_section("ARCHITECTURE APPROVED")
+        ok(f"Architecture approved in {elapsed:.1f}s")
+        ok(f"  Decisions applied : {approval.decisions_applied}")
+        ok(f"  Spec changes      : {approval.spec_changes_applied}")
+        ok(f"  Goals dispatched  : {len(approval.goals_dispatched)}")
+        for gid in approval.goals_dispatched:
+            info(f"    → {gid}")
 
 
 @plan_group.command(name="review")
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Use dry-run mode",
-)
+@click.option("--dry-run", is_flag=True, help="Use dry-run mode")
+@catch_domain_errors
 def plan_review(dry_run: bool) -> None:
     """
     Run phase review phase.
@@ -248,90 +311,99 @@ def plan_review(dry_run: bool) -> None:
         os.environ["AGENT_MODE"] = "dry-run"
 
     project = _require_project()
-    click.echo(f"Project: {project}")
+    ok(f"Project: {project}")
 
-    repo = AppContainer.from_env().project_plan_repo
+    container = AppContainer.from_env()
+    repo = container.project_plan_repo
     plan = repo.get()
 
     if plan is None or plan.status != "phase_review":
         if plan:
-            click.echo(f"Plan is in '{plan.status}' state (expected 'phase_review').")
+            warn(f"Plan is in '{plan.status}' state (expected 'phase_review').")
         else:
-            click.echo("No plan found. Run 'orchestrator plan init' first.")
+            warn("No plan found. Run 'orchestrator plan init' first.")
         return
 
-    orchestrator = AppContainer.from_env().planner_orchestrator
+    orchestrator = container.planner_orchestrator
 
-    click.echo("Running phase review...")
-    result = orchestrator.run_phase_review(io_handler=_io_handler)
+    planner_log, session_id = _make_planner_logger(container, "phase_review")
+    _bind_planner_hooks(orchestrator, planner_log)
+    planner_log.session_start()
 
-    if result.failure_reason:
-        click.echo(f"Phase review failed: {result.failure_reason}")
-        return
+    try:
+        with _spinner("Running phase review"):
+            result = orchestrator.run_phase_review(io_handler=_io_handler)
 
-    # Display retrospective
+        if result.failure_reason:
+            planner_log.session_end(success=False)
+            die(f"Phase review failed: {result.failure_reason}")
+            return
+
+        planner_log.session_end(success=True)
+    finally:
+        planner_log.close()
+
     if result.lessons:
-        click.echo("\n" + "=" * 60)
-        click.echo("LESSONS LEARNED")
-        click.echo("=" * 60)
-        click.echo(result.lessons)
+        _print_section("LESSONS LEARNED")
+        for line in result.lessons.splitlines():
+            info(line)
 
-    # Display next phase proposal
     if result.next_phase_proposal:
-        click.echo("\n" + "=" * 60)
-        click.echo("NEXT PHASE PROPOSAL")
-        click.echo("=" * 60)
+        _print_section("NEXT PHASE PROPOSAL")
         phase = result.next_phase_proposal
-        click.echo(f"Phase {phase.index}: {phase.name}")
-        click.echo(f"  Goal: {phase.goal}")
+        info(f"Phase {phase.index}: {phase.name}")
+        info(f"  Goal: {phase.goal}")
         if phase.exit_criteria:
-            click.echo(f"  Exit criteria: {phase.exit_criteria}")
+            info(f"  Exit criteria: {phase.exit_criteria}")
 
-    # Display pending decisions
     if result.pending_decisions:
-        click.echo("\n" + "=" * 60)
-        click.echo("PENDING DECISIONS")
-        click.echo("=" * 60)
+        _print_section("PENDING DECISIONS")
         for decision in result.pending_decisions:
-            click.echo(f"\n[{decision.id}] {decision.domain}")
-            click.echo(f"  {decision.content[:100]}...")
+            info(f"\n[{decision.id}] {decision.domain}")
+            for line in decision.content.splitlines():
+                info(f"  {line}")
 
-    # Decision approval loop (same as architect)
+    approved_ids = []
     if result.pending_decisions:
-        approved_ids = []
         for decision in result.pending_decisions:
             if click.confirm(f"\nApprove decision '{decision.id}'?"):
                 approved_ids.append(decision.id)
-    else:
-        approved_ids = []
+                ok(f"✓ {decision.id}")
+            else:
+                warn(f"✗ {decision.id}")
 
-    # Continuation decision
     approve_next = click.confirm("\nContinue with next phase?")
 
     if approve_next or click.confirm("Mark project as done?"):
-        result = orchestrator.approve_phase_review(approve_next=approve_next)
-        click.echo("\nPhase review approved!")
-        click.echo(f"Plan status: {result.plan_status}")
-        click.echo(f"Decisions applied: {result.decisions_applied}")
-        click.echo(f"Goals dispatched: {len(result.goals_dispatched)}")
+        approval = orchestrator.approve_phase_review(approve_next=approve_next)
+        _print_section("PHASE REVIEW APPROVED")
+        ok(f"Phase review approved!")
+        ok(f"  Plan status       : {approval.plan_status}")
+        ok(f"  Decisions applied : {approval.decisions_applied}")
+        ok(f"  Goals dispatched  : {len(approval.goals_dispatched)}")
+        for gid in approval.goals_dispatched:
+            info(f"    → {gid}")
 
 
 @plan_group.command(name="status")
+@catch_domain_errors
 def plan_status() -> None:
     """
     Show current project plan status.
     """
     project = _require_project()
-    click.echo(f"Project: {project}")
-    orchestrator = AppContainer.from_env().planner_orchestrator
+    container = AppContainer.from_env()
+    orchestrator = container.planner_orchestrator
     plan = orchestrator.get_status()
 
-    click.echo(f"\nPlan: {plan.plan_id}")
-    click.echo(f"Status: {plan.status.value}")
-    click.echo(f"Vision: {plan.vision}")
+    _print_section(f"PROJECT PLAN — {project}")
+    info(f"Status : {plan.status.value}")
+    if plan.vision:
+        info(f"Vision : {plan.vision}")
 
     if plan.phases:
-        click.echo("\nPhases:")
+        info("")
+        info("Phases:")
         for phase in plan.phases:
             status_icon = {
                 "planned": "○",
@@ -340,20 +412,31 @@ def plan_status() -> None:
             }.get(phase.status.value, "?")
             label = f"Phase {phase.index}: {phase.name}"
             if phase.status.value == "active":
-                label = f"{label} (now)"
-            click.echo(f"  {status_icon} {label}")
-            click.echo(f"     Goal: {phase.goal}")
-            if phase.goal_names:
-                click.echo(f"     Goals: {', '.join(phase.goal_names)}")
+                label = f"{label}  ← now"
+            goal_count = len(phase.goal_names)
+            info(f"  {status_icon}  {label}  ({goal_count} goals)")
+
+    try:
+        goal_repo = container.goal_repo
+        all_goals = goal_repo.list_all() if hasattr(goal_repo, "list_all") else []
+        active_goals = [g for g in all_goals if g.status.value not in ("merged", "cancelled")]
+        if active_goals:
+            info("")
+            info("Active Goals:")
+            for goal in active_goals:
+                task_count = len(goal.tasks) if hasattr(goal, "tasks") and goal.tasks else 0
+                status_icon = "●" if goal.status.value == "running" else "○"
+                info(f"  {status_icon}  {goal.name:<28} {goal.status.value:<12} {task_count} tasks")
+    except Exception:
+        pass
+
+    info("")
+    info("JIT Planner: enabled")
 
 
 @plan_group.command(name="decision")
 @click.argument("description")
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Use dry-run mode",
-)
+@click.option("--dry-run", is_flag=True, help="Use dry-run mode")
 def plan_decision(description: str, dry_run: bool) -> None:
     """
     Surface a mid-phase architectural question.
@@ -364,11 +447,99 @@ def plan_decision(description: str, dry_run: bool) -> None:
     if dry_run:
         os.environ["AGENT_MODE"] = "dry-run"
 
-    click.echo(f"Decision description: {description}")
-    click.echo("(Decision approval flow not fully implemented in this prototype)")
+    info(f"Decision description: {description}")
+    info("(Decision approval flow not fully implemented in this prototype)")
 
 
-# Register the group in the main CLI
+@plan_group.command(name="logs")
+@click.option("--session-id", default=None, help="Specific session ID to display")
+@click.option(
+    "--filter",
+    "event_filter",
+    default=None,
+    type=click.Choice(["turns", "tools", "decisions", "phases", "all"]),
+    help="Filter event types (default: all)",
+)
+@click.option("--tail", default=0, help="Show only the last N lines")
+def plan_logs(session_id: str, event_filter: str, tail: int) -> None:
+    """
+    Display or tail the planning session log.
+
+    Reads the JSONL log file written by PlannerLiveLogger and renders
+    it with terminal colours, filtered by event type if requested.
+
+    Examples:
+        orchestrator plan logs
+        orchestrator plan logs --filter turns
+        orchestrator plan logs --filter tools --tail 20
+        orchestrator plan logs --session-id abc123
+    """
+    import json
+
+    from src.infra.logging.live_logger import LiveLogger
+    from src.infra.logging.log_events import LogEvent, LogEventType
+
+    container = AppContainer.from_env()
+    log_dir = container.paths.logs_dir / "planner"
+
+    if not log_dir.exists():
+        die("No planner session logs found. Run a planning command first.")
+        return
+
+    jsonl_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    if not jsonl_files:
+        die("No planner session logs found. Run a planning command first.")
+        return
+
+    if session_id:
+        matched = [f for f in jsonl_files if session_id in f.name]
+        if not matched:
+            die(f"No log file found for session-id '{session_id}'.")
+            return
+        log_file = matched[-1]
+    else:
+        log_file = jsonl_files[-1]
+
+    events: list = []
+    with open(log_file, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                events.append(LogEvent.from_json(data))
+            except Exception:
+                continue
+
+    FILTER_MAP = {
+        "turns": {LogEventType.PLANNER_TURN},
+        "tools": {LogEventType.PLANNER_TOOL_CALL, LogEventType.PLANNER_TOOL_RESULT},
+        "decisions": {LogEventType.PLANNER_DECISION},
+        "phases": {LogEventType.PLANNER_PHASE},
+    }
+    if event_filter and event_filter != "all":
+        allowed = FILTER_MAP.get(event_filter, set())
+        events = [e for e in events if e.event_type in allowed]
+
+    if tail > 0:
+        events = events[-tail:]
+
+    if not events:
+        suffix = f" for filter '{event_filter}'" if event_filter else ""
+        info(f"No events found in {log_file.name}{suffix}.")
+        return
+
+    info(f"Log: {log_file.name}  ({len(events)} events)")
+    click.echo()
+
+    live = LiveLogger()
+    live.register_agent("planner", "replay", str(log_dir))
+    for event in events:
+        live._render_to_terminal(event)
+    live.close()
+
+
 def register_cli(main_group) -> None:
     """Register this group with the main CLI."""
     main_group.add_command(plan_group)
