@@ -43,9 +43,8 @@
         },
         "terminal.integrated.env.linux": {
           "REDIS_URL": "redis://localhost:6379/0",
-          "AGENT_MODE": "dry-run",
+          "AGENT_MODE": "real",
           "ORCHESTRATOR_HOME": "/root/.orchestrator",
-          "PROJECT_NAME": "default",
           "PYTHONPATH": "/workspaces/agent-orchestrator"
         }
       }
