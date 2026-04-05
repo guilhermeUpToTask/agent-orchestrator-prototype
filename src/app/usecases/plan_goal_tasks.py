@@ -25,7 +25,7 @@ Hexagonal Architecture notes:
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Callable, Optional
 
 import structlog
 
@@ -69,12 +69,14 @@ class PlanGoalTasksUseCase:
         planner_runtime: PlannerRuntimePort,
         event_port: EventPort,
         spec_repo: Optional[ProjectSpecRepository] = None,
+        progress_hook: Optional[Callable[[str, dict], None]] = None,
     ) -> None:
         self._task_creation = task_creation
         self._goal_repo = goal_repo
         self._planner_runtime = planner_runtime
         self._events = event_port
         self._spec_repo = spec_repo
+        self._progress_hook = progress_hook
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -109,6 +111,9 @@ class PlanGoalTasksUseCase:
             goal_description=goal.description,
         )
 
+        if self._progress_hook:
+            self._progress_hook("jit_start", {"goal_id": goal_id, "goal_name": goal.name})
+
         task_defs = self._invoke_llm(goal)
         if not task_defs:
             log.error(
@@ -118,6 +123,12 @@ class PlanGoalTasksUseCase:
             return
 
         self._persist_tasks(goal, task_defs)
+
+        if self._progress_hook:
+            self._progress_hook("jit_end", {
+                "goal_id": goal_id,
+                "task_ids": [t.task_id for t in task_defs],
+            })
 
     # ------------------------------------------------------------------
     # LLM interaction

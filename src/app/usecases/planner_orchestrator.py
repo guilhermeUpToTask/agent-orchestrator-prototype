@@ -140,6 +140,8 @@ class PlannerOrchestrator:
         self._spec_repo = spec_repo
         self._project_name = project_name
         self._event_port = event_port
+        self._turn_callback: Optional[Callable[[str, list], None]] = None
+        self._planner_event_hook: Optional[Callable[[str, dict], None]] = None
 
     # ------------------------------------------------------------------
     # Discovery mode
@@ -594,6 +596,32 @@ class PlannerOrchestrator:
         """Return the current plan."""
         return self._plan_repo.load()
 
+    def set_turn_callback(
+        self,
+        callback: Optional[Callable[[str, list], None]],
+    ) -> None:
+        """
+        Register an additional callback to be invoked on every LLM turn.
+
+        The callback receives (role: str, content_blocks: list[dict]).
+        Intended for CLI streaming; the app layer never imports infra.
+        Called AFTER the session is persisted so the CLI always sees
+        complete, already-saved turns.
+        """
+        self._turn_callback = callback
+
+    def set_planner_event_hook(
+        self,
+        hook: Optional[Callable[[str, dict], None]],
+    ) -> None:
+        """
+        Register a hook for high-level planning events (decisions, phases).
+
+        The hook receives (event_type: str, data: dict).
+        Intended for CLI streaming; the app layer never imports infra.
+        """
+        self._planner_event_hook = hook
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -613,13 +641,16 @@ class PlannerOrchestrator:
             messages.append({"role": turn.role, "content": turn.content})
         return messages
 
-    def _make_session_callback(self, session: PlannerSession) -> Callable[[str, list[dict]], None]:
+    def _make_session_callback(self, session: PlannerSession) -> Callable[[str, list], None]:
         """Create a session callback for persisting turns."""
 
-        def callback(role: str, content_blocks: list[dict]) -> None:
+        def callback(role: str, content_blocks: list) -> None:
             turn_index = len(session.turns)
             session.add_turn(role, content_blocks, turn_index)
             self._session_repo.save(session)
+            # Fire the optional CLI streaming hook AFTER persistence.
+            if self._turn_callback is not None:
+                self._turn_callback(role, content_blocks)
 
         return callback
 
@@ -744,6 +775,8 @@ class PlannerOrchestrator:
             decisions.append(entry.model_dump(mode="json"))
             session.record_roadmap_candidate({"pending_decisions": decisions})
             self._session_repo.save(session)
+            if self._planner_event_hook:
+                self._planner_event_hook("decision_proposed", {"id": entry.id, "domain": entry.domain})
             return json.dumps({"proposed": True, "id": entry.id})
 
         tools.append(
@@ -790,6 +823,12 @@ class PlannerOrchestrator:
                 # Store in session data for later extraction
                 session.record_roadmap_candidate({"pending_phases": phases_data})
                 self._session_repo.save(session)
+                if self._planner_event_hook:
+                    for p in phases_data:
+                        self._planner_event_hook("phase_proposed", {
+                            "name": p.get("name", ""),
+                            "goal_names": p.get("goal_names", []),
+                        })
                 return json.dumps({"proposed": True, "phase_count": len(phases_data)})
             except Exception as exc:
                 return json.dumps({"proposed": False, "error": str(exc)})
