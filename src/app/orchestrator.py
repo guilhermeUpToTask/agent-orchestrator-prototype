@@ -50,6 +50,7 @@ from src.domain.project_spec import ProjectSpec, ProjectSpecRepository
 from src.app.usecases.goal_merge_task import GoalMergeTaskUseCase
 from src.app.usecases.goal_cancel_task import GoalCancelTaskUseCase
 from src.app.usecases.load_project_spec import LoadProjectSpec
+from src.app.usecases.plan_goal_tasks import PlanGoalTasksUseCase
 
 log = structlog.get_logger(__name__)
 
@@ -63,6 +64,7 @@ WATCHED_EVENTS = [
     "goal.ready_for_review",
     "goal.approved",
     "goal.merged",
+    "goal.unblocked",
 ]
 
 # Statuses that unlock the next goal in a sequential plan
@@ -100,6 +102,7 @@ class TaskGraphOrchestrator:
         project_name: str = "",
         create_pr_usecase=None,  # CreateGoalPRUseCase | None
         telemetry_emitter: TelemetryEmitterPort | None = None,
+        plan_goal_tasks: Optional[PlanGoalTasksUseCase] = None,
     ) -> None:
         self._task_repo     = task_repo
         self._goal_repo     = goal_repo
@@ -112,6 +115,7 @@ class TaskGraphOrchestrator:
         self._telemetry     = TelemetryService(telemetry_emitter, producer="goal-orchestrator")
         self._running       = False
         self._spec: Optional[ProjectSpec] = None
+        self._plan_goal_tasks = plan_goal_tasks
 
     # ------------------------------------------------------------------
     # ProjectSpec access
@@ -194,6 +198,7 @@ class TaskGraphOrchestrator:
             "goal.ready_for_review": self._on_goal_ready_for_review,
             "goal.approved": self._on_goal_unlocked,
             "goal.merged": self._on_goal_unlocked,
+            "goal.unblocked": self._on_goal_unblocked_jit,
         }
 
     def _dispatch(self, event: DomainEvent) -> None:
@@ -351,6 +356,38 @@ class TaskGraphOrchestrator:
                 "trigger":           event_type,
             },
         ))
+
+    def _on_goal_unblocked_jit(self, event: DomainEvent) -> None:
+        """
+        ``goal.unblocked`` → invoke Tactical JIT Planner to generate TDD tasks.
+
+        Fires for every goal that becomes unblocked, including Phase 0 goals
+        that are emitted directly by ``PlannerOrchestrator.approve_architecture``.
+
+        If ``PlanGoalTasksUseCase`` was not injected (e.g. dry-run or legacy
+        config), the event is logged and skipped — no error is raised.
+        """
+        goal_id = event.payload.get("goal_id")
+        if not goal_id:
+            return
+
+        if self._plan_goal_tasks is None:
+            log.warning(
+                "orchestrator.jit_planner_not_configured",
+                goal_id=goal_id,
+                hint="Inject plan_goal_tasks into TaskGraphOrchestrator to enable JIT planning.",
+            )
+            return
+
+        log.info("orchestrator.jit_planning_goal", goal_id=goal_id)
+        try:
+            self._plan_goal_tasks.execute(goal_id)
+        except Exception as exc:
+            log.exception(
+                "orchestrator.jit_planning_failed",
+                goal_id=goal_id,
+                error=str(exc),
+            )
 
     # ------------------------------------------------------------------
     # Signal handling
