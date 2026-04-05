@@ -1,36 +1,37 @@
 """
-src/infra/runtime/openai_planner_runtime.py — OpenAI-spec Planner runtime.
-
-Works with any OpenAI-compatible endpoint (OpenAI, vLLM, LM Studio, OpenRouter).
+src/infra/runtime/openai_interactive_runtime.py
 """
 
 from typing import Callable, Optional
 
 from src.domain.ports.planner import PlannerOutput, PlannerRuntimePort, PlannerTool
 from src.infra.runtime.planners.adapters.openai_adapter import OpenAIPlannerAdapter
-from src.infra.runtime.planners.base_agent_runtime import BasePlannerRuntime
+from src.infra.runtime.planners.base_interactive_runtime import BaseInteractivePlannerRuntime
 
 
-class OpenAIPlannerRuntime(PlannerRuntimePort):
+class OpenAIInteractivePlannerRuntime(PlannerRuntimePort):
     def __init__(
         self,
         api_key: str,
         model: str = "gpt-4o",
         base_url: Optional[str] = None,
+        io_handler: Optional[Callable[[str], str]] = None,
     ) -> None:
-        self._runtime = BasePlannerRuntime(
+        self._runtime = BaseInteractivePlannerRuntime(
             adapter=OpenAIPlannerAdapter(
                 api_key=api_key,
                 model=model,
                 base_url=base_url,
                 system_prompt=(
-                    "You are an expert software architect and planner. "
-                    "Use the provided tools to construct a roadmap."
+                    "You are a requirements gatherer. "
+                    "Ask the user questions to build a project brief."
                 ),
                 temperature=0.2,
             ),
-            submit_tool_name="submit_final_roadmap",
-            artifact_arg="roadmap_json",
+            io_handler=io_handler,
+            ask_tool_name="ask_question",
+            submit_tool_name="submit_project_brief",
+            artifact_arg="brief_json",
         )
 
     def run_session(
