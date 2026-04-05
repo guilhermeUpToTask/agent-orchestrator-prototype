@@ -18,8 +18,9 @@ from src.app.services.decision_apply import apply_decision_to_spec
 from src.app.services.planner_context import PlannerContextAssembler
 from src.app.usecases.goal_init import GoalInitUseCase
 from src.app.usecases.validate_against_spec import ValidateAgainstSpec
-from src.domain.aggregates.planner_session import (
-    PlannerMode,
+from src.domain.events.domain_event import DomainEvent
+from src.domain.ports.messaging import EventPort
+from src.domain.aggregates.planner_session import (    PlannerMode,
     PlannerSession,
     PlannerSessionStatus,
 )
@@ -124,6 +125,7 @@ class PlannerOrchestrator:
         goal_repo: GoalRepositoryPort,
         spec_repo: ProjectSpecRepository,
         project_name: str,
+        event_port: Optional[EventPort] = None,
     ) -> None:
         self._plan_repo = plan_repo
         self._session_repo = session_repo
@@ -137,6 +139,7 @@ class PlannerOrchestrator:
         self._goal_repo = goal_repo
         self._spec_repo = spec_repo
         self._project_name = project_name
+        self._event_port = event_port
 
     # ------------------------------------------------------------------
     # Discovery mode
@@ -397,6 +400,18 @@ class PlannerOrchestrator:
                         goal = self._goal_init.execute(goal_spec)
                         plan = plan.record_goal_registered(goal.name)
                         goals_dispatched.append(goal.goal_id)
+                        # Phase 0 goals bypass UnblockGoalsUseCase, so emit
+                        # goal.unblocked here to wake the Tactical JIT Planner.
+                        if self._event_port is not None:
+                            self._event_port.publish(DomainEvent(
+                                type="goal.unblocked",
+                                producer="planner-orchestrator",
+                                payload={
+                                    "goal_id": goal.goal_id,
+                                    "name": goal.name,
+                                    "feature_tag": goal.feature_tag,
+                                },
+                            ))
                     except Exception as exc:
                         log.error(
                             "planner_orchestrator.goal_dispatch_failed",
@@ -1069,9 +1084,54 @@ class PlannerOrchestrator:
         return session.roadmap_data.get("architecture_summary", "")
 
     def _find_goal_spec(self, session: PlannerSession, goal_name: str) -> Any:
-        """Find a goal spec by name in session roadmap_data."""
-        # This is a simplified implementation - in practice, the goal specs
-        # would be extracted from the session's roadmap data
+        """
+        Build a task-less GoalSpec for a goal that appears in the session's
+        ``pending_phases`` roadmap data.
+
+        The Strategic Planner (Tier 1) only produces phase/goal *names* and
+        descriptions — tasks are left for the Tactical JIT Planner.  We
+        therefore construct a ``GoalSpec`` with an empty ``tasks`` list so
+        that ``GoalInitUseCase`` can create the branch and aggregate without
+        waiting for task details.
+        """
+        from src.domain.value_objects.goal import GoalSpec
+
+        if not session.roadmap_data:
+            return None
+
+        # Search every proposed phase for the matching goal name.
+        for phase_data in session.roadmap_data.get("pending_phases", []):
+            if goal_name not in phase_data.get("goal_names", []):
+                continue
+
+            # Use the phase-level "goal" field as the per-goal description when
+            # a finer-grained description hasn't been stored.
+            description = phase_data.get("goal", f"Goal: {goal_name}")
+
+            # Also check whether per-goal metadata was stored under
+            # "goal_descriptions" (future extension point).
+            goal_descs: dict = session.roadmap_data.get("goal_descriptions", {})
+            if goal_name in goal_descs:
+                description = goal_descs[goal_name]
+
+            try:
+                return GoalSpec(
+                    name=goal_name,
+                    description=description,
+                    tasks=[],  # filled by PlanGoalTasksUseCase at execution time
+                )
+            except Exception as exc:
+                log.warning(
+                    "planner_orchestrator.goal_spec_build_failed",
+                    goal_name=goal_name,
+                    error=str(exc),
+                )
+                return None
+
+        log.warning(
+            "planner_orchestrator.goal_name_not_in_phases",
+            goal_name=goal_name,
+        )
         return None
 
     def _build_architecture_prompt(self) -> str:

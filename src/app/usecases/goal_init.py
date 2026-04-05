@@ -148,34 +148,43 @@ class GoalInitUseCase:
 
         # ------------------------------------------------------------------
         # 5. Create all tasks (dependency-ordered: roots first)
+        #    Skipped when spec.tasks is empty — JIT planner fills them in.
         # ------------------------------------------------------------------
-        ordered = _topological_order(spec)
-        for tdef in ordered:
-            task_branch = f"goal/{spec.name}/task/{tdef.task_id}"
-            constraints = {
-                **tdef.constraints,
-                "goal_branch": goal.branch,
-                "task_branch": task_branch,
-            }
-            self._task_creation.create_task(
-                task_id=tdef.task_id,
-                title=tdef.title,
-                description=tdef.description,
-                capability=tdef.capability,
-                files_allowed_to_modify=tdef.files_allowed_to_modify,
-                feature_id=goal.goal_id,
-                test_command=tdef.test_command,
-                acceptance_criteria=tdef.acceptance_criteria,
-                depends_on=tdef.depends_on,
-                max_retries=tdef.max_retries,
-                min_version=tdef.min_version,
-                constraints=constraints,
-            )
+        if spec.tasks:
+            ordered = _topological_order(spec)
+            for tdef in ordered:
+                task_branch = f"goal/{spec.name}/task/{tdef.task_id}"
+                constraints = {
+                    **tdef.constraints,
+                    "goal_branch": goal.branch,
+                    "task_branch": task_branch,
+                }
+                self._task_creation.create_task(
+                    task_id=tdef.task_id,
+                    title=tdef.title,
+                    description=tdef.description,
+                    capability=tdef.capability,
+                    files_allowed_to_modify=tdef.files_allowed_to_modify,
+                    feature_id=goal.goal_id,
+                    test_command=tdef.test_command,
+                    acceptance_criteria=tdef.acceptance_criteria,
+                    depends_on=tdef.depends_on,
+                    max_retries=tdef.max_retries,
+                    min_version=tdef.min_version,
+                    constraints=constraints,
+                )
+                log.info(
+                    "goal_init.task_created",
+                    goal_id=goal.goal_id,
+                    task_id=tdef.task_id,
+                    depends_on=tdef.depends_on,
+                )
+        else:
             log.info(
-                "goal_init.task_created",
+                "goal_init.tasks_deferred",
                 goal_id=goal.goal_id,
-                task_id=tdef.task_id,
-                depends_on=tdef.depends_on,
+                name=goal.name,
+                hint="JIT planner will generate tasks when goal is unblocked.",
             )
 
         # ------------------------------------------------------------------
