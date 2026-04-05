@@ -7,7 +7,6 @@ StubPlannerRuntime: Deterministic stub for tests and dry-run mode.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Callable, Optional
 
 from src.domain.ports.planner import (
@@ -16,8 +15,8 @@ from src.domain.ports.planner import (
     PlannerRuntimePort,
     PlannerTool,
 )
-
-log = logging.getLogger(__name__)
+from src.infra.runtime.planners.adapters.anthropic_adapter import AnthropicPlannerAdapter
+from src.infra.runtime.planners.base_agent_runtime import BasePlannerRuntime
 
 _DEFAULT_MODEL = "claude-opus-4-6"
 
@@ -42,22 +41,8 @@ _STUB_ROADMAP = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Anthropic runtime (production)
-# ---------------------------------------------------------------------------
-
 class AnthropicPlannerRuntime(PlannerRuntimePort):
-    """
-    Agentic planning loop backed by the Anthropic Messages API.
-
-    Uses claude-opus-4-6 with extended thinking (budget_tokens=8000) for
-    high-quality, reasoned planning output.
-
-    Loop exits when:
-      - submit_final_roadmap tool is called and returns accepted=true
-      - stop_reason == "end_turn" (no more tool calls expected)
-      - max_turns reached → raises PlannerRuntimeError
-    """
+    """Anthropic planner runtime backed by shared base loop + adapter."""
 
     def __init__(
         self,
@@ -65,9 +50,15 @@ class AnthropicPlannerRuntime(PlannerRuntimePort):
         model: str = _DEFAULT_MODEL,
         thinking_budget: int = 8000,
     ) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._thinking_budget = thinking_budget
+        self._runtime = BasePlannerRuntime(
+            adapter=AnthropicPlannerAdapter(
+                api_key=api_key,
+                model=model,
+                thinking_budget=thinking_budget,
+            ),
+            submit_tool_name="submit_final_roadmap",
+            artifact_arg="roadmap_json",
+        )
 
     def run_session(
         self,
@@ -76,108 +67,13 @@ class AnthropicPlannerRuntime(PlannerRuntimePort):
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
     ) -> PlannerOutput:
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise PlannerRuntimeError(
-                "anthropic SDK not installed. Run: pip install anthropic"
-            ) from exc
-
-        client = anthropic.Anthropic(api_key=self._api_key)
-        api_tools = [_tool_to_api(t) for t in tools]
-        tool_map = {t.name: t.handler for t in tools}
-
-        messages: list[dict] = [{"role": "user", "content": prompt}]
-        roadmap_accepted = False
-        final_text = ""
-        reasoning = ""
-        turns_used = 0
-
-        for turn in range(max_turns):
-            turns_used = turn + 1
-            response = client.messages.create(
-                model=self._model,
-                max_tokens=16000,
-                thinking={"type": "enabled", "budget_tokens": self._thinking_budget},
-                tools=api_tools,
-                messages=messages,
-            )
-
-            # Extract reasoning from thinking blocks
-            for block in response.content:
-                if block.type == "thinking":
-                    reasoning = getattr(block, "thinking", "")
-                elif block.type == "text":
-                    final_text = getattr(block, "text", "")
-
-            # Serialize content for persistence
-            content_blocks = _serialize_content(response.content)
-            if session_callback:
-                session_callback("assistant", content_blocks)
-
-            # Append assistant turn to history
-            messages.append({"role": "assistant", "content": response.content})
-
-            # Process tool calls
-            tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-            if not tool_use_blocks:
-                # No tool calls → model finished naturally
-                break
-
-            tool_results: list[dict] = []
-            for block in tool_use_blocks:
-                handler = tool_map.get(block.name)
-                if handler is None:
-                    result_str = json.dumps({"error": f"Unknown tool: {block.name}"})
-                else:
-                    try:
-                        result_str = handler(block.input)
-                    except Exception as exc:
-                        result_str = json.dumps({"error": str(exc)})
-
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result_str,
-                })
-
-                # Check if submit_final_roadmap was accepted → break loop
-                if block.name == "submit_final_roadmap":
-                    try:
-                        parsed = json.loads(result_str)
-                        if parsed.get("accepted"):
-                            roadmap_accepted = True
-                    except Exception:
-                        pass
-
-            # Persist tool results turn
-            if session_callback:
-                session_callback("tool_result", tool_results)
-
-            messages.append({"role": "user", "content": tool_results})
-
-            if roadmap_accepted:
-                break
-
-        if not roadmap_accepted:
-            raise PlannerRuntimeError(
-                "Planning session exceeded max turns without submitting a roadmap"
-            )
-
-        # Extract roadmap_raw from submit_final_roadmap result in message history
-        roadmap_raw = _extract_roadmap_from_history(messages)
-
-        return PlannerOutput(
-            reasoning=reasoning,
-            roadmap_raw=roadmap_raw,
-            raw_text=final_text,
-            turns=messages,
+        return self._runtime.run_session(
+            prompt=prompt,
+            tools=tools,
+            max_turns=max_turns,
+            session_callback=session_callback,
         )
 
-
-# ---------------------------------------------------------------------------
-# Stub runtime (tests / dry-run)
-# ---------------------------------------------------------------------------
 
 class StubPlannerRuntime(PlannerRuntimePort):
     """
@@ -200,7 +96,6 @@ class StubPlannerRuntime(PlannerRuntimePort):
         tool_map = {t.name: t.handler for t in tools}
         roadmap_json = json.dumps(self._custom_output)
 
-        # Simulate: assistant calls submit_final_roadmap
         assistant_blocks = [
             {
                 "type": "tool_use",
@@ -212,7 +107,6 @@ class StubPlannerRuntime(PlannerRuntimePort):
         if session_callback:
             session_callback("assistant", assistant_blocks)
 
-        # Execute the tool
         handler = tool_map.get("submit_final_roadmap")
         result_str = handler({"roadmap_json": roadmap_json}) if handler else json.dumps({"accepted": True})
 
@@ -242,48 +136,3 @@ class StubPlannerRuntime(PlannerRuntimePort):
             raw_text="Stub output: roadmap submitted.",
             turns=[],
         )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _tool_to_api(tool: PlannerTool) -> dict:
-    return {
-        "name": tool.name,
-        "description": tool.description,
-        "input_schema": tool.input_schema,
-    }
-
-
-def _serialize_content(content_blocks: list) -> list[dict]:
-    """Convert Anthropic SDK content blocks to plain dicts for storage."""
-    result = []
-    for block in content_blocks:
-        if hasattr(block, "model_dump"):
-            result.append(block.model_dump())
-        elif hasattr(block, "__dict__"):
-            result.append({k: v for k, v in vars(block).items() if not k.startswith("_")})
-        else:
-            result.append({"type": "unknown", "raw": str(block)})
-    return result
-
-
-def _extract_roadmap_from_history(messages: list[dict]) -> dict:
-    """Find the roadmap_raw from the submit_final_roadmap tool call in history."""
-    for msg in messages:
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            # Check tool_use blocks in assistant messages
-            btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
-            bname = block.get("name") if isinstance(block, dict) else getattr(block, "name", None)
-            if btype == "tool_use" and bname == "submit_final_roadmap":
-                binput = block.get("input") if isinstance(block, dict) else getattr(block, "input", {})
-                raw = binput.get("roadmap_json", "") if isinstance(binput, dict) else ""
-                try:
-                    return json.loads(raw)
-                except Exception:
-                    pass
-    return {}

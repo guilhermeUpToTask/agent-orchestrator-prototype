@@ -63,7 +63,7 @@ class GoalSnapshot:
 
 
 @dataclass(frozen=True)
-class PlannerContext:
+class PlanningContextSnapshot:
     """
     Immutable snapshot of everything the planner needs to reason about.
 
@@ -96,15 +96,15 @@ class PlannerContext:
     current_phase_goal: Optional[str]
     planned_phases: list[str]
 
-    def to_prompt_context(self) -> str:
-        """
-        Render the context as a structured markdown string suitable for
-        inclusion in a planner prompt.
-        """
+class PlanningContextRenderer:
+    """Render planning context snapshots into prompt-friendly text."""
+
+    def render_markdown(self, snapshot: PlanningContextSnapshot) -> str:
+        """Render snapshot as structured markdown."""
         sections: list[str] = []
 
         # 1. Architectural constraints
-        c = self.architecture_constraints
+        c = snapshot.architecture_constraints
         sections.append("## Project constraints")
         sections.append(f"**Project**: {c.get('project', '?')}")
         sections.append(f"**Domain**: {c.get('domain', '?')}")
@@ -120,11 +120,11 @@ class PlannerContext:
             sections.append(f"**Required**: {', '.join(cst['required'])}")
 
         # 2. Accumulated decisions — grouped by domain
-        if self.decisions:
+        if snapshot.decisions:
             sections.append("\n## Architectural decisions")
             # Group by domain
             by_domain: dict[str, list[DecisionEntry]] = {}
-            for d in self.decisions:
+            for d in snapshot.decisions:
                 by_domain.setdefault(d.domain or "general", []).append(d)
             for domain, entries in sorted(by_domain.items()):
                 sections.append(f"\n### {domain.capitalize()}")
@@ -147,39 +147,39 @@ class PlannerContext:
                             sections.append(f"  - Remove forbidden: {', '.join(sc.remove_forbidden)}")
 
         # 3. Current architecture description
-        if self.current_arch:
+        if snapshot.current_arch:
             sections.append("\n## Current architecture")
-            sections.append(self.current_arch)
+            sections.append(snapshot.current_arch)
 
         # 4. Extra context
-        if self.extra_context:
+        if snapshot.extra_context:
             sections.append("\n## Additional context")
-            sections.append(self.extra_context)
+            sections.append(snapshot.extra_context)
 
         # 5. Project plan state
-        if self.plan_status:
+        if snapshot.plan_status:
             sections.append("\n## Project plan")
-            sections.append(f"Status: {self.plan_status}")
-            if self.current_phase_goal:
-                sections.append(f'Current phase: "{self.current_phase_goal}"')
-            if self.planned_phases:
+            sections.append(f"Status: {snapshot.plan_status}")
+            if snapshot.current_phase_goal:
+                sections.append(f'Current phase: "{snapshot.current_phase_goal}"')
+            if snapshot.planned_phases:
                 sections.append("Planned phases:")
-                for phase_desc in self.planned_phases:
+                for phase_desc in snapshot.planned_phases:
                     sections.append(f"  - {phase_desc}")
 
         # 6. Execution state summary
         sections.append("\n## Current execution state")
         sections.append(
-            f"- {self.pending_goal_count} goal(s) pending"
-            f", {self.active_task_count} task(s) actively running"
+            f"- {snapshot.pending_goal_count} goal(s) pending"
+            f", {snapshot.active_task_count} task(s) actively running"
         )
-        if self.merged_goal_names:
+        if snapshot.merged_goal_names:
             sections.append(
-                f"- Completed goals: {', '.join(self.merged_goal_names)}"
+                f"- Completed goals: {', '.join(snapshot.merged_goal_names)}"
             )
-        if self.goals:
+        if snapshot.goals:
             sections.append("\n### In-progress goals")
-            for g in self.goals:
+            for g in snapshot.goals:
                 merged, total = g.progress
                 sections.append(
                     f"- **{g.name}** [{g.status}] — {merged}/{total} tasks merged"
@@ -212,63 +212,17 @@ class PlannerContextAssembler:
         self._task_repo     = task_repo
         self._plan_repo     = plan_repo
 
-    def assemble(self) -> PlannerContext:
-        """Build and return a PlannerContext snapshot."""
+    def assemble(self) -> PlanningContextSnapshot:
+        """Build and return a PlanningContextSnapshot."""
         log.info("planner_context.assembling")
 
-        # 1. Architectural constraints from ProjectSpec
-        constraints = self._spec.get_architecture_constraints()
+        constraints = self._read_spec_context()
+        decisions, current_arch, extra_ctx = self._read_project_state_context()
+        visible_goals, merged_names, pending_count = self._read_goal_context()
+        active_task_count = self._read_task_load()
+        plan_status, current_phase_goal, planned_phases = self._read_plan_state()
 
-        # 2. Persistent planner memory
-        decisions    = self._project_state.list_decisions(status="active")
-        current_arch = self._project_state.read_state(STATE_KEY_CURRENT_ARCH) or ""
-        extra_ctx    = self._project_state.read_state(STATE_KEY_CONTEXT) or ""
-
-        # 3. Goal execution state
-        all_goals = self._goal_repo.list_all()
-        merged_names = [g.name for g in all_goals if g.status == GoalStatus.MERGED]
-
-        # Non-terminal goals are surfaced to the planner so it avoids
-        # re-proposing work that is already planned or in-flight.
-        visible_goals = [
-            GoalSnapshot(
-                goal_id=g.goal_id,
-                name=g.name,
-                description=g.description,
-                status=g.status.value,
-                feature_tag=g.feature_tag,
-                depends_on=list(g.depends_on),
-                progress=g.progress(),
-                branch=g.branch,
-            )
-            for g in all_goals
-            if not g.is_terminal()
-        ]
-        pending_count = sum(1 for g in all_goals if g.status == GoalStatus.PENDING)
-
-        # 4. Active task count (ASSIGNED + IN_PROGRESS) — gives the planner a
-        #    sense of current load without exposing full task details.
-        all_tasks = self._task_repo.list_all()
-        active_task_count = sum(
-            1 for t in all_tasks if t.status in TaskStatus.active()
-        )
-
-        # 5. Project plan state
-        plan = self._plan_repo.get()
-        plan_status = None
-        current_phase_goal = None
-        planned_phases = []
-
-        if plan is not None:
-            plan_status = plan.status.value
-            current_phase = plan.current_phase()
-            if current_phase:
-                current_phase_goal = current_phase.goal
-            # Get planned phases (future phases with PLANNED status)
-            for phase in plan.planned_phases():
-                planned_phases.append(f"Phase {phase.index}: {phase.goal}")
-
-        ctx = PlannerContext(
+        ctx = PlanningContextSnapshot(
             architecture_constraints=constraints,
             decisions=decisions,
             current_arch=current_arch,
@@ -292,3 +246,47 @@ class PlannerContextAssembler:
             plan_status=plan_status,
         )
         return ctx
+
+    def _read_spec_context(self) -> dict[str, Any]:
+        return self._spec.get_architecture_constraints()
+
+    def _read_project_state_context(self) -> tuple[list[DecisionEntry], str, str]:
+        decisions = self._project_state.list_decisions(status="active")
+        current_arch = self._project_state.read_state(STATE_KEY_CURRENT_ARCH) or ""
+        extra_context = self._project_state.read_state(STATE_KEY_CONTEXT) or ""
+        return decisions, current_arch, extra_context
+
+    def _read_goal_context(self) -> tuple[list[GoalSnapshot], list[str], int]:
+        all_goals = self._goal_repo.list_all()
+        merged_names = [g.name for g in all_goals if g.status == GoalStatus.MERGED]
+        visible_goals = [
+            GoalSnapshot(
+                goal_id=g.goal_id,
+                name=g.name,
+                description=g.description,
+                status=g.status.value,
+                feature_tag=g.feature_tag,
+                depends_on=list(g.depends_on),
+                progress=g.progress(),
+                branch=g.branch,
+            )
+            for g in all_goals
+            if not g.is_terminal()
+        ]
+        pending_count = sum(1 for g in all_goals if g.status == GoalStatus.PENDING)
+        return visible_goals, merged_names, pending_count
+
+    def _read_task_load(self) -> int:
+        all_tasks = self._task_repo.list_all()
+        return sum(1 for t in all_tasks if t.status in TaskStatus.active())
+
+    def _read_plan_state(self) -> tuple[Optional[str], Optional[str], list[str]]:
+        plan = self._plan_repo.get()
+        if plan is None:
+            return None, None, []
+
+        plan_status = plan.status.value
+        current_phase = plan.current_phase()
+        current_phase_goal = current_phase.goal if current_phase else None
+        planned_phases = [f"Phase {phase.index}: {phase.goal}" for phase in plan.planned_phases()]
+        return plan_status, current_phase_goal, planned_phases
