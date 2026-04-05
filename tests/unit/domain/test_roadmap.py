@@ -142,6 +142,7 @@ def test_goalspec_rejects_task_cycle():
         GoalSpec(name="g", description="d", tasks=[t1, t2])
 
 
-def test_goalspec_rejects_empty_tasks():
-    with pytest.raises(ValueError):
-        GoalSpec(name="g", description="d", tasks=[])
+def test_goalspec_accepts_empty_tasks_jit_mode():
+    # Empty task list is valid — Tactical JIT Planner fills them in later.
+    spec = GoalSpec(name="g", description="d", tasks=[])
+    assert spec.tasks == []
