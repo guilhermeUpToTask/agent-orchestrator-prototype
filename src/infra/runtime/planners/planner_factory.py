@@ -53,7 +53,7 @@ class OpenAIPlannerStrategy(PlannerProviderStrategy):
         )
 
     def build_interactive(self, ctx: SettingsContext) -> PlannerRuntimePort:
-        from src.infra.runtime.planners.openia_interactive_planner_runtime import (
+        from src.infra.runtime.planners.openai_interactive_planner_runtime import (
             OpenAIInteractivePlannerRuntime,
         )
         import os
@@ -75,7 +75,7 @@ class OpenRouterPlannerStrategy(PlannerProviderStrategy):
         )
 
     def build_interactive(self, ctx: SettingsContext) -> PlannerRuntimePort:
-        from src.infra.runtime.planners.openia_interactive_planner_runtime import (
+        from src.infra.runtime.planners.openai_interactive_planner_runtime import (
             OpenAIInteractivePlannerRuntime,
         )
 
