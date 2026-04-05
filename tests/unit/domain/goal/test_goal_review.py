@@ -149,9 +149,10 @@ def _running_goal(goal_id="g001", task_ids=("t1",)) -> GoalAggregate:
 
 class TestGoalSpecEmptyTasks:
 
-    def test_empty_tasks_raises(self):
-        with pytest.raises(ValidationError, match="at least one task"):
-            GoalSpec(name="my-goal", description="d", tasks=[])
+    def test_empty_tasks_valid_jit_mode(self):
+        # Empty task list is valid — the Tactical JIT Planner fills them in.
+        spec = GoalSpec(name="my-goal", description="d", tasks=[])
+        assert spec.tasks == []
 
     def test_single_task_valid(self):
         spec = GoalSpec(
