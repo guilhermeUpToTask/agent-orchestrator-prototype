@@ -43,6 +43,17 @@ class LiveLogger:
         LogEventType.STDERR: "\033[31m",          # Red
         LogEventType.AGENT_ERROR: "\033[31m",     # Red
         LogEventType.AGENT_OUTPUT: "\033[33m",    # Yellow
+        # Planning layer events
+        LogEventType.PLANNER_SESSION_START: "\033[35m",  # Magenta
+        LogEventType.PLANNER_TURN: "\033[35m",           # Magenta
+        LogEventType.PLANNER_TOOL_CALL: "\033[36m",      # Cyan
+        LogEventType.PLANNER_TOOL_RESULT: "\033[36m",    # Cyan
+        LogEventType.PLANNER_SESSION_END: "\033[35m",    # Magenta
+        LogEventType.PLANNER_DECISION: "\033[33m",       # Yellow
+        LogEventType.PLANNER_PHASE: "\033[33m",          # Yellow
+        LogEventType.JIT_PLAN_START: "\033[34m",         # Blue
+        LogEventType.JIT_PLAN_END: "\033[34m",           # Blue
+        LogEventType.GOAL_DISPATCHED: "\033[32m",        # Green
     }
 
     # Event type labels for readable output
@@ -57,6 +68,17 @@ class LiveLogger:
         LogEventType.STDERR: "STDERR",
         LogEventType.AGENT_ERROR: "ERROR",
         LogEventType.AGENT_OUTPUT: "OUTPUT",
+        # Planning layer labels
+        LogEventType.PLANNER_SESSION_START: "PLAN_START",
+        LogEventType.PLANNER_TURN: "PLAN_TURN",
+        LogEventType.PLANNER_TOOL_CALL: "PLAN_TOOL",
+        LogEventType.PLANNER_TOOL_RESULT: "PLAN_RSLT",
+        LogEventType.PLANNER_SESSION_END: "PLAN_END",
+        LogEventType.PLANNER_DECISION: "DECISION",
+        LogEventType.PLANNER_PHASE: "PHASE",
+        LogEventType.JIT_PLAN_START: "JIT_START",
+        LogEventType.JIT_PLAN_END: "JIT_END",
+        LogEventType.GOAL_DISPATCHED: "GOAL_DISP",
     }
 
     RESET = "\033[0m"
