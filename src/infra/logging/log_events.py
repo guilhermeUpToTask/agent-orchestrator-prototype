@@ -33,6 +33,18 @@ class LogEventType(str, Enum):
     AGENT_ERROR = "AGENT_ERROR"
     AGENT_OUTPUT = "AGENT_OUTPUT"
 
+    # Planning layer events (Tier 1 Strategic + Tier 2 JIT)
+    PLANNER_SESSION_START = "PLANNER_SESSION_START"
+    PLANNER_TURN = "PLANNER_TURN"           # one LLM → human message received
+    PLANNER_TOOL_CALL = "PLANNER_TOOL_CALL"  # tool invoked by the LLM
+    PLANNER_TOOL_RESULT = "PLANNER_TOOL_RESULT"
+    PLANNER_SESSION_END = "PLANNER_SESSION_END"
+    PLANNER_DECISION = "PLANNER_DECISION"   # propose_decision tool fired
+    PLANNER_PHASE = "PLANNER_PHASE"         # propose_phase_plan tool fired
+    JIT_PLAN_START = "JIT_PLAN_START"
+    JIT_PLAN_END = "JIT_PLAN_END"
+    GOAL_DISPATCHED = "GOAL_DISPATCHED"
+
 
 @dataclass
 class LogEvent:
@@ -187,4 +199,117 @@ def build_agent_output_event(agent_name: str, output: str) -> LogEvent:
         details={
             "output_preview": output[:200] + "..." if len(output) > 200 else output,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Planning layer convenience builders
+# ---------------------------------------------------------------------------
+
+def build_planner_session_start_event(mode: str, session_id: str) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.PLANNER_SESSION_START,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Planning session started: mode={mode} session={session_id}",
+        details={"mode": mode, "session_id": session_id},
+    )
+
+
+def build_planner_turn_event(role: str, preview: str, turn_index: int) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.PLANNER_TURN,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Turn {turn_index} [{role}]: {preview}",
+        details={"role": role, "preview": preview, "turn_index": turn_index},
+    )
+
+
+def build_planner_tool_call_event(tool_name: str, args_preview: str) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.PLANNER_TOOL_CALL,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Tool call: {tool_name}",
+        details={"tool_name": tool_name, "args_preview": args_preview},
+    )
+
+
+def build_planner_tool_result_event(tool_name: str, accepted: bool, preview: str) -> LogEvent:
+    status = "accepted" if accepted else "rejected"
+    return LogEvent(
+        event_type=LogEventType.PLANNER_TOOL_RESULT,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Tool result: {tool_name} → {status}",
+        details={"tool_name": tool_name, "accepted": accepted, "preview": preview},
+    )
+
+
+def build_planner_session_end_event(
+    mode: str, success: bool, elapsed_s: float, turn_count: int
+) -> LogEvent:
+    status = "success" if success else "failed"
+    return LogEvent(
+        event_type=LogEventType.PLANNER_SESSION_END,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Planning session ended: {status} after {turn_count} turns ({elapsed_s:.1f}s)",
+        details={
+            "mode": mode,
+            "success": success,
+            "elapsed_s": elapsed_s,
+            "turn_count": turn_count,
+        },
+    )
+
+
+def build_planner_decision_event(decision_id: str, domain: str) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.PLANNER_DECISION,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Decision proposed: [{decision_id}] domain={domain}",
+        details={"decision_id": decision_id, "domain": domain},
+    )
+
+
+def build_planner_phase_event(phase_name: str, goal_names: list) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.PLANNER_PHASE,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Phase proposed: {phase_name} ({len(goal_names)} goals)",
+        details={"phase_name": phase_name, "goal_names": goal_names},
+    )
+
+
+def build_jit_plan_start_event(goal_id: str, goal_name: str) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.JIT_PLAN_START,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"JIT planning started for goal: {goal_name}",
+        details={"goal_id": goal_id, "goal_name": goal_name},
+    )
+
+
+def build_jit_plan_end_event(goal_id: str, task_ids: list, elapsed_s: float) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.JIT_PLAN_END,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"JIT planning complete: {len(task_ids)} tasks in {elapsed_s:.1f}s",
+        details={"goal_id": goal_id, "task_ids": task_ids, "elapsed_s": elapsed_s},
+    )
+
+
+def build_goal_dispatched_event(goal_id: str, goal_name: str, phase_index: int) -> LogEvent:
+    return LogEvent(
+        event_type=LogEventType.GOAL_DISPATCHED,
+        agent_name="planner",
+        timestamp=0.0,
+        message=f"Goal dispatched: {goal_name} (phase {phase_index})",
+        details={"goal_id": goal_id, "goal_name": goal_name, "phase_index": phase_index},
     )

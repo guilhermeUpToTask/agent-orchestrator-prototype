@@ -600,6 +600,21 @@ class AppContainer:
             advance_pr_usecase=self.advance_goal_from_pr_usecase,
         )
 
+    def make_planner_logger(self, session_id: str, mode: str) -> "PlannerLiveLogger":
+        """
+        Build a fresh PlannerLiveLogger for one planning command invocation.
+
+        The log directory is derived from project paths so logs are co-located
+        with other project artefacts under ~/.orchestrator/<project>/logs/planner/.
+        """
+        from src.infra.logging.live_logger import LiveLogger
+        from src.infra.logging.planner_logger import PlannerLiveLogger
+
+        log_dir = self.paths.logs_dir / "planner"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        live = LiveLogger(json_log_dir=log_dir)
+        return PlannerLiveLogger(live, session_id, mode, log_dir)
+
     @cached_property
     def planner_context_assembler(self):
         from src.app.services.planner_context import PlannerContextAssembler
