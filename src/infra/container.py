@@ -540,6 +540,18 @@ class AppContainer:
         return ProposeSpecChange(spec_repo=self.spec_repo)
 
     @cached_property
+    def plan_goal_tasks_usecase(self):
+        from src.app.usecases.plan_goal_tasks import PlanGoalTasksUseCase
+
+        return PlanGoalTasksUseCase(
+            task_creation=self.task_creation_service,
+            goal_repo=self.goal_repo,
+            planner_runtime=self.planner_runtime,
+            event_port=self.event_port,
+            spec_repo=self.spec_repo,
+        )
+
+    @cached_property
     def task_graph_orchestrator(self):
         from src.app.orchestrator import TaskGraphOrchestrator
 
@@ -553,6 +565,7 @@ class AppContainer:
             project_name=self.get_required_project(),
             create_pr_usecase=None,
             telemetry_emitter=self.telemetry_emitter,
+            plan_goal_tasks=self.plan_goal_tasks_usecase,
         )
 
     @cached_property
@@ -569,6 +582,7 @@ class AppContainer:
             project_name=self.get_required_project(),
             create_pr_usecase=self.create_goal_pr_usecase,
             telemetry_emitter=self.telemetry_emitter,
+            plan_goal_tasks=self.plan_goal_tasks_usecase,
         )
 
     def get_reconciler(self, interval_seconds: int = 60, stuck_task_min_age_seconds: int = 120):
@@ -628,4 +642,5 @@ class AppContainer:
             goal_repo=self.goal_repo,
             spec_repo=self.spec_repo,
             project_name=project_name,
+            event_port=self.event_port,
         )
