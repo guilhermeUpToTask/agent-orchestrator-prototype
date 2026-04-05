@@ -238,6 +238,23 @@ class GoalAggregate(BaseModel):
         self._bump("goal.started", "orchestrator")
         return self
 
+    def append_task_summary(self, summary: "TaskSummary") -> "GoalAggregate":
+        """
+        Append a TaskSummary to this goal after JIT planning has produced tasks.
+
+        Intended to be called by PlanGoalTasksUseCase once per created task.
+        Emits a ``goal.task_added`` history entry and bumps state_version so
+        repository CAS checks detect the mutation.
+        """
+        self._assert_not_terminal()
+        self.tasks[summary.task_id] = summary
+        self._bump(
+            "goal.task_added",
+            "jit-planner",
+            {"task_id": summary.task_id, "title": summary.title},
+        )
+        return self
+
     def record_task_status(self, task_id: str, status: TaskStatus) -> "GoalAggregate":
         """Mirror intermediate task status into TaskSummary (no goal transition)."""
         self._assert_not_terminal()
