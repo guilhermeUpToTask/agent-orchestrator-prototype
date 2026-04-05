@@ -370,3 +370,169 @@ class TestPlannerOrchestratorStatus:
         result = self.orchestrator.get_status()
 
         assert result.plan_id == plan.plan_id
+
+
+class TestPlannerOrchestratorCallbackHooks:
+    """Test set_turn_callback and set_planner_event_hook."""
+
+    def setup_method(self):
+        self.plan_repo = MagicMock()
+        self.session_repo = MagicMock()
+        self.context_assembler = MagicMock(spec=PlannerContextAssembler)
+        self.autonomous_runtime = MagicMock(spec=PlannerRuntimePort)
+        self.interactive_runtime = MagicMock(spec=PlannerRuntimePort)
+        self.goal_init = MagicMock()
+        self.validator = MagicMock()
+        self.project_state = MagicMock()
+        self.agent_registry = MagicMock()
+        self.goal_repo = MagicMock()
+        self.spec_repo = MagicMock()
+
+        self.orchestrator = PlannerOrchestrator(
+            plan_repo=self.plan_repo,
+            session_repo=self.session_repo,
+            context_assembler=self.context_assembler,
+            autonomous_runtime=self.autonomous_runtime,
+            interactive_runtime=self.interactive_runtime,
+            goal_init=self.goal_init,
+            validator=self.validator,
+            project_state=self.project_state,
+            agent_registry=self.agent_registry,
+            goal_repo=self.goal_repo,
+            spec_repo=self.spec_repo,
+            project_name="test-project",
+        )
+
+    def test_set_turn_callback_stores_callback(self):
+        cb = Mock()
+        self.orchestrator.set_turn_callback(cb)
+        assert self.orchestrator._turn_callback is cb
+
+    def test_turn_callback_invoked_per_turn_during_architecture(self):
+        from src.domain.aggregates.project_plan import ProjectPlanStatus
+        from src.domain.ports.planner import PlannerOutput
+
+        # Set up plan in ARCHITECTURE state
+        plan = ProjectPlan.create("Test vision")
+        brief = ProjectBrief(
+            vision="Test",
+            constraints=[],
+            phase_1_exit_criteria="",
+            open_questions=[],
+        )
+        plan = plan.approve_brief(brief)
+        self.plan_repo.load.return_value = plan
+
+        # Fresh session (no resumable)
+        self.session_repo.list_all.return_value = []
+        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+
+        turn_calls = []
+        self.orchestrator.set_turn_callback(lambda role, blocks: turn_calls.append((role, blocks)))
+
+        # Simulate the runtime firing the session_callback twice
+        def fake_run_session(prompt, tools, max_turns, session_callback):
+            session_callback("assistant", [{"type": "text", "text": "Thinking..."}])
+            session_callback("user", [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}])
+            return PlannerOutput(
+                session_id="s1",
+                roadmap_raw={},
+                reasoning="done",
+                raw_text="",
+                validation_errors=[],
+                validation_warnings=[],
+            )
+
+        self.autonomous_runtime.run_session.side_effect = fake_run_session
+
+        self.orchestrator.run_architecture()
+
+        assert len(turn_calls) == 2
+        assert turn_calls[0][0] == "assistant"
+        assert turn_calls[1][0] == "user"
+
+    def test_set_planner_event_hook_stores_hook(self):
+        hook = Mock()
+        self.orchestrator.set_planner_event_hook(hook)
+        assert self.orchestrator._planner_event_hook is hook
+
+    def test_planner_event_hook_fires_decision_proposed(self):
+        import json
+        from src.domain.ports.planner import PlannerOutput
+
+        plan = ProjectPlan.create("Test vision")
+        brief = ProjectBrief(vision="Test", constraints=[], phase_1_exit_criteria="", open_questions=[])
+        plan = plan.approve_brief(brief)
+        self.plan_repo.load.return_value = plan
+        self.session_repo.list_all.return_value = []
+        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+
+        hook_calls = []
+        self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
+
+        def fake_run(prompt, tools, max_turns, session_callback):
+            # Find and invoke the propose_decision tool handler directly
+            tool = next(t for t in tools if t.name == "propose_decision")
+            tool.handler({
+                "id": "use-fastapi",
+                "domain": "backend",
+                "content": "Use FastAPI for the REST layer.",
+            })
+            return PlannerOutput(
+                session_id="s1",
+                roadmap_raw={},
+                reasoning="done",
+                raw_text="",
+                validation_errors=[],
+                validation_warnings=[],
+            )
+
+        self.autonomous_runtime.run_session.side_effect = fake_run
+        self.orchestrator.run_architecture()
+
+        decision_hooks = [(et, d) for et, d in hook_calls if et == "decision_proposed"]
+        assert len(decision_hooks) == 1
+        assert decision_hooks[0][1]["id"] == "use-fastapi"
+        assert decision_hooks[0][1]["domain"] == "backend"
+
+    def test_planner_event_hook_fires_phase_proposed(self):
+        import json
+        from src.domain.ports.planner import PlannerOutput
+
+        plan = ProjectPlan.create("Test vision")
+        brief = ProjectBrief(vision="Test", constraints=[], phase_1_exit_criteria="", open_questions=[])
+        plan = plan.approve_brief(brief)
+        self.plan_repo.load.return_value = plan
+        self.session_repo.list_all.return_value = []
+        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+
+        hook_calls = []
+        self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
+
+        def fake_run(prompt, tools, max_turns, session_callback):
+            phase_tool = next(t for t in tools if t.name == "propose_phase_plan")
+            phase_tool.handler({
+                "phases_json": json.dumps([{
+                    "index": 0,
+                    "name": "Foundation",
+                    "goal": "Setup base",
+                    "goal_names": ["setup-db"],
+                    "exit_criteria": "DB is up",
+                }])
+            })
+            return PlannerOutput(
+                session_id="s1",
+                roadmap_raw={},
+                reasoning="done",
+                raw_text="",
+                validation_errors=[],
+                validation_warnings=[],
+            )
+
+        self.autonomous_runtime.run_session.side_effect = fake_run
+        self.orchestrator.run_architecture()
+
+        phase_hooks = [(et, d) for et, d in hook_calls if et == "phase_proposed"]
+        assert len(phase_hooks) == 1
+        assert phase_hooks[0][1]["name"] == "Foundation"
+        assert "setup-db" in phase_hooks[0][1]["goal_names"]
