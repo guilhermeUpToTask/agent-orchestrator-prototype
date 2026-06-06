@@ -552,6 +552,21 @@ class AppContainer:
         )
 
     @cached_property
+    def run_refinement_usecase(self):
+        from src.app.usecases.run_refinement import RunRefinementUseCase
+
+        return RunRefinementUseCase(
+            goal_repo=self.goal_repo,
+            task_repo=self.task_repo,
+            task_creation=self.task_creation_service,
+            agent_registry=self.agent_registry,
+            event_port=self.event_port,
+            planner_runtime=self.planner_runtime,
+            context_assembler=self.planner_context_assembler,
+            session_repo=self.planner_session_repo,
+        )
+
+    @cached_property
     def task_graph_orchestrator(self):
         from src.app.orchestrator import TaskGraphOrchestrator
 

@@ -291,3 +291,19 @@ def _start_heartbeat_thread(registry, agent_id: str) -> None:
                 log.warning("heartbeat.failed", agent_id=agent_id, error=str(exc))
 
     threading.Thread(target=_beat, daemon=True, name=f"heartbeat-{agent_id}").start()
+
+
+@system_group.command("api")
+@click.option("--port", default=8000, help="Port to run the API server on")
+def run_api(port: int):
+    """Run the FastAPI server for the AIPOM frontend."""
+    import uvicorn
+
+    click.echo(f"Starting API server on port {port}...")
+    uvicorn.run(
+        "src.api.server:create_app",
+        host="0.0.0.0",
+        port=port,
+        factory=True,
+        reload=True,
+    )
