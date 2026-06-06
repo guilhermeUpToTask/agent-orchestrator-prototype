@@ -297,10 +297,7 @@ def _start_heartbeat_thread(registry, agent_id: str) -> None:
 @click.option("--port", default=8000, help="Port to run the API server on")
 def run_api(port: int):
     """Run the FastAPI server for the AIPOM frontend."""
-    try:
-        import uvicorn
-    except ModuleNotFoundError:
-        die("Missing API dependencies. Install the project with FastAPI/Uvicorn dependencies first.")
+    import uvicorn
 
     click.echo(f"Starting API server on port {port}...")
     uvicorn.run(
