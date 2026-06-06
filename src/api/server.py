@@ -65,13 +65,13 @@ class DiscoveryMessageResponse(BaseModel):
     brief: Optional[dict] = None
 
 
-_sse_queue: queue.Queue[dict] = queue.Queue(maxsize=200)
+_sse_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
 
 
 def publish_sse(event_type: str, payload: dict) -> None:
     try:
         _sse_queue.put_nowait({"type": event_type, "payload": payload})
-    except queue.Full:
+    except asyncio.QueueFull:
         log.warning("api.sse_queue_full", event_type=event_type)
 
 
@@ -204,18 +204,12 @@ def create_app(container=None) -> FastAPI:
     _discovery_question_q: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
     _discovery_answer_q: queue.Queue[str] = queue.Queue(maxsize=1)
 
-    def _put_discovery_question(question: str) -> None:
-        try:
-            _discovery_question_q.put_nowait(question)
-        except asyncio.QueueFull:
-            log.warning("api.discovery_question_queue_full")
-
     @app.post("/api/plan/discovery/start")
     async def start_discovery(c=Depends(get_container)) -> dict:
         loop = asyncio.get_running_loop()
 
         def io_handler(question: str) -> str:
-            loop.call_soon_threadsafe(_put_discovery_question, question)
+            loop.call_soon_threadsafe(_discovery_question_q.put_nowait, question)
             return _discovery_answer_q.get()
 
         future = loop.run_in_executor(
@@ -227,17 +221,12 @@ def create_app(container=None) -> FastAPI:
             question = await asyncio.wait_for(_discovery_question_q.get(), timeout=30.0)
             return {"question": question, "done": False}
         except asyncio.TimeoutError:
-            if not future.done():
-                raise HTTPException(status_code=504, detail="Discovery did not produce a question in time")
             result = await future
             return {"done": True, "brief": result.brief.model_dump() if result.brief else None}
 
     @app.post("/api/plan/discovery/message", response_model=DiscoveryMessageResponse)
     async def discovery_message(body: DiscoveryMessageRequest) -> DiscoveryMessageResponse:
-        try:
-            _discovery_answer_q.put_nowait(body.message)
-        except queue.Full:
-            raise HTTPException(status_code=409, detail="Discovery already has a pending answer")
+        _discovery_answer_q.put(body.message)
         try:
             question = await asyncio.wait_for(_discovery_question_q.get(), timeout=60.0)
             return DiscoveryMessageResponse(question=question, done=False)
@@ -252,10 +241,10 @@ def create_app(container=None) -> FastAPI:
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.to_thread(_sse_queue.get, True, 25.0)
+                    event = await asyncio.wait_for(_sse_queue.get(), timeout=25.0)
                     data = json.dumps(event)
                     yield f"data: {data}\n\n"
-                except queue.Empty:
+                except asyncio.TimeoutError:
                     yield ": ping\n\n"
 
         return StreamingResponse(
