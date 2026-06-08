@@ -527,6 +527,14 @@ class AppContainer:
         return LoadProjectSpec(spec_repo=self.spec_repo)
 
     @cached_property
+    def current_spec(self):
+        """
+        Load and cache the active ProjectSpec for the configured project.
+        Used by the API layer's GET /spec endpoint and spec-dependent routes.
+        """
+        return self.load_project_spec_usecase.execute(self.get_required_project())
+
+    @cached_property
     def validate_against_spec_usecase(self):
         from src.app.usecases.validate_against_spec import ValidateAgainstSpec
 
