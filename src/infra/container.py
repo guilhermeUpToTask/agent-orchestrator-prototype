@@ -257,6 +257,25 @@ class AppContainer:
         strategy = get_planner_strategy(self._ctx)
         return strategy.build_interactive(self._ctx)
 
+    def build_interactive_planner_runtime(
+        self, io_handler: Callable[[str], str]
+    ) -> PlannerRuntimePort:
+        """Build a fresh interactive runtime for a single discovery session."""
+        if self._ctx.machine.mode == "dry-run":
+            from src.infra.runtime.planners.anthropic_interactive_planner_runtime import (
+                StubInteractivePlannerRuntime,
+            )
+
+            return StubInteractivePlannerRuntime()
+
+        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+
+        strategy = get_planner_strategy(self._ctx)
+        runtime = strategy.build_interactive(self._ctx)
+        # Inject the caller-controlled io_handler into the runtime
+        runtime._runtime._io_handler = io_handler
+        return runtime
+
     # ------------------------------------------------------------------
     # Infrastructure: misc
     # ------------------------------------------------------------------
@@ -663,6 +682,12 @@ class AppContainer:
         spec = self.load_project_spec_usecase.execute(project_name)
         telemetry = TelemetryService(self.telemetry_emitter, producer="planner-orchestrator")
         trace = telemetry.start_trace(correlation_id=self._ctx.machine.project_name)
+        
+        # Factory for building fresh interactive runtimes with io_handlers
+        def interactive_runtime_factory(io_handler):
+            fresh_runtime = self.build_interactive_planner_runtime(io_handler=io_handler)
+            return TelemetryPlannerRuntimeWrapper(fresh_runtime, telemetry, trace)
+        
         return PlannerOrchestrator(
             plan_repo=self.project_plan_repo,
             session_repo=self.planner_session_repo,
@@ -681,4 +706,5 @@ class AppContainer:
             spec_repo=self.spec_repo,
             project_name=project_name,
             event_port=self.event_port,
+            interactive_runtime_factory=interactive_runtime_factory,
         )

@@ -7,11 +7,17 @@ from src.domain.aggregates.planner_session import PlannerSession
 from src.domain.ports.planner import PlannerTool
 
 
-def build_ask_question_tool() -> PlannerTool:
+def build_ask_question_tool(
+    io_handler: Optional[Callable[[str], str]] = None
+) -> PlannerTool:
     """Tool used by interactive discovery runtime to ask clarifying questions."""
 
     def ask_question_handler(inp: dict) -> str:
         question = inp.get("question", "")
+        if io_handler is not None:
+            answer = io_handler(question)
+            return json.dumps({"asked": True, "question": question, "answer": answer})
+        # No handler -- just record the question, caller must poll
         return json.dumps({"asked": True, "question": question})
 
     return PlannerTool(
