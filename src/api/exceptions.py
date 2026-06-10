@@ -10,11 +10,12 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from src.api.schemas.common import ErrorResponse
+from src.api.schemas.common import ErrorResponse, PlanConflictResponse
 
 # Domain imports — only error types, never aggregates or use cases
 from src.domain.errors import (
     DomainError,
+    InvalidPlanTransitionError,
     InvalidStatusTransitionError,
     MaxRetriesExceededError,
     ForbiddenFileEditError,
@@ -53,6 +54,21 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=404,
             content=_error_body(f"Resource not found: {exc}"),
+        )
+
+    # ── 409 Conflict — invalid plan lifecycle transition ──────────────────────
+    @app.exception_handler(InvalidPlanTransitionError)
+    async def invalid_plan_transition_handler(
+        request: Request, exc: InvalidPlanTransitionError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content=PlanConflictResponse(
+                detail=str(exc),
+                action=exc.action,
+                current_status=exc.current_status,
+                expected_status=exc.expected,
+            ).model_dump(),
         )
 
     # ── 409 Conflict — invalid state transition ───────────────────────────────

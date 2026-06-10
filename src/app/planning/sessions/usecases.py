@@ -15,6 +15,7 @@ from src.app.services.decision_apply import apply_decision_to_spec
 from src.app.usecases.goal_init import GoalInitUseCase
 from src.domain.aggregates.planner_session import PlannerMode, PlannerSession, PlannerSessionStatus
 from src.domain.aggregates.project_plan import ProjectPlan, ProjectPlanStatus
+from src.domain.errors import InvalidPlanTransitionError
 from src.domain.events.domain_event import DomainEvent
 from src.domain.ports.messaging import EventPort
 from src.domain.ports.planner import PlannerRuntimeError, PlannerRuntimePort
@@ -94,7 +95,11 @@ class ApproveBriefUseCase:
     def execute(self) -> ProjectPlan:
         plan = self._plan_repo.load()
         if plan.status != ProjectPlanStatus.DISCOVERY:
-            raise ValueError(f"Plan must be in DISCOVERY state, got {plan.status.value}")
+            raise InvalidPlanTransitionError(
+                action="approve brief",
+                current_status=plan.status.value,
+                expected=[ProjectPlanStatus.DISCOVERY.value],
+            )
         if plan.brief is None:
             raise ValueError("No brief to approve on the plan")
         plan = plan.approve_brief(plan.brief)
@@ -171,7 +176,11 @@ class ApproveArchitectureUseCase:
     def execute(self, decision_ids: list[str]) -> ApprovalResult:
         plan = self._plan_repo.load()
         if plan.status != ProjectPlanStatus.ARCHITECTURE:
-            raise ValueError(f"Plan must be in ARCHITECTURE state, got {plan.status.value}")
+            raise InvalidPlanTransitionError(
+                action="approve architecture",
+                current_status=plan.status.value,
+                expected=[ProjectPlanStatus.ARCHITECTURE.value],
+            )
 
         arch_session = next((s for s in self._session_repo.list_all() if s.mode == PlannerMode.ARCHITECTURE and s.status == PlannerSessionStatus.COMPLETED), None)
         if arch_session is None:
@@ -282,7 +291,11 @@ class ApprovePhaseReviewUseCase:
     def execute(self, approve_next: bool = True) -> ApprovalResult:
         plan = self._plan_repo.load()
         if plan.status != ProjectPlanStatus.PHASE_REVIEW:
-            raise ValueError(f"Plan must be in PHASE_REVIEW state, got {plan.status.value}")
+            raise InvalidPlanTransitionError(
+                action="approve phase review",
+                current_status=plan.status.value,
+                expected=[ProjectPlanStatus.PHASE_REVIEW.value],
+            )
 
         review_session = next((s for s in self._session_repo.list_all() if s.mode == PlannerMode.PHASE_REVIEW and s.status == PlannerSessionStatus.COMPLETED), None)
         if review_session is None:

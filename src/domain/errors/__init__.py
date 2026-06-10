@@ -1,6 +1,7 @@
 """src/domain/errors/ — Domain exceptions (re-exports)."""
 
 from src.domain.errors.base        import DomainError
+from src.domain.errors.plan_errors import InvalidPlanTransitionError
 from src.domain.errors.task_errors import (
     ForbiddenFileEditError,
     InvalidStatusTransitionError,
@@ -10,6 +11,7 @@ from src.domain.errors.task_errors import (
 __all__ = [
     "DomainError",
     "ForbiddenFileEditError",
+    "InvalidPlanTransitionError",
     "InvalidStatusTransitionError",
     "MaxRetriesExceededError",
 ]

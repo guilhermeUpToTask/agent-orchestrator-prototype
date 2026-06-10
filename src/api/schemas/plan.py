@@ -1,6 +1,11 @@
-"""src/api/schemas/plan.py — Plan-related API DTOs."""
+"""src/api/schemas/plan.py — Plan-related API DTOs.
+
+Field types strictly mirror the ProjectPlan aggregate
+(src/domain/aggregates/project_plan.py) — keep them in sync.
+"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -11,7 +16,7 @@ class PlanBriefResponse(BaseModel):
 
     vision: str
     constraints: list[str]
-    phase_1_exit_criteria: list[str]
+    phase_1_exit_criteria: str
     open_questions: list[str]
 
 
@@ -23,15 +28,15 @@ class PlanPhaseResponse(BaseModel):
     goal: str
     goal_names: list[str]
     status: str
-    exit_criteria: list[str]
-    lessons: list[str]
+    exit_criteria: str
+    lessons: str
 
 
 class PlanHistoryEntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     event: str
-    timestamp: Optional[str] = None
+    timestamp: Optional[datetime] = None
     actor: Optional[str] = None
     detail: Optional[dict[str, Any]] = None
 

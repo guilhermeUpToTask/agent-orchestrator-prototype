@@ -21,7 +21,6 @@ from typing import Any
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from src.api.dependencies import set_container, set_container_provider
 from src.api.exceptions import register_exception_handlers
