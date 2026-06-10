@@ -1,6 +1,6 @@
 import React from 'react';
 import { tokens } from '../styles/tokens';
-import { usePlannerStore } from '../store/plannerStore';
+import { usePlan } from '../lib/queries';
 import type { Phase } from '../types/ui';
 
 const PHASE_DOT: Record<Phase['status'], { glyph: string; color: string }> = {
@@ -15,7 +15,7 @@ const PHASE_DOT: Record<Phase['status'], { glyph: string; color: string }> = {
  * knows what "done" means for the current slice of work.
  */
 export function PhaseTimeline() {
-  const plan = usePlannerStore((s) => s.plan);
+  const { data: plan } = usePlan();
   if (!plan || plan.phases.length === 0) return null;
 
   const active = plan.phases.find((p) => p.index === plan.current_phase_index);

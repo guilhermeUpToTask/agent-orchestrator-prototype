@@ -6,7 +6,14 @@ import {
 } from 'lucide-react';
 import { tokens, PHASE_STATUS_META } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { TaskNodeData } from '../types/ui';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useApproveArchitecture,
+  useApproveBrief,
+  useApprovePhase,
+  useGoals,
+  usePlan,
+} from '../lib/queries';
 
 function StatPill({ value, label, color }: { value: number; label: string; color: string }) {
   return (
@@ -49,27 +56,30 @@ function Divider() {
 }
 
 export function Toolbar() {
-  const plan = usePlannerStore((s) => s.plan);
-  const goals = usePlannerStore((s) => s.goals);
-  const nodes = usePlannerStore((s) => s.nodes);
   const ui = usePlannerStore((s) => s.ui);
-  const loaded = usePlannerStore((s) => s.loaded);
-
-  const doApproveBrief = usePlannerStore((s) => s.doApproveBrief);
-  const doApproveArchitecture = usePlannerStore((s) => s.doApproveArchitecture);
-  const doApprovePhase = usePlannerStore((s) => s.doApprovePhase);
   const setLayoutDirection = usePlannerStore((s) => s.setLayoutDirection);
-  const autoLayout = usePlannerStore((s) => s.autoLayout);
   const toggleChatPanel = usePlannerStore((s) => s.toggleChatPanel);
-  const loadPlan = usePlannerStore((s) => s.loadPlan);
+
+  const queryClient = useQueryClient();
+  const { data: plan } = usePlan();
+  const { data: goals, isSuccess: loaded } = useGoals();
+
+  const approveBrief = useApproveBrief();
+  const approveArchitecture = useApproveArchitecture();
+  const approvePhase = useApprovePhase();
+
+  const doApproveBrief = () => approveBrief.mutate();
+  const doApproveArchitecture = (ids: string[]) => approveArchitecture.mutate(ids);
+  const doApprovePhase = (next: boolean) => approvePhase.mutate(next);
+  const refresh = () => queryClient.invalidateQueries();
+  // Layout is derived from layoutDirection — toggling re-runs the dagre pass
+  const autoLayout = () => setLayoutDirection(ui.layoutDirection);
 
   const planStatus = plan?.status ?? 'discovery';
   const phaseMeta = PHASE_STATUS_META[planStatus] ?? PHASE_STATUS_META.discovery;
   const currentPhase = plan?.phases[plan.current_phase_index ?? 0];
 
-  const taskStatuses = nodes
-    .filter((n) => n.type === 'taskNode')
-    .map((n) => (n.data as unknown as TaskNodeData).task.status);
+  const taskStatuses = (goals ?? []).flatMap((g) => g.tasks.map((t) => t.status));
   const stats = {
     done: taskStatuses.filter((s) => ['succeeded', 'merged'].includes(s)).length,
     running: taskStatuses.filter((s) => ['in_progress', 'assigned'].includes(s)).length,
@@ -207,7 +217,7 @@ export function Toolbar() {
       <Btn
         icon={ui.isThinking ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <RotateCcw size={12} />}
         label="REFRESH"
-        onClick={loadPlan}
+        onClick={refresh}
         color={tokens.textSecond}
         disabled={ui.isThinking}
       />
