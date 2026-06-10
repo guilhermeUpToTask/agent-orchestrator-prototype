@@ -193,13 +193,13 @@ class SettingsContext:
         """
         Fully-resolved ProjectPaths for the active project.
 
-        Computed once on first access and cached.  Raises ValueError if
-        no project is configured.
+        Computed once on first access and cached.  Raises ConfigurationError
+        if no project is configured.
         """
         from src.infra.project_paths import ProjectPaths
 
         if not self.machine.project_name:
-            raise ValueError("No project configured. Run `orchestrator init` first.")
+            raise ConfigurationError("No project configured. Run `orchestrator init` first.")
         return ProjectPaths.for_project(
             self.machine.orchestrator_home,
             self.machine.project_name,
@@ -224,7 +224,7 @@ class SettingsContext:
     @property
     def project_home(self) -> Path:
         if not self.machine.project_name:
-            raise ValueError("No project configured. Run `orchestrator init` first.")
+            raise ConfigurationError("No project configured. Run `orchestrator init` first.")
         return self.machine.orchestrator_home / "projects" / self.machine.project_name
 
     # ------------------------------------------------------------------

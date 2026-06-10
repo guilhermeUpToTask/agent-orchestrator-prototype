@@ -14,12 +14,16 @@ Zero business logic lives here.
 """
 from __future__ import annotations
 
+import os
+import threading
+from typing import Any
+
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.dependencies import set_container
+from src.api.dependencies import set_container, set_container_provider
 from src.api.exceptions import register_exception_handlers
 from src.api.routers import agents, discovery, events, goals, plan, project, refinement, spec, tasks
 from src.api.schemas.common import HealthResponse
@@ -28,6 +32,61 @@ from src.api.sse import publish_sse
 log = structlog.get_logger(__name__)
 
 _API_VERSION = "0.2.0"
+
+
+def _wire_planner_sse_hook(container: Any) -> None:
+    """Forward planner events to the SSE stream; tolerate unconfigured projects."""
+
+    def _planner_hook(event_type: str, data: dict[str, Any]) -> None:
+        publish_sse(f"plan.{event_type}", data)
+
+    try:
+        container.planner_orchestrator.set_planner_event_hook(_planner_hook)
+    except Exception as exc:
+        log.warning("api.planner_hook_setup_failed", error=str(exc))
+
+
+class DynamicContainerProvider:
+    """
+    Resolve the AppContainer lazily, rebuilding it whenever the active
+    project context changes.
+
+    The active project lives in ``.orchestrator/config.json`` and may be
+    switched by the CLI while the API is running.  AppContainer caches all
+    repositories and use cases per project, so a stale container would keep
+    serving the previous project's spec, plan, and task state.  On every
+    request we fingerprint the resolvable context (project_name + mode) and
+    rebuild only when it changed — the common path is a tuple comparison.
+    """
+
+    def __init__(self) -> None:
+        self._container: Any = None
+        self._fingerprint: tuple[Any, ...] | None = None
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _current_fingerprint() -> tuple[Any, ...]:
+        from src.infra.settings import GlobalConfigStore
+
+        stored = GlobalConfigStore().load()
+        mode = os.environ.get("AGENT_MODE") or stored.get("mode")
+        return (stored.get("project_name"), mode)
+
+    def __call__(self) -> Any:
+        from src.infra.container import AppContainer
+
+        fingerprint = self._current_fingerprint()
+        with self._lock:
+            if self._container is None or fingerprint != self._fingerprint:
+                log.info(
+                    "api.container_rebuilt",
+                    project_name=fingerprint[0],
+                    mode=fingerprint[1],
+                )
+                self._container = AppContainer.from_env()
+                self._fingerprint = fingerprint
+                _wire_planner_sse_hook(self._container)
+            return self._container
 
 
 def _unique_operation_id(route) -> str:
@@ -47,12 +106,9 @@ def create_app(container=None) -> FastAPI:
     Build and return the configured FastAPI application.
 
     Pass *container* explicitly in tests to inject a mock container;
-    leave it as ``None`` in production and it will be resolved from env.
+    leave it as ``None`` in production and the active project context is
+    re-resolved from ``.orchestrator/config.json`` on each request.
     """
-    if container is None:
-        from src.infra.container import AppContainer
-        container = AppContainer.from_env()
-
     # ── App instance ──────────────────────────────────────────────────────────
     app = FastAPI(
         title="AIPOM Orchestrator API",
@@ -76,17 +132,12 @@ def create_app(container=None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Dependency injection ──────────────────────────────────────────────────
-    set_container(container)
-
-    # ── SSE hook — planner events → event stream ──────────────────────────────
-    def _planner_hook(event_type: str, data: dict) -> None:
-        publish_sse(f"plan.{event_type}", data)
-
-    try:
-        container.planner_orchestrator.set_planner_event_hook(_planner_hook)
-    except Exception as exc:
-        log.warning("api.planner_hook_setup_failed", error=str(exc))
+    # ── Dependency injection + planner SSE hook ───────────────────────────────
+    if container is not None:
+        set_container(container)
+        _wire_planner_sse_hook(container)
+    else:
+        set_container_provider(DynamicContainerProvider())
 
     # ── Routers ───────────────────────────────────────────────────────────────
     _prefix = "/api"

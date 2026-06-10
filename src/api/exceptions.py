@@ -26,6 +26,9 @@ from src.domain.project_spec.errors import (
     ForbiddenMutationError,
 )
 
+# Infra error — raised when the active project context cannot be resolved.
+from src.infra.settings.models import ConfigurationError
+
 
 def _error_body(detail: str) -> dict:
     return ErrorResponse(detail=detail).model_dump()
@@ -33,6 +36,16 @@ def _error_body(detail: str) -> dict:
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach all domain-to-HTTP exception handlers to *app*."""
+
+    # ── 400 Bad Request — unresolved project context ──────────────────────────
+    @app.exception_handler(ConfigurationError)
+    async def configuration_error_handler(
+        request: Request, exc: ConfigurationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content=_error_body(str(exc)),
+        )
 
     # ── 404 Not Found ─────────────────────────────────────────────────────────
     @app.exception_handler(KeyError)
