@@ -18,7 +18,7 @@ import { usePlannerStore } from '../store/plannerStore';
 import { TaskNode } from './TaskNode';
 import { GoalGroupNode } from './GoalGroupNode';
 import { PhaseTimeline } from './PhaseTimeline';
-import type { TaskNodeData } from '../types/domain';
+import type { TaskNodeData } from '../types/ui';
 
 // Register custom node types
 const nodeTypes: NodeTypes = {

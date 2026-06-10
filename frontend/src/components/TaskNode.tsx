@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import type { TaskNodeData } from '../types/domain';
+import type { TaskNodeData } from '../types/ui';
 import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 

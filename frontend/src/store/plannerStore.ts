@@ -31,7 +31,7 @@ import type {
   TaskStatus,
   PlannerUIState,
   HistoryEntry,
-} from '../types/domain';
+} from '../types/ui';
 import {
   fetchPlan, fetchGoals, fetchAgents, fetchPlanHistory,
   fetchGoalHistory, sendChatMessage, subscribeToEvents,
@@ -148,7 +148,7 @@ export const usePlannerStore = create<PlannerState>()(
             id: nanoid(),
             role: 'system' as const,
             text: `[${h.actor}] ${h.event}${h.detail ? ' — ' + JSON.stringify(h.detail) : ''}`,
-            ts: h.ts ? new Date(h.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ts(),
+            ts: h.timestamp ? new Date(h.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ts(),
           }));
 
         const introMsg: ChatMessage = {

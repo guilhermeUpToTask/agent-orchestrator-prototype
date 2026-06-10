@@ -2,7 +2,7 @@ import React from 'react';
 import { X, GitPullRequest, ExternalLink, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
 import { tokens, STATUS_META, AGENT_COLORS, GOAL_STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { GoalAggregate, TaskNodeData, TaskStatus } from '../types/domain';
+import type { GoalAggregate, TaskNodeData, TaskStatus } from '../types/ui';
 
 const ALL_STATUSES: TaskStatus[] = [
   'created', 'assigned', 'in_progress', 'succeeded',
@@ -125,7 +125,7 @@ export function DetailPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: meta.dot }} />
             <span style={{ fontSize: 12, color: meta.color, fontFamily: tokens.fontMono }}>{meta.label}</span>
-            {task.retry_count > 0 && (
+            {(task.retry_count ?? 0) > 0 && (
               <span style={{ fontSize: 10, color: tokens.yellow, fontFamily: tokens.fontMono }}>
                 (retry {task.retry_count})
               </span>
@@ -191,8 +191,8 @@ export function DetailPanel() {
           <div style={{ display: 'flex', gap: 14 }}>
             <div>
               <div style={{ fontSize: 9, color: tokens.textMuted, fontFamily: tokens.fontMono }}>RETRIES USED</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: task.retry_count > 0 ? tokens.yellow : tokens.textPrimary }}>
-                {task.retry_count}
+              <div style={{ fontSize: 14, fontWeight: 700, color: (task.retry_count ?? 0) > 0 ? tokens.yellow : tokens.textPrimary }}>
+                {task.retry_count ?? 0}
               </div>
             </div>
           </div>

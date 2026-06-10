@@ -5,14 +5,20 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from src.domain.aggregates.goal import GoalStatus
+from src.domain.value_objects.status import TaskStatus
+
 
 class GoalTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     task_id: str
     title: str
-    status: str
+    status: TaskStatus
     depends_on: list[str]
+    # Enriched from the task repository when available
+    assigned_agent_id: Optional[str] = None
+    retry_count: int = 0
 
 
 class GoalHistoryEntryResponse(BaseModel):
@@ -29,7 +35,7 @@ class GoalResponse(BaseModel):
     goal_id: str
     name: str
     description: str
-    status: str
+    status: GoalStatus
     feature_tag: Optional[str] = None
     depends_on: list[str]
     tasks: list[GoalTaskResponse]

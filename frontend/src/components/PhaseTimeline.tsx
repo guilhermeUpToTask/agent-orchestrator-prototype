@@ -1,7 +1,7 @@
 import React from 'react';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { Phase } from '../types/domain';
+import type { Phase } from '../types/ui';
 
 const PHASE_DOT: Record<Phase['status'], { glyph: string; color: string }> = {
   planned:   { glyph: '○', color: tokens.textMuted },
