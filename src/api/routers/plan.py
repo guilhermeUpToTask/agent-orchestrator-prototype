@@ -7,6 +7,22 @@ Covers:
   POST /plan/approve-brief    operator approves the discovery brief
   POST /plan/approve-architecture  operator selects architecture decisions
   POST /plan/approve-phase    operator greenlights the next phase
+
+State machine (enforced by the ProjectPlan aggregate — violations → 409):
+
+  discovery → architecture → phase_active → phase_review → phase_active …
+                                                         → done
+
+Two distinct approval moments exist and must not be conflated:
+  * Plan DECISION (mid-phase): /plan/approve-architecture applies the
+    planner's pending architecture decisions while the plan is in
+    `architecture`, dispatching the first phase's goals.
+  * Plan REVIEW (end-of-phase): /plan/approve-phase acts on a completed
+    PHASE_REVIEW session while the plan is in `phase_review`, releasing
+    the next phase (or marking the plan `done`).
+
+Every 409 carries a PlanConflictResponse body with `action`,
+`current_status`, and `expected_status` so clients can recover.
 """
 from __future__ import annotations
 
@@ -16,7 +32,7 @@ from src.api.dependencies import (
     PlanOrchestratorDep,
     ProjectPlanRepoDep,
 )
-from src.api.schemas.common import ErrorResponse
+from src.api.schemas.common import ErrorResponse, PlanConflictResponse
 from src.api.schemas.plan import (
     ApproveBriefResponse,
     ApproveArchitectureRequest,
@@ -86,8 +102,8 @@ def _plan_to_response(plan) -> PlanResponse:
 def get_plan(repo: ProjectPlanRepoDep) -> PlanResponse:
     try:
         plan = repo.load()
-        return _plan_to_response(plan)
-    except Exception:
+    except KeyError:
+        # No plan file yet — present an empty discovery-stage plan.
         return PlanResponse(
             plan_id=None,
             status="discovery",
@@ -98,6 +114,7 @@ def get_plan(repo: ProjectPlanRepoDep) -> PlanResponse:
             brief=None,
             history=[],
         )
+    return _plan_to_response(plan)
 
 
 @router.get(
@@ -115,9 +132,9 @@ def get_plan(repo: ProjectPlanRepoDep) -> PlanResponse:
 def get_plan_history(repo: ProjectPlanRepoDep) -> list[PlanHistoryEntryResponse]:
     try:
         plan = repo.load()
-        return [PlanHistoryEntryResponse(**h.model_dump()) for h in plan.history]
-    except Exception:
+    except KeyError:
         return []
+    return [PlanHistoryEntryResponse(**h.model_dump()) for h in plan.history]
 
 
 # ── Approve Brief ─────────────────────────────────────────────────────────────
@@ -129,12 +146,15 @@ def get_plan_history(repo: ProjectPlanRepoDep) -> list[PlanHistoryEntryResponse]
     summary="Approve Discovery Brief",
     description=(
         "Operator approves the discovery brief, advancing the plan from "
-        "`discovery` to `brief_approved` status."
+        "`discovery` to `architecture` status."
     ),
     responses={
         status.HTTP_409_CONFLICT: {
-            "model": ErrorResponse,
-            "description": "Plan is not in a state that allows brief approval.",
+            "model": PlanConflictResponse,
+            "description": (
+                "Plan is not in `discovery` status. The body reports the "
+                "current vs expected status."
+            ),
         }
     },
 )
@@ -152,13 +172,17 @@ def approve_brief(orchestrator: PlanOrchestratorDep) -> ApproveBriefResponse:
     status_code=status.HTTP_200_OK,
     summary="Approve Architecture Decisions",
     description=(
-        "Operator selects which architecture decision IDs to apply, "
+        "**Mid-phase plan decision.** Operator selects which architecture "
+        "decision IDs to apply while the plan is in `architecture` status, "
         "triggering goal dispatch for the first phase."
     ),
     responses={
         status.HTTP_409_CONFLICT: {
-            "model": ErrorResponse,
-            "description": "Plan is not awaiting architecture approval.",
+            "model": PlanConflictResponse,
+            "description": (
+                "Plan is not in `architecture` status (e.g. already in "
+                "`phase_review`). The body reports the current vs expected status."
+            ),
         }
     },
 )
@@ -185,13 +209,17 @@ def approve_architecture(
     status_code=status.HTTP_200_OK,
     summary="Approve Phase Review",
     description=(
-        "Operator greenlights the phase review, releasing goals for the next phase. "
-        "Set `approve_next=false` to reject the phase and keep the plan in review."
+        "**End-of-phase plan review.** Operator greenlights the phase review "
+        "while the plan is in `phase_review` status, releasing goals for the "
+        "next phase. Set `approve_next=false` to finish and mark the plan `done`."
     ),
     responses={
         status.HTTP_409_CONFLICT: {
-            "model": ErrorResponse,
-            "description": "Plan is not awaiting phase review.",
+            "model": PlanConflictResponse,
+            "description": (
+                "Plan is not in `phase_review` status. The body reports the "
+                "current vs expected status."
+            ),
         }
     },
 )

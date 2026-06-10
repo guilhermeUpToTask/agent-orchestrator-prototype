@@ -59,6 +59,7 @@ class PlannerOrchestrator:
         _ = agent_registry
 
         self._plan_repo = plan_repo
+        self._session_repo = session_repo
         self._turn_callback: Optional[Callable[[str, list], None]] = None
         self._planner_event_hook: Optional[Callable[[str, dict], None]] = None
         self._support = PlanningSessionSupport(
@@ -110,34 +111,16 @@ class PlannerOrchestrator:
 
     def start_discovery(self, io_handler: Optional[Callable[[str], str]] = None) -> DiscoveryResult:
         if io_handler is not None and self._interactive_runtime_factory is not None:
-            # Build fresh interactive runtime with the provided io_handler using injected factory
+            # Build a fresh interactive runtime bound to this caller's io_handler
             fresh_runtime = self._interactive_runtime_factory(io_handler)
-            # Create a fresh use case with the fresh runtime
-            from src.app.planning.sessions.usecases import StartDiscoveryUseCase
             fresh_use_case = StartDiscoveryUseCase(
                 plan_repo=self._plan_repo,
                 session_repo=self._session_repo,
                 runtime=fresh_runtime,
                 support=self._support,
             )
-            return fresh_use_case.execute()  # Don't pass io_handler - it's already in the runtime
-        else:
-            return self._start_discovery.execute(io_handler=io_handler)
-        if io_handler is not None:
-            # Build fresh interactive runtime with the provided io_handler
-            container = AppContainer.from_env()
-            fresh_runtime = container.build_interactive_planner_runtime(io_handler=io_handler)
-            # Create a fresh use case with the fresh runtime
-            from src.app.planning.sessions.usecases import StartDiscoveryUseCase
-            fresh_use_case = StartDiscoveryUseCase(
-                plan_repo=self._plan_repo,
-                session_repo=self._session_repo,
-                runtime=fresh_runtime,
-                support=self._support,
-            )
-            return fresh_use_case.execute()  # Don't pass io_handler - it's already in the runtime
-        else:
-            return self._start_discovery.execute(io_handler=io_handler)
+            return fresh_use_case.execute()  # io_handler already lives in the runtime
+        return self._start_discovery.execute(io_handler=io_handler)
 
     def approve_brief(self) -> ProjectPlan:
         return self._approve_brief.execute()
