@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, ChevronRight, Bot, User, Loader2, Settings2, Wrench } from 'lucide-react';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import { startDiscovery } from '../lib/api';
-import type { ChatMessage, ChatMode, TaskNodeData } from '../types/ui';
+import { useGoals, usePlan, useSendChatMessage, useStartDiscovery } from '../lib/queries';
+import type { ChatMessage, ChatMode } from '../types/ui';
 
 function ToolCallBubble({ msg }: { msg: ChatMessage }) {
   return (
@@ -189,12 +189,12 @@ function quickActionsFor(mode: ChatMode): string[] {
 export function ChatPanel() {
   const messages = usePlannerStore((s) => s.messages);
   const ui = usePlannerStore((s) => s.ui);
-  const plan = usePlannerStore((s) => s.plan);
-  const nodes = usePlannerStore((s) => s.nodes);
-  const sendMessage = usePlannerStore((s) => s.sendMessage);
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  const setThinking = usePlannerStore((s) => s.setThinking);
   const toggleChatPanel = usePlannerStore((s) => s.toggleChatPanel);
+
+  const { data: plan } = usePlan();
+  const { data: goals = [] } = useGoals();
+  const sendMessage = useSendChatMessage();
+  const startDiscovery = useStartDiscovery();
 
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
@@ -203,8 +203,9 @@ export function ChatPanel() {
 
   const planStatus = plan?.status ?? 'discovery';
   const mode = chatModeFor(planStatus);
-  const selectedNode = nodes.find((n) => n.id === ui.selectedNodeId && n.type === 'taskNode');
-  const selectedTask = selectedNode ? (selectedNode.data as unknown as TaskNodeData).task : null;
+  const selectedTask = ui.selectedNodeId
+    ? goals.flatMap((g) => g.tasks).find((t) => t.task_id === ui.selectedNodeId) ?? null
+    : null;
 
   const send = useCallback(async (text: string) => {
     if (!text.trim() || ui.isThinking || !mode.inputEnabled) return;
@@ -214,23 +215,6 @@ export function ChatPanel() {
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
-  }
-
-  async function handleStartDiscovery() {
-    setThinking(true);
-    try {
-      const result = await startDiscovery();
-      const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      if (result.question) {
-        addMessage({ role: 'assistant', text: result.question, ts: now });
-      } else if (result.done) {
-        addMessage({ role: 'assistant', text: 'Discovery complete. Brief ready for approval.', ts: now });
-      }
-    } catch (err) {
-      addMessage({ role: 'system', text: `Start discovery failed: ${err}`, ts: new Date().toLocaleTimeString() });
-    } finally {
-      setThinking(false);
-    }
   }
 
   if (ui.chatPanelCollapsed) {
@@ -296,7 +280,7 @@ export function ChatPanel() {
       </div>
 
       {/* Context strip */}
-      {selectedNode && (
+      {selectedTask && (
         <div style={{
           padding: '6px 14px', background: tokens.accentGlow,
           borderBottom: `1px solid ${tokens.accentDim}`,
@@ -304,7 +288,7 @@ export function ChatPanel() {
         }}>
           <Settings2 size={9} color={tokens.accent} />
           <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.accent }}>
-            ctx: {selectedNode.id} · {selectedTask?.status}
+            ctx: {selectedTask.task_id} · {selectedTask.status}
           </span>
         </div>
       )}
@@ -312,7 +296,7 @@ export function ChatPanel() {
       {/* Discovery start button */}
       {planStatus === 'discovery' && messages.length <= 2 && (
         <div style={{ padding: '10px 14px', borderBottom: `1px solid ${tokens.border}`, flexShrink: 0 }}>
-          <button onClick={handleStartDiscovery} disabled={ui.isThinking} style={{
+          <button onClick={() => startDiscovery.mutate()} disabled={ui.isThinking} style={{
             width: '100%', padding: '8px', background: tokens.purpleDim,
             border: `1px solid ${tokens.purple}44`, borderRadius: tokens.r6,
             color: tokens.purple, cursor: 'pointer', fontFamily: tokens.fontMono,

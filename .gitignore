@@ -81,3 +81,5 @@ Thumbs.db
 
 #workflow running aplication
 workflow/
+
+node_modules/

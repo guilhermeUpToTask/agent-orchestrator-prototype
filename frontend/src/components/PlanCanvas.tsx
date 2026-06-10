@@ -1,23 +1,28 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
   type NodeTypes,
   type Node,
-  type Edge,
+  type Connection,
   SelectionMode,
   Panel,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
+import { tokens, STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
+import { useAgents, useGoals, usePlan } from '../lib/queries';
 import { TaskNode } from './TaskNode';
 import { GoalGroupNode } from './GoalGroupNode';
 import { PhaseTimeline } from './PhaseTimeline';
+import { buildFlowFromGoals, GOAL_COLORS } from '../lib/layout';
 import type { TaskNodeData } from '../types/ui';
 
 // Register custom node types
@@ -29,8 +34,7 @@ const nodeTypes: NodeTypes = {
 // ─── Goal group legend ─────────────────────────────────────────────────────────
 
 function GoalLegend() {
-  const goals = usePlannerStore((s) => s.goals);
-  const GOAL_COLORS = [tokens.accent, tokens.purple, tokens.cyan, tokens.green, tokens.orange];
+  const { data: goals = [] } = useGoals();
 
   return (
     <div style={{
@@ -69,9 +73,7 @@ function GoalLegend() {
 // ─── Vision strip ──────────────────────────────────────────────────────────────
 
 function VisionStrip() {
-  const plan = usePlannerStore((s) => s.plan);
-
-  // Guard: plan is null until loadPlan() resolves — render nothing while loading
+  const { data: plan } = usePlan();
   if (!plan) return null;
 
   return (
@@ -102,13 +104,32 @@ function VisionStrip() {
 // ─── Main canvas ───────────────────────────────────────────────────────────────
 
 export function PlanCanvas() {
-  const nodes = usePlannerStore((s) => s.nodes);
-  const edges = usePlannerStore((s) => s.edges);
-  const onNodesChange = usePlannerStore((s) => s.onNodesChange);
-  const onEdgesChange = usePlannerStore((s) => s.onEdgesChange);
-  const onConnect = usePlannerStore((s) => s.onConnect);
   const selectNode = usePlannerStore((s) => s.selectNode);
   const ui = usePlannerStore((s) => s.ui);
+
+  const { data: goals = [] } = useGoals();
+  const { data: agents = [] } = useAgents();
+  const { data: plan = null } = usePlan();
+
+  // Server state → flow graph. Recomputed when goals/agents/plan/layout change.
+  const layout = useMemo(
+    () => buildFlowFromGoals(goals, agents, ui.layoutDirection, plan),
+    [goals, agents, plan, ui.layoutDirection],
+  );
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(layout.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layout.edges);
+
+  // Re-sync local flow state whenever the derived layout changes
+  useEffect(() => {
+    setNodes(layout.nodes);
+    setEdges(layout.edges);
+  }, [layout, setNodes, setEdges]);
+
+  const onConnect = useCallback(
+    (connection: Connection) => setEdges((eds) => addEdge({ ...connection, type: 'smoothstep' }, eds)),
+    [setEdges],
+  );
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {

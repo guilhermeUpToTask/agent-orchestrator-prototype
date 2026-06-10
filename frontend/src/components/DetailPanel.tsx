@@ -2,12 +2,8 @@ import React from 'react';
 import { X, GitPullRequest, ExternalLink, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
 import { tokens, STATUS_META, AGENT_COLORS, GOAL_STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { GoalAggregate, TaskNodeData, TaskStatus } from '../types/ui';
-
-const ALL_STATUSES: TaskStatus[] = [
-  'created', 'assigned', 'in_progress', 'succeeded',
-  'failed', 'canceled', 'requeued', 'merged',
-];
+import { useAgents, useGoals, useSendChatMessage } from '../lib/queries';
+import type { GoalAggregate } from '../types/ui';
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -41,21 +37,20 @@ function Tag({ text, color }: { text: string; color?: string }) {
 export function DetailPanel() {
   const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
   const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
-  const nodes = usePlannerStore((s) => s.nodes);
-  const goals = usePlannerStore((s) => s.goals);
-  const agentRegistry = usePlannerStore((s) => s.agentRegistry);
   const selectNode = usePlannerStore((s) => s.selectNode);
-  const sendMessage = usePlannerStore((s) => s.sendMessage);
-  const ui = usePlannerStore((s) => s.ui);
 
-  const node = nodes.find((n) => n.id === selectedNodeId && n.type === 'taskNode');
-  const data = node ? (node.data as unknown as TaskNodeData) : null;
-  const goal = goals.find((g) => g.goal_id === data?.goalId);
+  const { data: goals = [] } = useGoals();
+  const { data: agentRegistry = [] } = useAgents();
+  const sendMessage = useSendChatMessage();
 
-  if (!detailPanelOpen || !node || !data) return null;
+  const goal = goals.find((g) => g.tasks.some((t) => t.task_id === selectedNodeId));
+  const task = goal?.tasks.find((t) => t.task_id === selectedNodeId);
 
-  const task = data.task;
-  const agent = data.agent;
+  if (!detailPanelOpen || !task) return null;
+
+  const agent = task.assigned_agent_id
+    ? agentRegistry.find((a) => a.agent_id === task.assigned_agent_id) ?? null
+    : null;
   const status = (task.status ?? 'created') as StatusKey;
   const meta = STATUS_META[status] ?? STATUS_META.created;
   const agentColor = agent ? (AGENT_COLORS[agent.name] ?? tokens.textSecond) : tokens.textMuted;
@@ -66,13 +61,15 @@ export function DetailPanel() {
     .filter((t) => t.status !== 'succeeded' && t.status !== 'merged')
     .map((t) => t.task_id);
 
-  function askExplain() {
+  // Capture in arrow consts so TS narrowing from the guard above carries
+  // into the click handlers.
+  const askExplain = () => {
     sendMessage(`explain_task ${task.task_id} — why is it ${task.status}?`);
-  }
+  };
 
-  function askReassign(agentName: string) {
+  const askReassign = (agentName: string) => {
     sendMessage(`Reassign ${task.task_id} to ${agentName}`);
-  }
+  };
 
   return (
     <div className="anim-slidein" style={{
@@ -112,7 +109,7 @@ export function DetailPanel() {
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 14 }}>
           <Tag text={meta.label} color={meta.color} />
           {agent && <Tag text={agent.name} color={agentColor} />}
-          {data.goalName && <Tag text={data.goalName} color={tokens.textMuted} />}
+          {goal && <Tag text={goal.name} color={tokens.textMuted} />}
         </div>
 
         <Field label="Title">
