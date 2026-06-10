@@ -41,6 +41,7 @@
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff"
         },
+        //TODO: Pass those envs to the .env later on.
         "terminal.integrated.env.linux": {
           "REDIS_URL": "redis://localhost:6379/0",
           "AGENT_MODE": "real",
