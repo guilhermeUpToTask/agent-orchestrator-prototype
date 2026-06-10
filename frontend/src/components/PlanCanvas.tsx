@@ -107,13 +107,16 @@ export function PlanCanvas() {
   const selectNode = usePlannerStore((s) => s.selectNode);
   const ui = usePlannerStore((s) => s.ui);
 
-  const { data: goals = [] } = useGoals();
-  const { data: agents = [] } = useAgents();
-  const { data: plan = null } = usePlan();
+  // NOTE: no `= []` defaults here — a fresh array per render would change
+  // the useMemo deps every render and loop setNodes/setEdges forever while
+  // the queries are still loading. Normalize inside the memo instead.
+  const { data: goals } = useGoals();
+  const { data: agents } = useAgents();
+  const { data: plan } = usePlan();
 
   // Server state → flow graph. Recomputed when goals/agents/plan/layout change.
   const layout = useMemo(
-    () => buildFlowFromGoals(goals, agents, ui.layoutDirection, plan),
+    () => buildFlowFromGoals(goals ?? [], agents ?? [], ui.layoutDirection, plan ?? null),
     [goals, agents, plan, ui.layoutDirection],
   );
 
