@@ -16,11 +16,14 @@ import '@xyflow/react/dist/style.css';
 import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { TaskNode } from './TaskNode';
+import { GoalGroupNode } from './GoalGroupNode';
+import { PhaseTimeline } from './PhaseTimeline';
 import type { TaskNodeData } from '../types/domain';
 
 // Register custom node types
 const nodeTypes: NodeTypes = {
   taskNode: TaskNode as React.ComponentType<any>,
+  goalGroup: GoalGroupNode as React.ComponentType<any>,
 };
 
 // ─── Goal group legend ─────────────────────────────────────────────────────────
@@ -109,6 +112,7 @@ export function PlanCanvas() {
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
+      if (node.type === 'goalGroup') return; // groups frame tasks; not selectable
       selectNode(ui.selectedNodeId === node.id ? null : node.id);
     },
     [selectNode, ui.selectedNodeId],
@@ -121,7 +125,7 @@ export function PlanCanvas() {
   return (
     <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0 }}>
       <ReactFlow
-        nodes={nodes as Node<TaskNodeData>[]}
+        nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -156,8 +160,9 @@ export function PlanCanvas() {
         <MiniMap
           style={{ bottom: 20, right: ui.detailPanelOpen ? 336 : 20 }}
           nodeColor={(n) => {
+            if (n.type === 'goalGroup') return '#1c2030';
             const data = (n as Node<TaskNodeData>).data;
-            const meta = STATUS_META[data?.status as StatusKey];
+            const meta = STATUS_META[data?.task?.status as StatusKey];
             return meta?.dot ?? tokens.border;
           }}
           maskColor="rgba(11,13,18,0.7)"
@@ -167,6 +172,11 @@ export function PlanCanvas() {
         {/* Top-left: goal legend */}
         <Panel position="top-left">
           <GoalLegend />
+        </Panel>
+
+        {/* Top-center: phase timeline */}
+        <Panel position="top-center">
+          <PhaseTimeline />
         </Panel>
 
         {/* Bottom-right: vision */}

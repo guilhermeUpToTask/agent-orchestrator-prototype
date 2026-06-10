@@ -3,7 +3,7 @@ import { Send, ChevronRight, Bot, User, Loader2, Settings2, Wrench } from 'lucid
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { startDiscovery } from '../lib/api';
-import type { ChatMessage, ChatMode } from '../types/domain';
+import type { ChatMessage, ChatMode, TaskNodeData } from '../types/domain';
 
 function ToolCallBubble({ msg }: { msg: ChatMessage }) {
   return (
@@ -203,7 +203,8 @@ export function ChatPanel() {
 
   const planStatus = plan?.status ?? 'discovery';
   const mode = chatModeFor(planStatus);
-  const selectedNode = nodes.find((n) => n.id === ui.selectedNodeId);
+  const selectedNode = nodes.find((n) => n.id === ui.selectedNodeId && n.type === 'taskNode');
+  const selectedTask = selectedNode ? (selectedNode.data as unknown as TaskNodeData).task : null;
 
   const send = useCallback(async (text: string) => {
     if (!text.trim() || ui.isThinking || !mode.inputEnabled) return;
@@ -303,7 +304,7 @@ export function ChatPanel() {
         }}>
           <Settings2 size={9} color={tokens.accent} />
           <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.accent }}>
-            ctx: {selectedNode.id} · {selectedNode.data.task?.status}
+            ctx: {selectedNode.id} · {selectedTask?.status}
           </span>
         </div>
       )}

@@ -28,6 +28,8 @@ export interface TaskSummary {
   retry_count: number;
 }
 
+export type PRStatus = 'open' | 'closed' | 'merged';
+
 export interface GoalAggregate {
   goal_id: string;
   name: string;
@@ -37,6 +39,12 @@ export interface GoalAggregate {
   depends_on: string[];
   tasks: TaskSummary[];
   history: HistoryEntry[];
+  // GitHub PR gate (present once a PR has been opened for the goal branch)
+  pr_number?: number | null;
+  pr_html_url?: string | null;
+  pr_status?: PRStatus | null;
+  pr_checks_passed?: boolean | null;
+  pr_approved?: boolean | null;
 }
 
 export interface Phase {
@@ -96,6 +104,8 @@ export interface TaskNodeData {
   goalName: string;
   agent: AgentProps | null;
   selected?: boolean;
+  // React Flow v12 node data must satisfy Record<string, unknown>
+  [key: string]: unknown;
 }
 
 // ─── Chat ──────────────────────────────────────────────────────────────────────
