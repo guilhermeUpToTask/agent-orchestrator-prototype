@@ -31,6 +31,9 @@ router = APIRouter(prefix="/plan/discovery", tags=["plan"])
 _question_q: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 _answer_q: queue.Queue[str] = queue.Queue(maxsize=1)
 
+# Track active discovery session state
+_discovery_active: bool = False
+
 _FIRST_QUESTION_TIMEOUT = 30.0
 _SUBSEQUENT_TIMEOUT = 60.0
 
@@ -53,6 +56,16 @@ _SUBSEQUENT_TIMEOUT = 60.0
     },
 )
 async def start_discovery(orchestrator: PlanOrchestratorDep) -> DiscoveryStartResponse:
+    global _discovery_active
+    
+    if _discovery_active:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A discovery session is already in progress.",
+        )
+    
+    _discovery_active = True
     loop = asyncio.get_running_loop()
 
     def io_handler(question: str) -> str:
@@ -71,6 +84,7 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> DiscoveryStartRe
         return DiscoveryStartResponse(question=question, done=False)
     except asyncio.TimeoutError:
         result = await future
+        _discovery_active = False
         return DiscoveryStartResponse(
             done=True,
             brief=result.brief.model_dump() if result.brief else None,
@@ -97,6 +111,15 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> DiscoveryStartRe
 async def send_discovery_message(
     payload: DiscoveryMessageRequest,
 ) -> DiscoveryMessageResponse:
+    global _discovery_active
+    
+    if not _discovery_active:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No active discovery session. Call /plan/discovery/start first.",
+        )
+    
     _answer_q.put(payload.message)
     try:
         question = await asyncio.wait_for(
@@ -104,4 +127,5 @@ async def send_discovery_message(
         )
         return DiscoveryMessageResponse(question=question, done=False)
     except asyncio.TimeoutError:
+        _discovery_active = False
         return DiscoveryMessageResponse(question=None, done=True)
