@@ -34,6 +34,12 @@ class GoalResponse(BaseModel):
     depends_on: list[str]
     tasks: list[GoalTaskResponse]
     history: list[GoalHistoryEntryResponse]
+    # GitHub PR gate state (None until a PR is opened for the goal branch)
+    pr_number: Optional[int] = None
+    pr_status: Optional[str] = None  # "open" | "closed" | "merged"
+    pr_html_url: Optional[str] = None
+    pr_checks_passed: bool = False
+    pr_approved: bool = False
 
 
 # ── Finalize ──────────────────────────────────────────────────────────────────
