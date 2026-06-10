@@ -100,7 +100,7 @@ export interface TaskNodeData {
 
 // ─── Chat ──────────────────────────────────────────────────────────────────────
 
-export type ChatRole = 'user' | 'assistant' | 'system';
+export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export interface ChatMessage {
   id: string;
@@ -108,6 +108,20 @@ export interface ChatMessage {
   text: string;
   ts: string;
   nodeCtx?: string;
+  /** Planner tool name when role === 'tool' (e.g. propose_decision) */
+  toolName?: string;
+}
+
+/**
+ * What the chat panel is acting as, derived from ProjectPlanStatus.
+ * Mirrors the backend prompt builders (discovery / architecture /
+ * phase_review / tactical refinement).
+ */
+export interface ChatMode {
+  key: 'discovery' | 'tactical' | 'awaiting-architecture' | 'awaiting-phase-review' | 'done';
+  label: string;
+  inputEnabled: boolean;
+  hint: string;
 }
 
 // ─── UI state ──────────────────────────────────────────────────────────────────

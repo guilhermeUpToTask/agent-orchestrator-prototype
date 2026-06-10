@@ -1,13 +1,37 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, ChevronRight, Bot, User, Loader2, Settings2 } from 'lucide-react';
+import { Send, ChevronRight, Bot, User, Loader2, Settings2, Wrench } from 'lucide-react';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { startDiscovery } from '../lib/api';
-import type { ChatMessage } from '../types/domain';
+import type { ChatMessage, ChatMode } from '../types/domain';
+
+function ToolCallBubble({ msg }: { msg: ChatMessage }) {
+  return (
+    <div style={{
+      padding: '6px 10px', background: '#131022',
+      border: `1px solid ${tokens.purple}33`, borderLeft: `2px solid ${tokens.purple}`,
+      borderRadius: tokens.r6, animation: 'fadein 0.15s ease both',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+        <Wrench size={9} color={tokens.purple} />
+        <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.purple, letterSpacing: '0.06em' }}>
+          tool · {msg.toolName ?? 'planner'}
+        </span>
+        <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textDim }}>{msg.ts}</span>
+      </div>
+      <div style={{
+        fontSize: 11, color: tokens.textSecond, fontFamily: tokens.fontMono,
+        lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      }}>{msg.text}</div>
+    </div>
+  );
+}
 
 function Bubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
+
+  if (msg.role === 'tool') return <ToolCallBubble msg={msg} />;
 
   if (isSystem) {
     return (
@@ -75,20 +99,76 @@ function ThinkingBubble() {
   );
 }
 
-// Context-aware placeholder text
-function placeholderFor(planStatus: string, nodeId: string | null): string {
-  if (nodeId) return `Feedback on ${nodeId}… (Enter to send)`;
+// Derive the chat mode from the plan status — mirrors the backend prompt
+// builders (discovery / architecture / phase_review / tactical refinement).
+function chatModeFor(planStatus: string): ChatMode {
   switch (planStatus) {
-    case 'phase_active': return 'Reassign a task, add a step, fix acceptance criteria…';
+    case 'discovery':
+      return {
+        key: 'discovery',
+        label: 'DISCOVERY Q&A',
+        inputEnabled: true,
+        hint: 'The planner asks questions; your answers build the project brief. Approve the brief in the toolbar when it is ready.',
+      };
+    case 'architecture':
+      return {
+        key: 'awaiting-architecture',
+        label: 'AWAITING ARCHITECTURE APPROVAL',
+        inputEnabled: false,
+        hint: 'The planner drafted architecture decisions. Review the proposed decisions above and use “Approve Architecture” in the toolbar.',
+      };
+    case 'phase_active':
+      return {
+        key: 'tactical',
+        label: 'TACTICAL REFINEMENT',
+        inputEnabled: true,
+        hint: 'Chat is wired to the tactical planner — request task changes and it mutates the live plan.',
+      };
+    case 'phase_review':
+      return {
+        key: 'awaiting-phase-review',
+        label: 'AWAITING PHASE REVIEW',
+        inputEnabled: false,
+        hint: 'The phase review is in progress. Use “Approve Phase” in the toolbar to release the next phase or finish the project.',
+      };
+    case 'done':
+      return {
+        key: 'done',
+        label: 'PROJECT DONE',
+        inputEnabled: false,
+        hint: 'All phases are complete and merged. Chat is read-only.',
+      };
+    default:
+      return {
+        key: 'tactical',
+        label: planStatus.toUpperCase(),
+        inputEnabled: true,
+        hint: 'Ask about the plan.',
+      };
+  }
+}
+
+// Context-aware placeholder text
+function placeholderFor(mode: ChatMode, nodeId: string | null): string {
+  if (!mode.inputEnabled) {
+    switch (mode.key) {
+      case 'awaiting-architecture': return 'Waiting for architecture approval — use the toolbar';
+      case 'awaiting-phase-review': return 'Waiting for phase review approval — use the toolbar';
+      default: return 'Project complete';
+    }
+  }
+  if (nodeId) return `Feedback on ${nodeId}… (Enter to send)`;
+  switch (mode.key) {
+    case 'tactical': return 'Reassign a task, add a step, fix acceptance criteria…';
     case 'discovery': return 'Answer the planner\'s question…';
     default: return 'Ask about the plan…';
   }
 }
 
 // Context-aware quick actions
-function quickActionsFor(planStatus: string): string[] {
-  switch (planStatus) {
-    case 'phase_active':
+function quickActionsFor(mode: ChatMode): string[] {
+  switch (mode.key) {
+    case 'tactical':
       return [
         'What tasks are blocking progress?',
         'Reassign task-X to reviewer agent',
@@ -102,7 +182,7 @@ function quickActionsFor(planStatus: string): string[] {
         'MVP ships in 4 weeks',
       ];
     default:
-      return ['What is the current plan status?', 'Explain the architecture summary'];
+      return [];
   }
 }
 
@@ -122,13 +202,14 @@ export function ChatPanel() {
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, ui.isThinking]);
 
   const planStatus = plan?.status ?? 'discovery';
+  const mode = chatModeFor(planStatus);
   const selectedNode = nodes.find((n) => n.id === ui.selectedNodeId);
 
   const send = useCallback(async (text: string) => {
-    if (!text.trim() || ui.isThinking) return;
+    if (!text.trim() || ui.isThinking || !mode.inputEnabled) return;
     setInput('');
     await sendMessage(text);
-  }, [ui.isThinking, sendMessage]);
+  }, [ui.isThinking, sendMessage, mode.inputEnabled]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
@@ -165,7 +246,8 @@ export function ChatPanel() {
     );
   }
 
-  const quickActions = quickActionsFor(planStatus);
+  const quickActions = quickActionsFor(mode);
+  const inputLocked = ui.isThinking || !mode.inputEnabled;
 
   return (
     <div style={{
@@ -186,18 +268,30 @@ export function ChatPanel() {
         <span style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPrimary, letterSpacing: '0.08em' }}>
           CHAT · AIPOM
         </span>
-        {/* Plan status chip */}
+        {/* Chat mode chip */}
         <span style={{
           fontSize: 8, fontFamily: tokens.fontMono, padding: '2px 6px',
-          borderRadius: 3, background: '#1c2030', color: tokens.textMuted,
+          borderRadius: 3,
+          background: mode.key === 'tactical' ? tokens.accentGlow : mode.key === 'discovery' ? tokens.purpleDim : '#1c2030',
+          color: mode.key === 'tactical' ? tokens.accent : mode.key === 'discovery' ? tokens.purple : tokens.textMuted,
           marginLeft: 4,
         }}>
-          {planStatus === 'phase_active' ? '⚡ LIVE' : planStatus.toUpperCase()}
+          {mode.key === 'tactical' ? '⚡ ' : mode.key === 'discovery' ? '? ' : ''}{mode.label}
         </span>
         <div style={{ flex: 1 }} />
         <button onClick={toggleChatPanel} style={{ background: 'transparent', border: 'none', color: tokens.textMuted, cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
           <ChevronRight size={14} />
         </button>
+      </div>
+
+      {/* Mode hint banner */}
+      <div style={{
+        padding: '6px 14px', borderBottom: `1px solid ${tokens.border}`,
+        background: mode.inputEnabled ? 'transparent' : '#16121f',
+        fontSize: 9, fontFamily: tokens.fontMono, lineHeight: 1.5,
+        color: mode.inputEnabled ? tokens.textMuted : tokens.purple, flexShrink: 0,
+      }}>
+        {mode.hint}
       </div>
 
       {/* Context strip */}
@@ -236,7 +330,7 @@ export function ChatPanel() {
       </div>
 
       {/* Quick actions */}
-      {messages.length <= 3 && (
+      {quickActions.length > 0 && messages.length <= 3 && (
         <div style={{ padding: '0 14px 10px', display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
           <div style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted, marginBottom: 2, letterSpacing: '0.08em' }}>
             QUICK ACTIONS
@@ -260,9 +354,9 @@ export function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={placeholderFor(planStatus, ui.selectedNodeId)}
+          placeholder={placeholderFor(mode, ui.selectedNodeId)}
           rows={2}
-          disabled={ui.isThinking}
+          disabled={inputLocked}
           style={{
             flex: 1, background: tokens.inputBg,
             border: `1px solid ${tokens.border}`, borderRadius: tokens.r8,
@@ -274,15 +368,15 @@ export function ChatPanel() {
         />
         <button
           onClick={() => send(input)}
-          disabled={ui.isThinking || !input.trim()}
+          disabled={inputLocked || !input.trim()}
           style={{
             width: 36, height: 36, borderRadius: tokens.r8,
-            background: ui.isThinking || !input.trim() ? '#1a1d2a' : tokens.accent,
-            border: 'none', cursor: ui.isThinking || !input.trim() ? 'default' : 'pointer',
+            background: inputLocked || !input.trim() ? '#1a1d2a' : tokens.accent,
+            border: 'none', cursor: inputLocked || !input.trim() ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
         >
-          <Send size={14} color={ui.isThinking || !input.trim() ? tokens.textMuted : '#fff'} />
+          <Send size={14} color={inputLocked || !input.trim() ? tokens.textMuted : '#fff'} />
         </button>
       </div>
     </div>
