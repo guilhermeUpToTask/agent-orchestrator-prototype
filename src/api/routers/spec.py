@@ -42,11 +42,11 @@ router = APIRouter(prefix="/spec", tags=["spec"])
 )
 def get_spec(spec: CurrentSpecDep) -> SpecResponse:
     return SpecResponse(
-        project_name=spec.meta.project_name,
+        project_name=spec.name,  # spec.meta.name is the correct attribute
         version=spec.meta.version,
         objective_description=spec.objective.description,
         objective_domain=spec.objective.domain,
-        forbidden_patterns=spec.constraints.forbidden_patterns,
+        forbidden_patterns=list(spec.constraints.forbidden),
     )
 
 
@@ -125,7 +125,8 @@ def validate_against_spec(
     payload: ValidateSpecRequest,
     use_case: ValidateAgainstSpecUseCaseDep,
 ) -> ValidateSpecResponse:
-    result = use_case.execute(payload.artifact)
+    # ValidateAgainstSpec.execute() expects keyword arguments
+    result = use_case.execute(task_description=payload.artifact)
     return ValidateSpecResponse(
         passed=result.passed,
         violations=result.violations,
