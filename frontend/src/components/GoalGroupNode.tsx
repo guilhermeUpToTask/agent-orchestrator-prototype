@@ -14,13 +14,23 @@ export function GoalGroupNode({ data }: NodeProps) {
   const { goal, color, phaseIndex, inActivePhase } = data as GoalGroupData;
   const statusMeta = GOAL_STATUS_META[goal.status] ?? { label: goal.status.toUpperCase(), color: tokens.textMuted };
 
+  // PR review gates take visual priority: goals blocked on a human PR
+  // decision are highlighted purple; merged goals settle to green.
+  const gateColor =
+    goal.status === 'awaiting_pr_approval' ? tokens.purple
+    : goal.status === 'approved' ? tokens.accent
+    : goal.status === 'merged' || goal.status === 'completed' ? tokens.green
+    : null;
+  const borderColor = gateColor ?? (inActivePhase ? color : color + '55');
+  const solid = gateColor !== null || inActivePhase;
+
   return (
     <div style={{
       width: '100%', height: '100%',
       background: `${color}08`,
-      border: `1.5px ${inActivePhase ? 'solid' : 'dashed'} ${inActivePhase ? color : color + '55'}`,
+      border: `1.5px ${solid ? 'solid' : 'dashed'} ${borderColor}`,
       borderRadius: tokens.r12,
-      boxShadow: inActivePhase ? `0 0 18px ${color}22` : 'none',
+      boxShadow: gateColor ? `0 0 18px ${gateColor}33` : inActivePhase ? `0 0 18px ${color}22` : 'none',
     }}>
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />

@@ -57,6 +57,11 @@ def _goal_to_response(goal) -> GoalResponse:
         depends_on=goal.depends_on,
         tasks=tasks,
         history=history,
+        pr_number=goal.pr_number,
+        pr_status=goal.pr_status,
+        pr_html_url=goal.pr_html_url,
+        pr_checks_passed=goal.pr_checks_passed,
+        pr_approved=goal.pr_approved,
     )
 
 

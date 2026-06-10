@@ -261,6 +261,20 @@ export const usePlannerStore = create<PlannerState>()(
               });
               break;
 
+            case 'goal.pr_opened':
+              get().addMessage({
+                role: 'system',
+                text: `PR #${event.payload.pr_number ?? '?'} opened for ${event.payload.goal_id} — awaiting human review`,
+                ts: now,
+              });
+              get().refreshGoals();
+              break;
+
+            case 'goal.pr_state_synced':
+            case 'goal.finalized':
+              get().refreshGoals();
+              break;
+
             case 'plan.decision_proposed':
               get().addMessage({
                 role: 'tool',
