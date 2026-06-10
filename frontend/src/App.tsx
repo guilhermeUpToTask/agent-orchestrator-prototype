@@ -14,10 +14,22 @@ import './styles/global.css';
  */
 function useChatHydration() {
   const addMessage = usePlannerStore((s) => s.addMessage);
-  const { data: plan } = usePlan();
+  const { data: plan, error } = usePlan();
   const { data: goals } = useGoals();
   const { data: history } = usePlanHistory();
   const hydrated = useRef(false);
+  const errorShown = useRef(false);
+
+  useEffect(() => {
+    if (error && !errorShown.current) {
+      errorShown.current = true;
+      addMessage({
+        role: 'system',
+        text: `Failed to connect to backend: ${error.message}. Is the API server running at ${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}?`,
+        ts: ts(),
+      });
+    }
+  }, [error, addMessage]);
 
   useEffect(() => {
     if (hydrated.current || !plan || !goals || !history) return;
