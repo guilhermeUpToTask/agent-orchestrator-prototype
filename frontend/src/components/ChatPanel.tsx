@@ -3,7 +3,7 @@ import { Send, ChevronRight, Bot, User, Loader2, Settings2, Wrench } from 'lucid
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { startDiscovery } from '../lib/api';
-import type { ChatMessage, ChatMode, TaskNodeData } from '../types/domain';
+import type { ChatMessage, ChatMode, TaskNodeData } from '../types/ui';
 
 function ToolCallBubble({ msg }: { msg: ChatMessage }) {
   return (

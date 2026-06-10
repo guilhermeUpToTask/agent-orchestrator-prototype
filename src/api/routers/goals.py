@@ -21,6 +21,7 @@ from src.api.dependencies import (
     GoalFinalizeUseCaseDep,
     GoalRepoDep,
     SyncGoalPRUseCaseDep,
+    TaskRepoDep,
     UnblockGoalsUseCaseDep,
 )
 from src.api.schemas.common import ErrorResponse
@@ -37,16 +38,21 @@ router = APIRouter(prefix="/goals", tags=["goals"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _goal_to_response(goal) -> GoalResponse:
-    tasks = [
-        GoalTaskResponse(
+def _goal_to_response(goal, task_lookup: dict | None = None) -> GoalResponse:
+    task_lookup = task_lookup or {}
+
+    def _task_response(t) -> GoalTaskResponse:
+        full = task_lookup.get(t.task_id)
+        return GoalTaskResponse(
             task_id=t.task_id,
             title=t.title,
             status=t.status.value,
             depends_on=t.depends_on,
+            assigned_agent_id=full.assignment.agent_id if full and full.assignment else None,
+            retry_count=full.retry_policy.attempt if full else 0,
         )
-        for t in goal.tasks.values()
-    ]
+
+    tasks = [_task_response(t) for t in goal.tasks.values()]
     history = [GoalHistoryEntryResponse(**h.model_dump()) for h in goal.history]
     return GoalResponse(
         goal_id=goal.goal_id,
@@ -73,8 +79,9 @@ def _goal_to_response(goal) -> GoalResponse:
     summary="List All Goals",
     description="Returns all goal aggregates with their tasks and current status.",
 )
-def list_goals(repo: GoalRepoDep) -> list[GoalResponse]:
-    return [_goal_to_response(g) for g in repo.list_all()]
+def list_goals(repo: GoalRepoDep, task_repo: TaskRepoDep) -> list[GoalResponse]:
+    task_lookup = {t.task_id: t for t in task_repo.list_all()}
+    return [_goal_to_response(g, task_lookup) for g in repo.list_all()]
 
 
 @router.get(

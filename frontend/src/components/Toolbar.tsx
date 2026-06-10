@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { tokens, PHASE_STATUS_META } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { TaskNodeData } from '../types/domain';
+import type { TaskNodeData } from '../types/ui';
 
 function StatPill({ value, label, color }: { value: number; label: string; color: string }) {
   return (
