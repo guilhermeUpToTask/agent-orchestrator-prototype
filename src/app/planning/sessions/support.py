@@ -92,9 +92,8 @@ class PlanningSessionSupport:
     def build_discovery_tools(
         self, session: PlannerSession, io_handler: Optional[Callable[[str], str]]
     ) -> list[PlannerTool]:
-        _ = io_handler
         return [
-            build_ask_question_tool(),
+            build_ask_question_tool(io_handler=io_handler),
             build_submit_project_brief_tool(session=session, session_save=self._session_repo.save),
         ]
 
