@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { tokens, PHASE_STATUS_META } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
+import type { TaskNodeData } from '../types/domain';
 
 function StatPill({ value, label, color }: { value: number; label: string; color: string }) {
   return (
@@ -66,11 +67,14 @@ export function Toolbar() {
   const phaseMeta = PHASE_STATUS_META[planStatus] ?? PHASE_STATUS_META.discovery;
   const currentPhase = plan?.phases[plan.current_phase_index ?? 0];
 
+  const taskStatuses = nodes
+    .filter((n) => n.type === 'taskNode')
+    .map((n) => (n.data as unknown as TaskNodeData).task.status);
   const stats = {
-    done: nodes.filter((n) => ['succeeded', 'merged'].includes(n.data?.task?.status ?? '')).length,
-    running: nodes.filter((n) => ['in_progress', 'assigned'].includes(n.data?.task?.status ?? '')).length,
-    pending: nodes.filter((n) => n.data?.task?.status === 'created').length,
-    failed: nodes.filter((n) => ['failed', 'canceled'].includes(n.data?.task?.status ?? '')).length,
+    done: taskStatuses.filter((s) => ['succeeded', 'merged'].includes(s)).length,
+    running: taskStatuses.filter((s) => ['in_progress', 'assigned'].includes(s)).length,
+    pending: taskStatuses.filter((s) => s === 'created').length,
+    failed: taskStatuses.filter((s) => ['failed', 'canceled'].includes(s)).length,
   };
 
   return (

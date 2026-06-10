@@ -59,8 +59,8 @@ interface PlannerState {
   loaded: boolean;
   loadError: string | null;
 
-  // React Flow
-  nodes: Node<TaskNodeData>[];
+  // React Flow — mixed: 'goalGroup' group nodes + 'taskNode' children
+  nodes: Node[];
   edges: Edge[];
 
   // Chat
@@ -139,7 +139,7 @@ export const usePlannerStore = create<PlannerState>()(
         ]);
 
         const coloredAgents = agents.map(colorAgent);
-        const { nodes, edges } = buildFlowFromGoals(goals, coloredAgents, get().ui.layoutDirection);
+        const { nodes, edges } = buildFlowFromGoals(goals, coloredAgents, get().ui.layoutDirection, plan);
 
         // Hydrate chat from backend history
         const historyMessages: ChatMessage[] = planHistory
@@ -193,7 +193,7 @@ export const usePlannerStore = create<PlannerState>()(
       try {
         const goals = await fetchGoals();
         const agents = get().agentRegistry;
-        const { nodes, edges } = buildFlowFromGoals(goals, agents, get().ui.layoutDirection);
+        const { nodes, edges } = buildFlowFromGoals(goals, agents, get().ui.layoutDirection, get().plan);
         set((s) => {
           s.goals = goals;
           s.nodes = nodes;
@@ -224,7 +224,7 @@ export const usePlannerStore = create<PlannerState>()(
               const { task_id, status } = event.payload as { task_id: string; status: TaskStatus };
               set((s) => {
                 const node = s.nodes.find((n) => n.id === task_id);
-                if (node) node.data.task.status = status;
+                if (node?.type === 'taskNode') (node.data as TaskNodeData).task.status = status;
                 // Also update goal task summaries
                 for (const g of s.goals) {
                   const t = g.tasks.find((t) => t.task_id === task_id);
@@ -300,7 +300,7 @@ export const usePlannerStore = create<PlannerState>()(
 
     // ── React Flow handlers ───────────────────────────────────────────────────
     onNodesChange: (changes) => {
-      set((s) => { s.nodes = applyNodeChanges(changes, s.nodes) as Node<TaskNodeData>[]; });
+      set((s) => { s.nodes = applyNodeChanges(changes, s.nodes); });
     },
     onEdgesChange: (changes) => {
       set((s) => { s.edges = applyEdgeChanges(changes, s.edges); });
@@ -324,7 +324,9 @@ export const usePlannerStore = create<PlannerState>()(
         } else {
           s.ui.selectedGoalId = null;
         }
-        s.nodes = s.nodes.map((n) => ({ ...n, data: { ...n.data, selected: n.id === id } }));
+        s.nodes = s.nodes.map((n) =>
+          n.type === 'taskNode' ? { ...n, data: { ...n.data, selected: n.id === id } } : n,
+        );
       });
     },
 
@@ -457,8 +459,8 @@ export const usePlannerStore = create<PlannerState>()(
 
     // ── Layout ─────────────────────────────────────────────────────────────────
     autoLayout: () => {
-      const { goals, agentRegistry, ui } = get();
-      const { nodes, edges } = buildFlowFromGoals(goals, agentRegistry, ui.layoutDirection);
+      const { goals, agentRegistry, ui, plan } = get();
+      const { nodes, edges } = buildFlowFromGoals(goals, agentRegistry, ui.layoutDirection, plan);
       set((s) => { s.nodes = nodes; s.edges = edges; });
     },
 

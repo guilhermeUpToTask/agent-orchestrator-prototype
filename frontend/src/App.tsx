@@ -4,7 +4,6 @@ import { Toolbar } from './components/Toolbar';
 import { PlanCanvas } from './components/PlanCanvas';
 import { ChatPanel } from './components/ChatPanel';
 import { DetailPanel } from './components/DetailPanel';
-import { AddNodeModal } from './components/AddNodeModal';
 import { usePlannerStore } from './store/plannerStore';
 import './styles/global.css';
 
@@ -40,9 +39,6 @@ export default function App() {
           {/* Chat panel — fixed right column */}
           <ChatPanel />
         </div>
-
-        {/* Modal layer */}
-        <AddNodeModal />
       </div>
     </ReactFlowProvider>
   );
