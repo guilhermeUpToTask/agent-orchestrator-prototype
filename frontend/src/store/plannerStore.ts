@@ -260,6 +260,24 @@ export const usePlannerStore = create<PlannerState>()(
                 ts: now,
               });
               break;
+
+            case 'plan.decision_proposed':
+              get().addMessage({
+                role: 'tool',
+                toolName: 'propose_decision',
+                text: `Decision proposed [${event.payload.domain}] — id: ${event.payload.id}. Review it when approving the architecture.`,
+                ts: now,
+              });
+              break;
+
+            case 'plan.phase_proposed':
+              get().addMessage({
+                role: 'tool',
+                toolName: 'propose_phases',
+                text: `Phase proposed: "${event.payload.name}" with goals: ${event.payload.goal_names.join(', ') || '(none)'}`,
+                ts: now,
+              });
+              break;
           }
         },
         () => {
