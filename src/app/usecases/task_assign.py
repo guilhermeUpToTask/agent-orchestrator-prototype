@@ -163,6 +163,7 @@ class TaskAssignUseCase:
             agent_id=agent.agent_id,
             lease_seconds=assignment.lease_seconds,
         )
+        assert task.assignment is not None  # set by the write above
         task.assignment.lease_token = lease_token
 
         # Write 2 — persist lease token before waking the worker

@@ -28,6 +28,8 @@ Deprecated direct-merge path:
 """
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.domain import DomainEvent, EventPort, GoalStatus
@@ -62,7 +64,7 @@ class GoalFinalizeUseCase:
         self._goal_repo = goal_repo
         self._events    = event_port
 
-    def execute(self, goal_id: str) -> dict:
+    def execute(self, goal_id: str) -> dict[str, Any]:
         """
         Finalize the goal. Returns a summary dict.
         Raises ValueError if goal is not APPROVED or MERGED.

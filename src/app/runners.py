@@ -19,7 +19,7 @@ in-memory adapter's finite generators are re-entered by an outer poll loop
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Any, Callable
 
 import structlog
 
@@ -42,7 +42,7 @@ _POLL_INTERVAL = 0.5  # outer-loop sleep when a finite generator drains
 
 
 def run_task_manager_loop(
-    handler,
+    handler: Any,
     events: EventPort,
     stop: Callable[[], bool],
     consumer: str = "tm-1",
@@ -86,7 +86,7 @@ def run_task_manager_loop(
     log.info("task_manager.stopped")
 
 
-def run_goal_orchestrator_loop(orchestrator) -> None:
+def run_goal_orchestrator_loop(orchestrator: Any) -> None:
     """Run the TaskGraphOrchestrator without touching signal handlers.
 
     Safe on any thread; stop it via orchestrator.shutdown().
@@ -94,6 +94,6 @@ def run_goal_orchestrator_loop(orchestrator) -> None:
     orchestrator.run_forever(install_signal_handlers=False)
 
 
-def run_reconciler_loop(reconciler) -> None:
+def run_reconciler_loop(reconciler: Any) -> None:
     """Run the Reconciler; stop it via reconciler.shutdown()."""
     reconciler.run_forever()

@@ -16,6 +16,13 @@ from src.domain import AgentRuntimePort, SessionHandle
 log = structlog.get_logger(__name__)
 
 
+def _as_text(data: "bytes | str | None") -> str:
+    """TimeoutExpired captures bytes or str depending on text mode."""
+    if data is None:
+        return ""
+    return data.decode(errors="replace") if isinstance(data, bytes) else data
+
+
 class CliSessionHandle(SessionHandle):
     def __init__(self, session_id: str, workspace_path: str) -> None:
         self._session_id = session_id
@@ -115,8 +122,8 @@ class CliAgentRuntime(AgentRuntimePort, ABC):
             return AgentExecutionResult(
                 success=False,
                 exit_code=-1,
-                stdout=exc.stdout or "",
-                stderr=f"TIMEOUT after {timeout_seconds}s\n{exc.stderr or ''}",
+                stdout=_as_text(exc.stdout),
+                stderr=f"TIMEOUT after {timeout_seconds}s\n{_as_text(exc.stderr)}",
                 elapsed_seconds=elapsed,
             )
 

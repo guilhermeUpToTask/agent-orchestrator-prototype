@@ -84,7 +84,7 @@ class AgentProps(BaseModel):
             and self.satisfies_version(selector.min_version)
         )
 
-    def scheduling_score(self) -> tuple:
+    def scheduling_score(self) -> tuple[float, ...]:
         """
         Comparable score for ranking eligible agents.
         Higher is better.  Precedence: trust > max_concurrent > tool count.

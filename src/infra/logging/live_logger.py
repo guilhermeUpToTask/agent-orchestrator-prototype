@@ -184,6 +184,11 @@ class LiveLogger:
             # Stream to terminal in real-time
             self._render_to_terminal(event)
 
+    def replay(self, events) -> None:
+        """Render previously recorded events to the terminal (e.g. plan logs)."""
+        for event in events:
+            self._render_to_terminal(event)
+
     def _render_to_terminal(self, event: LogEvent) -> None:
         """Render a log event to the terminal in readable format."""
         # Format timestamp (human-readable)

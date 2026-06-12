@@ -4,7 +4,7 @@ src/app/usecases/planner_orchestrator.py — Thin facade for planning operations
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from src.app.planning.contracts.results import (
     ApprovalResult,
@@ -60,8 +60,8 @@ class PlannerOrchestrator:
 
         self._plan_repo = plan_repo
         self._session_repo = session_repo
-        self._turn_callback: Optional[Callable[[str, list], None]] = None
-        self._planner_event_hook: Optional[Callable[[str, dict], None]] = None
+        self._turn_callback: Optional[Callable[[str, list[Any]], None]] = None
+        self._planner_event_hook: Optional[Callable[[str, dict[str, Any]], None]] = None
         self._support = PlanningSessionSupport(
             context_assembler=context_assembler,
             session_repo=session_repo,
@@ -140,10 +140,10 @@ class PlannerOrchestrator:
     def get_status(self) -> ProjectPlan:
         return self._plan_repo.load()
 
-    def set_turn_callback(self, callback: Optional[Callable[[str, list], None]]) -> None:
+    def set_turn_callback(self, callback: Optional[Callable[[str, list[Any]], None]]) -> None:
         self._turn_callback = callback
         self._support.set_turn_callback(callback)
 
-    def set_planner_event_hook(self, hook: Optional[Callable[[str, dict], None]]) -> None:
+    def set_planner_event_hook(self, hook: Optional[Callable[[str, dict[str, Any]], None]]) -> None:
         self._planner_event_hook = hook
         self._support.set_planner_event_hook(hook)

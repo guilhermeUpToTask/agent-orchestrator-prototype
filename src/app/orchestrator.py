@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import signal
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import structlog
 
@@ -101,7 +101,7 @@ class TaskGraphOrchestrator:
         cancel_usecase: GoalCancelTaskUseCase,
         spec_repo: Optional[ProjectSpecRepository] = None,
         project_name: str = "",
-        create_pr_usecase=None,  # CreateGoalPRUseCase | None
+        create_pr_usecase: Any = None,  # CreateGoalPRUseCase | None
         telemetry_emitter: TelemetryEmitterPort | None = None,
         plan_goal_tasks: Optional[PlanGoalTasksUseCase] = None,
     ) -> None:
@@ -407,7 +407,7 @@ class TaskGraphOrchestrator:
     # ------------------------------------------------------------------
 
     def _install_signal_handlers(self) -> None:
-        def _handler(sig, _frame):
+        def _handler(sig: int, _frame: object) -> None:
             log.info("orchestrator.signal_received", signal=sig)
             self.shutdown()
 

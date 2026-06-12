@@ -368,9 +368,7 @@ def _install_sigterm_handler() -> None:
     signal.signal(signal.SIGTERM, _handle)
 
 
-def _shutdown_processes(
-    procs: list[tuple[str, subprocess.Popen]], timeout: float = 5.0
-) -> None:
+def _shutdown_processes(procs: list[list], timeout: float = 5.0) -> None:
     """Terminate all children, escalating to SIGKILL after *timeout* seconds."""
     for _name, p in procs:
         if p.poll() is None:

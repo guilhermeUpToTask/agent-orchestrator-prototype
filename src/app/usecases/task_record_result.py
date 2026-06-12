@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import structlog
 
-from src.domain import DomainEvent, EventPort, TaskResult, TaskStatus
+from src.domain import DomainEvent, EventPort, TaskAggregate, TaskResult, TaskStatus
 from src.domain import TaskRepositoryPort
 
 log = structlog.get_logger(__name__)
@@ -158,7 +158,7 @@ class TaskRecordResultUseCase:
     # Internal
     # ------------------------------------------------------------------
 
-    def _load(self, task_id: str):
+    def _load(self, task_id: str) -> TaskAggregate | None:
         try:
             return self._repo.load(task_id)
         except KeyError:

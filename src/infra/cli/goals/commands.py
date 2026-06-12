@@ -6,6 +6,11 @@ import click
 from src.infra.cli.error_handler import catch_domain_errors, die, info, ok, warn
 
 
+def _warn_if_not_real(app, detail: str) -> None:
+    if app.ctx.mode != "real":
+        warn(f"AGENT_MODE is not 'real' (current: '{app.ctx.mode}').\n   {detail}")
+
+
 @click.group("goals")
 def goals_group():
     """Manage goals."""
@@ -20,12 +25,10 @@ def goal_init(goal_file: str):
     from src.infra.container import AppContainer
 
     app = AppContainer.from_env()
-    if app.ctx.mode != "real":
-        warn(
-            f"AGENT_MODE is not 'real' (current: '{app.ctx.mode}').\n"
-            "   Events will NOT reach Redis. "
-            "Run with: AGENT_MODE=real orchestrate goals init <file>"
-        )
+    _warn_if_not_real(
+        app,
+        "Events will NOT reach Redis. Run with: AGENT_MODE=real orchestrate goals init <file>",
+    )
 
     spec = load_goal_file(goal_file)
     goal = app.goal_init_usecase.execute(spec)
@@ -46,11 +49,7 @@ def goal_run():
     from src.infra.container import AppContainer
 
     app = AppContainer.from_env()
-    if app.ctx.mode != "real":
-        warn(
-            f"AGENT_MODE is not 'real' (current: '{app.ctx.mode}').\n"
-            "   The orchestrator needs Redis to receive events."
-        )
+    _warn_if_not_real(app, "The orchestrator needs Redis to receive events.")
 
     info("TaskGraphOrchestrator starting. Press Ctrl+C to stop.")
     app.task_graph_orchestrator.run_forever()

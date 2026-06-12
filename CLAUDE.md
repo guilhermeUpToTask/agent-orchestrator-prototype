@@ -128,5 +128,5 @@ Do not use standard `print()` or Python's default `logging` module.
    - A `mock_container` fixture is available in `conftest.py` which patches `AppContainer.from_env` globally, protecting tests from accidental local environment reads.
 
 ## 🧹 Code Style & Types
-- **Python**: Strictly typed (`mypy --strict`). Use `from __future__ import annotations`. Use `pydantic` `BaseModel` for DTOs and Value Objects. Use `@dataclass(frozen=True)` for immutable domain structures when Pydantic isn't strictly necessary.
+- **Python**: `mypy src` must pass with zero errors. `src/domain` and `src/app` are fully strict; the adapter layers (`src/infra`, `src/api`) carry explicit, documented relaxations in `pyproject.toml` — tighten them over time, never loosen. Use `from __future__ import annotations`. Use `pydantic` `BaseModel` for DTOs and Value Objects. Use `@dataclass(frozen=True)` for immutable domain structures when Pydantic isn't strictly necessary.
 - **TypeScript**: Strictly typed. Avoid `any`. Interfaces mapped to Backend DTOs must remain synchronized.

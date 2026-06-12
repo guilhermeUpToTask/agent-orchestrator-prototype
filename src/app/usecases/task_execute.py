@@ -248,7 +248,7 @@ class TaskExecuteUseCase:
         branch: str,
         commit_sha: str,
         modified_files: list[str],
-        artifacts: dict,
+        artifacts: dict[str, Any],
     ) -> None:
         self._events.publish(DomainEvent(
             type="task.execution_succeeded",

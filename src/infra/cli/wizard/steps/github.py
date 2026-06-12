@@ -220,7 +220,7 @@ def _validate_github_access(
     """
     try:
         from src.infra.github.client import GitHubClient
-        client = GitHubClient(token=token, owner=owner, repo=repo, timeout=10)
+        client = GitHubClient(token=token, owner=owner, repo=repo, timeout_s=10)
         # The cheapest way to validate access: list open PRs (max 1 result)
         client.find_open_pr("__nonexistent__", "main")
         return True, ""
@@ -246,9 +246,10 @@ def _persist_github_settings(
     manager = ProjectConfigStore(project_home)
     existing = manager.load()
 
+    # ProjectSettings is the non-secret store — tokens are never persisted
+    # (the old github_token kwarg crashed with TypeError here).
     updated = ProjectSettings(
         source_repo_url=existing.source_repo_url,
-        github_token=os.environ.get("GITHUB_TOKEN", ""),
         github_owner=settings["github_owner"],
         github_repo=settings["github_repo"],
         github_base_branch=settings["github_base_branch"],

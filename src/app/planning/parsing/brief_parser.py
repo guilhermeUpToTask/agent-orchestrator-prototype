@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from dataclasses import dataclass
 
 from src.domain.aggregates.project_plan import ProjectBrief
@@ -11,7 +13,7 @@ class BriefParseError(ValueError):
 
 @dataclass(frozen=True)
 class BriefParser:
-    def parse(self, artifact: dict) -> ProjectBrief:
+    def parse(self, artifact: dict[str, Any]) -> ProjectBrief:
         brief_data = artifact.get("brief", artifact)
         if not isinstance(brief_data, dict):
             raise BriefParseError("brief payload must be a JSON object")

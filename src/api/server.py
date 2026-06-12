@@ -268,6 +268,7 @@ def create_app(container=None) -> FastAPI:
         set_container(container)
         _wire_planner_sse_hook(container)
     else:
+        assert provider is not None  # by construction above
         set_container_provider(provider)
 
     # ── Routers ───────────────────────────────────────────────────────────────

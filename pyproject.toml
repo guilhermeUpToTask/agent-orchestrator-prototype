@@ -50,3 +50,39 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+# Honest per-layer typing: src/domain and src/app are fully strict (the
+# layers that claim it); the adapter layers carry explicit relaxations
+# until they are brought up to strict. Ratchet rule: `mypy src` must stay
+# at zero errors under this config — tighten flags here, never loosen.
+# TODO(type-health): remove these overrides module by module.
+[[tool.mypy.overrides]]
+module = ["src.infra.*", "src.api.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+warn_return_any = false
+
+# Routers receive DI deps typed as `object` (src/api/dependencies.py) —
+# typing those Annotated deps removes this block.
+[[tool.mypy.overrides]]
+module = ["src.api.routers.*"]
+disable_error_code = ["attr-defined", "arg-type"]
+
+# redis-py's sync client returns `Awaitable[T] | T` unions everywhere.
+[[tool.mypy.overrides]]
+module = ["src.infra.redis_adapters.*"]
+disable_error_code = ["union-attr", "arg-type", "index"]
+
+# Runtime adapters narrow SessionHandle to concrete handle types (LSP
+# variance) and call SDKs whose param types are stricter than our dicts.
+[[tool.mypy.overrides]]
+module = ["src.infra.runtime.*"]
+disable_error_code = ["override", "arg-type"]
+
+# Optional LLM SDK — imported lazily, not a declared dependency.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true

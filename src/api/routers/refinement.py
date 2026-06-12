@@ -89,7 +89,7 @@ async def refine_plan(
         target=run, daemon=True, name=f"refine-{session.session_id}"
     ).start()
 
-    return SessionAccepted(session_id=session.session_id, status=session.status)  # type: ignore[arg-type]
+    return SessionAccepted(session_id=session.session_id, status=session.status)
 
 
 @router.get(
@@ -111,8 +111,8 @@ async def get_session(session_id: str) -> SessionStatusResponse:
         )
     return SessionStatusResponse(
         session_id=session.session_id,
-        kind=session.kind,  # type: ignore[arg-type]
-        status=session.status,  # type: ignore[arg-type]
+        kind=session.kind,
+        status=session.status,
         question=session.current_question,
         result=session.result,
         error=session.error,
