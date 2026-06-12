@@ -30,7 +30,7 @@ def project_status():
     click.echo(f"  Config file    : {store.config_path}")
     click.echo(f"  Redis URL      : {app.ctx.machine.redis_url}")
 
-    project_home = app.ctx.machine.orchestrator_home / "projects" / project
+    project_home = app.ctx.machine.orchestrator_home / "projects" / (project or "")
     if project_home.exists():
         has_spec = (project_home / "project_spec.yaml").exists()
         status = "✓" if has_spec else "⚠  (no project_spec.yaml)"

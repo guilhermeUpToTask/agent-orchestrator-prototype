@@ -30,6 +30,7 @@ from src.infra.project_paths import ProjectPaths
 
 if TYPE_CHECKING:
     from src.domain import PlannerRuntimePort
+    from src.domain.ports.project_state import ProjectStatePort
     from src.infra.logging.planner_logger import PlannerLiveLogger
 
 log = structlog.get_logger(__name__)
@@ -54,9 +55,15 @@ class AppContainer:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_env(cls, project_name: str | None = None) -> "AppContainer":
-        """Load settings from environment + disk and return a container."""
-        ctx = SettingsService().load(project_name=project_name)
+    def from_env(
+        cls, project_name: str | None = None, mode: str | None = None
+    ) -> "AppContainer":
+        """Load settings from environment + disk and return a container.
+
+        *mode* lets CLI flags (--dry-run) override the resolved mode
+        explicitly instead of mutating os.environ at a distance.
+        """
+        ctx = SettingsService().load(project_name=project_name, mode=mode)
         return cls(ctx)
 
     # ------------------------------------------------------------------
@@ -276,8 +283,10 @@ class AppContainer:
 
         strategy = get_planner_strategy(self._ctx)
         runtime = strategy.build_interactive(self._ctx)
-        # Inject the caller-controlled io_handler into the runtime
-        runtime._runtime._io_handler = io_handler
+        # Inject the caller-controlled io_handler into the runtime.
+        # Reaching into the adapter's internals is a known DI wart
+        # (review §3.8) — tolerated until the runtime exposes a setter.
+        runtime._runtime._io_handler = io_handler  # type: ignore[attr-defined]
         return runtime
 
     # ------------------------------------------------------------------
@@ -326,7 +335,7 @@ class AppContainer:
         if self._ctx.machine.mode == "dry-run":
             from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
 
-            base = InMemoryProjectStateAdapter()
+            base: ProjectStatePort = InMemoryProjectStateAdapter()
         else:
             from src.infra.fs.project_state_adapter import FilesystemProjectStateAdapter
 

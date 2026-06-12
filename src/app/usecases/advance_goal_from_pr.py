@@ -24,7 +24,7 @@ matching the spec requirement:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -53,7 +53,7 @@ class AdvanceGoalFromPRUseCase:
         self,
         goal_repo: GoalRepositoryPort,
         event_port: EventPort,
-        unblock_goals_usecase=None,   # UnblockGoalsUseCase | None
+        unblock_goals_usecase: Any = None,  # UnblockGoalsUseCase | None
         plan_repo: Optional[ProjectPlanRepositoryPort] = None,  # NEW — optional for backward compat
     ) -> None:
         self._goal_repo = goal_repo

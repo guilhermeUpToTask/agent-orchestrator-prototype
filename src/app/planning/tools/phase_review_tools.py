@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Any, Callable
 
 from src.domain.aggregates.planner_session import PlannerSession
 from src.domain.aggregates.project_plan import ProjectPlan
@@ -10,14 +10,16 @@ from src.domain.repositories.goal_repository import GoalRepositoryPort
 
 
 def build_read_phase_summary_tool(plan: ProjectPlan, goal_repo: GoalRepositoryPort) -> PlannerTool:
-    def read_phase_summary_handler(_: dict) -> str:
+    def read_phase_summary_handler(_: dict[str, Any]) -> str:
         current_phase = plan.current_phase()
         if not current_phase:
             return json.dumps({"error": "No active phase"})
 
+        # GoalRepositoryPort has no name lookup — index list_all() by name.
+        goals_by_name = {g.name: g for g in goal_repo.list_all()}
         goals = []
         for goal_name in current_phase.goal_names:
-            goal = goal_repo.get_by_name(goal_name)
+            goal = goals_by_name.get(goal_name)
             if goal:
                 goals.append(
                     {
@@ -49,7 +51,7 @@ def build_propose_next_phase_tool(
     session_save: Callable[[PlannerSession], None],
     default_index: int,
 ) -> PlannerTool:
-    def propose_next_phase_handler(inp: dict) -> str:
+    def propose_next_phase_handler(inp: dict[str, Any]) -> str:
         phase_data = {
             "index": inp.get("index", default_index),
             "name": inp.get("name", ""),
@@ -80,7 +82,7 @@ def build_submit_review_tool(
     session: PlannerSession,
     session_save: Callable[[PlannerSession], None],
 ) -> PlannerTool:
-    def submit_review_handler(inp: dict) -> str:
+    def submit_review_handler(inp: dict[str, Any]) -> str:
         lessons = inp.get("lessons", "")
         architecture_summary = inp.get("architecture_summary", "")
         session.record_roadmap_candidate(

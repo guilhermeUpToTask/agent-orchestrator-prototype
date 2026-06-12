@@ -19,7 +19,7 @@ class PlannerTool:
     name: str
     description: str
     input_schema: dict[str, Any]            # JSON Schema
-    handler: Callable[[dict], str]          # takes tool input, returns string result
+    handler: Callable[[dict[str, Any]], str]  # takes tool input, returns string result
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class PlannerOutput:
     raw_text: str                           # full final assistant message
     decisions_update: str = ""
     arch_update: str = ""
-    turns: list[dict] = field(default_factory=list)  # raw message history
+    turns: list[dict[str, Any]] = field(default_factory=list)  # raw message history
 
 
 class PlannerRuntimeError(Exception):
@@ -52,7 +52,7 @@ class PlannerRuntimePort(ABC):
         prompt: str,
         tools: list[PlannerTool],
         max_turns: int = 15,
-        session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        session_callback: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
     ) -> PlannerOutput:
         """
         Run the agentic planning loop and return a PlannerOutput.

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from src.domain import AgentSelector, DomainEvent, ExecutionSpec, TaskAggregate
 from src.domain import EventPort, TaskRepositoryPort
@@ -23,12 +23,12 @@ class TaskCreationService:
         files_allowed_to_modify: list[str],
         feature_id: Optional[str] = None,
         test_command: Optional[str] = None,
-        acceptance_criteria: list[str] = None,
-        depends_on: list[str] = None,
+        acceptance_criteria: Optional[list[str]] = None,
+        depends_on: Optional[list[str]] = None,
         max_retries: int = 2,
         min_version: str = ">=1.0.0",
         task_id: Optional[str] = None,
-        constraints: Optional[dict] = None,
+        constraints: Optional[dict[str, Any]] = None,
     ) -> TaskAggregate:
         # Single quotes in test commands survive the shell but break when
         # PyYAML stores them and bash re-executes. Replace with double quotes.

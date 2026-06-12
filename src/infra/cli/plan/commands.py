@@ -6,29 +6,28 @@ Commands:
   architect    — Run architecture planning
   review       — Run phase review
   status       — Show project plan status
-  decision     — Surface mid-phase architectural question
   logs         — Display or tail a planning session log
 """
 
 from __future__ import annotations
 
 import contextlib
-import os
-import sys
-import tempfile
-import threading
 import time
 import uuid
 
 import click
 
-from src.infra.container import AppContainer
-from src.infra.container import AppContainer as _AppContainer
+from src.infra.cli.container_provider import LazyContainerProvider
 from src.infra.cli.error_handler import die, info, ok, warn, catch_domain_errors
+from src.infra.container import AppContainer
+
+# ensure=True: builds a provider even when the group is invoked directly
+# (tests, embedding) without the root cli callback having set ctx.obj.
+pass_provider = click.make_pass_decorator(LazyContainerProvider, ensure=True)
 
 
-def _require_project() -> str:
-    project = _AppContainer.from_env().ctx.machine.project_name
+def _require_project(container: AppContainer) -> str:
+    project = container.ctx.machine.project_name
     if not project:
         die("No project configured.\n  Run: orchestrate init\n  Then try again.")
         return ""
@@ -47,33 +46,6 @@ def _print_section(title: str) -> None:
     click.echo("─" * width)
 
 
-@contextlib.contextmanager
-def _spinner(message: str):
-    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    stop_event = threading.Event()
-
-    def _spin():
-        i = 0
-        while not stop_event.is_set():
-            click.echo(f"\r{frames[i % len(frames)]}  {message}", nl=False, err=False)
-            stop_event.wait(0.1)
-            i += 1
-        click.echo(f"\r   {message} … done", nl=True)
-
-    if not sys.stdout.isatty():
-        click.echo(f"   {message}...")
-        yield
-        return
-
-    t = threading.Thread(target=_spin, daemon=True)
-    t.start()
-    try:
-        yield
-    finally:
-        stop_event.set()
-        t.join()
-
-
 def _make_planner_logger(container: AppContainer, mode: str):
     from src.infra.logging.live_logger import LiveLogger
     from src.infra.logging.planner_logger import PlannerLiveLogger
@@ -82,7 +54,7 @@ def _make_planner_logger(container: AppContainer, mode: str):
     log_dir.mkdir(parents=True, exist_ok=True)
     session_id = str(uuid.uuid4())[:8]
     live = LiveLogger(json_log_dir=log_dir)
-    return PlannerLiveLogger(live, session_id, mode, log_dir), session_id
+    return PlannerLiveLogger(live, session_id, mode, log_dir)
 
 
 def _bind_planner_hooks(orchestrator, planner_log) -> None:
@@ -100,6 +72,25 @@ def _bind_planner_hooks(orchestrator, planner_log) -> None:
     orchestrator.set_planner_event_hook(event_hook)
 
 
+@contextlib.contextmanager
+def _planner_session(container: AppContainer, orchestrator, mode: str):
+    """Logger + hooks + session start/end/close choreography, once.
+
+    Sessions are interactive (the io_handler prompts on the same terminal),
+    so no spinner is drawn — the planner live log provides liveness.
+    """
+    planner_log = _make_planner_logger(container, mode)
+    _bind_planner_hooks(orchestrator, planner_log)
+    planner_log.session_start()
+    success = False
+    try:
+        yield planner_log
+        success = True
+    finally:
+        planner_log.session_end(success=success)
+        planner_log.close()
+
+
 @click.group(name="plan")
 def plan_group() -> None:
     """Strategic planning operations."""
@@ -108,21 +99,19 @@ def plan_group() -> None:
 
 @plan_group.command(name="init")
 @click.option("--dry-run", is_flag=True, help="Use dry-run mode (no actual planning)")
+@pass_provider
 @catch_domain_errors
-def plan_init(dry_run: bool) -> None:
+def plan_init(obj: LazyContainerProvider, dry_run: bool) -> None:
     """
     Start or resume discovery phase.
 
     Runs an interactive planning session to gather project requirements
     and create a project brief.
     """
-    if dry_run:
-        os.environ["AGENT_MODE"] = "dry-run"
-
-    project = _require_project()
+    container = obj.get(mode="dry-run" if dry_run else None)
+    project = _require_project(container)
     ok(f"Project: {project}")
 
-    container = AppContainer.from_env()
     repo = container.project_plan_repo
     plan = repo.get()
 
@@ -145,23 +134,13 @@ def plan_init(dry_run: bool) -> None:
             )
         raise
 
-    planner_log, session_id = _make_planner_logger(container, "discovery")
-    _bind_planner_hooks(orchestrator, planner_log)
-    planner_log.session_start()
-    _start = time.monotonic()
-
-    try:
-        with _spinner("Running discovery session"):
-            result = orchestrator.start_discovery(io_handler=_io_handler)
+    with _planner_session(container, orchestrator, "discovery"):
+        info("Running discovery session — answer the planner's questions below.")
+        result = orchestrator.start_discovery(io_handler=_io_handler)
 
         if result.failure_reason:
-            planner_log.session_end(success=False)
             die(f"Discovery failed: {result.failure_reason}")
             return
-
-        planner_log.session_end(success=True)
-    finally:
-        planner_log.close()
 
     if result.brief:
         _print_section("PROJECT BRIEF")
@@ -185,20 +164,18 @@ def plan_init(dry_run: bool) -> None:
 
 @plan_group.command(name="architect")
 @click.option("--dry-run", is_flag=True, help="Use dry-run mode")
+@pass_provider
 @catch_domain_errors
-def plan_architect(dry_run: bool) -> None:
+def plan_architect(obj: LazyContainerProvider, dry_run: bool) -> None:
     """
     Run architecture planning phase.
 
     Proposes architectural decisions and phase plan for approval.
     """
-    if dry_run:
-        os.environ["AGENT_MODE"] = "dry-run"
-
-    project = _require_project()
+    container = obj.get(mode="dry-run" if dry_run else None)
+    project = _require_project(container)
     ok(f"Project: {project}")
 
-    container = AppContainer.from_env()
     repo = container.project_plan_repo
     plan = repo.get()
 
@@ -210,24 +187,15 @@ def plan_architect(dry_run: bool) -> None:
         return
 
     orchestrator = container.planner_orchestrator
+    started_at = time.monotonic()
 
-    planner_log, session_id = _make_planner_logger(container, "architecture")
-    _bind_planner_hooks(orchestrator, planner_log)
-    planner_log.session_start()
-    _start = time.monotonic()
-
-    try:
-        with _spinner("Running architecture planning"):
-            result = orchestrator.run_architecture(io_handler=_io_handler)
+    with _planner_session(container, orchestrator, "architecture"):
+        info("Running architecture planning — this may take a few minutes.")
+        result = orchestrator.run_architecture(io_handler=_io_handler)
 
         if result.failure_reason:
-            planner_log.session_end(success=False)
             die(f"Architecture planning failed: {result.failure_reason}")
             return
-
-        planner_log.session_end(success=True)
-    finally:
-        planner_log.close()
 
     if result.pending_decisions:
         _print_section("PROPOSED DECISIONS")
@@ -268,19 +236,16 @@ def plan_architect(dry_run: bool) -> None:
                 type=click.Choice(["y", "n", "edit"], case_sensitive=False),
                 default="y",
             )
+            if action.lower() == "edit":
+                edited = click.edit(decision.content, extension=".md")
+                if edited is not None:
+                    decision.content = edited.strip()
+                    info(f"Edited decision: {decision.id}")
+                if click.confirm(f"Approve edited decision '{decision.id}'?", default=True):
+                    action = "y"
             if action.lower() == "y":
                 approved_ids.append(decision.id)
                 ok(f"✓ {decision.id}")
-            elif action.lower() == "edit":
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-                    f.write(decision.content)
-                    temp_path = f.name
-                try:
-                    editor = os.environ.get("EDITOR", "vim")
-                    os.system(f"{editor} {temp_path}")
-                    info(f"Edited decision: {decision.id}")
-                finally:
-                    os.unlink(temp_path)
             else:
                 warn(f"✗ {decision.id}")
 
@@ -288,7 +253,7 @@ def plan_architect(dry_run: bool) -> None:
 
     if click.confirm("\nApprove phase plan and start execution?"):
         approval = orchestrator.approve_architecture(approved_ids)
-        elapsed = time.monotonic() - _start
+        elapsed = time.monotonic() - started_at
         _print_section("ARCHITECTURE APPROVED")
         ok(f"Architecture approved in {elapsed:.1f}s")
         ok(f"  Decisions applied : {approval.decisions_applied}")
@@ -300,20 +265,18 @@ def plan_architect(dry_run: bool) -> None:
 
 @plan_group.command(name="review")
 @click.option("--dry-run", is_flag=True, help="Use dry-run mode")
+@pass_provider
 @catch_domain_errors
-def plan_review(dry_run: bool) -> None:
+def plan_review(obj: LazyContainerProvider, dry_run: bool) -> None:
     """
     Run phase review phase.
 
     Review completed phase and plan the next phase.
     """
-    if dry_run:
-        os.environ["AGENT_MODE"] = "dry-run"
-
-    project = _require_project()
+    container = obj.get(mode="dry-run" if dry_run else None)
+    project = _require_project(container)
     ok(f"Project: {project}")
 
-    container = AppContainer.from_env()
     repo = container.project_plan_repo
     plan = repo.get()
 
@@ -326,22 +289,13 @@ def plan_review(dry_run: bool) -> None:
 
     orchestrator = container.planner_orchestrator
 
-    planner_log, session_id = _make_planner_logger(container, "phase_review")
-    _bind_planner_hooks(orchestrator, planner_log)
-    planner_log.session_start()
-
-    try:
-        with _spinner("Running phase review"):
-            result = orchestrator.run_phase_review(io_handler=_io_handler)
+    with _planner_session(container, orchestrator, "phase_review"):
+        info("Running phase review — this may take a few minutes.")
+        result = orchestrator.run_phase_review(io_handler=_io_handler)
 
         if result.failure_reason:
-            planner_log.session_end(success=False)
             die(f"Phase review failed: {result.failure_reason}")
             return
-
-        planner_log.session_end(success=True)
-    finally:
-        planner_log.close()
 
     if result.lessons:
         _print_section("LESSONS LEARNED")
@@ -372,27 +326,33 @@ def plan_review(dry_run: bool) -> None:
             else:
                 warn(f"✗ {decision.id}")
 
-    approve_next = click.confirm("\nContinue with next phase?")
+    if click.confirm("\nContinue with next phase?"):
+        approve_next = True
+    elif click.confirm("Mark project as done?"):
+        approve_next = False
+    else:
+        info("No action taken — plan unchanged. Re-run `plan review` when ready.")
+        return
 
-    if approve_next or click.confirm("Mark project as done?"):
-        approval = orchestrator.approve_phase_review(approve_next=approve_next)
-        _print_section("PHASE REVIEW APPROVED")
-        ok("Phase review approved!")
-        ok(f"  Plan status       : {approval.plan_status}")
-        ok(f"  Decisions applied : {approval.decisions_applied}")
-        ok(f"  Goals dispatched  : {len(approval.goals_dispatched)}")
-        for gid in approval.goals_dispatched:
-            info(f"    → {gid}")
+    approval = orchestrator.approve_phase_review(approve_next=approve_next)
+    _print_section("PHASE REVIEW APPROVED")
+    ok("Phase review approved!")
+    ok(f"  Plan status       : {approval.plan_status}")
+    ok(f"  Decisions applied : {approval.decisions_applied}")
+    ok(f"  Goals dispatched  : {len(approval.goals_dispatched)}")
+    for gid in approval.goals_dispatched:
+        info(f"    → {gid}")
 
 
 @plan_group.command(name="status")
+@pass_provider
 @catch_domain_errors
-def plan_status() -> None:
+def plan_status(obj: LazyContainerProvider) -> None:
     """
     Show current project plan status.
     """
-    project = _require_project()
-    container = AppContainer.from_env()
+    container = obj.get()
+    project = _require_project(container)
     orchestrator = container.planner_orchestrator
     plan = orchestrator.get_status()
 
@@ -427,11 +387,8 @@ def plan_status() -> None:
                 task_count = len(goal.tasks) if hasattr(goal, "tasks") and goal.tasks else 0
                 status_icon = "●" if goal.status.value == "running" else "○"
                 info(f"  {status_icon}  {goal.name:<28} {goal.status.value:<12} {task_count} tasks")
-    except Exception:
-        pass
-
-    info("")
-    info("JIT Planner: enabled")
+    except Exception as exc:
+        warn(f"Could not list goals: {exc}")
 
 
 @plan_group.command(name="logs")
@@ -444,7 +401,10 @@ def plan_status() -> None:
     help="Filter event types (default: all)",
 )
 @click.option("--tail", default=0, help="Show only the last N lines")
-def plan_logs(session_id: str, event_filter: str, tail: int) -> None:
+@pass_provider
+def plan_logs(
+    obj: LazyContainerProvider, session_id: str, event_filter: str, tail: int
+) -> None:
     """
     Display or tail the planning session log.
 
@@ -462,7 +422,7 @@ def plan_logs(session_id: str, event_filter: str, tail: int) -> None:
     from src.infra.logging.live_logger import LiveLogger
     from src.infra.logging.log_events import LogEvent, LogEventType
 
-    container = AppContainer.from_env()
+    container = obj.get()
     log_dir = container.paths.logs_dir / "planner"
 
     if not log_dir.exists():
@@ -518,8 +478,7 @@ def plan_logs(session_id: str, event_filter: str, tail: int) -> None:
 
     live = LiveLogger()
     live.register_agent("planner", "replay", str(log_dir))
-    for event in events:
-        live._render_to_terminal(event)
+    live.replay(events)
     live.close()
 
 

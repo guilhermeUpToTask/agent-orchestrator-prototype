@@ -25,7 +25,7 @@ Hexagonal Architecture notes:
 from __future__ import annotations
 
 import json
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import structlog
 
@@ -68,7 +68,7 @@ class PlanGoalTasksUseCase:
         planner_runtime: PlannerRuntimePort,
         event_port: EventPort,
         spec_repo: Optional[ProjectSpecRepository] = None,
-        progress_hook: Optional[Callable[[str, dict], None]] = None,
+        progress_hook: Optional[Callable[[str, dict[str, Any]], None]] = None,
     ) -> None:
         self._task_creation = task_creation
         self._goal_repo = goal_repo
@@ -140,7 +140,7 @@ class PlanGoalTasksUseCase:
         """
         extracted: list[GoalTaskDef] = []
 
-        def submit_tdd_tasks_handler(inp: dict) -> str:
+        def submit_tdd_tasks_handler(inp: dict[str, Any]) -> str:
             """Tool handler — validate and store the two TDD task definitions."""
             nonlocal extracted
             raw = inp.get("tasks_json", "[]")

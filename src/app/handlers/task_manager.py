@@ -15,6 +15,8 @@ Event → Use case mapping:
 """
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.domain import SchedulerService, TaskResult
@@ -81,13 +83,13 @@ class TaskManagerHandler:
     # Worker execution results (payload-carrying events)
     # ------------------------------------------------------------------
 
-    def handle_execution_started(self, payload: dict) -> None:
+    def handle_execution_started(self, payload: dict[str, Any]) -> None:
         self._record.record_started(
             task_id=payload["task_id"],
             agent_id=payload.get("agent_id", "unknown"),
         )
 
-    def handle_execution_succeeded(self, payload: dict) -> None:
+    def handle_execution_succeeded(self, payload: dict[str, Any]) -> None:
         self._record.record_succeeded(
             task_id=payload["task_id"],
             agent_id=payload.get("agent_id", "unknown"),
@@ -99,7 +101,7 @@ class TaskManagerHandler:
             ),
         )
 
-    def handle_execution_failed(self, payload: dict) -> None:
+    def handle_execution_failed(self, payload: dict[str, Any]) -> None:
         self._record.record_failed(
             task_id=payload["task_id"],
             agent_id=payload.get("agent_id", "unknown"),

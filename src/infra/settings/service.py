@@ -71,7 +71,9 @@ class SettingsService:
     # Public: load
     # ------------------------------------------------------------------
 
-    def load(self, project_name: str | None = None) -> SettingsContext:
+    def load(
+        self, project_name: str | None = None, mode: str | None = None
+    ) -> SettingsContext:
         """
         Build and return the full SettingsContext.
 
@@ -79,8 +81,14 @@ class SettingsService:
         ----------
         project_name:
             Override the project name from config.json.
+        mode:
+            Explicit mode override (e.g. a CLI --dry-run flag). Takes
+            precedence over AGENT_MODE and config.json — commands pass it
+            here instead of mutating os.environ.
         """
-        machine = self._load_machine(project_name_override=project_name)
+        machine = self._load_machine(
+            project_name_override=project_name, mode_override=mode
+        )
         project = self._load_project(machine)
         secrets = self._load_secrets()
         return SettingsContext(machine=machine, project=project, secrets=secrets)
@@ -165,7 +173,11 @@ class SettingsService:
     # Internal loaders
     # ------------------------------------------------------------------
 
-    def _load_machine(self, project_name_override: str | None = None) -> MachineSettings:
+    def _load_machine(
+        self,
+        project_name_override: str | None = None,
+        mode_override: str | None = None,
+    ) -> MachineSettings:
         """Build MachineSettings from explicitly allowed env vars > config.json > overrides > defaults."""
         stored = self._global_store.load_raw()
 
@@ -174,8 +186,10 @@ class SettingsService:
             val = os.environ.get(key)
             return val if val and val.strip() else None
 
-        # Hierarchy: ENV > JSON File > Default
-        mode = _env("AGENT_MODE") or stored.get("mode") or MACHINE_DEFAULTS["mode"]
+        # Hierarchy: explicit override > ENV > JSON File > Default
+        mode = (
+            mode_override or _env("AGENT_MODE") or stored.get("mode") or MACHINE_DEFAULTS["mode"]
+        )
 
         home_raw = _env("ORCHESTRATOR_HOME")
         orchestrator_home = (

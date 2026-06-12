@@ -60,6 +60,8 @@ class OpenAIPlannerAdapter:
 
         tool_calls: list[NormalizedToolCall] = []
         for tc in (msg.tool_calls or []):
+            if not hasattr(tc, "function"):
+                continue  # custom tool calls carry no function payload
             try:
                 args = json.loads(tc.function.arguments)
             except Exception:

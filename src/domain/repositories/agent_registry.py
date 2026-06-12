@@ -31,8 +31,8 @@ class AgentRegistryPort(ABC):
         ...
 
     @abstractmethod
-    def heartbeat(self, agent_id: str) -> None:
-        """Update the last_heartbeat timestamp for the given agent."""
+    def heartbeat(self, agent_id: str) -> bool:
+        """Update last_heartbeat for the agent; False if it is unknown."""
         ...
 
     @abstractmethod

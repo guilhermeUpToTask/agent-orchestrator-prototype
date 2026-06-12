@@ -201,10 +201,11 @@ class PlannerContextAssembler:
     def __init__(
         self,
         spec: Optional[ProjectSpec] = None,
-        project_state: Optional[ProjectStatePort] = None,
-        goal_repo: Optional[GoalRepositoryPort] = None,
-        task_repo: Optional[TaskRepositoryPort] = None,
-        plan_repo: Optional[ProjectPlanRepositoryPort] = None,
+        *,
+        project_state: ProjectStatePort,
+        goal_repo: GoalRepositoryPort,
+        task_repo: TaskRepositoryPort,
+        plan_repo: ProjectPlanRepositoryPort,
         spec_loader: Optional[Callable[[], ProjectSpec]] = None,
     ) -> None:
         if spec is None and spec_loader is None:
@@ -255,6 +256,7 @@ class PlannerContextAssembler:
         # The loader wins so a long-lived assembler (cached in the container)
         # observes `spec apply` without a process restart.
         spec = self._spec_loader() if self._spec_loader is not None else self._spec
+        assert spec is not None  # __init__ requires spec or spec_loader
         return spec.get_architecture_constraints()
 
     def _read_project_state_context(self) -> tuple[list[DecisionEntry], str, str]:

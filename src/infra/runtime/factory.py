@@ -20,7 +20,7 @@ def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentR
     if ctx.machine.mode == "dry-run" or agent_props.runtime_type == "dry-run":
         from src.infra.runtime.dry_run_runtime import SimulatedAgentRuntime
 
-        base_runtime = SimulatedAgentRuntime()
+        base_runtime: AgentRuntimePort = SimulatedAgentRuntime()
     else:
 
         def _build_gemini(cfg: dict) -> AgentRuntimePort:
@@ -75,7 +75,9 @@ def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentR
     from src.infra.project_paths import ProjectPaths
 
     json_log_dir = str(
-        ProjectPaths.for_project(ctx.machine.orchestrator_home, ctx.machine.project_name).logs_dir
+        ProjectPaths.for_project(
+            ctx.machine.orchestrator_home, ctx.machine.project_name or "default"
+        ).logs_dir
     )
     return LoggingRuntimeWrapper(
         base_runtime=base_runtime,
