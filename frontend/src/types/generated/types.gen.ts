@@ -168,48 +168,6 @@ export type DiscoveryMessageRequest = {
 };
 
 /**
- * DiscoveryMessageResponse
- */
-export type DiscoveryMessageResponse = {
-    /**
-     * Question
-     */
-    question: string | null;
-    /**
-     * Done
-     */
-    done: boolean;
-    /**
-     * Brief
-     */
-    brief?: {
-        [key: string]: unknown;
-    } | null;
-};
-
-/**
- * DiscoveryStartResponse
- *
- * Returned by POST /discovery/start — either a question or completion.
- */
-export type DiscoveryStartResponse = {
-    /**
-     * Question
-     */
-    question?: string | null;
-    /**
-     * Done
-     */
-    done: boolean;
-    /**
-     * Brief
-     */
-    brief?: {
-        [key: string]: unknown;
-    } | null;
-};
-
-/**
  * ErrorResponse
  */
 export type ErrorResponse = {
@@ -667,21 +625,49 @@ export type RefineRequest = {
 };
 
 /**
- * RefineResponse
+ * SessionAccepted
+ *
+ * Returned with 202 when a long-running session is started.
  */
-export type RefineResponse = {
+export type SessionAccepted = {
     /**
      * Session Id
      */
     session_id: string;
     /**
-     * Actions Taken
+     * Status
      */
-    actions_taken: Array<string>;
+    status: 'running' | 'waiting_input' | 'done' | 'failed';
+};
+
+/**
+ * SessionStatusResponse
+ *
+ * Current state of a long-running session.
+ */
+export type SessionStatusResponse = {
     /**
-     * Succeeded
+     * Session Id
      */
-    succeeded: boolean;
+    session_id: string;
+    /**
+     * Kind
+     */
+    kind: 'discovery' | 'refine';
+    /**
+     * Status
+     */
+    status: 'running' | 'waiting_input' | 'done' | 'failed';
+    /**
+     * Question
+     */
+    question?: string | null;
+    /**
+     * Result
+     */
+    result?: {
+        [key: string]: unknown;
+    } | null;
     /**
      * Error
      */
@@ -1028,9 +1014,9 @@ export type PlanRefinePlanData = {
 
 export type PlanRefinePlanErrors = {
     /**
-     * Context assembly failed (e.g. no project spec loaded).
+     * Validation Error
      */
-    422: ErrorResponse;
+    422: HttpValidationError;
 };
 
 export type PlanRefinePlanError = PlanRefinePlanErrors[keyof PlanRefinePlanErrors];
@@ -1039,10 +1025,44 @@ export type PlanRefinePlanResponses = {
     /**
      * Successful Response
      */
-    200: RefineResponse;
+    202: SessionAccepted;
 };
 
 export type PlanRefinePlanResponse = PlanRefinePlanResponses[keyof PlanRefinePlanResponses];
+
+export type PlanGetSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Session Id
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/api/plan/sessions/{session_id}';
+};
+
+export type PlanGetSessionErrors = {
+    /**
+     * Not Found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlanGetSessionError = PlanGetSessionErrors[keyof PlanGetSessionErrors];
+
+export type PlanGetSessionResponses = {
+    /**
+     * Successful Response
+     */
+    200: SessionStatusResponse;
+};
+
+export type PlanGetSessionResponse = PlanGetSessionResponses[keyof PlanGetSessionResponses];
 
 export type PlanStartDiscoveryData = {
     body?: never;
@@ -1064,21 +1084,30 @@ export type PlanStartDiscoveryResponses = {
     /**
      * Successful Response
      */
-    200: DiscoveryStartResponse;
+    202: SessionAccepted;
 };
 
 export type PlanStartDiscoveryResponse = PlanStartDiscoveryResponses[keyof PlanStartDiscoveryResponses];
 
 export type PlanSendDiscoveryMessageData = {
     body: DiscoveryMessageRequest;
-    path?: never;
+    path: {
+        /**
+         * Session Id
+         */
+        session_id: string;
+    };
     query?: never;
-    url: '/api/plan/discovery/message';
+    url: '/api/plan/discovery/{session_id}/message';
 };
 
 export type PlanSendDiscoveryMessageErrors = {
     /**
-     * No active discovery session.
+     * Not Found
+     */
+    404: ErrorResponse;
+    /**
+     * The session is not waiting for input.
      */
     409: ErrorResponse;
     /**
@@ -1093,10 +1122,44 @@ export type PlanSendDiscoveryMessageResponses = {
     /**
      * Successful Response
      */
-    200: DiscoveryMessageResponse;
+    202: SessionAccepted;
 };
 
 export type PlanSendDiscoveryMessageResponse = PlanSendDiscoveryMessageResponses[keyof PlanSendDiscoveryMessageResponses];
+
+export type PlanGetDiscoverySessionData = {
+    body?: never;
+    path: {
+        /**
+         * Session Id
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/api/plan/discovery/{session_id}';
+};
+
+export type PlanGetDiscoverySessionErrors = {
+    /**
+     * Not Found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlanGetDiscoverySessionError = PlanGetDiscoverySessionErrors[keyof PlanGetDiscoverySessionErrors];
+
+export type PlanGetDiscoverySessionResponses = {
+    /**
+     * Successful Response
+     */
+    200: SessionStatusResponse;
+};
+
+export type PlanGetDiscoverySessionResponse = PlanGetDiscoverySessionResponses[keyof PlanGetDiscoverySessionResponses];
 
 export type GoalsListGoalsData = {
     body?: never;
