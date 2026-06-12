@@ -2,10 +2,10 @@
 src/infra/cli/agents/commands.py — Agent management commands.
 
 Commands:
-  orchestrator agents create  — register a new agent
-  orchestrator agents list    — list all registered agents
-  orchestrator agents delete  — deregister an agent
-  orchestrator agents edit    — update agent fields
+  orchestrate agents create  — register a new agent
+  orchestrate agents list    — list all registered agents
+  orchestrate agents delete  — deregister an agent
+  orchestrate agents edit    — update agent fields
 """
 
 from __future__ import annotations

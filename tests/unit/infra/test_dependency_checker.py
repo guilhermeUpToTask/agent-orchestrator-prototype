@@ -7,7 +7,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
-from src.dependency_checker import (
+from src.infra.dependency_checker import (
     DepResult,
     DependencyChecker,
     DependencyReport,

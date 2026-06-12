@@ -30,7 +30,6 @@ from typing import Callable, Optional
 import structlog
 
 from src.domain import (
-    DomainEvent,
     EventPort,
     GoalTaskDef,
     TaskStatus,

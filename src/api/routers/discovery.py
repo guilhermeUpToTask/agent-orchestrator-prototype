@@ -83,8 +83,12 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> DiscoveryStartRe
         )
         return DiscoveryStartResponse(question=question, done=False)
     except asyncio.TimeoutError:
-        result = await future
-        _discovery_active = False
+        try:
+            result = await future
+        finally:
+            # Reset even when the planner session raised, or every subsequent
+            # /start would 409 until the server restarts.
+            _discovery_active = False
         return DiscoveryStartResponse(
             done=True,
             brief=result.brief.model_dump() if result.brief else None,

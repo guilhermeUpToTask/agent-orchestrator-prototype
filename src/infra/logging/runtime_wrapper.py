@@ -289,7 +289,6 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
             # Read output streams in real-time using select
             stdout_lines = []
             stderr_lines = []
-            timeout_remaining = timeout_seconds
 
             while True:
                 # Check if process has finished

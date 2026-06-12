@@ -41,7 +41,7 @@ def setup_registry(
 
     click.echo("\n  No agents are registered yet.")
     if not click.confirm("  Register a first agent now?", default=True):
-        click.echo("  ⚠  No agents registered.\n     Use  orchestrator agents create  when ready.")
+        click.echo("  ⚠  No agents registered.\n     Use  orchestrate agents create  when ready.")
         return
 
     _interactive_register_agent(registry)

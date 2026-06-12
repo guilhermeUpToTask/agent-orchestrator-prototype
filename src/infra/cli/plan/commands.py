@@ -24,13 +24,13 @@ import click
 
 from src.infra.container import AppContainer
 from src.infra.container import AppContainer as _AppContainer
-from src.infra.cli.error_handler import die, err, info, ok, warn, catch_domain_errors
+from src.infra.cli.error_handler import die, info, ok, warn, catch_domain_errors
 
 
 def _require_project() -> str:
     project = _AppContainer.from_env().ctx.machine.project_name
     if not project:
-        die("No project configured.\n  Run: orchestrator init\n  Then try again.")
+        die("No project configured.\n  Run: orchestrate init\n  Then try again.")
         return ""
     return project
 
@@ -140,7 +140,7 @@ def plan_init(dry_run: bool) -> None:
         if "SpecNotFound" in exc_name or "NotFound" in exc_name:
             die(
                 f"No project spec found for project '{project}'.\n"
-                "  Run: orchestrator init\n"
+                "  Run: orchestrate init\n"
                 "  to create a project spec before running `plan init`."
             )
         raise
@@ -180,7 +180,7 @@ def plan_init(dry_run: bool) -> None:
         if click.confirm("\nApprove this project brief?"):
             plan = orchestrator.approve_brief()
             ok(f"Brief approved — status: {plan.status.value}")
-            info("Run: orchestrator plan architect")
+            info("Run: orchestrate plan architect")
 
 
 @plan_group.command(name="architect")
@@ -206,7 +206,7 @@ def plan_architect(dry_run: bool) -> None:
         if plan:
             warn(f"Plan is in '{plan.status}' state (expected 'architecture').")
         else:
-            warn("No plan found. Run 'orchestrator plan init' first.")
+            warn("No plan found. Run 'orchestrate plan init' first.")
         return
 
     orchestrator = container.planner_orchestrator
@@ -321,7 +321,7 @@ def plan_review(dry_run: bool) -> None:
         if plan:
             warn(f"Plan is in '{plan.status}' state (expected 'phase_review').")
         else:
-            warn("No plan found. Run 'orchestrator plan init' first.")
+            warn("No plan found. Run 'orchestrate plan init' first.")
         return
 
     orchestrator = container.planner_orchestrator
@@ -377,7 +377,7 @@ def plan_review(dry_run: bool) -> None:
     if approve_next or click.confirm("Mark project as done?"):
         approval = orchestrator.approve_phase_review(approve_next=approve_next)
         _print_section("PHASE REVIEW APPROVED")
-        ok(f"Phase review approved!")
+        ok("Phase review approved!")
         ok(f"  Plan status       : {approval.plan_status}")
         ok(f"  Decisions applied : {approval.decisions_applied}")
         ok(f"  Goals dispatched  : {len(approval.goals_dispatched)}")
@@ -434,23 +434,6 @@ def plan_status() -> None:
     info("JIT Planner: enabled")
 
 
-@plan_group.command(name="decision")
-@click.argument("description")
-@click.option("--dry-run", is_flag=True, help="Use dry-run mode")
-def plan_decision(description: str, dry_run: bool) -> None:
-    """
-    Surface a mid-phase architectural question.
-
-    Runs a short architecture-mode session on just the question,
-    shows proposed decision for approval.
-    """
-    if dry_run:
-        os.environ["AGENT_MODE"] = "dry-run"
-
-    info(f"Decision description: {description}")
-    info("(Decision approval flow not fully implemented in this prototype)")
-
-
 @plan_group.command(name="logs")
 @click.option("--session-id", default=None, help="Specific session ID to display")
 @click.option(
@@ -469,10 +452,10 @@ def plan_logs(session_id: str, event_filter: str, tail: int) -> None:
     it with terminal colours, filtered by event type if requested.
 
     Examples:
-        orchestrator plan logs
-        orchestrator plan logs --filter turns
-        orchestrator plan logs --filter tools --tail 20
-        orchestrator plan logs --session-id abc123
+        orchestrate plan logs
+        orchestrate plan logs --filter turns
+        orchestrate plan logs --filter tools --tail 20
+        orchestrate plan logs --session-id abc123
     """
     import json
 

@@ -6,7 +6,6 @@ from typing import Callable, Optional, Protocol
 from src.domain.ports.planner import PlannerOutput, PlannerRuntimeError, PlannerTool
 from src.infra.runtime.planners.runtime_types import (
     NormalizedAssistantTurn,
-    NormalizedToolCall,
     NormalizedToolResult,
 )
 from src.infra.runtime.planners.tooling.tool_execution import execute_tool_call

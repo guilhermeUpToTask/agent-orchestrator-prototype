@@ -4,13 +4,11 @@ tests/regression/infra/test_config_path_and_plan_init.py
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from src.infra.settings import GlobalConfigStore, SettingsService
 from src.infra.cli.plan.commands import plan_group
 
 

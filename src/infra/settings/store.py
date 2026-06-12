@@ -26,7 +26,7 @@ from src.infra.settings.defaults import (
     PROJECT_CONFIG_FILENAME,
     PROJECT_DEFAULTS,
 )
-from src.infra.settings.models import MachineSettings, ProjectSettings
+from src.infra.settings.models import ProjectSettings
 
 _SECRET_KEYS: frozenset[str] = frozenset(
     {"github_token", "anthropic_api_key", "gemini_api_key", "openrouter_api_key"}
