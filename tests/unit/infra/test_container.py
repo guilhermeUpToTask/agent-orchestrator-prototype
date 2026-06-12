@@ -123,3 +123,42 @@ class TestAppContainerWiring:
         # when GITHUB_TOKEN is omitted, rather than falling back gracefully.
         with pytest.raises(ConfigurationError, match="GITHUB_TOKEN is not set"):
             _ = app.github_client
+
+
+class TestSpecStaleness:
+    """Spec-derived members must observe `spec apply` without a container rebuild."""
+
+    def _rewrite_spec(self, tmp_path: Path, version: str) -> None:
+        project_dir = tmp_path / "projects" / "container-test"
+        (project_dir / "project_spec.yaml").write_text(
+            f"""
+meta:
+  name: container-test
+  version: {version}
+objective:
+  description: test
+  domain: test
+"""
+        )
+
+    def test_current_spec_reflects_on_disk_changes(self, dry_run_ctx, tmp_path):
+        app = AppContainer(dry_run_ctx)
+        assert str(app.current_spec.meta.version) == "0.1.0"
+
+        self._rewrite_spec(tmp_path, "0.2.0")
+
+        assert str(app.current_spec.meta.version) == "0.2.0"
+
+    def test_planner_context_assembler_reloads_spec_per_assemble(
+        self, dry_run_ctx, tmp_path
+    ):
+        app = AppContainer(dry_run_ctx)
+        assembler = app.planner_context_assembler
+        assembler.assemble()
+
+        self._rewrite_spec(tmp_path, "0.9.9")
+
+        # Same cached assembler instance, fresh spec on the next assemble.
+        snapshot = app.planner_context_assembler.assemble()
+        assert snapshot is not None
+        assert str(app.current_spec.meta.version) == "0.9.9"

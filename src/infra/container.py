@@ -530,17 +530,22 @@ class AppContainer:
     @cached_property
     def sync_goal_pr_usecase(self):
         from src.app.usecases.sync_goal_pr_status import SyncGoalPRStatusUseCase
+        from src.domain import SpecNotFoundError
 
-        spec = None
-        try:
-            spec = self.load_project_spec_usecase.execute(self.get_required_project())
-        except Exception:
-            pass
+        def spec_loader():
+            try:
+                return self.load_project_spec_usecase.execute(self.get_required_project())
+            except SpecNotFoundError:
+                return None  # CI gate simply unconfigured for this project
+            except Exception as exc:
+                log.warning("container.spec_load_failed", error=str(exc))
+                return None
+
         return SyncGoalPRStatusUseCase(
             goal_repo=self.goal_repo,
             event_port=self.event_port,
             github=self.github_client,
-            spec=spec,
+            spec_loader=spec_loader,
         )
 
     @cached_property
@@ -549,20 +554,21 @@ class AppContainer:
 
         return LoadProjectSpec(spec_repo=self.spec_repo)
 
-    @cached_property
+    @property
     def current_spec(self):
         """
-        Load and cache the active ProjectSpec for the configured project.
+        Load the active ProjectSpec for the configured project.
         Used by the API layer's GET /spec endpoint and spec-dependent routes.
+        Deliberately NOT cached: `spec apply` must be visible to a long-lived
+        API process without a restart, and a spec load is one file read.
         """
         return self.load_project_spec_usecase.execute(self.get_required_project())
 
-    @cached_property
+    @property
     def validate_against_spec_usecase(self):
         from src.app.usecases.validate_against_spec import ValidateAgainstSpec
 
-        spec = self.load_project_spec_usecase.execute(self.get_required_project())
-        return ValidateAgainstSpec(spec)
+        return ValidateAgainstSpec(self.current_spec)
 
     @cached_property
     def propose_spec_change_usecase(self):
@@ -660,9 +666,13 @@ class AppContainer:
     def planner_context_assembler(self):
         from src.app.services.planner_context import PlannerContextAssembler
 
-        spec = self.load_project_spec_usecase.execute(self.get_required_project())
+        # Fail fast if the spec is missing (same behavior as loading eagerly),
+        # then hand the assembler a loader so each assemble() sees the latest.
+        self.load_project_spec_usecase.execute(self.get_required_project())
         return PlannerContextAssembler(
-            spec=spec,
+            spec_loader=lambda: self.load_project_spec_usecase.execute(
+                self.get_required_project()
+            ),
             project_state=self.project_state,
             goal_repo=self.goal_repo,
             task_repo=self.task_repo,
