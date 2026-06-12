@@ -60,20 +60,21 @@ The backend follows a strict **Hexagonal / Clean Architecture**.
 ## 📁 Repository Structure
 
 ```text
-orchestrator-fullstack/
-├── backend/
-│   ├── src/
-│   │   ├── domain/        # Entities, Value Objects, Aggregates, Ports (Interfaces)
-│   │   ├── app/           # Use Cases, Handlers, Services (Orchestration)
-│   │   ├── infra/         # Adapters (Redis, FS, Git, GitHub, Runtimes, CLI)
-│   │   └── api/           # FastAPI Routers, DTOs (Schemas), SSE Streaming
-│   ├── tests/             # Unit and Integration test split
-│   └── pyproject.toml     # Python dependencies & Ruff/Mypy config
+agent-orchestrator/
+├── src/
+│   ├── domain/        # Entities, Value Objects, Aggregates, Ports (Interfaces)
+│   ├── app/           # Use Cases, Handlers, Services (Orchestration)
+│   ├── infra/         # Adapters (Redis, FS, Git, GitHub, Runtimes, CLI)
+│   └── api/           # FastAPI Routers, DTOs (Schemas), SSE Streaming
+├── tests/             # Unit and Integration test split
+├── scripts/           # OpenAPI export and other tooling
+├── pyproject.toml     # Python dependencies & Ruff/Mypy config
 └── frontend/
     ├── src/
     │   ├── components/    # React components (PlanCanvas, ChatPanel, Toolbar)
     │   ├── store/         # Zustand global state
     │   ├── lib/           # API wrappers, layout math
+    │   ├── types/         # openapi-ts generated types
     │   └── styles/        # Global CSS & Design Tokens
     └── package.json       # React / Vite dependencies
 ```

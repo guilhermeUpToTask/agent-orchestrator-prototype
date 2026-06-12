@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Callable, Optional
 
 from src.domain.aggregates.planner_session import PlannerSession
 from src.domain.ports.planner import PlannerTool

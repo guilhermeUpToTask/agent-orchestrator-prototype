@@ -20,13 +20,17 @@ holds the single loaded SettingsContext and derives everything from it.
 from __future__ import annotations
 
 from functools import cached_property
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import structlog
 
 from src.infra.settings import SettingsContext, SettingsService
 from src.infra.settings.models import ConfigurationError
 from src.infra.project_paths import ProjectPaths
+
+if TYPE_CHECKING:
+    from src.domain import PlannerRuntimePort
+    from src.infra.logging.planner_logger import PlannerLiveLogger
 
 log = structlog.get_logger(__name__)
 
@@ -71,7 +75,7 @@ class AppContainer:
         """Return project_name or raise with an actionable message."""
         name = self._ctx.machine.project_name
         if not name:
-            raise ConfigurationError("No project configured.\nRun: orchestrator init")
+            raise ConfigurationError("No project configured.\nRun: orchestrate init")
         return name
 
     # ------------------------------------------------------------------
@@ -597,22 +601,17 @@ class AppContainer:
     def task_graph_orchestrator(self):
         from src.app.orchestrator import TaskGraphOrchestrator
 
-        return TaskGraphOrchestrator(
-            task_repo=self.task_repo,
-            goal_repo=self.goal_repo,
-            event_port=self.event_port,
-            merge_usecase=self.goal_merge_task_usecase,
-            cancel_usecase=self.goal_cancel_task_usecase,
-            spec_repo=self.spec_repo,
-            project_name=self.get_required_project(),
-            create_pr_usecase=None,
-            telemetry_emitter=self.telemetry_emitter,
-            plan_goal_tasks=self.plan_goal_tasks_usecase,
-        )
-
-    @cached_property
-    def task_graph_orchestrator_with_pr(self):
-        from src.app.orchestrator import TaskGraphOrchestrator
+        # PR creation is on by default: stubbed in dry-run, real when GitHub
+        # is fully configured. Without a token goals still merge tasks but
+        # stop at READY_FOR_REVIEW, so warn loudly.
+        if self._ctx.machine.mode == "dry-run" or self._ctx.github_fully_configured():
+            create_pr_usecase = self.create_goal_pr_usecase
+        else:
+            create_pr_usecase = None
+            log.warning(
+                "container.pr_creation_disabled",
+                reason="GitHub repo/token not configured — goals will not open PRs",
+            )
 
         return TaskGraphOrchestrator(
             task_repo=self.task_repo,
@@ -622,7 +621,7 @@ class AppContainer:
             cancel_usecase=self.goal_cancel_task_usecase,
             spec_repo=self.spec_repo,
             project_name=self.get_required_project(),
-            create_pr_usecase=self.create_goal_pr_usecase,
+            create_pr_usecase=create_pr_usecase,
             telemetry_emitter=self.telemetry_emitter,
             plan_goal_tasks=self.plan_goal_tasks_usecase,
         )

@@ -199,7 +199,7 @@ class SettingsContext:
         from src.infra.project_paths import ProjectPaths
 
         if not self.machine.project_name:
-            raise ConfigurationError("No project configured. Run `orchestrator init` first.")
+            raise ConfigurationError("No project configured. Run `orchestrate init` first.")
         return ProjectPaths.for_project(
             self.machine.orchestrator_home,
             self.machine.project_name,
@@ -224,7 +224,7 @@ class SettingsContext:
     @property
     def project_home(self) -> Path:
         if not self.machine.project_name:
-            raise ConfigurationError("No project configured. Run `orchestrator init` first.")
+            raise ConfigurationError("No project configured. Run `orchestrate init` first.")
         return self.machine.orchestrator_home / "projects" / self.machine.project_name
 
     # ------------------------------------------------------------------

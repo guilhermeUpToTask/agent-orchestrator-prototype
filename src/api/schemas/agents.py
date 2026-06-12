@@ -1,9 +1,8 @@
 """src/api/schemas/agents.py — Agent-related API DTOs."""
 from __future__ import annotations
 
-from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class AgentResponse(BaseModel):

@@ -40,7 +40,7 @@ def _parse_decision(text: str) -> DecisionEntry:
     if not lines or lines[0].strip() != _FRONTMATTER_SEP:
         raise ValueError("Decision file missing frontmatter separator")
     end_idx = next(
-        (i for i, l in enumerate(lines[1:], 1) if l.strip() == _FRONTMATTER_SEP),
+        (i for i, ln in enumerate(lines[1:], 1) if ln.strip() == _FRONTMATTER_SEP),
         None,
     )
     if end_idx is None:
@@ -61,10 +61,10 @@ def _parse_decision(text: str) -> DecisionEntry:
     # Parse spec_changes if present
     spec_changes = None
     if "spec_changes:" in fm_lines:
-        sc_lines = [l for l in fm_lines if l.strip().startswith("add_required:") 
-                    or l.strip().startswith("add_forbidden:")
-                    or l.strip().startswith("remove_required:")
-                    or l.strip().startswith("remove_forbidden:")]
+        sc_lines = [ln for ln in fm_lines if ln.strip().startswith("add_required:")
+                    or ln.strip().startswith("add_forbidden:")
+                    or ln.strip().startswith("remove_required:")
+                    or ln.strip().startswith("remove_forbidden:")]
         sc_dict = {}
         for line in sc_lines:
             if ":" in line:

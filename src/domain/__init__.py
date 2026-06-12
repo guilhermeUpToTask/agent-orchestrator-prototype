@@ -201,3 +201,20 @@ from src.domain.repositories.project_plan_repository import ProjectPlanRepositor
 
 # SpecChanges (new field on DecisionEntry)
 from src.domain.ports.project_state import SpecChanges
+
+# Names imported after the main __all__ block — exported here so the
+# re-exports above are an explicit public API rather than unused imports.
+__all__ += [
+    # PR value objects + GitHub port
+    "PRStatus", "PRCheckConclusion", "CheckRunResult", "PRInfo",
+    "GitHubPort", "GitHubError", "GitHubRateLimitError",
+    # spec / roadmap
+    "CIConfig", "Roadmap",
+    # planner memory + leases
+    "ProjectStatePort", "DecisionEntry",
+    "LeaseRefresherPort", "LeaseRefresherFactory",
+    # planner sessions + runtime
+    "PlannerSession", "PlannerSessionStatus", "SessionTurn",
+    "PlannerRuntimePort", "PlannerRuntimeError", "PlannerOutput", "PlannerTool",
+    "PlannerSessionRepositoryPort",
+]

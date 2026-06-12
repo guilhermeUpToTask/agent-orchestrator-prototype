@@ -24,7 +24,7 @@ def goal_init(goal_file: str):
         warn(
             f"AGENT_MODE is not 'real' (current: '{app.ctx.mode}').\n"
             "   Events will NOT reach Redis. "
-            "Run with: AGENT_MODE=real orchestrator goals init <file>"
+            "Run with: AGENT_MODE=real orchestrate goals init <file>"
         )
 
     spec = load_goal_file(goal_file)

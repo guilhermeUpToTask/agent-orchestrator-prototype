@@ -2,11 +2,11 @@
 src/infra/cli/system/commands.py — System daemon commands.
 
 Commands:
-  orchestrator system start          — boot all daemons (api + task-manager + workers + reconciler)
-  orchestrator system api            — run the FastAPI server
-  orchestrator system task-manager   — run the task manager event loop
-  orchestrator system worker         — run a worker event loop
-  orchestrator system reconciler     — run the reconciler loop
+  orchestrate system start          — boot all daemons (api + task-manager + workers + reconciler)
+  orchestrate system api            — run the FastAPI server
+  orchestrate system task-manager   — run the task manager event loop
+  orchestrate system worker         — run a worker event loop
+  orchestrate system reconciler     — run the reconciler loop
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def system_start(
         store.generate_defaults()
         click.echo(
             "  ℹ  No .orchestrator/config.json found — generated with defaults.\n"
-            "     Run  orchestrator init  for interactive setup.\n"
+            "     Run  orchestrate init  for interactive setup.\n"
         )
 
     from src.infra.container import AppContainer
@@ -83,8 +83,10 @@ def system_start(
         click.echo("Checking dependencies...")
         report = print_dep_table(app.ctx.machine.redis_url)
         if not report.can_start:
-            die("Required dependencies are not available. Run  orchestrator init  to diagnose.")
+            die("Required dependencies are not available. Run  orchestrate init  to diagnose.")
         click.echo()
+
+    _destroy_legacy_workers_group(app)
 
     registry = app.agent_registry
     active_agents = [a for a in registry.list_agents() if a.active]
@@ -93,7 +95,7 @@ def system_start(
         die("No active agents found in registry. Register agents first.")
 
     # Children inherit the resolved mode (env > config.json > default) so
-    # `AGENT_MODE=dry-run orchestrator system start` works as documented.
+    # `AGENT_MODE=dry-run orchestrate system start` works as documented.
     env = {**os.environ, "AGENT_MODE": app.ctx.machine.mode}
     procs: list[tuple[str, "subprocess.Popen"]] = []
 
@@ -205,7 +207,7 @@ def run_worker(agent_id: str):
     # Validate the provided agent_id actually exists and is active
     agent = registry.get(agent_id)
     if not agent:
-        die(f"Agent '{agent_id}' not found in registry. Run `orchestrator agents create` first.")
+        die(f"Agent '{agent_id}' not found in registry. Run `orchestrate agents create` first.")
         return
     if not agent.active:
         die(f"Agent '{agent_id}' is marked as inactive in the registry.")
@@ -218,19 +220,24 @@ def run_worker(agent_id: str):
     registry.heartbeat(agent_id)
     _start_heartbeat_thread(registry, agent_id)
 
+    # Each worker uses its own consumer group so every group receives every
+    # task.assigned event. A shared group would deliver each event to exactly
+    # one worker — usually the wrong one, which would ack and drop it.
+    group = f"worker-{agent_id}"
+
     try:
-        for event in events.subscribe("task.assigned", group="workers", consumer=agent_id):
+        for event in events.subscribe("task.assigned", group=group, consumer=agent_id):
             assigned_to = event.payload.get("agent_id")
             task_id = event.payload.get("task_id")
             project_id = event.payload.get("project_id", "")
 
             if assigned_to != agent_id:
-                log.info("worker.skip_not_mine", task_id=task_id, assigned_to=assigned_to)
-                events.ack(event, group="workers")
+                log.debug("worker.skip_not_mine", task_id=task_id, assigned_to=assigned_to)
+                events.ack(event, group=group)
                 continue
 
             handler.process(task_id=task_id, project_id=project_id)
-            events.ack(event, group="workers")
+            events.ack(event, group=group)
     except KeyboardInterrupt:
         click.echo(f"\nWorker {agent_id} stopped.")
     except Exception as exc:
@@ -278,6 +285,22 @@ def _spawn(
     procs.append((name, p))
     log.info("system.daemon_started", daemon=name, pid=p.pid)
     return p
+
+
+def _destroy_legacy_workers_group(app) -> None:
+    """Remove the pre-per-agent-group shared "workers" consumer group.
+
+    Older versions had all workers share one group on events:task.assigned,
+    which left stale pending entries behind. Safe to call repeatedly; no-op
+    once the group is gone or in dry-run mode (no Redis).
+    """
+    if app.ctx.machine.mode == "dry-run":
+        return
+    try:
+        if app._redis.xgroup_destroy("events:task.assigned", "workers"):
+            log.info("system.legacy_workers_group_destroyed")
+    except Exception:
+        pass  # stream doesn't exist yet — nothing to migrate
 
 
 def _install_sigterm_handler() -> None:
