@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 import redis
 
@@ -53,12 +53,22 @@ class RedisEventAdapter(EventPort):
         pipe.execute()
         self._write_journal(event)
 
-    def subscribe(self, event_type: str, group: str, consumer: str) -> Iterator[DomainEvent]:
+    def subscribe(
+        self,
+        event_type: str,
+        group: str,
+        consumer: str,
+        stop: Optional[Callable[[], bool]] = None,
+    ) -> Iterator[DomainEvent]:
         """Subscribe to a single event type. See subscribe_many() for multiple types."""
-        yield from self.subscribe_many([event_type], group, consumer)
+        yield from self.subscribe_many([event_type], group, consumer, stop=stop)
 
     def subscribe_many(
-        self, event_types: list[str], group: str, consumer: str
+        self,
+        event_types: list[str],
+        group: str,
+        consumer: str,
+        stop: Optional[Callable[[], bool]] = None,
     ) -> Iterator[DomainEvent]:
         """
         Block-subscribe to multiple event types in a single XREADGROUP call.
@@ -96,13 +106,17 @@ class RedisEventAdapter(EventPort):
         # Build the read dict: {stream_key: ">"} for all streams.
         read_dict = {key: ">" for key in streams}
         last_claim = time.monotonic()
+        # Short block so an embedded loop notices stop() within ~1s.
+        block_ms = 1000 if stop is not None else 5000
 
         while True:
+            if stop is not None and stop():
+                return
             results = self._r.xreadgroup(
                 group,
                 consumer,
                 read_dict,
-                block=5000,
+                block=block_ms,
                 count=10,  # read up to 10 messages across all streams per call
             )
             for stream_key, messages in results or []:
@@ -199,26 +213,47 @@ class RedisEventAdapter(EventPort):
 
 
 class InMemoryEventAdapter(EventPort):
-    """Simple in-process pub/sub for testing. Not thread-safe."""
+    """Simple in-process pub/sub for testing / dry-run. Not thread-safe.
+
+    Generators are finite: they yield the backlog published since this
+    group's last read and then return. Per-(group, event_type) cursors let
+    a runner loop re-subscribe with the same group and see only new events,
+    mirroring (in miniature) how a Redis consumer group resumes.
+    """
 
     def __init__(self) -> None:
         self._published: list[DomainEvent] = []
         self._subscribers: dict[str, list[DomainEvent]] = {}
+        self._cursors: dict[tuple[str, str], int] = {}
 
     def publish(self, event: DomainEvent) -> None:
         self._published.append(event)
         self._subscribers.setdefault(event.type, []).append(event)
 
     def subscribe(
-        self, event_type: str, group: str = "", consumer: str = ""
+        self,
+        event_type: str,
+        group: str = "",
+        consumer: str = "",
+        stop: Optional[Callable[[], bool]] = None,
     ) -> Iterator[DomainEvent]:
-        yield from self._subscribers.get(event_type, [])
+        yield from self.subscribe_many([event_type], group, consumer, stop=stop)
 
     def subscribe_many(
-        self, event_types: list[str], group: str = "", consumer: str = ""
+        self,
+        event_types: list[str],
+        group: str = "",
+        consumer: str = "",
+        stop: Optional[Callable[[], bool]] = None,
     ) -> Iterator[DomainEvent]:
         for et in event_types:
-            yield from self._subscribers.get(et, [])
+            backlog = self._subscribers.get(et, [])
+            start = self._cursors.get((group, et), 0)
+            for i in range(start, len(backlog)):
+                if stop is not None and stop():
+                    return
+                self._cursors[(group, et)] = i + 1
+                yield backlog[i]
 
     def ack(self, event: DomainEvent, group: str) -> None:  # noqa: ARG002
         return None

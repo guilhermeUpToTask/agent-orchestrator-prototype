@@ -21,7 +21,7 @@ PR polling:
 """
 from __future__ import annotations
 
-import time
+import threading
 from typing import Optional
 
 import structlog
@@ -85,6 +85,8 @@ class Reconciler:
         self._sync_pr      = sync_pr_usecase
         self._advance_pr   = advance_pr_usecase
 
+        self._stop = threading.Event()
+
     # ------------------------------------------------------------------
     # Loop
     # ------------------------------------------------------------------
@@ -96,11 +98,21 @@ class Reconciler:
             self._run_pr_polling_pass()
 
     def run_forever(self) -> None:
-        """Block forever, running the reconcile loop."""
+        """Run the reconcile loop until shutdown() is called.
+
+        Waits one full interval BEFORE the first pass: at boot, workers may
+        not have heartbeated yet, and an eager pass would fail their ASSIGNED
+        tasks as dead-agent.
+        """
         log.info("reconciler.started", interval=self._interval)
-        while True:
+        while not self._stop.wait(self._interval):
             self.run_once()
-            time.sleep(self._interval)
+        log.info("reconciler.stopped")
+
+    def shutdown(self) -> None:
+        """Unblock run_forever() at the next interval check."""
+        log.info("reconciler.shutdown_requested")
+        self._stop.set()
 
     # ------------------------------------------------------------------
     # Task reconciliation pass (unchanged from original)

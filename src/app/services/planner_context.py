@@ -27,7 +27,7 @@ Design:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import structlog
 
@@ -200,13 +200,17 @@ class PlannerContextAssembler:
 
     def __init__(
         self,
-        spec: ProjectSpec,
-        project_state: ProjectStatePort,
-        goal_repo: GoalRepositoryPort,
-        task_repo: TaskRepositoryPort,
-        plan_repo: ProjectPlanRepositoryPort,  # NEW
+        spec: Optional[ProjectSpec] = None,
+        project_state: Optional[ProjectStatePort] = None,
+        goal_repo: Optional[GoalRepositoryPort] = None,
+        task_repo: Optional[TaskRepositoryPort] = None,
+        plan_repo: Optional[ProjectPlanRepositoryPort] = None,
+        spec_loader: Optional[Callable[[], ProjectSpec]] = None,
     ) -> None:
+        if spec is None and spec_loader is None:
+            raise ValueError("PlannerContextAssembler needs spec or spec_loader")
         self._spec          = spec
+        self._spec_loader   = spec_loader
         self._project_state = project_state
         self._goal_repo     = goal_repo
         self._task_repo     = task_repo
@@ -248,7 +252,10 @@ class PlannerContextAssembler:
         return ctx
 
     def _read_spec_context(self) -> dict[str, Any]:
-        return self._spec.get_architecture_constraints()
+        # The loader wins so a long-lived assembler (cached in the container)
+        # observes `spec apply` without a process restart.
+        spec = self._spec_loader() if self._spec_loader is not None else self._spec
+        return spec.get_architecture_constraints()
 
     def _read_project_state_context(self) -> tuple[list[DecisionEntry], str, str]:
         decisions = self._project_state.list_decisions(status="active")

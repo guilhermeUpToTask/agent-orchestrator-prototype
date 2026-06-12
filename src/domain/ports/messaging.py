@@ -4,7 +4,7 @@ src/domain/ports/messaging.py — Event bus port.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 from src.domain.events.domain_event import DomainEvent
 
@@ -22,22 +22,36 @@ class EventPort(ABC):
 
     @abstractmethod
     def subscribe(
-        self, event_type: str, group: str, consumer: str
+        self,
+        event_type: str,
+        group: str,
+        consumer: str,
+        stop: Optional[Callable[[], bool]] = None,
     ) -> Iterator[DomainEvent]:
         """
         Block-subscribe to a single event type using consumer groups.
         Each message is delivered to exactly one consumer in the group.
+
+        When *stop* is provided, the generator returns (instead of blocking
+        forever) shortly after stop() turns true — required for running
+        subscription loops on threads that must shut down cleanly.
         """
         ...
 
     @abstractmethod
     def subscribe_many(
-        self, event_types: list[str], group: str, consumer: str
+        self,
+        event_types: list[str],
+        group: str,
+        consumer: str,
+        stop: Optional[Callable[[], bool]] = None,
     ) -> Iterator[DomainEvent]:
         """
         Block-subscribe to multiple event types in a single call.
         Prefer this over chaining subscribe() calls — chaining blocking
         generators means only the first stream is ever consumed.
+
+        *stop* semantics match subscribe().
         """
         ...
 

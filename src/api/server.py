@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import threading
+from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
@@ -31,6 +32,88 @@ from src.api.sse import publish_sse
 log = structlog.get_logger(__name__)
 
 _API_VERSION = "0.2.0"
+
+# Coordinator daemons (task manager, goal orchestrator, reconciler) run as
+# lifespan threads inside this process — the single writer for task/goal
+# state. Set ORCHESTRATOR_EMBED_COORDINATORS=0 to opt out (tests, or when
+# running them as standalone CLI processes).
+_COORDINATOR_STATE: dict[str, Any] = {}
+
+
+def _coordinators_enabled() -> bool:
+    return os.environ.get("ORCHESTRATOR_EMBED_COORDINATORS", "1") != "0"
+
+
+def _start_coordinators(container: Any) -> None:
+    """Resolve dependencies on this thread, then start the three loops.
+
+    cached_property is not locked, so every coordinator dependency is
+    touched here, on the single startup thread, before any thread runs.
+    """
+    from src.app.runners import (
+        run_goal_orchestrator_loop,
+        run_reconciler_loop,
+        run_task_manager_loop,
+    )
+
+    interval = int(os.environ.get("RECONCILER_INTERVAL", "60"))
+    stuck_age = int(os.environ.get("RECONCILER_STUCK_AGE", "120"))
+
+    handler = container.task_manager_handler
+    events_port = container.event_port
+    orchestrator = container.task_graph_orchestrator
+    reconciler = container.get_reconciler(
+        interval_seconds=interval,
+        stuck_task_min_age_seconds=stuck_age,
+    )
+
+    stop_event = threading.Event()
+    threads = [
+        threading.Thread(
+            target=run_task_manager_loop,
+            args=(handler, events_port, stop_event.is_set),
+            daemon=True,
+            name="task-manager",
+        ),
+        threading.Thread(
+            target=run_goal_orchestrator_loop,
+            args=(orchestrator,),
+            daemon=True,
+            name="goal-orchestrator",
+        ),
+        threading.Thread(
+            target=run_reconciler_loop,
+            args=(reconciler,),
+            daemon=True,
+            name="reconciler",
+        ),
+    ]
+    for t in threads:
+        t.start()
+
+    _COORDINATOR_STATE.update(
+        stop_event=stop_event,
+        orchestrator=orchestrator,
+        reconciler=reconciler,
+        threads=threads,
+    )
+    log.info(
+        "api.coordinators_started",
+        reconciler_interval=interval,
+        reconciler_stuck_age=stuck_age,
+    )
+
+
+def _stop_coordinators() -> None:
+    if not _COORDINATOR_STATE:
+        return
+    _COORDINATOR_STATE["stop_event"].set()
+    _COORDINATOR_STATE["orchestrator"].shutdown()
+    _COORDINATOR_STATE["reconciler"].shutdown()
+    for t in _COORDINATOR_STATE["threads"]:
+        t.join(timeout=5.0)  # daemon threads — process exit is the backstop
+    log.info("api.coordinators_stopped")
+    _COORDINATOR_STATE.clear()
 
 
 def _wire_planner_sse_hook(container: Any) -> None:
@@ -82,6 +165,16 @@ class DynamicContainerProvider:
                     project_name=fingerprint[0],
                     mode=fingerprint[1],
                 )
+                if self._container is not None and _COORDINATOR_STATE:
+                    log.warning(
+                        "api.coordinators_bound_to_previous_project",
+                        detail=(
+                            "Embedded coordinators keep the container they "
+                            "were started with — restart the API to point "
+                            "them at the new project."
+                        ),
+                        project_name=fingerprint[0],
+                    )
                 self._container = AppContainer.from_env()
                 self._fingerprint = fingerprint
                 _wire_planner_sse_hook(self._container)
@@ -107,7 +200,25 @@ def create_app(container=None) -> FastAPI:
     Pass *container* explicitly in tests to inject a mock container;
     leave it as ``None`` in production and the active project context is
     re-resolved from ``.orchestrator/config.json`` on each request.
+
+    In production (container is None) the lifespan also hosts the three
+    coordinator daemons as threads, making this process the sole writer
+    for task/goal state. Injected-container (test) apps skip them.
     """
+    provider = DynamicContainerProvider() if container is None else None
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if provider is not None and _coordinators_enabled():
+            try:
+                _start_coordinators(provider())
+            except Exception as exc:
+                # An unconfigured project must not keep the API from serving
+                # setup endpoints; coordinators need a restart once fixed.
+                log.warning("api.coordinators_not_started", error=str(exc))
+        yield
+        _stop_coordinators()
+
     # ── App instance ──────────────────────────────────────────────────────────
     app = FastAPI(
         title="AIPOM Orchestrator API",
@@ -118,6 +229,7 @@ def create_app(container=None) -> FastAPI:
             "spec validation, and a real-time SSE event stream."
         ),
         generate_unique_id_function=_unique_operation_id,
+        lifespan=lifespan,
     )
 
     # ── Exception handlers ────────────────────────────────────────────────────
@@ -136,7 +248,7 @@ def create_app(container=None) -> FastAPI:
         set_container(container)
         _wire_planner_sse_hook(container)
     else:
-        set_container_provider(DynamicContainerProvider())
+        set_container_provider(provider)
 
     # ── Routers ───────────────────────────────────────────────────────────────
     _prefix = "/api"
