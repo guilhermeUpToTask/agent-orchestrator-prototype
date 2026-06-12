@@ -22,7 +22,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
     "coverage>=7.0",
-    "fakeredis>=2.20",
+    # >=2.36: earlier releases lose messages on multi-stream XREADGROUP
+    # (cursor advances on every stream while delivering only one)
+    "fakeredis>=2.36",
     "ruff>=0.4",
     "mypy>=1.10",
 ]

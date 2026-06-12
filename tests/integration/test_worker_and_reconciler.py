@@ -173,6 +173,34 @@ def build_reconciler(task_repo, lease_port, event_port, agent_registry,
     )
 
 
+
+def apply_execution_results(event_port, task_repo) -> None:
+    """Apply worker-published execution results the way the task manager
+    does in production (workers publish, the task manager writes state).
+    Idempotent: already-applied transitions are skipped."""
+    from src.app.usecases.task_record_result import TaskRecordResultUseCase
+    from src.domain import TaskResult
+
+    record = TaskRecordResultUseCase(task_repo=task_repo, event_port=event_port)
+    for e in list(event_port.all_events):
+        p = e.payload
+        if e.type == "task.execution_started":
+            record.record_started(p["task_id"], p["agent_id"])
+        elif e.type == "task.execution_succeeded":
+            record.record_succeeded(
+                p["task_id"],
+                p["agent_id"],
+                TaskResult(
+                    branch=p.get("branch", ""),
+                    commit_sha=p.get("commit_sha", ""),
+                    modified_files=p.get("modified_files", []),
+                    artifacts=p.get("artifacts", {}),
+                ),
+            )
+        elif e.type == "task.execution_failed":
+            record.record_failed(p["task_id"], p["agent_id"], p.get("reason", "unknown"))
+
+
 # ===========================================================================
 # WorkerHandler — happy path
 # ===========================================================================
@@ -189,6 +217,7 @@ class TestWorkerHandlerHappyPath:
 
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.SUCCEEDED
@@ -201,6 +230,7 @@ class TestWorkerHandlerHappyPath:
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         final = task_repo.load(task.task_id)
         assert final.result is not None
         assert final.result.commit_sha is not None
@@ -213,6 +243,7 @@ class TestWorkerHandlerHappyPath:
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         event_types = [e.type for e in event_port.all_events]
         assert "task.started" in event_types
         assert "task.completed" in event_types
@@ -226,6 +257,7 @@ class TestWorkerHandlerHappyPath:
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         log_dir = log_base / task.task_id
         assert (log_dir / "stdout.txt").exists()
         assert (log_dir / "stderr.txt").exists()
@@ -242,6 +274,7 @@ class TestWorkerHandlerHappyPath:
 
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         assert not lease_port.is_lease_active(task.task_id)
 
 
@@ -314,6 +347,7 @@ class TestWorkerHandlerErrors:
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.FAILED
 
@@ -331,6 +365,7 @@ class TestWorkerHandlerErrors:
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         assert len(event_port.events_of_type("task.failed")) == 1
 
     def test_forbidden_file_edit_causes_failure(
@@ -362,6 +397,7 @@ class TestWorkerHandlerErrors:
             worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.FAILED
@@ -382,6 +418,7 @@ class TestWorkerHandlerErrors:
         task_repo.save(task)
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         final = task_repo.load(task.task_id)
         failed_entry = next(h for h in final.history if h.event == "task.failed")
@@ -404,6 +441,7 @@ class TestWorkerHandlerErrors:
             runtime=failing_runtime,
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
         assert not lease_port.is_lease_active(task.task_id)
 
     def test_failing_test_command_fails_task(
@@ -426,6 +464,7 @@ class TestWorkerHandlerErrors:
             worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.FAILED
@@ -449,6 +488,7 @@ class TestWorkerHandlerErrors:
             worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow
         )
         worker.process(task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         assert len(event_port.events_of_type("task.failed")) == 1
 
