@@ -276,6 +276,31 @@ def drain_events(
     return events
 
 
+def pump_execution_results(event_port, tm) -> None:
+    """Deliver worker-published execution results to the task manager,
+    mirroring the production task-manager loop (workers publish, the task
+    manager is the sole task-state writer)."""
+    while True:
+        # Loop: fakeredis returns one stream per xreadgroup call, like a
+        # consumer loop would observe.
+        events = drain_events(
+            event_port._r,
+            ["task.execution_started", "task.execution_succeeded", "task.execution_failed"],
+            "task-manager",
+            "tm-1",
+            block_ms=50,
+        )
+        if not events:
+            return
+        for e in events:
+            if e.type == "task.execution_started":
+                tm.handle_execution_started(e.payload)
+            elif e.type == "task.execution_succeeded":
+                tm.handle_execution_succeeded(e.payload)
+            elif e.type == "task.execution_failed":
+                tm.handle_execution_failed(e.payload)
+
+
 # ===========================================================================
 # Scenario 1 — Happy path: full lifecycle
 # ===========================================================================
@@ -329,6 +354,7 @@ class TestHappyPath:
 
         # ── Worker executes ───────────────────────────────────────────────
         worker.process(task_id=task.task_id, project_id="proj-e2e")
+        pump_execution_results(event_port, tm)
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.SUCCEEDED, f"Got: {final.status}"
@@ -388,6 +414,7 @@ class TestHappyPath:
         # task-A runs successfully
         tm.handle_task_created(task_a.task_id)
         worker.process(task_id=task_a.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task_a.task_id).status == TaskStatus.SUCCEEDED
 
         # task-B should now be unblocked by the completed event
@@ -396,6 +423,7 @@ class TestHappyPath:
 
         # task-B executes successfully
         worker.process(task_id=task_b.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task_b.task_id).status == TaskStatus.SUCCEEDED
 
         # Both branches exist in the repo
@@ -443,6 +471,7 @@ class TestFailurePaths:
             simulate_failure=True,
         )
         failing_worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task.task_id).status == TaskStatus.FAILED
 
         # task_manager handles failure → requeues (retry count < max)
@@ -462,6 +491,7 @@ class TestFailurePaths:
             simulate_failure=False,
         )
         succeeding_worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.SUCCEEDED
         assert final.result.commit_sha is not None
@@ -493,6 +523,7 @@ class TestFailurePaths:
             simulate_failure=True,
         )
         failing_worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task.task_id).status == TaskStatus.FAILED
 
         tm.handle_task_failed(task.task_id)
@@ -564,6 +595,7 @@ class TestFailurePaths:
         tm = make_task_manager(task_repo, agent_registry, event_port, lease_port)
         tm.handle_task_created(task.task_id)
         worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
 
         final = task_repo.load(task.task_id)
         assert final.status == TaskStatus.FAILED
@@ -684,6 +716,7 @@ class TestReconcilerPaths:
             git_workspace, git_repo, tmp_path, monkeypatch,
         )
         worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task.task_id).status == TaskStatus.SUCCEEDED
 
     def test_reconciler_republishes_stuck_created_task(
@@ -735,6 +768,7 @@ class TestReconcilerPaths:
             git_workspace, git_repo, tmp_path, monkeypatch,
         )
         worker.process(task_id=task.task_id, project_id="proj")
+        pump_execution_results(event_port, tm)
         assert task_repo.load(task.task_id).status == TaskStatus.SUCCEEDED
 
     def test_reconciler_fails_in_progress_expired_lease(

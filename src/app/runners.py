@@ -33,6 +33,9 @@ TASK_MANAGER_EVENTS = [
     "task.requeued",
     "task.completed",
     "task.failed",
+    "task.execution_started",
+    "task.execution_succeeded",
+    "task.execution_failed",
 ]
 
 _POLL_INTERVAL = 0.5  # outer-loop sleep when a finite generator drains
@@ -46,10 +49,15 @@ def run_task_manager_loop(
 ) -> None:
     """Route task lifecycle events to the TaskManagerHandler until stop()."""
     handlers = {
-        "task.created": handler.handle_task_created,
-        "task.requeued": handler.handle_task_requeued,
-        "task.completed": handler.handle_task_completed,
-        "task.failed": handler.handle_task_failed,
+        # Lifecycle notifications carry only a task_id.
+        "task.created": lambda e: handler.handle_task_created(e.payload["task_id"]),
+        "task.requeued": lambda e: handler.handle_task_requeued(e.payload["task_id"]),
+        "task.completed": lambda e: handler.handle_task_completed(e.payload["task_id"]),
+        "task.failed": lambda e: handler.handle_task_failed(e.payload["task_id"]),
+        # Worker execution results carry the full result payload.
+        "task.execution_started": lambda e: handler.handle_execution_started(e.payload),
+        "task.execution_succeeded": lambda e: handler.handle_execution_succeeded(e.payload),
+        "task.execution_failed": lambda e: handler.handle_execution_failed(e.payload),
     }
 
     log.info("task_manager.started", events=list(handlers))
@@ -57,19 +65,18 @@ def run_task_manager_loop(
         for event in events.subscribe_many(
             list(handlers), group=TASK_MANAGER_GROUP, consumer=consumer, stop=stop
         ):
-            task_id = event.payload.get("task_id")
             fn = handlers.get(event.type)
-            if not task_id or fn is None:
+            if fn is None or not event.payload.get("task_id"):
                 continue
             try:
-                fn(task_id)
+                fn(event)
             except Exception as exc:
                 # Log and move on; the un-acked entry stays in the PEL and is
                 # replayed by the recovery pass on the next (re)start.
                 log.exception(
                     "task_manager.handler_failed",
                     event_type=event.type,
-                    task_id=task_id,
+                    task_id=event.payload.get("task_id"),
                     error=str(exc),
                 )
                 continue

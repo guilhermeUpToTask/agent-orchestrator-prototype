@@ -17,7 +17,13 @@ class EventPort(ABC):
 
     @abstractmethod
     def publish(self, event: DomainEvent) -> None:
-        """Publish event. Payload must be minimal — IDs only."""
+        """Publish event.
+
+        Payloads must be minimal: IDs plus immutable result facts (e.g. the
+        task.execution_* events carry branch/commit_sha/modified_files so the
+        task manager can persist outcomes without trusting worker state).
+        Anything mutable must be fetched from a repository by the consumer.
+        """
         ...
 
     @abstractmethod
