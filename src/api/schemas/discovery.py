@@ -1,23 +1,13 @@
-"""src/api/schemas/discovery.py — Discovery session API DTOs."""
-from __future__ import annotations
+"""src/api/schemas/discovery.py — Discovery session API DTOs.
 
-from typing import Any, Optional
+Discovery runs as a long-lived session (see schemas/sessions.py): start
+returns 202 + SessionAccepted, answers are POSTed to the session, and the
+current question / final brief are read via the session GET endpoint.
+"""
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
 
-class DiscoveryStartResponse(BaseModel):
-    """Returned by POST /discovery/start — either a question or completion."""
-    question: Optional[str] = None
-    done: bool
-    brief: Optional[dict[str, Any]] = None
-
-
 class DiscoveryMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4096)
-
-
-class DiscoveryMessageResponse(BaseModel):
-    question: Optional[str]
-    done: bool
-    brief: Optional[dict[str, Any]] = None

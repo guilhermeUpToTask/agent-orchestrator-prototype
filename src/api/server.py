@@ -14,6 +14,7 @@ Zero business logic lives here.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -50,6 +51,8 @@ def _start_coordinators(container: Any) -> None:
     cached_property is not locked, so every coordinator dependency is
     touched here, on the single startup thread, before any thread runs.
     """
+    from src.api.event_bridge import run_event_bridge
+    from src.api.sse import get_broker
     from src.app.runners import (
         run_goal_orchestrator_loop,
         run_reconciler_loop,
@@ -88,6 +91,18 @@ def _start_coordinators(container: Any) -> None:
             name="reconciler",
         ),
     ]
+    # Redis → SSE bridge: makes worker/coordinator progress visible to the
+    # frontend. Dry-run has no Redis; there, only router-originated events
+    # reach the UI (the coordinators publish to the in-memory adapter).
+    if container.ctx.machine.mode != "dry-run":
+        threads.append(
+            threading.Thread(
+                target=run_event_bridge,
+                args=(container._redis, get_broker(), stop_event.is_set),
+                daemon=True,
+                name="sse-event-bridge",
+            )
+        )
     for t in threads:
         t.start()
 
@@ -209,6 +224,11 @@ def create_app(container=None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        from src.api.sse import get_broker
+
+        # Threadpool routers and the bridge thread publish from off-loop;
+        # the broker needs the loop to hop onto it safely.
+        get_broker().bind_loop(asyncio.get_running_loop())
         if provider is not None and _coordinators_enabled():
             try:
                 _start_coordinators(provider())

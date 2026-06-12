@@ -1,52 +1,68 @@
 """
 src/api/routers/discovery.py — Interactive discovery session endpoints.
 
-The discovery flow is a long-running interactive Q&A between the user
-and the LLM planner.  It uses two asyncio queues to shuttle questions
-and answers between the HTTP request cycle and the blocking executor thread.
+Discovery is a long-running interactive Q&A between the user and the LLM
+planner. It follows the session pattern:
 
-Covers:
-  POST /plan/discovery/start    kick off a discovery session, returns first question
-  POST /plan/discovery/message  send an answer, returns the next question or completion
+  POST /plan/discovery/start                202 + session_id; planner runs
+                                            on the executor
+  POST /plan/discovery/{session_id}/message 202; answer the current question
+  GET  /plan/discovery/{session_id}         current status / question / brief
+
+Each question is also published over SSE as plan.discovery_question, and
+completion as plan.discovery_completed / plan.discovery_failed.
+
+Completion is an explicit state transition made by the runner (finally
+block) — never inferred from response timeouts, which desynchronized the
+old design whenever an LLM turn ran long. Session state lives in
+src/api/sessions.py keyed by session id; a failed session never blocks the
+next start.
 """
 from __future__ import annotations
 
-import asyncio
-import queue
+import threading
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies import PlanOrchestratorDep
 from src.api.schemas.common import ErrorResponse
-from src.api.schemas.discovery import (
-    DiscoveryMessageRequest,
-    DiscoveryMessageResponse,
-    DiscoveryStartResponse,
+from src.api.schemas.discovery import DiscoveryMessageRequest
+from src.api.schemas.sessions import SessionAccepted, SessionStatusResponse
+from src.api.sessions import (
+    STATUS_WAITING_INPUT,
+    ApiSession,
+    registry,
 )
+from src.api.sse import publish_sse
+
+import structlog
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/plan/discovery", tags=["plan"])
 
-# Module-level queues: one session at a time (single-user orchestrator model).
-# A future multi-user variant would key these per session_id.
-_question_q: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
-_answer_q: queue.Queue[str] = queue.Queue(maxsize=1)
 
-# Track active discovery session state
-_discovery_active: bool = False
-
-_FIRST_QUESTION_TIMEOUT = 30.0
-_SUBSEQUENT_TIMEOUT = 60.0
+def _session_response(session: ApiSession) -> SessionStatusResponse:
+    return SessionStatusResponse(
+        session_id=session.session_id,
+        kind="discovery",
+        status=session.status,  # type: ignore[arg-type]
+        question=session.current_question,
+        result=session.result,
+        error=session.error,
+    )
 
 
 @router.post(
     "/start",
-    response_model=DiscoveryStartResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=SessionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="Start Discovery Session",
     description=(
-        "Launches the interactive discovery session in a background thread. "
-        "Returns either the first question from the planner, or `done=true` with "
-        "the completed brief if the planner needs no further input."
+        "Launches the interactive discovery session in a background thread and "
+        "returns immediately with a session id. Questions are published over "
+        "SSE as `plan.discovery_question` and are also readable via "
+        "`GET /plan/discovery/{session_id}`."
     ),
     responses={
         status.HTTP_409_CONFLICT: {
@@ -55,81 +71,106 @@ _SUBSEQUENT_TIMEOUT = 60.0
         }
     },
 )
-async def start_discovery(orchestrator: PlanOrchestratorDep) -> DiscoveryStartResponse:
-    global _discovery_active
-    
-    if _discovery_active:
-        from fastapi import HTTPException, status
+async def start_discovery(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
+    if registry.active("discovery") is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A discovery session is already in progress.",
         )
-    
-    _discovery_active = True
-    loop = asyncio.get_running_loop()
+
+    session = registry.create("discovery")
 
     def io_handler(question: str) -> str:
-        loop.call_soon_threadsafe(_question_q.put_nowait, question)
-        return _answer_q.get()
-
-    future = loop.run_in_executor(
-        None,
-        lambda: orchestrator.start_discovery(io_handler=io_handler),
-    )
-
-    try:
-        question = await asyncio.wait_for(
-            _question_q.get(), timeout=_FIRST_QUESTION_TIMEOUT
+        publish_sse(
+            "plan.discovery_question",
+            {"session_id": session.session_id, "question": question},
         )
-        return DiscoveryStartResponse(question=question, done=False)
-    except asyncio.TimeoutError:
+        return session.ask(question)
+
+    def run() -> None:
         try:
-            result = await future
+            result = orchestrator.start_discovery(io_handler=io_handler)
+            if result.failure_reason:
+                session.fail(result.failure_reason)
+            else:
+                session.complete(
+                    {"brief": result.brief.model_dump() if result.brief else None}
+                )
+        except Exception as exc:
+            log.exception(
+                "discovery.session_failed",
+                session_id=session.session_id,
+                error=str(exc),
+            )
+            session.fail(str(exc))
         finally:
-            # Reset even when the planner session raised, or every subsequent
-            # /start would 409 until the server restarts.
-            _discovery_active = False
-        return DiscoveryStartResponse(
-            done=True,
-            brief=result.brief.model_dump() if result.brief else None,
-        )
+            event = (
+                "plan.discovery_completed"
+                if session.status == "done"
+                else "plan.discovery_failed"
+            )
+            publish_sse(event, {"session_id": session.session_id})
+
+    # Daemon thread, not the loop's executor: an abandoned session parked on
+    # answer_q.get() must never block server shutdown.
+    threading.Thread(
+        target=run, daemon=True, name=f"discovery-{session.session_id}"
+    ).start()
+
+    return SessionAccepted(session_id=session.session_id, status=session.status)  # type: ignore[arg-type]
 
 
 @router.post(
-    "/message",
-    response_model=DiscoveryMessageResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Send Discovery Message",
+    "/{session_id}/message",
+    response_model=SessionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Answer Discovery Question",
     description=(
-        "Send an answer to the current discovery question. "
-        "Returns the next question from the planner, or `done=true` with the "
-        "final brief when all questions are answered."
+        "Submit the user's answer to the session's current question. The next "
+        "question (or completion) arrives via SSE / the session GET endpoint."
     ),
     responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {
             "model": ErrorResponse,
-            "description": "No active discovery session.",
-        }
+            "description": "The session is not waiting for input.",
+        },
     },
 )
 async def send_discovery_message(
-    payload: DiscoveryMessageRequest,
-) -> DiscoveryMessageResponse:
-    global _discovery_active
-    
-    if not _discovery_active:
-        from fastapi import HTTPException, status
+    session_id: str, payload: DiscoveryMessageRequest
+) -> SessionAccepted:
+    session = registry.get(session_id)
+    if session is None or session.kind != "discovery":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No discovery session '{session_id}'.",
+        )
+    if session.status != STATUS_WAITING_INPUT:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="No active discovery session. Call /plan/discovery/start first.",
+            detail=f"Session is '{session.status}', not waiting for input.",
         )
-    
-    _answer_q.put(payload.message)
-    try:
-        question = await asyncio.wait_for(
-            _question_q.get(), timeout=_SUBSEQUENT_TIMEOUT
+
+    session.answer_q.put(payload.message)
+    return SessionAccepted(session_id=session.session_id, status="running")
+
+
+@router.get(
+    "/{session_id}",
+    response_model=SessionStatusResponse,
+    summary="Get Discovery Session",
+    description=(
+        "Read the session's current state: `waiting_input` carries the pending "
+        "question; `done` carries the final brief in `result.brief`."
+    ),
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_discovery_session(session_id: str) -> SessionStatusResponse:
+    session = registry.get(session_id)
+    if session is None or session.kind != "discovery":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No discovery session '{session_id}'.",
         )
-        return DiscoveryMessageResponse(question=question, done=False)
-    except asyncio.TimeoutError:
-        _discovery_active = False
-        return DiscoveryMessageResponse(question=None, done=True)
+    return _session_response(session)

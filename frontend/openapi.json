@@ -206,7 +206,7 @@
           "plan"
         ],
         "summary": "Refine Plan",
-        "description": "Dispatches a user message to the tactical LLM planner for an interactive refinement session. The planner may add, update, or remove tasks and goals based on the message. Returns the list of actions taken and whether the session succeeded. Optionally scoped to a specific node or goal via `focused_node_id` / `focused_goal_id`.",
+        "description": "Starts a tactical LLM refinement session for the given message and returns immediately with a session id. The planner may add, update, or remove tasks and goals. Actions stream over SSE as `plan.refinement_action`; the outcome (actions taken, success, error) is available from `GET /plan/sessions/{session_id}` once the status is `done` or `failed`. Optionally scoped via `focused_node_id` / `focused_goal_id`.",
         "operationId": "plan-refine_plan",
         "requestBody": {
           "content": {
@@ -219,22 +219,75 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RefineResponse"
+                  "$ref": "#/components/schemas/SessionAccepted"
                 }
               }
             }
           },
           "422": {
-            "description": "Context assembly failed (e.g. no project spec loaded).",
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Session",
+        "description": "Read the state of any long-running plan session (refinement or discovery). Terminal sessions carry their outcome in `result`.",
+        "operationId": "plan-get_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -248,15 +301,15 @@
           "plan"
         ],
         "summary": "Start Discovery Session",
-        "description": "Launches the interactive discovery session in a background thread. Returns either the first question from the planner, or `done=true` with the completed brief if the planner needs no further input.",
+        "description": "Launches the interactive discovery session in a background thread and returns immediately with a session id. Questions are published over SSE as `plan.discovery_question` and are also readable via `GET /plan/discovery/{session_id}`.",
         "operationId": "plan-start_discovery",
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiscoveryStartResponse"
+                  "$ref": "#/components/schemas/SessionAccepted"
                 }
               }
             }
@@ -274,37 +327,58 @@
         }
       }
     },
-    "/api/plan/discovery/message": {
+    "/api/plan/discovery/{session_id}/message": {
       "post": {
         "tags": [
           "plan"
         ],
-        "summary": "Send Discovery Message",
-        "description": "Send an answer to the current discovery question. Returns the next question from the planner, or `done=true` with the final brief when all questions are answered.",
+        "summary": "Answer Discovery Question",
+        "description": "Submit the user's answer to the session's current question. The next question (or completion) arrives via SSE / the session GET endpoint.",
         "operationId": "plan-send_discovery_message",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DiscoveryMessageRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiscoveryMessageResponse"
+                  "$ref": "#/components/schemas/SessionAccepted"
                 }
               }
             }
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "409": {
-            "description": "No active discovery session.",
+            "description": "The session is not waiting for input.",
             "content": {
               "application/json": {
                 "schema": {
@@ -312,6 +386,59 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/discovery/{session_id}": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Discovery Session",
+        "description": "Read the session's current state: `waiting_input` carries the pending question; `done` carries the final brief in `result.brief`.",
+        "operationId": "plan-get_discovery_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "422": {
             "description": "Validation Error",
@@ -1409,7 +1536,7 @@
           "events"
         ],
         "summary": "Real-Time Event Stream",
-        "description": "Opens a `text/event-stream` connection that delivers real-time domain events to the frontend. Events are JSON objects with `type` and `payload` keys. A `: ping` keep-alive comment is sent every 25 s when the queue is idle. Reconnect timeout is set to 3 000 ms.",
+        "description": "Opens a `text/event-stream` connection that delivers real-time domain events to the frontend. Each connection gets its own queue (multiple tabs all receive every event). Events are JSON objects with `type` and `payload` keys. A `: ping` keep-alive comment is sent every 25 s when idle. Reconnect timeout is set to 3 000 ms.",
         "operationId": "events-event_stream",
         "responses": {
           "200": {
@@ -1683,80 +1810,6 @@
           "message"
         ],
         "title": "DiscoveryMessageRequest"
-      },
-      "DiscoveryMessageResponse": {
-        "properties": {
-          "question": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question"
-          },
-          "done": {
-            "type": "boolean",
-            "title": "Done"
-          },
-          "brief": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Brief"
-          }
-        },
-        "type": "object",
-        "required": [
-          "question",
-          "done"
-        ],
-        "title": "DiscoveryMessageResponse"
-      },
-      "DiscoveryStartResponse": {
-        "properties": {
-          "question": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question"
-          },
-          "done": {
-            "type": "boolean",
-            "title": "Done"
-          },
-          "brief": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Brief"
-          }
-        },
-        "type": "object",
-        "required": [
-          "done"
-        ],
-        "title": "DiscoveryStartResponse",
-        "description": "Returned by POST /discovery/start \u2014 either a question or completion."
       },
       "ErrorResponse": {
         "properties": {
@@ -2557,22 +2610,77 @@
         ],
         "title": "RefineRequest"
       },
-      "RefineResponse": {
+      "SessionAccepted": {
         "properties": {
           "session_id": {
             "type": "string",
             "title": "Session Id"
           },
-          "actions_taken": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Actions Taken"
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting_input",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status"
+        ],
+        "title": "SessionAccepted",
+        "description": "Returned with 202 when a long-running session is started."
+      },
+      "SessionStatusResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
           },
-          "succeeded": {
-            "type": "boolean",
-            "title": "Succeeded"
+          "kind": {
+            "type": "string",
+            "enum": [
+              "discovery",
+              "refine"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting_input",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
           },
           "error": {
             "anyOf": [
@@ -2589,10 +2697,11 @@
         "type": "object",
         "required": [
           "session_id",
-          "actions_taken",
-          "succeeded"
+          "kind",
+          "status"
         ],
-        "title": "RefineResponse"
+        "title": "SessionStatusResponse",
+        "description": "Current state of a long-running session."
       },
       "SpecResponse": {
         "properties": {
