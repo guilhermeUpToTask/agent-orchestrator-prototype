@@ -1,50 +1,156 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ============================================================================
+   AIPOM design tokens — "Instrument panel"
+   Color is reserved for state. Five status hues, fixed meanings:
+     idle (gray)  · not started
+     run  (blue)  · machine working — also the interactive accent
+     gate (amber) · waiting on the operator
+     ok   (green) · settled successfully
+     fail (red)   · failed / disconnected
+   Dark is default; light theme overrides the same variables.
+   ========================================================================= */
 
 :root {
   color-scheme: dark;
-  font-family: 'Geist', 'DM Sans', system-ui, sans-serif;
+
+  /* surfaces — elevation by lightness step, not shadow */
+  --bg-0: #131416;
+  --bg-1: #1a1b1e;
+  --bg-2: #222327;
+  --bg-3: #2a2c31;
+  --border-0: #2e3035;
+  --border-1: #3d4046;
+
+  /* text — floor 4.5:1 on --bg-1 */
+  --text-1: #ececee;
+  --text-2: #b4b6bc;
+  --text-3: #84878f;
+
+  /* status: base / wash / readable-on-wash */
+  --idle: #84878f;  --idle-bg: #25262a;  --idle-text: #9a9da4;
+  --run:  #5a9cf8;  --run-bg:  #16243c;  --run-text:  #8fbcfb;
+  --gate: #e0a430;  --gate-bg: #332708;  --gate-text: #ecc164;
+  --ok:   #4cc38a;  --ok-bg:   #122b1f;  --ok-text:   #7bd6ab;
+  --fail: #ef6a6a;  --fail-bg: #371616;  --fail-text: #f49b9b;
+
+  /* interaction — blue family: blue is the machine, including your controls to it */
+  --accent: #5a9cf8;
+  --accent-hover: #7cb0fa;
+  --accent-text-on: #0d1726;
+
+  /* type */
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --fs-micro: 11px;   /* uppercase mono labels only */
+  --fs-body: 13px;
+  --fs-emph: 14px;
+  --fs-title: 16px;
+  --fs-head: 20px;
+
+  /* spacing (4px scale) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+
+  /* radius — instrument, not bubble */
+  --r-1: 3px; --r-2: 6px; --r-3: 10px;
+
+  /* elevation — true overlays only */
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.45);
+
+  /* shell metrics */
+  --topbar-h: 44px;
+  --rail-w: 248px;
+  --chat-w: 320px;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --bg-0: #f4f4f5; --bg-1: #ffffff; --bg-2: #f7f7f8; --bg-3: #ededee;
+  --border-0: #dcdce0; --border-1: #c4c4ca;
+  --text-1: #1b1c1f; --text-2: #45474d; --text-3: #6b6e76;
+  --idle: #6b6e76; --idle-bg: #ececee; --idle-text: #55585f;
+  --run:  #1f6fe0; --run-bg:  #e3eefc; --run-text:  #1a5cba;
+  --gate: #9a6a00; --gate-bg: #fbf0d7; --gate-text: #7d5600;
+  --ok:   #15794a; --ok-bg:   #ddf3e7; --ok-text:   #116239;
+  --fail: #c93b3b; --fail-bg: #fbe3e3; --fail-text: #a82f2f;
+  --accent: #1f6fe0; --accent-hover: #3a83ea; --accent-text-on: #ffffff;
+  --shadow-overlay: 0 8px 24px rgb(20 22 26 / 0.18);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+
+body {
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
 
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  background: #0b0d12;
-  overflow: hidden;
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+button:disabled { cursor: default; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+code, pre, .mono { font-family: var(--font-mono); }
+
+/* Every focusable element gets the same visible ring. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent);
+  border-radius: var(--r-1);
 }
 
-/* Scrollbars */
-::-webkit-scrollbar            { width: 4px; height: 4px; }
-::-webkit-scrollbar-track      { background: transparent; }
-::-webkit-scrollbar-thumb      { background: #1c2030; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover{ background: #2a3050; }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
-/* React Flow overrides */
-.react-flow__renderer          { background: transparent !important; }
-.react-flow__background        { background: #0b0d12 !important; }
-.react-flow__minimap           { background: #0f1117 !important; border: 1px solid #1c2030 !important; border-radius: 8px !important; }
-.react-flow__minimap-mask      { fill: rgba(0,0,0,0.5) !important; }
-.react-flow__minimap-node      { fill: #1c2030 !important; }
-.react-flow__controls          { background: #0f1117 !important; border: 1px solid #1c2030 !important; border-radius: 8px !important; box-shadow: none !important; }
-.react-flow__controls-button   { background: #0f1117 !important; border-color: #1c2030 !important; color: #475569 !important; }
-.react-flow__controls-button:hover { background: #13161f !important; color: #94a3b8 !important; }
-.react-flow__edge-path         { stroke-width: 1.5; }
-.react-flow__handle            { background: #1c2030 !important; border-color: #2a3050 !important; width: 8px !important; height: 8px !important; }
-.react-flow__handle-left       { left: -4px !important; }
-.react-flow__handle-right      { right: -4px !important; }
-.react-flow__node              { cursor: default !important; }
-.react-flow__panel             { margin: 12px !important; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-0); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-1); }
 
-/* Animations */
-@keyframes spin    { to { transform: rotate(360deg); } }
-@keyframes pulse   { 0%,100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.1); } }
-@keyframes fadein  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-@keyframes glow    { 0%,100% { box-shadow: 0 0 4px var(--glow-color,#3b6ef5); } 50% { box-shadow: 0 0 14px var(--glow-color,#3b6ef5); } }
-@keyframes slideIn { from { transform: translateX(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* ── Shared utility classes ──────────────────────────────────────────────── */
 
-.anim-fadein  { animation: fadein  .18s ease both; }
-.anim-slidein { animation: slideIn .2s ease both; }
+/* Uppercase mono micro-label — the only place 11px is allowed */
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
 
-/* Custom selection */
-::selection { background: rgba(59,110,245,0.3); }
+/* Live-update feedback: one quiet wash that decays. No layout movement. */
+@keyframes row-flash { from { background-color: var(--run-bg); } to { background-color: transparent; } }
+.row-flash { animation: row-flash 600ms ease-out; }
+
+/* The only ambient motion: a breathing dot on blue running states. */
+@keyframes breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.breathe { animation: breathe 2s ease-in-out infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1.2s linear infinite; }
+
+/* Skeletons for data surfaces — never spinners */
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+.skeleton {
+  border-radius: var(--r-1);
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breathe, .spin, .skeleton, .row-flash { animation: none; }
+}
+
+/* ── React Flow chrome (used by the goal graph view) ─────────────────────── */
+.react-flow__renderer   { background: transparent !important; }
+.react-flow__background { background: var(--bg-0) !important; }
+.react-flow__minimap    { background: var(--bg-1) !important; border: 1px solid var(--border-0) !important; border-radius: var(--r-2) !important; }
+.react-flow__controls   { background: var(--bg-1) !important; border: 1px solid var(--border-0) !important; border-radius: var(--r-2) !important; box-shadow: none !important; }
+.react-flow__controls-button { background: var(--bg-1) !important; border-color: var(--border-0) !important; color: var(--text-3) !important; }
+.react-flow__controls-button:hover { background: var(--bg-2) !important; color: var(--text-2) !important; }
+.react-flow__node { cursor: default !important; }

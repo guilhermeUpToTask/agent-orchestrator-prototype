@@ -1,100 +1,83 @@
 import React, { useEffect, useRef } from 'react';
-import { ReactFlowProvider } from '@xyflow/react';
-import { Toolbar } from './components/Toolbar';
-import { PlanCanvas } from './components/PlanCanvas';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { TopBar } from './components/TopBar';
+import { LifecycleRail } from './components/LifecycleRail';
+import { GatePanel } from './components/GatePanel';
 import { ChatPanel } from './components/ChatPanel';
-import { DetailPanel } from './components/DetailPanel';
+import { Overview } from './views/Overview';
+import { GoalsView, GoalDetail } from './views/Goals';
+import { ActivityView } from './views/Activity';
 import { usePlannerStore, ts } from './store/plannerStore';
-import { useGoals, usePlan, usePlanHistory, useSSEBridge } from './lib/queries';
+import { usePlan, useSSEBridge } from './lib/queries';
+import { absTime } from './lib/time';
 import './styles/global.css';
+import styles from './App.module.css';
 
-/**
- * Hydrate the chat transcript once when the backend data first arrives:
- * recent plan history as system entries plus a connection intro.
- */
+/** One intro line when the backend first answers — history lives in Activity. */
 function useChatHydration() {
   const addMessage = usePlannerStore((s) => s.addMessage);
-  const { data: plan, error } = usePlan();
-  const { data: goals } = useGoals();
-  const { data: history } = usePlanHistory();
+  const { data: plan } = usePlan();
   const hydrated = useRef(false);
-  const errorShown = useRef(false);
 
   useEffect(() => {
-    if (error && !errorShown.current) {
-      errorShown.current = true;
-      addMessage({
-        role: 'system',
-        text: `Failed to connect to backend: ${error.message}. Is the API server running at ${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}?`,
-        ts: ts(),
-      });
-    }
-  }, [error, addMessage]);
-
-  useEffect(() => {
-    if (hydrated.current || !plan || !goals || !history) return;
+    if (hydrated.current || !plan) return;
     hydrated.current = true;
-
-    for (const h of history.slice(-20)) {
-      addMessage({
-        role: 'system',
-        text: `[${h.actor ?? 'system'}] ${h.event}${h.detail ? ' — ' + JSON.stringify(h.detail) : ''}`,
-        ts: h.timestamp
-          ? new Date(h.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-          : ts(),
-      });
-    }
-
     addMessage({
       role: 'assistant',
-      text: `AIPOM connected. Plan status: ${plan.status} · ${goals.length} goals · ${goals.reduce((n, g) => n + g.tasks.length, 0)} tasks. ${
+      text:
         plan.status === 'phase_active'
-          ? 'Chat is wired to the planning engine — type a refinement request.'
+          ? 'Connected. Chat is wired to the tactical planner — type a refinement request.'
           : plan.status === 'discovery'
-            ? 'Discovery is active. Answer questions to build the project brief.'
-            : 'Use the approval buttons in the toolbar to advance the plan.'
-      }`,
+            ? 'Connected. Discovery is active — answer questions here to build the project brief.'
+            : 'Connected. Approvals live in the gate card on the left rail.',
       ts: ts(),
     });
-  }, [plan, goals, history, addMessage]);
+  }, [plan, addMessage]);
+}
+
+/**
+ * While the stream is not live, the main view is marked stale instead of
+ * silently showing old data: dimmed slightly, with a "data as of" notice.
+ */
+function StaleNotice() {
+  const { state, lastEventAt } = usePlannerStore((s) => s.connection);
+  if (state === 'live' || state === 'connecting') return null;
+  return (
+    <div className={styles.staleNotice} role="status">
+      Live stream {state === 'down' ? 'disconnected' : 'reconnecting'} — showing data as of{' '}
+      {lastEventAt ? absTime(lastEventAt) : 'initial load'}.
+    </div>
+  );
 }
 
 export default function App() {
-  const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
+  const connState = usePlannerStore((s) => s.connection.state);
 
   useSSEBridge();
   useChatHydration();
 
   return (
-    <ReactFlowProvider>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        width: '100vw',
-        overflow: 'hidden',
-        background: '#0b0d12',
-      }}>
-        {/* Toolbar */}
-        <Toolbar />
-
-        {/* Main content row */}
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          overflow: 'hidden',
-          position: 'relative',
-        }}>
-          {/* Plan canvas — fills available space */}
-          <PlanCanvas />
-
-          {/* Detail panel — overlays canvas on the right */}
-          {detailPanelOpen && <DetailPanel />}
-
-          {/* Chat panel — fixed right column */}
+    <BrowserRouter>
+      <div className={styles.shell}>
+        <TopBar />
+        <div className={styles.body}>
+          <LifecycleRail />
+          <main className={`${styles.main} ${connState === 'down' || connState === 'reconnecting' ? styles.stale : ''}`}>
+            <StaleNotice />
+            <div className={styles.viewScroll}>
+              <Routes>
+                <Route path="/" element={<Overview />} />
+                <Route path="/goals" element={<GoalsView />} />
+                <Route path="/goals/:goalId" element={<GoalDetail />} />
+                <Route path="/activity" element={<ActivityView />} />
+                <Route path="*" element={<Overview />} />
+              </Routes>
+            </div>
+          </main>
           <ChatPanel />
         </div>
+        <GatePanel />
       </div>
-    </ReactFlowProvider>
+    </BrowserRouter>
   );
 }

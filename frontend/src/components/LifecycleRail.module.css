@@ -1,0 +1,212 @@
+.rail {
+  width: var(--rail-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-0);
+  overflow-y: auto;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--border-0);
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 7px 10px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+.navLink:hover { background: var(--bg-2); color: var(--text-1); }
+.navActive { background: var(--bg-3); color: var(--text-1); }
+
+.navBadge {
+  margin-left: auto;
+  min-width: 18px;
+  text-align: center;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--gate-bg);
+  border: 1px solid color-mix(in srgb, var(--gate) 40%, transparent);
+  color: var(--gate-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+/* ── Lifecycle steps ────────────────────────────────────────────────────── */
+
+.sectionLabel { padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+
+.steps {
+  list-style: none;
+  padding: 0 var(--sp-3);
+  position: relative;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 6px 4px;
+  position: relative;
+}
+
+/* connecting line */
+.step::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 26px;
+  bottom: -8px;
+  width: 1px;
+  background: var(--border-0);
+}
+.step:last-child::before { display: none; }
+
+.stepMark {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--text-3);
+  z-index: 1;
+  margin-top: 1px;
+}
+.done .stepMark { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+.active .stepMark { border-color: var(--run); color: var(--run); background: var(--run-bg); }
+
+.stepLabel {
+  font-size: var(--fs-body);
+  color: var(--text-3);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.done .stepLabel { color: var(--text-2); }
+.active .stepLabel { color: var(--text-1); font-weight: 500; }
+
+.stepSub {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Cursor slot: gate card / session card ──────────────────────────────── */
+
+.cursorSlot {
+  margin-top: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.sessionCard,
+.gateCard {
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sessionCard {
+  background: var(--bg-2);
+  border: 1px solid var(--border-0);
+}
+
+.gateCard {
+  background: var(--gate-bg);
+  border: 1px solid color-mix(in srgb, var(--gate) 45%, transparent);
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.gateTitle {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--gate-text);
+}
+
+.cardBody {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.gateCard .cardBody { color: color-mix(in srgb, var(--gate-text) 75%, var(--text-2)); }
+
+.cardMeta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+
+.runDot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--run);
+}
+
+.progressLine {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--run-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.primaryBtn,
+.gateBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+
+.primaryBtn {
+  background: var(--accent);
+  color: var(--accent-text-on);
+}
+.primaryBtn:hover { background: var(--accent-hover); }
+.primaryBtn:disabled { opacity: 0.55; }
+
+.gateBtn {
+  background: var(--gate);
+  color: #1f1602;
+}
+.gateBtn:hover { background: color-mix(in srgb, var(--gate) 85%, white); }
