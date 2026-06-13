@@ -26,7 +26,10 @@ Every 409 carries a PlanConflictResponse body with `action`,
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+import threading
+
+import structlog
+from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies import (
     PlanOrchestratorDep,
@@ -44,7 +47,11 @@ from src.api.schemas.plan import (
     PlanPhaseResponse,
     PlanResponse,
 )
+from src.api.schemas.sessions import SessionAccepted
+from src.api.sessions import registry
 from src.api.sse import publish_sse
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
@@ -162,6 +169,159 @@ def approve_brief(orchestrator: PlanOrchestratorDep) -> ApproveBriefResponse:
     plan = orchestrator.approve_brief()
     publish_sse("plan.status_changed", {"status": plan.status.value})
     return ApproveBriefResponse(plan_status=plan.status.value, vision=plan.vision)
+
+
+# ── Run Architecture (session) ────────────────────────────────────────────────
+
+@router.post(
+    "/architecture/run",
+    response_model=SessionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Run Architecture Session",
+    description=(
+        "Launches the autonomous architecture planner in a background thread "
+        "while the plan is in `architecture` status. The planner drafts the "
+        "phase plan and architecture decisions; each is published over SSE as "
+        "`plan.decision_proposed` / `plan.phase_proposed` as it is produced, and "
+        "the session emits `plan.architecture_completed` / "
+        "`plan.architecture_failed` on termination. Once decisions exist the "
+        "operator can call `POST /plan/approve-architecture`."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "An architecture session is already in progress.",
+        }
+    },
+)
+async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
+    if registry.active("architecture") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An architecture session is already in progress.",
+        )
+
+    session = registry.create("architecture")
+
+    def run() -> None:
+        try:
+            result = orchestrator.run_architecture()
+            if result.failure_reason:
+                session.fail(result.failure_reason)
+            else:
+                session.complete(
+                    {
+                        "decisions": [
+                            {"id": d.id, "domain": d.domain, "feature_tag": d.feature_tag}
+                            for d in result.pending_decisions
+                        ],
+                        "phases": [
+                            {"index": p.index, "name": p.name, "goal_names": p.goal_names}
+                            for p in result.pending_phases
+                        ],
+                    }
+                )
+        except Exception as exc:
+            log.exception(
+                "architecture.session_failed",
+                session_id=session.session_id,
+                error=str(exc),
+            )
+            session.fail(str(exc))
+        finally:
+            if session.status == "done":
+                publish_sse(
+                    "plan.architecture_completed",
+                    {"session_id": session.session_id},
+                )
+            else:
+                publish_sse(
+                    "plan.architecture_failed",
+                    {"session_id": session.session_id, "error": session.error},
+                )
+
+    threading.Thread(
+        target=run, daemon=True, name=f"architecture-{session.session_id}"
+    ).start()
+
+    return SessionAccepted(session_id=session.session_id, status=session.status)
+
+
+# ── Run Phase Review (session) ────────────────────────────────────────────────
+
+@router.post(
+    "/phase-review/run",
+    response_model=SessionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Run Phase Review Session",
+    description=(
+        "Launches the autonomous phase-review planner in a background thread "
+        "while the plan is in `phase_review` status. The planner records lessons "
+        "and proposes the next phase; the session emits "
+        "`plan.phase_review_completed` / `plan.phase_review_failed` on "
+        "termination. The operator then calls `POST /plan/approve-phase`."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "A phase-review session is already in progress.",
+        }
+    },
+)
+async def run_phase_review(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
+    if registry.active("phase_review") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A phase-review session is already in progress.",
+        )
+
+    session = registry.create("phase_review")
+
+    def run() -> None:
+        try:
+            result = orchestrator.run_phase_review()
+            if result.failure_reason:
+                session.fail(result.failure_reason)
+            else:
+                next_phase = result.next_phase_proposal
+                session.complete(
+                    {
+                        "lessons": result.lessons,
+                        "next_phase": (
+                            {"index": next_phase.index, "name": next_phase.name}
+                            if next_phase
+                            else None
+                        ),
+                        "decisions": [
+                            {"id": d.id, "domain": d.domain}
+                            for d in result.pending_decisions
+                        ],
+                    }
+                )
+        except Exception as exc:
+            log.exception(
+                "phase_review.session_failed",
+                session_id=session.session_id,
+                error=str(exc),
+            )
+            session.fail(str(exc))
+        finally:
+            if session.status == "done":
+                publish_sse(
+                    "plan.phase_review_completed",
+                    {"session_id": session.session_id},
+                )
+            else:
+                publish_sse(
+                    "plan.phase_review_failed",
+                    {"session_id": session.session_id, "error": session.error},
+                )
+
+    threading.Thread(
+        target=run, daemon=True, name=f"phase-review-{session.session_id}"
+    ).start()
+
+    return SessionAccepted(session_id=session.session_id, status=session.status)
 
 
 # ── Approve Architecture ──────────────────────────────────────────────────────

@@ -3,7 +3,9 @@ import { NavLink } from 'react-router-dom';
 import {
   Activity, Check, ChevronRight, Compass, LayoutDashboard, Play, Target,
 } from 'lucide-react';
-import { usePlan, useStartDiscovery, useGoals } from '../lib/queries';
+import {
+  usePlan, useStartDiscovery, useGoals, useRunArchitecture, useRunPhaseReview,
+} from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { relTime, useNow } from '../lib/time';
 import styles from './LifecycleRail.module.css';
@@ -33,7 +35,11 @@ export function LifecycleRail() {
   const decisions = usePlannerStore((s) => s.decisions);
   const events = usePlannerStore((s) => s.events);
   const isThinking = usePlannerStore((s) => s.ui.isThinking);
+  const activeRun = usePlannerStore((s) => s.activeRun);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
   const startDiscovery = useStartDiscovery();
+  const runArchitecture = useRunArchitecture();
+  const runPhaseReview = useRunPhaseReview();
   const now = useNow(1000);
 
   const status = plan?.status;
@@ -66,18 +72,31 @@ export function LifecycleRail() {
 
   // ── What goes in the cursor slot: gate, CTA, or live session ─────────────
   const briefReady = status === 'discovery' && plan?.brief != null;
+
+  // The architecture/phase-review gates only make sense once the autonomous
+  // planner has actually run — approving before that 409'd ("no completed
+  // session"). Decisions on the stream (or a completed run) signal readiness.
+  const architectureReady =
+    decisions.length > 0 || completedRuns.includes('architecture');
+  const phaseReviewReady = completedRuns.includes('phase_review');
+
+  const needsArchitectureDraft =
+    status === 'architecture' && !architectureReady && activeRun !== 'architecture';
+  const needsPhaseReviewRun =
+    status === 'phase_review' && !phaseReviewReady && activeRun !== 'phase_review';
+
   const gate =
     briefReady
       ? { title: 'Brief ready for approval', body: 'Review the project brief and approve it to start architecture drafting.' }
-      : status === 'architecture'
+      : status === 'architecture' && architectureReady
         ? {
             title: 'Architecture approval',
             body: decisions.length > 0
               ? `${decisions.length} decision${decisions.length === 1 ? '' : 's'} proposed. Review and approve to dispatch the first phase.`
-              : 'Approve the drafted architecture to dispatch the first phase to workers.',
+              : 'Architecture drafted. Review and approve to dispatch the first phase to workers.',
           }
-        : status === 'phase_review'
-          ? { title: 'Phase review', body: 'The phase has completed. Approve the next phase or mark the project done.' }
+        : status === 'phase_review' && phaseReviewReady
+          ? { title: 'Phase review', body: 'The phase review is complete. Approve the next phase or mark the project done.' }
           : null;
 
   const gateGoals = goals.filter(
@@ -144,12 +163,53 @@ export function LifecycleRail() {
           </div>
         )}
 
+        {/* Architecture not yet drafted: the missing step that dead-ended at
+            approve-architecture. Run it here; decisions then stream in. */}
+        {needsArchitectureDraft && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>Architecture not drafted yet</div>
+            <p className={styles.cardBody}>
+              Run the architecture planner — it drafts the phase plan and the
+              decisions you'll approve to dispatch the first phase.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => runArchitecture.mutate()}
+              disabled={runArchitecture.isPending}
+            >
+              Draft architecture
+            </button>
+          </div>
+        )}
+
+        {/* Phase review not yet run: same pattern as architecture. */}
+        {needsPhaseReviewRun && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>Phase review not run yet</div>
+            <p className={styles.cardBody}>
+              Run the phase review — the planner records lessons and proposes the
+              next phase for your approval.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => runPhaseReview.mutate()}
+              disabled={runPhaseReview.isPending}
+            >
+              Run phase review
+            </button>
+          </div>
+        )}
+
         {/* Live session: streamed progress, never a bare spinner */}
-        {(isThinking || (status === 'architecture' && !gateGoals.length && lastProgress)) && (
+        {(isThinking || activeRun !== null || (status === 'architecture' && !gateGoals.length && lastProgress)) && (
           <div className={styles.sessionCard} aria-live="polite">
             <div className={styles.cardTitle}>
               <span className={`${styles.runDot} breathe`} aria-hidden />
-              Planner working
+              {activeRun === 'architecture'
+                ? 'Drafting architecture…'
+                : activeRun === 'phase_review'
+                  ? 'Running phase review…'
+                  : 'Planner working'}
             </div>
             {lastProgress && (
               <pre className={styles.progressLine}>

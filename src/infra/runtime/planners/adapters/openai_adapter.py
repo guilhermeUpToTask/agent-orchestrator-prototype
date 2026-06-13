@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+import openai
 from openai import OpenAI
 
 from src.domain.ports.planner import PlannerTool
+from src.infra.runtime.planners.adapters import classify_provider_error
 from src.infra.runtime.planners.runtime_types import (
     NormalizedAssistantTurn,
     NormalizedToolCall,
@@ -50,12 +52,15 @@ class OpenAIPlannerAdapter:
         ]
 
     def send_turn(self, messages: list[dict], provider_tools: list[dict]) -> NormalizedAssistantTurn:
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            tools=provider_tools,
-            temperature=self._temperature,
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                tools=provider_tools,
+                temperature=self._temperature,
+            )
+        except openai.APIError as exc:
+            raise classify_provider_error(self._model, exc) from exc
         msg = response.choices[0].message
 
         tool_calls: list[NormalizedToolCall] = []

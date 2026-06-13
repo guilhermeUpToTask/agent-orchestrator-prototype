@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from src.domain.ports.planner import PlannerRuntimeError, PlannerTool
+from src.infra.runtime.planners.adapters import classify_provider_error
 from src.infra.runtime.planners.runtime_types import (
     NormalizedAssistantTurn,
     NormalizedToolCall,
@@ -37,13 +38,18 @@ class AnthropicPlannerAdapter:
         ]
 
     def send_turn(self, messages: list[dict], provider_tools: list[dict]) -> NormalizedAssistantTurn:
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=16000,
-            thinking={"type": "enabled", "budget_tokens": self._thinking_budget},
-            tools=provider_tools,
-            messages=messages,
-        )
+        import anthropic
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=16000,
+                thinking={"type": "enabled", "budget_tokens": self._thinking_budget},
+                tools=provider_tools,
+                messages=messages,
+            )
+        except anthropic.APIError as exc:
+            raise classify_provider_error(self._model, exc) from exc
 
         reasoning = ""
         final_text = ""

@@ -36,6 +36,8 @@ export interface DecisionProposal {
   at: number;
 }
 
+export type PlannerRunKind = 'architecture' | 'phase_review';
+
 const EVENT_BUFFER_MAX = 500;
 
 interface PlannerState {
@@ -47,6 +49,13 @@ interface PlannerState {
 
   // Architecture decision proposals captured from SSE
   decisions: DecisionProposal[];
+
+  // Which autonomous planner run (architecture / phase_review) is in flight,
+  // and which kinds have completed this session. Drives the rail's
+  // "Draft architecture" / "Run phase review" affordances and gate gating,
+  // since these runs have no REST read-model — only SSE start/finish events.
+  activeRun: PlannerRunKind | null;
+  completedRuns: PlannerRunKind[];
 
   // SSE connection
   connection: { state: ConnectionState; lastEventAt: number | null };
@@ -64,6 +73,11 @@ interface PlannerState {
   addDecision: (d: Omit<DecisionProposal, 'at'>) => void;
   clearDecisions: () => void;
 
+  // ── Autonomous planner runs ─────────────────────────────────────────────────
+  setActiveRun: (kind: PlannerRunKind | null) => void;
+  markRunComplete: (kind: PlannerRunKind) => void;
+  resetRuns: () => void;
+
   // ── Selection / panels ────────────────────────────────────────────────────
   selectNode: (id: string | null) => void;
   setLayoutDirection: (dir: 'LR' | 'TB') => void;
@@ -76,6 +90,8 @@ export const usePlannerStore = create<PlannerState>()(
     messages: [],
     events: [],
     decisions: [],
+    activeRun: null,
+    completedRuns: [],
     connection: { state: 'connecting', lastEventAt: null },
 
     ui: {
@@ -120,6 +136,21 @@ export const usePlannerStore = create<PlannerState>()(
 
     clearDecisions: () => {
       set((s) => { s.decisions = []; });
+    },
+
+    setActiveRun: (kind) => {
+      set((s) => { s.activeRun = kind; });
+    },
+
+    markRunComplete: (kind) => {
+      set((s) => {
+        s.activeRun = null;
+        if (!s.completedRuns.includes(kind)) s.completedRuns.push(kind);
+      });
+    },
+
+    resetRuns: () => {
+      set((s) => { s.activeRun = null; s.completedRuns = []; });
     },
 
     selectNode: (id) => {
