@@ -1,0 +1,105 @@
+.bar {
+  height: var(--topbar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-0);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.brandMark {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  background: var(--bg-2);
+}
+
+.brandName {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  letter-spacing: 0.08em;
+  color: var(--text-1);
+}
+
+.planIdentity {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border-0);
+}
+
+.planName {
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.spacer { flex: 1; }
+
+/* ── Connection indicator ────────────────────────────────────────────────── */
+
+.conn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dotIdle { background: var(--idle); }
+.dotLive { background: var(--ok); }
+.dotWarn { background: var(--gate); }
+.dotDown { background: var(--fail); }
+
+.connState {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+}
+.connIdle .connState { color: var(--idle-text); }
+.connLive .connState { color: var(--ok-text); }
+.connWarn .connState { color: var(--gate-text); }
+.connDown .connState { color: var(--fail-text); }
+
+.connLast {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  border-left: 1px solid var(--border-0);
+  padding-left: var(--sp-2);
+  white-space: nowrap;
+}
+
+.resync {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+}
+.resync:hover { color: var(--text-1); background: var(--bg-3); }
