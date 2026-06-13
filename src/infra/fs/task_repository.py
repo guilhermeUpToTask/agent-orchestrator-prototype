@@ -14,6 +14,7 @@ Fixes applied vs v1:
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 import yaml
@@ -27,13 +28,16 @@ class YamlTaskRepository(TaskRepositoryPort):
     Stores tasks as discrete YAML files in a designated directory.
     Uses temp-file writes and os.replace() to guarantee atomic file updates on POSIX.
 
-    WARNING: Architectural Constraint (Single Orchestrator Assumption)
-    ------------------------------------------------------------------
-    The `update_if_version()` method uses read-compare-write sequence which is
-    NOT a true atomic CAS (Compare-and-Swap) against concurrent processes.
-    It is ONLY safe if exactly one orchestrator process runs at any given time.
-    If multi-process horizontal scaling is needed, this repository must be
-    replaced with a system supporting true atomic CAS (e.g. Postgres or Redis).
+    Concurrency contract (Single Writer Process, Many Threads)
+    ----------------------------------------------------------
+    `update_if_version()` is a read-compare-write guarded by an in-process
+    lock: it is safe for one process with any number of threads (the API
+    process hosts the task manager, reconciler and HTTP handlers on
+    separate threads). It is NOT atomic across processes — which is why
+    workers never write task state: they publish task.execution_* events
+    and the task manager applies the transitions (TaskRecordResultUseCase).
+    If multi-process writers are ever needed, replace this repository with
+    a true atomic CAS backend (Postgres or Redis Lua).
     """
 
     def __init__(self, tasks_dir: str | Path) -> None:
@@ -42,6 +46,7 @@ class YamlTaskRepository(TaskRepositoryPort):
         # FIX #3.1: quarantine directory for corrupt task files
         self._quarantine = self._dir / "quarantine"
         self._quarantine.mkdir(exist_ok=True)
+        self._write_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Port implementation
@@ -60,20 +65,22 @@ class YamlTaskRepository(TaskRepositoryPort):
         new_state: TaskAggregate,
         expected_version: int,
     ) -> bool:
-        path = self._task_path(task_id)
-        if not path.exists():
-            raise KeyError(f"Task {task_id} not found")
+        with self._write_lock:
+            path = self._task_path(task_id)
+            if not path.exists():
+                raise KeyError(f"Task {task_id} not found")
 
-        current = yaml.safe_load(path.read_text())
-        if current.get("state_version") != expected_version:
-            return False  # version conflict
+            current = yaml.safe_load(path.read_text())
+            if current.get("state_version") != expected_version:
+                return False  # version conflict
 
-        self._atomic_write(path, new_state)
-        return True
+            self._atomic_write(path, new_state)
+            return True
 
     def save(self, task: TaskAggregate) -> None:
-        path = self._task_path(task.task_id)
-        self._atomic_write(path, task)
+        with self._write_lock:
+            path = self._task_path(task.task_id)
+            self._atomic_write(path, task)
 
     def append_history(
         self,
@@ -82,11 +89,12 @@ class YamlTaskRepository(TaskRepositoryPort):
         actor: str,
         detail: dict,
     ) -> None:
-        task = self.load(task_id)
-        from src.domain import HistoryEntry
+        with self._write_lock:
+            task = self.load(task_id)
+            from src.domain import HistoryEntry
 
-        task.history.append(HistoryEntry(event=event, actor=actor, detail=detail))
-        self._atomic_write(self._task_path(task_id), task)
+            task.history.append(HistoryEntry(event=event, actor=actor, detail=detail))
+            self._atomic_write(self._task_path(task_id), task)
 
     def delete(self, task_id: str) -> bool:
         """Remove the task YAML file.  Returns True if deleted, False if not found."""

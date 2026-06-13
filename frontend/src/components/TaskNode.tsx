@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { TaskNodeData } from '../types/domain';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
+import type { TaskNodeData } from '../types/ui';
 import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 
@@ -15,7 +15,7 @@ function PulsingDot({ color }: { color: string }) {
   );
 }
 
-function TaskNodeComponent({ id, data }: NodeProps<TaskNodeData>) {
+function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
   const selectNode = usePlannerStore((s) => s.selectNode);
   const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
   const isSelected = selectedNodeId === id;

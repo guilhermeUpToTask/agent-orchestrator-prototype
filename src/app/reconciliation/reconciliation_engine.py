@@ -21,8 +21,8 @@ PR polling:
 """
 from __future__ import annotations
 
-import time
-from typing import Optional
+import threading
+from typing import Any, Optional
 
 import structlog
 
@@ -30,6 +30,7 @@ from src.domain import (
     DomainEvent,
     ReconciliationAction,
     ReconciliationService,
+    TaskAggregate,
     TaskStatus,
 )
 from src.domain import AgentRegistryPort, EventPort, LeasePort, TaskRepositoryPort
@@ -68,8 +69,8 @@ class Reconciler:
         stuck_task_min_age_seconds: int = STUCK_TASK_MIN_AGE_SECONDS,
         # Optional PR-polling dependencies
         goal_repo: Optional[GoalRepositoryPort] = None,
-        sync_pr_usecase=None,
-        advance_pr_usecase=None,
+        sync_pr_usecase: Any = None,
+        advance_pr_usecase: Any = None,
     ) -> None:
         self._repo     = task_repo
         self._lease    = lease_port
@@ -85,6 +86,8 @@ class Reconciler:
         self._sync_pr      = sync_pr_usecase
         self._advance_pr   = advance_pr_usecase
 
+        self._stop = threading.Event()
+
     # ------------------------------------------------------------------
     # Loop
     # ------------------------------------------------------------------
@@ -96,11 +99,21 @@ class Reconciler:
             self._run_pr_polling_pass()
 
     def run_forever(self) -> None:
-        """Block forever, running the reconcile loop."""
+        """Run the reconcile loop until shutdown() is called.
+
+        Waits one full interval BEFORE the first pass: at boot, workers may
+        not have heartbeated yet, and an eager pass would fail their ASSIGNED
+        tasks as dead-agent.
+        """
         log.info("reconciler.started", interval=self._interval)
-        while True:
+        while not self._stop.wait(self._interval):
             self.run_once()
-            time.sleep(self._interval)
+        log.info("reconciler.stopped")
+
+    def shutdown(self) -> None:
+        """Unblock run_forever() at the next interval check."""
+        log.info("reconciler.shutdown_requested")
+        self._stop.set()
 
     # ------------------------------------------------------------------
     # Task reconciliation pass (unchanged from original)
@@ -121,6 +134,7 @@ class Reconciler:
     # ------------------------------------------------------------------
 
     def _run_pr_polling_pass(self) -> None:
+        assert self._goal_repo is not None  # guarded by run_once()
         """
         Poll GitHub for every goal in a PR-phase status.
 
@@ -159,7 +173,7 @@ class Reconciler:
     # Per-task: assess via domain service → act on decision
     # ------------------------------------------------------------------
 
-    def _process(self, task) -> None:
+    def _process(self, task: TaskAggregate) -> None:
         lease_active = self._lease.is_lease_active(task.task_id)
         agent = (
             self._registry.get(task.assignment.agent_id)
@@ -191,7 +205,7 @@ class Reconciler:
     # Side effects
     # ------------------------------------------------------------------
 
-    def _republish(self, task, event_type: str) -> None:
+    def _republish(self, task: TaskAggregate, event_type: str) -> None:
         """Re-emit task.created or task.requeued without modifying state."""
         self._events.publish(DomainEvent(
             type=event_type,
@@ -201,7 +215,7 @@ class Reconciler:
         log.info("reconciler.republished_pending",
                  task_id=task.task_id, event_type=event_type)
 
-    def _fail(self, task, reason: str) -> None:
+    def _fail(self, task: TaskAggregate, reason: str) -> None:
         """
         Transition task → FAILED via CAS write, then emit task.failed.
         If the task moved on before we act (worker recovered), skip silently.

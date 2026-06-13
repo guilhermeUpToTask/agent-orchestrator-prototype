@@ -18,6 +18,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from src.domain.errors.plan_errors import InvalidPlanTransitionError
+
 
 class PhaseStatus(str, Enum):
     PLANNED  = "planned"
@@ -147,11 +149,12 @@ class ProjectPlan(BaseModel):
         # Note: This is called from methods that return new instances
         # since Pydantic models are frozen. We don't actually mutate self.
 
-    def _assert_status(self, *expected: ProjectPlanStatus) -> None:
+    def _assert_status(self, action: str, *expected: ProjectPlanStatus) -> None:
         if self.status not in expected:
-            raise ValueError(
-                f"ProjectPlan '{self.plan_id}' is '{self.status.value}'; "
-                f"expected one of {[s.value for s in expected]}."
+            raise InvalidPlanTransitionError(
+                action=action,
+                current_status=self.status.value,
+                expected=[s.value for s in expected],
             )
 
     def _with_history(self, event: str, actor: str, detail: dict[str, Any] | None = None) -> "ProjectPlan":
@@ -178,7 +181,7 @@ class ProjectPlan(BaseModel):
 
         Approve the project brief created during discovery.
         """
-        self._assert_status(ProjectPlanStatus.DISCOVERY)
+        self._assert_status("approve brief", ProjectPlanStatus.DISCOVERY)
 
         return self._with_history(
             "project_plan.brief_approved",
@@ -200,7 +203,9 @@ class ProjectPlan(BaseModel):
         Approves the proposed phases and makes the first one ACTIVE.
         Appends new phases if not already present.
         """
-        self._assert_status(ProjectPlanStatus.ARCHITECTURE, ProjectPlanStatus.PHASE_REVIEW)
+        self._assert_status(
+            "approve phase", ProjectPlanStatus.ARCHITECTURE, ProjectPlanStatus.PHASE_REVIEW
+        )
 
         # Build new phases list - append if not already present
         new_phases = list(self.phases)
@@ -248,7 +253,7 @@ class ProjectPlan(BaseModel):
 
         Called when a goal is dispatched via GoalInitUseCase.
         """
-        self._assert_status(ProjectPlanStatus.PHASE_ACTIVE)
+        self._assert_status("register goal", ProjectPlanStatus.PHASE_ACTIVE)
 
         if self.current_phase_index < 0:
             raise ValueError("No active phase to register goal to")
@@ -277,7 +282,7 @@ class ProjectPlan(BaseModel):
 
         Called automatically when all goals in the active phase reach MERGED.
         """
-        self._assert_status(ProjectPlanStatus.PHASE_ACTIVE)
+        self._assert_status("trigger review", ProjectPlanStatus.PHASE_ACTIVE)
 
         # Update current phase status to COMPLETED
         updated_phases = []
@@ -304,7 +309,7 @@ class ProjectPlan(BaseModel):
 
         Status stays PHASE_REVIEW until approve_phase() advances it.
         """
-        self._assert_status(ProjectPlanStatus.PHASE_REVIEW)
+        self._assert_status("complete review", ProjectPlanStatus.PHASE_REVIEW)
 
         # Update current phase with lessons
         updated_phases = []
@@ -331,7 +336,7 @@ class ProjectPlan(BaseModel):
 
         Called when no more phases are planned.
         """
-        self._assert_status(ProjectPlanStatus.PHASE_REVIEW)
+        self._assert_status("mark done", ProjectPlanStatus.PHASE_REVIEW)
 
         return self._with_history(
             "project_plan.marked_done",

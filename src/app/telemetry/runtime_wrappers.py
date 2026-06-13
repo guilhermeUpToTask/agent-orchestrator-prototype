@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 from src.app.telemetry.service import TelemetryService
 from src.app.telemetry.tracing import TraceContext
@@ -118,7 +118,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         prompt: str,
         tools: list[PlannerTool],
         max_turns: int = 15,
-        session_callback: Optional[callable] = None,
+        session_callback: Optional["Callable[..., None]"] = None,
     ) -> PlannerOutput:
         span = self._telemetry.start_span(self._trace)
         self._telemetry.emit(

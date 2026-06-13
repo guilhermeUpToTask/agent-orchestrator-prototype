@@ -18,28 +18,34 @@ Usage in a router:
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Callable
 
 from fastapi import Depends
 
-# The container is lazily resolved; routers never import it directly.
-_container = None
+# The container is resolved through a provider so the active project context
+# can be re-evaluated per request; routers never import the container directly.
+_container_provider: Callable[[], object] | None = None
 
 
 def _get_container():
-    """Resolve the AppContainer singleton (initialised in create_app)."""
-    if _container is None:
+    """Resolve the AppContainer for this request (provider bound in create_app)."""
+    if _container_provider is None:
         raise RuntimeError(
             "AppContainer has not been initialised. "
             "Call create_app() before handling requests."
         )
-    return _container
+    return _container_provider()
 
 
 def set_container(container) -> None:
-    """Called once during create_app() to bind the container."""
-    global _container
-    _container = container
+    """Bind a fixed container (used by tests and explicit injection)."""
+    set_container_provider(lambda: container)
+
+
+def set_container_provider(provider: Callable[[], object]) -> None:
+    """Bind a callable that resolves the active container per request."""
+    global _container_provider
+    _container_provider = provider
 
 
 # ── Plan / Planner ────────────────────────────────────────────────────────────
@@ -159,6 +165,11 @@ def get_project_reset_usecase(c=Depends(_get_container)):
     return c.project_reset_usecase
 
 
+def get_settings_context(c=Depends(_get_container)):
+    """Return the active SettingsContext (machine + project + secrets)."""
+    return c.ctx
+
+
 # ── Annotated shorthands (modern DI style) ────────────────────────────────────
 # Import these in route handlers for the cleanest signatures:
 #
@@ -195,3 +206,4 @@ ProposeSpecChangeUseCaseDep = Annotated[object, Depends(get_propose_spec_change_
 ValidateAgainstSpecUseCaseDep = Annotated[object, Depends(get_validate_against_spec_usecase)]
 
 ProjectResetUseCaseDep = Annotated[object, Depends(get_project_reset_usecase)]
+SettingsContextDep = Annotated[object, Depends(get_settings_context)]

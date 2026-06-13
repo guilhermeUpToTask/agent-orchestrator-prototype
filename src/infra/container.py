@@ -20,13 +20,18 @@ holds the single loaded SettingsContext and derives everything from it.
 from __future__ import annotations
 
 from functools import cached_property
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import structlog
 
 from src.infra.settings import SettingsContext, SettingsService
 from src.infra.settings.models import ConfigurationError
 from src.infra.project_paths import ProjectPaths
+
+if TYPE_CHECKING:
+    from src.domain import PlannerRuntimePort
+    from src.domain.ports.project_state import ProjectStatePort
+    from src.infra.logging.planner_logger import PlannerLiveLogger
 
 log = structlog.get_logger(__name__)
 
@@ -50,9 +55,15 @@ class AppContainer:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_env(cls, project_name: str | None = None) -> "AppContainer":
-        """Load settings from environment + disk and return a container."""
-        ctx = SettingsService().load(project_name=project_name)
+    def from_env(
+        cls, project_name: str | None = None, mode: str | None = None
+    ) -> "AppContainer":
+        """Load settings from environment + disk and return a container.
+
+        *mode* lets CLI flags (--dry-run) override the resolved mode
+        explicitly instead of mutating os.environ at a distance.
+        """
+        ctx = SettingsService().load(project_name=project_name, mode=mode)
         return cls(ctx)
 
     # ------------------------------------------------------------------
@@ -71,7 +82,7 @@ class AppContainer:
         """Return project_name or raise with an actionable message."""
         name = self._ctx.machine.project_name
         if not name:
-            raise ConfigurationError("No project configured.\nRun: orchestrator init")
+            raise ConfigurationError("No project configured.\nRun: orchestrate init")
         return name
 
     # ------------------------------------------------------------------
@@ -272,8 +283,10 @@ class AppContainer:
 
         strategy = get_planner_strategy(self._ctx)
         runtime = strategy.build_interactive(self._ctx)
-        # Inject the caller-controlled io_handler into the runtime
-        runtime._runtime._io_handler = io_handler
+        # Inject the caller-controlled io_handler into the runtime.
+        # Reaching into the adapter's internals is a known DI wart
+        # (review §3.8) — tolerated until the runtime exposes a setter.
+        runtime._runtime._io_handler = io_handler  # type: ignore[attr-defined]
         return runtime
 
     # ------------------------------------------------------------------
@@ -322,7 +335,7 @@ class AppContainer:
         if self._ctx.machine.mode == "dry-run":
             from src.infra.fs.project_state_adapter import InMemoryProjectStateAdapter
 
-            base = InMemoryProjectStateAdapter()
+            base: ProjectStatePort = InMemoryProjectStateAdapter()
         else:
             from src.infra.fs.project_state_adapter import FilesystemProjectStateAdapter
 
@@ -526,17 +539,22 @@ class AppContainer:
     @cached_property
     def sync_goal_pr_usecase(self):
         from src.app.usecases.sync_goal_pr_status import SyncGoalPRStatusUseCase
+        from src.domain import SpecNotFoundError
 
-        spec = None
-        try:
-            spec = self.load_project_spec_usecase.execute(self.get_required_project())
-        except Exception:
-            pass
+        def spec_loader():
+            try:
+                return self.load_project_spec_usecase.execute(self.get_required_project())
+            except SpecNotFoundError:
+                return None  # CI gate simply unconfigured for this project
+            except Exception as exc:
+                log.warning("container.spec_load_failed", error=str(exc))
+                return None
+
         return SyncGoalPRStatusUseCase(
             goal_repo=self.goal_repo,
             event_port=self.event_port,
             github=self.github_client,
-            spec=spec,
+            spec_loader=spec_loader,
         )
 
     @cached_property
@@ -545,20 +563,21 @@ class AppContainer:
 
         return LoadProjectSpec(spec_repo=self.spec_repo)
 
-    @cached_property
+    @property
     def current_spec(self):
         """
-        Load and cache the active ProjectSpec for the configured project.
+        Load the active ProjectSpec for the configured project.
         Used by the API layer's GET /spec endpoint and spec-dependent routes.
+        Deliberately NOT cached: `spec apply` must be visible to a long-lived
+        API process without a restart, and a spec load is one file read.
         """
         return self.load_project_spec_usecase.execute(self.get_required_project())
 
-    @cached_property
+    @property
     def validate_against_spec_usecase(self):
         from src.app.usecases.validate_against_spec import ValidateAgainstSpec
 
-        spec = self.load_project_spec_usecase.execute(self.get_required_project())
-        return ValidateAgainstSpec(spec)
+        return ValidateAgainstSpec(self.current_spec)
 
     @cached_property
     def propose_spec_change_usecase(self):
@@ -597,22 +616,17 @@ class AppContainer:
     def task_graph_orchestrator(self):
         from src.app.orchestrator import TaskGraphOrchestrator
 
-        return TaskGraphOrchestrator(
-            task_repo=self.task_repo,
-            goal_repo=self.goal_repo,
-            event_port=self.event_port,
-            merge_usecase=self.goal_merge_task_usecase,
-            cancel_usecase=self.goal_cancel_task_usecase,
-            spec_repo=self.spec_repo,
-            project_name=self.get_required_project(),
-            create_pr_usecase=None,
-            telemetry_emitter=self.telemetry_emitter,
-            plan_goal_tasks=self.plan_goal_tasks_usecase,
-        )
-
-    @cached_property
-    def task_graph_orchestrator_with_pr(self):
-        from src.app.orchestrator import TaskGraphOrchestrator
+        # PR creation is on by default: stubbed in dry-run, real when GitHub
+        # is fully configured. Without a token goals still merge tasks but
+        # stop at READY_FOR_REVIEW, so warn loudly.
+        if self._ctx.machine.mode == "dry-run" or self._ctx.github_fully_configured():
+            create_pr_usecase = self.create_goal_pr_usecase
+        else:
+            create_pr_usecase = None
+            log.warning(
+                "container.pr_creation_disabled",
+                reason="GitHub repo/token not configured — goals will not open PRs",
+            )
 
         return TaskGraphOrchestrator(
             task_repo=self.task_repo,
@@ -622,7 +636,7 @@ class AppContainer:
             cancel_usecase=self.goal_cancel_task_usecase,
             spec_repo=self.spec_repo,
             project_name=self.get_required_project(),
-            create_pr_usecase=self.create_goal_pr_usecase,
+            create_pr_usecase=create_pr_usecase,
             telemetry_emitter=self.telemetry_emitter,
             plan_goal_tasks=self.plan_goal_tasks_usecase,
         )
@@ -661,9 +675,13 @@ class AppContainer:
     def planner_context_assembler(self):
         from src.app.services.planner_context import PlannerContextAssembler
 
-        spec = self.load_project_spec_usecase.execute(self.get_required_project())
+        # Fail fast if the spec is missing (same behavior as loading eagerly),
+        # then hand the assembler a loader so each assemble() sees the latest.
+        self.load_project_spec_usecase.execute(self.get_required_project())
         return PlannerContextAssembler(
-            spec=spec,
+            spec_loader=lambda: self.load_project_spec_usecase.execute(
+                self.get_required_project()
+            ),
             project_state=self.project_state,
             goal_repo=self.goal_repo,
             task_repo=self.task_repo,

@@ -12,7 +12,7 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from src.api.sse import get_sse_queue
+from src.api.sse import get_broker
 
 router = APIRouter(tags=["events"])
 
@@ -22,25 +22,30 @@ router = APIRouter(tags=["events"])
     summary="Real-Time Event Stream",
     description=(
         "Opens a `text/event-stream` connection that delivers real-time "
-        "domain events to the frontend. Events are JSON objects with `type` "
-        "and `payload` keys. A `: ping` keep-alive comment is sent every 25 s "
-        "when the queue is idle. Reconnect timeout is set to 3 000 ms."
+        "domain events to the frontend. Each connection gets its own queue "
+        "(multiple tabs all receive every event). Events are JSON objects "
+        "with `type` and `payload` keys. A `: ping` keep-alive comment is "
+        "sent every 25 s when idle. Reconnect timeout is set to 3 000 ms."
     ),
 )
 async def event_stream(request: Request) -> StreamingResponse:
-    sse_queue = get_sse_queue()
+    broker = get_broker()
+    queue = broker.register()
 
     async def generator():
-        yield "retry: 3000\n\n"
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                event = await asyncio.wait_for(sse_queue.get(), timeout=25.0)
-                data = json.dumps(event)
-                yield f"data: {data}\n\n"
-            except asyncio.TimeoutError:
-                yield ": ping\n\n"
+        try:
+            yield "retry: 3000\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    data = json.dumps(event)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            broker.unregister(queue)
 
     return StreamingResponse(
         generator(),

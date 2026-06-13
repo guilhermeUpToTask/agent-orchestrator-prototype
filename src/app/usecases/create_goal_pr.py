@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import structlog
 
-from src.domain import DomainEvent, EventPort
+from src.domain import DomainEvent, EventPort, GoalAggregate
 from src.domain.aggregates.goal import GoalStatus
 from src.domain.ports.github import GitHubPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
@@ -175,7 +175,7 @@ class CreateGoalPRUseCase:
 # PR body helper
 # ---------------------------------------------------------------------------
 
-def _build_pr_body(goal) -> str:
+def _build_pr_body(goal: "GoalAggregate") -> str:
     """Build a structured PR description from goal metadata."""
     task_lines = "\n".join(
         f"- [{t.status.value}] `{t.task_id}` — {t.title}"

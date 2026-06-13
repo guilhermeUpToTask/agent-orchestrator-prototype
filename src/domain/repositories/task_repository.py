@@ -3,6 +3,7 @@ src/domain/repositories/task_repository.py — Task persistence port.
 """
 from __future__ import annotations
 
+from typing import Any
 from abc import ABC, abstractmethod
 
 from src.domain.aggregates.task import TaskAggregate
@@ -43,7 +44,7 @@ class TaskRepositoryPort(ABC):
 
     @abstractmethod
     def append_history(
-        self, task_id: str, event: str, actor: str, detail: dict
+        self, task_id: str, event: str, actor: str, detail: dict[str, Any]
     ) -> None:
         """Append a history entry without bumping state_version."""
         ...

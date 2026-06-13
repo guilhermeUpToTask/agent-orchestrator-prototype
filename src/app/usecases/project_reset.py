@@ -103,6 +103,8 @@ class ProjectResetUseCase:
         for tid in task_ids:
             branch = f"task-{tid}"
             try:
+                if not self._repo_url:
+                    continue
                 proc = subprocess.run(
                     ["git", "push", self._repo_url, f":{branch}"],
                     capture_output=True,

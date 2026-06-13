@@ -114,6 +114,92 @@ async def test_publish_journal_created(adapter, tmp_path):
     journal_files = list((tmp_path / "events").glob("*.json"))
     assert len(journal_files) == 1
 
+def test_per_agent_groups_each_receive_every_event(adapter):
+    """Each worker group on the shared task.assigned stream sees every event.
+
+    Regression for the shared-"workers"-group bug where each assignment
+    reached exactly one (usually wrong) worker, which acked and dropped it.
+    """
+    event = DomainEvent(
+        type="task.assigned",
+        producer="task-manager",
+        payload={"task_id": "t1", "agent_id": "agent-b"},
+    )
+    adapter.publish(event)
+
+    for agent_id in ("agent-a", "agent-b"):
+        gen = adapter.subscribe("task.assigned", group=f"worker-{agent_id}", consumer=agent_id)
+        received = next(gen)
+        gen.close()
+        assert received.payload["task_id"] == "t1"
+
+
+def test_pel_replay_after_crash_same_consumer(redis_client, tmp_path):
+    """A delivered-but-unacked message is replayed when the consumer restarts."""
+    journal = str(tmp_path / "events")
+    a1 = RedisEventAdapter(redis_client, journal_dir=journal)
+    event = DomainEvent(type="task.assigned", producer="tm", payload={"task_id": "t1"})
+    a1.publish(event)
+
+    gen = a1.subscribe("task.assigned", group="g", consumer="c1")
+    delivered = next(gen)
+    gen.close()  # "crash" — no ack
+
+    a2 = RedisEventAdapter(redis_client, journal_dir=journal)
+    gen2 = a2.subscribe("task.assigned", group="g", consumer="c1")
+    replayed = next(gen2)
+    gen2.close()
+
+    assert replayed.event_id == delivered.event_id
+
+
+def test_pel_replay_skips_acked_messages(redis_client, tmp_path):
+    """Acked messages are not replayed on restart; only new ones are delivered."""
+    journal = str(tmp_path / "events")
+    a1 = RedisEventAdapter(redis_client, journal_dir=journal)
+    e1 = DomainEvent(type="task.assigned", producer="tm", payload={"task_id": "t1"})
+    a1.publish(e1)
+
+    gen = a1.subscribe("task.assigned", group="g", consumer="c1")
+    received = next(gen)
+    a1.ack(received, group="g")
+    gen.close()
+
+    e2 = DomainEvent(type="task.assigned", producer="tm", payload={"task_id": "t2"})
+    a1.publish(e2)
+
+    a2 = RedisEventAdapter(redis_client, journal_dir=journal)
+    gen2 = a2.subscribe("task.assigned", group="g", consumer="c1")
+    first = next(gen2)
+    gen2.close()
+
+    assert first.event_id == e2.event_id
+
+
+def test_autoclaim_recovers_dead_consumer_messages(redis_client, tmp_path):
+    """Messages pending on a vanished consumer are claimed by a live one."""
+    journal = str(tmp_path / "events")
+    a1 = RedisEventAdapter(redis_client, journal_dir=journal, claim_idle_ms=0)
+    stuck = DomainEvent(type="task.assigned", producer="tm", payload={"task_id": "t-stuck"})
+    a1.publish(stuck)
+
+    gen_dead = a1.subscribe("task.assigned", group="g", consumer="dead-1")
+    next(gen_dead)
+    gen_dead.close()  # consumer never comes back under this name
+
+    a2 = RedisEventAdapter(redis_client, journal_dir=journal, claim_idle_ms=0)
+    fresh = DomainEvent(type="task.assigned", producer="tm", payload={"task_id": "t-fresh"})
+    a2.publish(fresh)
+
+    gen = a2.subscribe("task.assigned", group="g", consumer="live-1")
+    first = next(gen)  # dead-1's entry, claimed by the startup recovery pass
+    second = next(gen)  # the new message, via the normal ">" read
+    gen.close()
+
+    assert first.event_id == stuck.event_id
+    assert second.event_id == fresh.event_id
+
+
 def test_publish_ignores_journal_write_failure(adapter, redis_client, monkeypatch):
     """Publishing should still succeed even if the optional journal write fails."""
     event = DomainEvent(type="task.created", producer="p1", payload={"task_id": "t1"})

@@ -72,7 +72,7 @@ def run_wizard(
     click.echo(_section(f"Step 2 of {total_steps} — Dependency Check"))
     if not check_and_report(orch_data["redis_url"]):
         click.echo(
-            "\n⚠  Fix the issues above then re-run:  orchestrator init\n"
+            "\n⚠  Fix the issues above then re-run:  orchestrate init\n"
             "   Your config has been saved — project and Redis URL are already set.\n",
             err=True,
         )
@@ -128,11 +128,11 @@ def run_wizard(
 
     click.echo(f"\n✓  Setup complete! Active project: {orch_data['project_name']}")
     click.echo("\n  Useful next steps:")
-    click.echo("    orchestrator project status          — confirm active project")
-    click.echo("    orchestrator project list            — see all projects")
-    click.echo("    orchestrator project use <n>      — switch project")
-    click.echo("    orchestrator plan init               — start planning")
-    click.echo("    orchestrator system start            — boot daemons\n")
+    click.echo("    orchestrate project status          — confirm active project")
+    click.echo("    orchestrate project list            — see all projects")
+    click.echo("    orchestrate project use <n>      — switch project")
+    click.echo("    orchestrate plan init               — start planning")
+    click.echo("    orchestrate system start            — boot daemons\n")
     return True
 
 

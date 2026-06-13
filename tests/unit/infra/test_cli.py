@@ -3,7 +3,7 @@ import pytest
 from click.testing import CliRunner
 from unittest.mock import MagicMock
 
-from src.cli import cli
+from src.infra.cli.main import cli
 
 
 @pytest.fixture
@@ -105,7 +105,9 @@ def test_task_manager(mock_container, runner):
     event = MagicMock()
     event.type = "task.created"
     event.payload = {"task_id": "t1"}
-    mock_container.event_port.subscribe_many.return_value = [event]
+    # The daemon loop re-subscribes after draining a finite backlog; the
+    # second subscription simulates Ctrl+C to end the test.
+    mock_container.event_port.subscribe_many.side_effect = [[event], KeyboardInterrupt()]
 
     result = runner.invoke(cli, ["system", "task-manager"])
 
@@ -120,7 +122,8 @@ def test_worker(mock_container, runner):
 
     event = MagicMock()
     event.payload = {"agent_id": "agent-worker-001", "task_id": "t1", "project_id": ""}
-    mock_container.event_port.subscribe.return_value = [event]
+    # Second subscription simulates Ctrl+C (see test_task_manager).
+    mock_container.event_port.subscribe.side_effect = [[event], KeyboardInterrupt()]
 
     result = runner.invoke(cli, ["system", "worker", "--agent-id", "agent-worker-001"])
 

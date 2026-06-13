@@ -1,15 +1,69 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Toolbar } from './components/Toolbar';
 import { PlanCanvas } from './components/PlanCanvas';
 import { ChatPanel } from './components/ChatPanel';
 import { DetailPanel } from './components/DetailPanel';
-import { AddNodeModal } from './components/AddNodeModal';
-import { usePlannerStore } from './store/plannerStore';
+import { usePlannerStore, ts } from './store/plannerStore';
+import { useGoals, usePlan, usePlanHistory, useSSEBridge } from './lib/queries';
 import './styles/global.css';
+
+/**
+ * Hydrate the chat transcript once when the backend data first arrives:
+ * recent plan history as system entries plus a connection intro.
+ */
+function useChatHydration() {
+  const addMessage = usePlannerStore((s) => s.addMessage);
+  const { data: plan, error } = usePlan();
+  const { data: goals } = useGoals();
+  const { data: history } = usePlanHistory();
+  const hydrated = useRef(false);
+  const errorShown = useRef(false);
+
+  useEffect(() => {
+    if (error && !errorShown.current) {
+      errorShown.current = true;
+      addMessage({
+        role: 'system',
+        text: `Failed to connect to backend: ${error.message}. Is the API server running at ${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}?`,
+        ts: ts(),
+      });
+    }
+  }, [error, addMessage]);
+
+  useEffect(() => {
+    if (hydrated.current || !plan || !goals || !history) return;
+    hydrated.current = true;
+
+    for (const h of history.slice(-20)) {
+      addMessage({
+        role: 'system',
+        text: `[${h.actor ?? 'system'}] ${h.event}${h.detail ? ' — ' + JSON.stringify(h.detail) : ''}`,
+        ts: h.timestamp
+          ? new Date(h.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+          : ts(),
+      });
+    }
+
+    addMessage({
+      role: 'assistant',
+      text: `AIPOM connected. Plan status: ${plan.status} · ${goals.length} goals · ${goals.reduce((n, g) => n + g.tasks.length, 0)} tasks. ${
+        plan.status === 'phase_active'
+          ? 'Chat is wired to the planning engine — type a refinement request.'
+          : plan.status === 'discovery'
+            ? 'Discovery is active. Answer questions to build the project brief.'
+            : 'Use the approval buttons in the toolbar to advance the plan.'
+      }`,
+      ts: ts(),
+    });
+  }, [plan, goals, history, addMessage]);
+}
 
 export default function App() {
   const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
+
+  useSSEBridge();
+  useChatHydration();
 
   return (
     <ReactFlowProvider>
@@ -40,9 +94,6 @@ export default function App() {
           {/* Chat panel — fixed right column */}
           <ChatPanel />
         </div>
-
-        {/* Modal layer */}
-        <AddNodeModal />
       </div>
     </ReactFlowProvider>
   );

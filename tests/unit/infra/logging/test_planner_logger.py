@@ -1,8 +1,7 @@
 """
 Unit tests for PlannerLiveLogger.
 """
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from src.infra.logging.live_logger import LiveLogger
 from src.infra.logging.log_events import LogEventType

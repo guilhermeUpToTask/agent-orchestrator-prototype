@@ -10,7 +10,7 @@ Execution pipeline (10 steps):
   1.  Load task, validate assignment
   2.  Load agent props → build the correct runtime for this agent
   3.  Create ephemeral git workspace
-  4.  Transition task → IN_PROGRESS  (CAS with retry)
+  4.  Announce start (publish task.execution_started)
   5.  Start background lease-refresh thread
   6.  Start agent session (AgentRuntimePort)
   7.  Send ExecutionContext
@@ -18,7 +18,13 @@ Execution pipeline (10 steps):
   9.  Validate modified files against allowed list
   10. Run acceptance tests (shell=False for safety)
   11. Commit + push on success / fail on error
-  12. Persist final state, emit event, cleanup
+  12. Publish the execution result, cleanup
+
+Single-writer contract: this use case NEVER writes task state. It publishes
+task.execution_started / task.execution_succeeded / task.execution_failed
+with the result facts, and the task manager (TaskRecordResultUseCase, in
+the API process) is the sole writer that applies the transitions and emits
+the canonical task.started / task.completed / task.failed notifications.
 """
 from __future__ import annotations
 
@@ -31,7 +37,7 @@ from src.app.telemetry.runtime_wrappers import TelemetryAgentRuntimeWrapper
 from src.app.telemetry.service import TelemetryService
 from src.domain import (
     AgentExecutionResult, AgentProps, DomainEvent, ExecutionContext,
-    ForbiddenFileEditError, TaskAggregate, TaskResult, TaskStatus,
+    ForbiddenFileEditError, TaskAggregate, TaskStatus,
 )
 from src.domain import (
     AgentRegistryPort, AgentRuntimePort, EventPort, GitWorkspacePort,
@@ -40,8 +46,6 @@ from src.domain import (
 from src.domain.ports.lease import LeaseRefresherFactory, LeaseRefresherPort
 
 log = structlog.get_logger(__name__)
-
-MAX_UPDATE_RETRIES = 5
 
 
 class _NoOpLeaseRefresher(LeaseRefresherPort):
@@ -142,7 +146,7 @@ class TaskExecuteUseCase:
         lease_refresher: LeaseRefresherPort | None = None
 
         try:
-            task = self._start_task_with_retry(task_id, agent_id)
+            self._publish_execution_started(task_id, agent_id)
             ws_path, branch = self._prepare_workspace(task_id, task.execution.constraints)
             self._telemetry.emit(
                 "state.updated",
@@ -151,11 +155,6 @@ class TaskExecuteUseCase:
                 task_id=task_id,
                 agent_id=agent_id,
             )
-            self._events.publish(DomainEvent(
-                type="task.started",
-                producer=agent_id,
-                payload={"task_id": task_id},
-            ))
 
             if lease_token:
                 lease_refresher = self._lease_refresher_factory(
@@ -171,7 +170,9 @@ class TaskExecuteUseCase:
                 task, ws_path, branch, result
             )
 
-            self._persist_success(task, agent_id, branch, commit_sha, actual_modified, result.artifacts)
+            self._publish_execution_succeeded(
+                task_id, agent_id, branch, commit_sha, actual_modified, result.artifacts
+            )
             self._telemetry.emit(
                 "state.updated",
                 self._telemetry.start_span(trace),
@@ -188,7 +189,7 @@ class TaskExecuteUseCase:
                 task_id=task_id,
                 agent_id=agent_id,
             )
-            self._persist_failure_safely(
+            self._publish_execution_failed(
                 task_id,
                 agent_id,
                 f"Forbidden file edits: {exc.violations}",
@@ -201,14 +202,7 @@ class TaskExecuteUseCase:
                 task_id=task_id,
                 agent_id=agent_id,
             )
-            self._persist_failure_safely(task_id, agent_id, str(exc))
-        except _DurabilityError as exc:
-            log.error(
-                "worker.durability_error",
-                task_id=task_id,
-                agent_id=agent_id,
-                error=str(exc),
-            )
+            self._publish_execution_failed(task_id, agent_id, str(exc))
         except Exception as exc:
             log.exception("worker.unexpected_error", task_id=task_id, error=str(exc))
             self._telemetry.emit(
@@ -218,7 +212,7 @@ class TaskExecuteUseCase:
                 task_id=task_id,
                 agent_id=agent_id,
             )
-            self._persist_failure_safely(
+            self._publish_execution_failed(
                 task_id,
                 agent_id,
                 f"Unexpected error: {exc}",
@@ -237,42 +231,46 @@ class TaskExecuteUseCase:
                 self._lease.revoke_lease(lease_token)
 
     # ------------------------------------------------------------------
-    # CAS retry loop for task.start()
+    # Execution result publishing (the task manager applies transitions)
     # ------------------------------------------------------------------
 
-    def _start_task_with_retry(self, task_id: str, agent_id: str) -> TaskAggregate:
-        """
-        Transition the task to IN_PROGRESS with optimistic-concurrency retry.
+    def _publish_execution_started(self, task_id: str, agent_id: str) -> None:
+        self._events.publish(DomainEvent(
+            type="task.execution_started",
+            producer=agent_id,
+            payload={"task_id": task_id, "agent_id": agent_id},
+        ))
 
-        The reconciler may write to the same YAML between our initial load()
-        and update_if_version(). A single version conflict should not waste a
-        full task retry. We reload fresh state and retry MAX_UPDATE_RETRIES times.
-        """
-        for attempt in range(MAX_UPDATE_RETRIES):
-            fresh = self._task_repo.load(task_id)
+    def _publish_execution_succeeded(
+        self,
+        task_id: str,
+        agent_id: str,
+        branch: str,
+        commit_sha: str,
+        modified_files: list[str],
+        artifacts: dict[str, Any],
+    ) -> None:
+        self._events.publish(DomainEvent(
+            type="task.execution_succeeded",
+            producer=agent_id,
+            payload={
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "branch": branch,
+                "commit_sha": commit_sha,
+                "modified_files": modified_files,
+                "artifacts": artifacts,
+            },
+        ))
+        log.info("worker.task_succeeded", task_id=task_id, commit_sha=commit_sha)
 
-            if fresh.status != TaskStatus.ASSIGNED:
-                raise RuntimeError(
-                    f"Task {task_id} is {fresh.status.value}, expected assigned "
-                    f"(CAS attempt {attempt})"
-                )
-            if fresh.assignment is None or fresh.assignment.agent_id != agent_id:
-                raise RuntimeError(
-                    f"Task {task_id} assignment changed under us before start "
-                    f"(CAS attempt {attempt})"
-                )
-
-            expected_v = fresh.state_version
-            fresh.start()
-            if self._task_repo.update_if_version(task_id, fresh, expected_v):
-                log.debug("worker.start_cas_ok", task_id=task_id, attempt=attempt)
-                return fresh
-
-            log.warning("worker.start_cas_conflict", task_id=task_id, attempt=attempt)
-
-        raise RuntimeError(
-            f"Version conflict starting task {task_id} after {MAX_UPDATE_RETRIES} retries"
-        )
+    def _publish_execution_failed(self, task_id: str, agent_id: str, reason: str) -> None:
+        log.error("worker.task_failed", task_id=task_id, reason=reason)
+        self._events.publish(DomainEvent(
+            type="task.execution_failed",
+            producer=agent_id,
+            payload={"task_id": task_id, "agent_id": agent_id, "reason": reason},
+        ))
 
     # ------------------------------------------------------------------
     # Helpers
@@ -325,7 +323,7 @@ class TaskExecuteUseCase:
         try:
             if task.status not in TaskStatus.active():
                 return
-            self._persist_failure(task.task_id, agent_id, reason)
+            self._publish_execution_failed(task.task_id, agent_id, reason)
         except Exception as exc:
             log.exception("worker.failure_handler_error", error=str(exc))
 
@@ -430,110 +428,9 @@ class TaskExecuteUseCase:
         self._git.push_branch(ws_path, branch)
         return commit_sha, actual_modified
 
-    def _persist_success(
-        self,
-        task: TaskAggregate,
-        agent_id: str,
-        branch: str,
-        commit_sha: str,
-        actual_modified: list[str],
-        artifacts: dict,
-    ) -> None:
-        task_result = TaskResult(
-            branch=branch,
-            commit_sha=commit_sha,
-            modified_files=actual_modified,
-            artifacts=artifacts,
-        )
-        for attempt in range(MAX_UPDATE_RETRIES):
-            fresh = self._task_repo.load(task.task_id)
-
-            if fresh.status == TaskStatus.SUCCEEDED:
-                log.info("worker.success_already_persisted", task_id=task.task_id)
-                return
-            if fresh.status not in TaskStatus.active():
-                raise _DurabilityError(
-                    f"Cannot persist success for task {task.task_id}: "
-                    f"state changed to {fresh.status.value}"
-                )
-
-            expected_v = fresh.state_version
-            fresh.complete(task_result)
-            if self._task_repo.update_if_version(task.task_id, fresh, expected_v):
-                self._events.publish(DomainEvent(
-                    type="task.completed",
-                    producer=agent_id,
-                    payload={"task_id": task.task_id, "commit_sha": commit_sha},
-                ))
-                log.info("worker.task_succeeded", task_id=task.task_id, commit_sha=commit_sha)
-                return
-
-            log.warning(
-                "worker.success_persist_conflict",
-                task_id=task.task_id,
-                attempt=attempt,
-            )
-
-        raise _DurabilityError(
-            f"Version conflict completing task {task.task_id} after "
-            f"{MAX_UPDATE_RETRIES} retries"
-        )
-
-    def _persist_failure(self, task_id: str, agent_id: str, reason: str) -> None:
-        log.error("worker.task_failed", task_id=task_id, reason=reason)
-        for attempt in range(MAX_UPDATE_RETRIES):
-            task = self._task_repo.load(task_id)
-            if task.status == TaskStatus.FAILED:
-                log.info("worker.failure_already_persisted", task_id=task_id)
-                return
-            if task.status not in TaskStatus.active():
-                log.warning(
-                    "worker.failure_persist_skipped_not_active",
-                    task_id=task_id,
-                    status=task.status.value,
-                )
-                return
-
-            expected_v = task.state_version
-            task.fail(reason)
-            if self._task_repo.update_if_version(task.task_id, task, expected_v):
-                self._events.publish(DomainEvent(
-                    type="task.failed",
-                    producer=agent_id,
-                    payload={"task_id": task.task_id, "reason": reason},
-                ))
-                return
-
-            log.warning(
-                "worker.failure_persist_conflict",
-                task_id=task_id,
-                attempt=attempt,
-            )
-
-        raise _DurabilityError(
-            f"Version conflict failing task {task_id} after "
-            f"{MAX_UPDATE_RETRIES} retries"
-        )
-
-    def _persist_failure_safely(self, task_id: str, agent_id: str, reason: str) -> None:
-        try:
-            self._persist_failure(task_id, agent_id, reason)
-        except _DurabilityError as exc:
-            log.error(
-                "worker.failure_durability_error",
-                task_id=task_id,
-                agent_id=agent_id,
-                error=str(exc),
-            )
-
-
 # ---------------------------------------------------------------------------
 # Internal exception types
 # ---------------------------------------------------------------------------
 
 class _AgentFailed(Exception):
-    pass
-
-
-class _DurabilityError(Exception):
     pass

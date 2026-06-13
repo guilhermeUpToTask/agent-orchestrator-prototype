@@ -10,7 +10,6 @@ from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 from src.domain.value_objects.status import TaskStatus
 from src.app.usecases.task_execute import TaskExecuteUseCase
 from src.app.orchestrator import TaskGraphOrchestrator
-from src.app.usecases.run_planning_session import RunPlanningSessionUseCase
 
 
 # ---------------------------------------------------------------------------
@@ -123,20 +122,3 @@ def test_goal_aggregate_normalizes_completed_to_merged():
     assert goal.status == GoalStatus.MERGED
 
 
-# ---------------------------------------------------------------------------
-# Issue 6: Deprecation warning for RunPlanningSessionUseCase
-# ---------------------------------------------------------------------------
-
-def test_run_planning_session_init_raises_deprecation_warning():
-    with pytest.warns(DeprecationWarning, match="RunPlanningSessionUseCase is deprecated"):
-        # We don't need real dependencies just to check the init warning
-        # but we need enough to satisfy type hints if necessary.
-        RunPlanningSessionUseCase(
-            context_assembler=MagicMock(),
-            planner_runtime=MagicMock(),
-            session_repo=MagicMock(),
-            goal_init=MagicMock(),
-            validator=MagicMock(),
-            project_state=MagicMock(),
-            agent_registry=MagicMock(),
-        )

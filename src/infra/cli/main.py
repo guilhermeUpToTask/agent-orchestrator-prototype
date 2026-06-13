@@ -6,8 +6,7 @@ import sys
 import click
 import structlog
 
-structlog.configure(processors=[structlog.dev.ConsoleRenderer()])
-
+from src.infra.cli.container_provider import LazyContainerProvider
 from src.infra.cli.system.commands  import system_group
 from src.infra.cli.tasks.commands   import tasks_group
 from src.infra.cli.agents.commands  import agents_group
@@ -17,10 +16,16 @@ from src.infra.cli.spec.commands    import spec_group
 from src.infra.cli.plan.commands    import plan_group
 from src.infra.cli.wizard import run_wizard
 
+# Loggers created at import time above are lazy proxies, so configuring
+# here still applies to them.
+structlog.configure(processors=[structlog.dev.ConsoleRenderer()])
+
 
 @click.group()
-def cli():
+@click.pass_context
+def cli(ctx: click.Context):
     """Agent Orchestrator — coordinate CLI-based coding agents."""
+    ctx.obj = LazyContainerProvider()
 
 
 @cli.command("init")

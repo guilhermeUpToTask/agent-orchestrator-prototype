@@ -19,6 +19,8 @@ immediately after this one by the reconciler.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 import structlog
 
 from src.domain import DomainEvent, EventPort
@@ -45,7 +47,8 @@ class SyncGoalPRStatusUseCase:
     spec is optional: when None, the CI gate is treated as unconfigured
     (no required checks, min_approvals=0). Inject the real ProjectSpec
     for production polling so the gate defined in project_spec.yaml is
-    enforced.
+    enforced. Prefer spec_loader for long-lived instances: it is called
+    on every execute(), so `spec apply` takes effect without a restart.
     """
 
     def __init__(
@@ -54,11 +57,18 @@ class SyncGoalPRStatusUseCase:
         event_port: EventPort,
         github: GitHubPort,
         spec: ProjectSpec | None = None,
+        spec_loader: Callable[[], ProjectSpec | None] | None = None,
     ) -> None:
         self._goal_repo = goal_repo
         self._events    = event_port
         self._github    = github
         self._spec      = spec
+        self._spec_loader = spec_loader
+
+    def _current_spec(self) -> ProjectSpec | None:
+        if self._spec_loader is not None:
+            return self._spec_loader()
+        return self._spec
 
     def execute(self, goal_id: str) -> bool:
         """
@@ -101,8 +111,9 @@ class SyncGoalPRStatusUseCase:
         # ------------------------------------------------------------------
         # Evaluate CI gate from ProjectSpec
         # ------------------------------------------------------------------
-        required_checks = list(self._spec.ci.required_checks) if self._spec else []
-        min_approvals   = self._spec.ci.min_approvals if self._spec else 0
+        spec = self._current_spec()
+        required_checks = list(spec.ci.required_checks) if spec else []
+        min_approvals   = spec.ci.min_approvals if spec else 0
 
         checks_passed = pr_info.all_required_checks_passed(required_checks)
         approved      = pr_info.meets_approval_gate(min_approvals)

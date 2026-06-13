@@ -37,7 +37,8 @@ ProjectSpec integration:
 from __future__ import annotations
 
 import signal
-from typing import Callable, Optional
+import time
+from typing import Any, Callable, Optional
 
 import structlog
 
@@ -100,7 +101,7 @@ class TaskGraphOrchestrator:
         cancel_usecase: GoalCancelTaskUseCase,
         spec_repo: Optional[ProjectSpecRepository] = None,
         project_name: str = "",
-        create_pr_usecase=None,  # CreateGoalPRUseCase | None
+        create_pr_usecase: Any = None,  # CreateGoalPRUseCase | None
         telemetry_emitter: TelemetryEmitterPort | None = None,
         plan_goal_tasks: Optional[PlanGoalTasksUseCase] = None,
     ) -> None:
@@ -151,8 +152,11 @@ class TaskGraphOrchestrator:
     # Public entry points
     # ------------------------------------------------------------------
 
-    def run_forever(self) -> None:
-        self._install_signal_handlers()
+    def run_forever(self, install_signal_handlers: bool = True) -> None:
+        # signal.signal raises ValueError off the main thread — embedded
+        # (lifespan-thread) runs must pass False and rely on shutdown().
+        if install_signal_handlers:
+            self._install_signal_handlers()
         self._load_spec()
 
         self._running = True
@@ -166,13 +170,22 @@ class TaskGraphOrchestrator:
         )
 
         try:
-            for event in self._events.subscribe_many(
-                WATCHED_EVENTS, CONSUMER_GROUP, CONSUMER_NAME
-            ):
-                if not self._running:
-                    break
-                self._dispatch(event)
-                self._events.ack(event, group=CONSUMER_GROUP)
+            # Outer loop: the Redis adapter's generator only returns on
+            # stop(), but the in-memory adapter's returns once its backlog
+            # is drained — re-subscribe (group cursor resumes) and poll.
+            while self._running:
+                for event in self._events.subscribe_many(
+                    WATCHED_EVENTS,
+                    CONSUMER_GROUP,
+                    CONSUMER_NAME,
+                    stop=lambda: not self._running,
+                ):
+                    if not self._running:
+                        break
+                    self._dispatch(event)
+                    self._events.ack(event, group=CONSUMER_GROUP)
+                if self._running:
+                    time.sleep(0.5)
         except Exception as exc:
             log.exception("orchestrator.fatal_error", error=str(exc))
             raise
@@ -394,7 +407,7 @@ class TaskGraphOrchestrator:
     # ------------------------------------------------------------------
 
     def _install_signal_handlers(self) -> None:
-        def _handler(sig, _frame):
+        def _handler(sig: int, _frame: object) -> None:
             log.info("orchestrator.signal_received", signal=sig)
             self.shutdown()
 

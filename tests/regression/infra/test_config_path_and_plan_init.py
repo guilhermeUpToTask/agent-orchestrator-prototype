@@ -4,13 +4,11 @@ tests/regression/infra/test_config_path_and_plan_init.py
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from src.infra.settings import GlobalConfigStore, SettingsService
 from src.infra.cli.plan.commands import plan_group
 
 
@@ -83,14 +81,13 @@ class TestPlanInitNoProject:
 
         runner = CliRunner()
 
-        # Patch BOTH AppContainer references imported in plan commands
-        with (
-            patch("src.infra.cli.plan.commands.AppContainer") as MockAppContainer,
-            patch("src.infra.cli.plan.commands._AppContainer") as MockUnderContainer,
-        ):
+        # Commands resolve the container through LazyContainerProvider,
+        # which builds it via AppContainer.from_env — patch that seam.
+        with patch(
+            "src.infra.container.AppContainer.from_env"
+        ) as mock_from_env:
             mock_container = MagicMock()
-            MockAppContainer.from_env.return_value = mock_container
-            MockUnderContainer.from_env.return_value = mock_container
+            mock_from_env.return_value = mock_container
 
             mock_orch = MagicMock()
             mock_result = MagicMock()

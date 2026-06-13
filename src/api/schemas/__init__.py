@@ -39,8 +39,10 @@ from src.api.schemas.refinement import (
 )
 from src.api.schemas.discovery import (
     DiscoveryMessageRequest,
-    DiscoveryMessageResponse,
-    DiscoveryStartResponse,
+)
+from src.api.schemas.sessions import (
+    SessionAccepted,
+    SessionStatusResponse,
 )
 from src.api.schemas.project import (
     ProjectResetRequest,
@@ -88,10 +90,10 @@ __all__ = [
     # Refinement
     "RefineRequest",
     "RefineResponse",
-    # Discovery
+    # Discovery / long-running sessions
     "DiscoveryMessageRequest",
-    "DiscoveryMessageResponse",
-    "DiscoveryStartResponse",
+    "SessionAccepted",
+    "SessionStatusResponse",
     # Project
     "ProjectResetRequest",
     "ProjectResetResponse",

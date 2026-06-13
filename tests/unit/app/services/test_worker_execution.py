@@ -1,9 +1,14 @@
 """
 tests/unit/app/services/test_worker_execution.py — TaskExecuteUseCase tests.
+
+Contract under test: the worker NEVER writes task state. It publishes
+task.execution_started / task.execution_succeeded / task.execution_failed
+and the task manager (TaskRecordResultUseCase, tested separately) applies
+the transitions.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, ANY
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -56,18 +61,29 @@ def _make_service(**overrides) -> WorkerExecutionService:
     return WorkerExecutionService(**defaults)
 
 
+def _published_types(svc) -> list[str]:
+    return [c[0][0].type for c in svc._events.publish.call_args_list]
+
+
+def _published_of_type(svc, event_type: str):
+    return [
+        c[0][0]
+        for c in svc._events.publish.call_args_list
+        if c[0][0].type == event_type
+    ]
+
+
 class TestWorkerExecutionService:
 
     # ------------------------------------------------------------------
     # Happy path
     # ------------------------------------------------------------------
 
-    def test_execute_success(self):
+    def test_execute_success_publishes_results_and_never_writes(self):
         task = _make_task()
         svc = _make_service()
 
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
         runtime = MagicMock()
@@ -77,16 +93,27 @@ class TestWorkerExecutionService:
         )
         svc._git.create_workspace.return_value = "/tmp/ws"
         svc._git.apply_changes_and_commit.return_value = "sha-abc"
+        svc._git.get_modified_files.return_value = []
 
         svc.execute("t-001", "p-001", "worker-1")
 
-        assert task.status == TaskStatus.SUCCEEDED
-        assert task.result.commit_sha == "sha-abc"
-        svc._events.publish.assert_any_call(ANY)
+        # Single-writer contract: zero task-state writes from the worker.
+        svc._task_repo.update_if_version.assert_not_called()
+        svc._task_repo.save.assert_not_called()
+
+        assert _published_types(svc) == [
+            "task.execution_started",
+            "task.execution_succeeded",
+        ]
+        succeeded = _published_of_type(svc, "task.execution_succeeded")[0]
+        assert succeeded.payload["task_id"] == "t-001"
+        assert succeeded.payload["agent_id"] == "worker-1"
+        assert succeeded.payload["commit_sha"] == "sha-abc"
+
         svc._git.cleanup_workspace.assert_called_once_with("/tmp/ws")
 
     # ------------------------------------------------------------------
-    # Agent failure → task.failed
+    # Agent failure → task.execution_failed
     # ------------------------------------------------------------------
 
     def test_execute_agent_failure(self):
@@ -94,7 +121,6 @@ class TestWorkerExecutionService:
         svc = _make_service()
 
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
         runtime = MagicMock()
@@ -103,14 +129,17 @@ class TestWorkerExecutionService:
             success=False, exit_code=1
         )
         svc._git.create_workspace.return_value = "/tmp/ws"
+        svc._git.get_modified_files.return_value = []
 
         svc.execute("t-001", "p-001", "worker-1")
 
-        assert task.status == TaskStatus.FAILED
-        assert "Agent exited with code 1" in task.last_error
+        svc._task_repo.update_if_version.assert_not_called()
+        failed = _published_of_type(svc, "task.execution_failed")
+        assert len(failed) == 1
+        assert "Agent exited with code 1" in failed[0].payload["reason"]
 
     # ------------------------------------------------------------------
-    # Forbidden file edit → task.failed
+    # Forbidden file edit → task.execution_failed
     # ------------------------------------------------------------------
 
     def test_execute_forbidden_edit(self):
@@ -120,7 +149,6 @@ class TestWorkerExecutionService:
         svc = _make_service()
 
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
         runtime = MagicMock()
@@ -137,48 +165,13 @@ class TestWorkerExecutionService:
         ):
             svc.execute("t-001", "p-001", "worker-1")
 
-        assert task.status == TaskStatus.FAILED
-        assert "Forbidden file edits" in task.last_error
+        svc._task_repo.update_if_version.assert_not_called()
+        failed = _published_of_type(svc, "task.execution_failed")
+        assert len(failed) == 1
+        assert "Forbidden file edits" in failed[0].payload["reason"]
 
     # ------------------------------------------------------------------
-    # CAS retry on start()
-    # ------------------------------------------------------------------
-
-    def test_start_cas_retry(self):
-        initial = _make_task()
-        retry_assigned = _make_task()
-        after_start = _make_task()
-        after_start.start()
-
-        svc = _make_service()
-        svc._task_repo.load.side_effect = [
-            initial, # 1. _start_task_with_retry (fails CAS)
-            initial, # 2. _start_task_with_retry (retry, succeeds CAS)
-            retry_assigned, # 3. _persist_success (succeeds CAS)
-            after_start,
-        ]
-        svc._task_repo.update_if_version.side_effect = [False, True, True]
-        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
-
-        runtime = MagicMock()
-        svc._runtime_factory.return_value = runtime
-        runtime.wait_for_completion.return_value = AgentExecutionResult(
-            success=True, exit_code=0
-        )
-        svc._git.create_workspace.return_value = "/tmp/ws"
-        svc._git.apply_changes_and_commit.return_value = "sha-abc"
-
-        svc.execute("t-001", "p-001", "worker-1")
-
-        assert svc._task_repo.update_if_version.call_count >= 2
-        completed = [
-            c for c in svc._events.publish.call_args_list
-            if c[0][0].type == "task.completed"
-        ]
-        assert len(completed) == 1
-
-    # ------------------------------------------------------------------
-    # Wrong agent → raises before try/except block
+    # Wrong agent → raises before any event
     # ------------------------------------------------------------------
 
     def test_wrong_agent_raises(self):
@@ -200,10 +193,10 @@ class TestWorkerExecutionService:
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
         svc._git.create_workspace.return_value = "/tmp/ws"
+        svc._git.get_modified_files.return_value = []
         svc._runtime_factory.return_value = MagicMock(
             wait_for_completion=MagicMock(
                 return_value=AgentExecutionResult(success=False, exit_code=99)
@@ -213,50 +206,6 @@ class TestWorkerExecutionService:
         svc.execute("t-001", "p-001", "worker-1")
 
         svc._git.cleanup_workspace.assert_called_once_with("/tmp/ws")
-
-    # ------------------------------------------------------------------
-    # _start_task_with_retry — status changed under us during CAS
-    # ------------------------------------------------------------------
-
-    def test_start_raises_when_task_status_changes_during_cas(self):
-        assigned_initial = _make_task()
-        succeeded_reload = _make_task()
-        succeeded_reload.status = TaskStatus.SUCCEEDED
-
-        svc = _make_service()
-        call_count = {"n": 0}
-
-        def load_side(tid):
-            call_count["n"] += 1
-            return assigned_initial if call_count["n"] == 1 else succeeded_reload
-
-        svc._task_repo.load.side_effect = load_side
-        svc._task_repo.update_if_version.return_value = True
-        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
-        svc._git.create_workspace.return_value = "/tmp/ws"
-
-        svc.execute("t-001", "p-001", "worker-1")
-
-        started_events = [
-            c for c in svc._events.publish.call_args_list
-            if c[0][0].type == "task.started"
-        ]
-        assert started_events == []
-
-    def test_start_raises_after_max_cas_retries_exhausted(self):
-        svc = _make_service()
-        svc._task_repo.load.side_effect = lambda tid: _make_task(task_id=tid)
-        svc._task_repo.update_if_version.return_value = False
-        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
-        svc._git.create_workspace.return_value = "/tmp/ws"
-
-        svc.execute("t-001", "p-001", "worker-1")
-
-        failed_events = [
-            c for c in svc._events.publish.call_args_list
-            if c[0][0].type == "task.failed"
-        ]
-        assert failed_events == []
 
     # ------------------------------------------------------------------
     # _handle_failure — skips when task already left active state
@@ -272,8 +221,21 @@ class TestWorkerExecutionService:
 
         svc._handle_failure(task, "worker-1", "some transient error")
 
-        svc._task_repo.update_if_version.assert_not_called()
         svc._events.publish.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # _handle_failure — when the failure publish itself errors
+    # ------------------------------------------------------------------
+
+    def test_handle_failure_swallows_its_own_exception(self):
+        svc = _make_service()
+        task = _make_task()
+        task.start()
+
+        svc._events.publish.side_effect = RuntimeError("redis down")
+
+        # Must not propagate — the worker's finally-block cleanup depends on it.
+        svc._handle_failure(task, "worker-1", "some reason")
 
     # ------------------------------------------------------------------
     # _build_env — non-string runtime_config values are JSON-encoded
@@ -283,7 +245,6 @@ class TestWorkerExecutionService:
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         agent = AgentProps(
             agent_id="worker-1", name="W1",
             runtime_config={
@@ -309,6 +270,7 @@ class TestWorkerExecutionService:
         svc._runtime_factory.return_value = runtime
         svc._git.create_workspace.return_value = "/tmp/ws"
         svc._git.apply_changes_and_commit.return_value = "sha-abc"
+        svc._git.get_modified_files.return_value = []
 
         svc.execute("t-001", "p-001", "worker-1")
 
@@ -326,7 +288,6 @@ class TestWorkerExecutionService:
         task = _make_task()
         svc = _make_service()
         svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.return_value = True
         svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
 
         runtime = MagicMock()
@@ -337,88 +298,8 @@ class TestWorkerExecutionService:
         svc._runtime_factory.return_value = runtime
         svc._git.create_workspace.return_value = "/tmp/ws"
         svc._git.apply_changes_and_commit.return_value = "sha-abc"
+        svc._git.get_modified_files.return_value = []
 
         svc.execute("t-001", "p-001", "worker-1")
 
-        assert task.status == TaskStatus.SUCCEEDED
-
-    # ------------------------------------------------------------------
-    # _start_task_with_retry — assignment stolen mid-CAS
-    # ------------------------------------------------------------------
-
-    def test_start_raises_when_assignment_changes_during_cas(self):
-        initial = _make_task()
-
-        def make_reassigned():
-            t = _make_task()
-            t.assignment = Assignment(agent_id="other-worker")
-            return t
-
-        svc = _make_service()
-        call_count = {"n": 0}
-
-        def load_side(tid):
-            call_count["n"] += 1
-            return initial if call_count["n"] == 1 else make_reassigned()
-
-        svc._task_repo.load.side_effect = load_side
-        svc._task_repo.update_if_version.return_value = True
-        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
-        svc._git.create_workspace.return_value = "/tmp/ws"
-
-        svc.execute("t-001", "p-001", "worker-1")
-
-        failed = [c for c in svc._events.publish.call_args_list
-                  if c[0][0].type == "task.failed"]
-        assert len(failed) == 1
-        assert "assignment changed" in failed[0][0][0].payload["reason"]
-
-    # ------------------------------------------------------------------
-    # _handle_failure — when the failure handler itself errors
-    # ------------------------------------------------------------------
-
-    def test_handle_failure_swallows_its_own_exception(self):
-        svc = _make_service()
-        task = _make_task()
-        task.start()
-
-        svc._task_repo.load.return_value = task
-        svc._task_repo.update_if_version.side_effect = RuntimeError("disk full")
-
-        svc._handle_failure(task, "worker-1", "some reason")
-
-        svc._events.publish.assert_not_called()
-
-    def test_success_does_not_publish_completed_when_persist_never_succeeds(self):
-        task = _make_task()
-        in_progress_states = []
-        for _ in range(6):
-            fresh = _make_task(status=TaskStatus.ASSIGNED)
-            fresh.start()
-            in_progress_states.append(fresh)
-
-        svc = _make_service()
-        svc._task_repo.load.side_effect = [task, task, task] + in_progress_states
-        svc._task_repo.update_if_version.side_effect = [True] + [False] * 5
-        svc._registry.get.return_value = AgentProps(agent_id="worker-1", name="W1")
-
-        runtime = MagicMock()
-        svc._runtime_factory.return_value = runtime
-        runtime.wait_for_completion.return_value = AgentExecutionResult(
-            success=True, exit_code=0
-        )
-        svc._git.create_workspace.return_value = "/tmp/ws"
-        svc._git.apply_changes_and_commit.return_value = "sha-abc"
-
-        svc.execute("t-001", "p-001", "worker-1")
-
-        completed = [
-            c for c in svc._events.publish.call_args_list
-            if c[0][0].type == "task.completed"
-        ]
-        failed = [
-            c for c in svc._events.publish.call_args_list
-            if c[0][0].type == "task.failed"
-        ]
-        assert completed == []
-        assert failed == []
+        assert len(_published_of_type(svc, "task.execution_succeeded")) == 1

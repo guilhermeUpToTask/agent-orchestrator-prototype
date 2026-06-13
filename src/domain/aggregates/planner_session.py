@@ -40,7 +40,7 @@ class PlannerMode(str, Enum):
 class SessionTurn(BaseModel):
     """One turn of the multi-turn planning conversation."""
     role: str                   # "assistant" | "tool_result"
-    content: list[dict]         # raw Anthropic message content blocks
+    content: list[dict[str, Any]]  # raw Anthropic message content blocks
     turn_index: int
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -61,7 +61,7 @@ class PlannerSession(BaseModel):
     mode: PlannerMode = PlannerMode.DISCOVERY
     reasoning: str = ""
     raw_llm_output: str = ""
-    roadmap_data: Optional[dict] = None
+    roadmap_data: Optional[dict[str, Any]] = None
     validation_errors: list[str] = Field(default_factory=list)
     validation_warnings: list[str] = Field(default_factory=list)
     goals_dispatched: list[str] = Field(default_factory=list)  # goal_ids
@@ -116,7 +116,7 @@ class PlannerSession(BaseModel):
     def add_turn(
         self,
         role: str,
-        content: list[dict],
+        content: list[dict[str, Any]],
         turn_index: int,
     ) -> "PlannerSession":
         """Append a conversation turn and persist it immediately."""
@@ -130,7 +130,7 @@ class PlannerSession(BaseModel):
         )
         return self
 
-    def record_roadmap_candidate(self, roadmap_data: dict) -> "PlannerSession":
+    def record_roadmap_candidate(self, roadmap_data: dict[str, Any]) -> "PlannerSession":
         """Record the roadmap data mid-session when submit_final_roadmap is called."""
         self._assert_status(PlannerSessionStatus.RUNNING)
         self.roadmap_data = roadmap_data

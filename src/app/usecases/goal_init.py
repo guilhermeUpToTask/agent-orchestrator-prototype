@@ -31,6 +31,7 @@ from src.domain import (
     GitWorkspacePort,
     GoalAggregate,
     GoalSpec,
+    GoalTaskDef,
     TaskStatus,
     TaskSummary,
 )
@@ -208,7 +209,7 @@ class GoalInitUseCase:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _topological_order(spec: GoalSpec) -> list:
+def _topological_order(spec: GoalSpec) -> list[GoalTaskDef]:
     """
     Return GoalTaskDefs in topological order (dependencies before dependents).
     Kahn's algorithm — assumes spec.tasks is already a valid DAG (validated

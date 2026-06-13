@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Any, Callable, Optional
 
 from src.domain.aggregates.planner_session import PlannerSession
 from src.domain.ports.planner import PlannerTool
@@ -12,7 +12,7 @@ def build_ask_question_tool(
 ) -> PlannerTool:
     """Tool used by interactive discovery runtime to ask clarifying questions."""
 
-    def ask_question_handler(inp: dict) -> str:
+    def ask_question_handler(inp: dict[str, Any]) -> str:
         question = inp.get("question", "")
         if io_handler is not None:
             answer = io_handler(question)
@@ -40,7 +40,7 @@ def build_submit_project_brief_tool(
 ) -> PlannerTool:
     """Accept and validate a final discovery brief payload."""
 
-    def submit_brief_handler(inp: dict) -> str:
+    def submit_brief_handler(inp: dict[str, Any]) -> str:
         brief_json = inp.get("brief_json", "")
         try:
             data = json.loads(brief_json)
