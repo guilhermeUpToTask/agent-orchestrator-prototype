@@ -107,11 +107,19 @@ class GlobalConfigStore:
 
     def initialize(self) -> dict[str, Any]:
         """
-        Write defaults and return them. Called on first run / --defaults flag.
-        Replaces the old generate_defaults() name.
+        Ensure config.json exists with defaults, preserving existing values.
+
+        Called on first run / --defaults flag. Fills in any missing default
+        keys without overwriting values already on disk — most importantly
+        ``project_name``. This makes re-running ``orchestrate init --defaults``
+        on a machine that already has an active project non-destructive, so it
+        never silently orphans the project.
         """
-        data = {k: v for k, v in MACHINE_DEFAULTS.items()
-                if k in MACHINE_PERSISTABLE_KEYS and v is not None}
+        defaults = {k: v for k, v in MACHINE_DEFAULTS.items()
+                    if k in MACHINE_PERSISTABLE_KEYS and v is not None}
+        # load() returns defaults merged with on-disk values; existing values win.
+        existing = {k: v for k, v in self.load().items() if v is not None}
+        data = {**defaults, **existing}
         self.save(data)
         return data
 
