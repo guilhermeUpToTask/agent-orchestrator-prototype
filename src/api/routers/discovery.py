@@ -21,6 +21,7 @@ next start.
 from __future__ import annotations
 
 import threading
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -94,7 +95,7 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
                 session.fail(result.failure_reason)
             else:
                 session.complete(
-                    {"brief": result.brief.model_dump() if result.brief else None}
+                    {"brief": asdict(result.brief) if result.brief else None}
                 )
         except Exception as exc:
             log.exception(
