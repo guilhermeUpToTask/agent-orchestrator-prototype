@@ -1,13 +1,9 @@
-import React, { useState } from 'react';
-import { X, CheckSquare, GitBranch, AlertTriangle } from 'lucide-react';
-import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
+import React from 'react';
+import { X, GitPullRequest, ExternalLink, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
+import { tokens, STATUS_META, AGENT_COLORS, GOAL_STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import type { TaskStatus } from '../types/domain';
-
-const ALL_STATUSES: TaskStatus[] = [
-  'created', 'assigned', 'in_progress', 'succeeded',
-  'failed', 'canceled', 'requeued', 'merged',
-];
+import { useAgents, useGoals, useSendChatMessage } from '../lib/queries';
+import type { GoalAggregate } from '../types/ui';
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -41,21 +37,21 @@ function Tag({ text, color }: { text: string; color?: string }) {
 export function DetailPanel() {
   const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
   const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
-  const nodes = usePlannerStore((s) => s.nodes);
-  const goals = usePlannerStore((s) => s.goals);
-  const agentRegistry = usePlannerStore((s) => s.agentRegistry);
   const selectNode = usePlannerStore((s) => s.selectNode);
-  const sendMessage = usePlannerStore((s) => s.sendMessage);
-  const ui = usePlannerStore((s) => s.ui);
 
-  const node = nodes.find((n) => n.id === selectedNodeId);
-  const goal = goals.find((g) => g.goal_id === node?.data.goalId);
+  const { data: goals = [] } = useGoals();
+  const { data: agentRegistry = [] } = useAgents();
+  const sendMessage = useSendChatMessage();
 
-  if (!detailPanelOpen || !node) return null;
+  const goal = goals.find((g) => g.tasks.some((t) => t.task_id === selectedNodeId));
+  const task = goal?.tasks.find((t) => t.task_id === selectedNodeId);
 
-  const task = node.data.task;
-  const agent = node.data.agent;
-  const status = (task?.status ?? 'created') as StatusKey;
+  if (!detailPanelOpen || !task) return null;
+
+  const agent = task.assigned_agent_id
+    ? agentRegistry.find((a) => a.agent_id === task.assigned_agent_id) ?? null
+    : null;
+  const status = (task.status ?? 'created') as StatusKey;
   const meta = STATUS_META[status] ?? STATUS_META.created;
   const agentColor = agent ? (AGENT_COLORS[agent.name] ?? tokens.textSecond) : tokens.textMuted;
 
@@ -65,13 +61,15 @@ export function DetailPanel() {
     .filter((t) => t.status !== 'succeeded' && t.status !== 'merged')
     .map((t) => t.task_id);
 
-  function askExplain() {
+  // Capture in arrow consts so TS narrowing from the guard above carries
+  // into the click handlers.
+  const askExplain = () => {
     sendMessage(`explain_task ${task.task_id} — why is it ${task.status}?`);
-  }
+  };
 
-  function askReassign(agentName: string) {
+  const askReassign = (agentName: string) => {
     sendMessage(`Reassign ${task.task_id} to ${agentName}`);
-  }
+  };
 
   return (
     <div className="anim-slidein" style={{
@@ -111,12 +109,12 @@ export function DetailPanel() {
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 14 }}>
           <Tag text={meta.label} color={meta.color} />
           {agent && <Tag text={agent.name} color={agentColor} />}
-          {node.data.goalName && <Tag text={node.data.goalName} color={tokens.textMuted} />}
+          {goal && <Tag text={goal.name} color={tokens.textMuted} />}
         </div>
 
         <Field label="Title">
           <span style={{ fontSize: 14, fontWeight: 600, color: tokens.textPrimary, lineHeight: 1.35 }}>
-            {task?.title ?? task?.task_id}
+            {task.title || task.task_id}
           </span>
         </Field>
 
@@ -124,7 +122,7 @@ export function DetailPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: meta.dot }} />
             <span style={{ fontSize: 12, color: meta.color, fontFamily: tokens.fontMono }}>{meta.label}</span>
-            {task?.retry_count > 0 && (
+            {(task.retry_count ?? 0) > 0 && (
               <span style={{ fontSize: 10, color: tokens.yellow, fontFamily: tokens.fontMono }}>
                 (retry {task.retry_count})
               </span>
@@ -153,8 +151,11 @@ export function DetailPanel() {
           <Field label="Goal">
             <div style={{ fontSize: 11, color: tokens.textSecond }}>
               {goal.name}
-              <span style={{ fontSize: 9, color: tokens.textMuted, marginLeft: 6, fontFamily: tokens.fontMono }}>
-                [{goal.status}]
+              <span style={{
+                fontSize: 9, marginLeft: 6, fontFamily: tokens.fontMono,
+                color: GOAL_STATUS_META[goal.status]?.color ?? tokens.textMuted,
+              }}>
+                [{GOAL_STATUS_META[goal.status]?.label ?? goal.status}]
               </span>
             </div>
             {goal.depends_on.length > 0 && (
@@ -164,6 +165,9 @@ export function DetailPanel() {
             )}
           </Field>
         )}
+
+        {/* GitHub PR review gate */}
+        {goal && <PRGate goal={goal} />}
 
         {/* Blocking deps */}
         {(status === 'created' || status === 'assigned') && blockingDeps.length > 0 && (
@@ -184,8 +188,8 @@ export function DetailPanel() {
           <div style={{ display: 'flex', gap: 14 }}>
             <div>
               <div style={{ fontSize: 9, color: tokens.textMuted, fontFamily: tokens.fontMono }}>RETRIES USED</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: task?.retry_count > 0 ? tokens.yellow : tokens.textPrimary }}>
-                {task?.retry_count ?? 0}
+              <div style={{ fontSize: 14, fontWeight: 700, color: (task.retry_count ?? 0) > 0 ? tokens.yellow : tokens.textPrimary }}>
+                {task.retry_count ?? 0}
               </div>
             </div>
           </div>
@@ -206,6 +210,84 @@ export function DetailPanel() {
         </Field>
       </div>
     </div>
+  );
+}
+
+/**
+ * GitHub PR review gate panel for the goal that owns the selected task.
+ * Goals awaiting PR approval get a purple highlighted border; the operator
+ * can jump straight to the PR on GitHub. The orchestrator never merges PRs —
+ * this gate is where the human takes over.
+ */
+function PRGate({ goal }: { goal: GoalAggregate }) {
+  const awaiting = goal.status === 'awaiting_pr_approval';
+  const hasPR = goal.pr_number != null;
+
+  if (!hasPR && !awaiting) return null;
+
+  const gateColor = awaiting ? tokens.purple : goal.pr_status === 'merged' ? tokens.green : tokens.accent;
+
+  function Check({ ok, label }: { ok: boolean | null | undefined; label: string }) {
+    const Icon = ok ? CheckCircle2 : ok === false ? XCircle : CircleDashed;
+    const color = ok ? tokens.green : ok === false ? tokens.red : tokens.textMuted;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon size={11} color={color} />
+        <span style={{ fontSize: 10, fontFamily: tokens.fontMono, color }}>{label}</span>
+      </div>
+    );
+  }
+
+  return (
+    <Field label="PR Review Gate">
+      <div style={{
+        padding: '10px 12px',
+        background: awaiting ? `${tokens.purple}10` : tokens.cardBg,
+        border: `1px solid ${gateColor}55`,
+        borderRadius: tokens.r6,
+        display: 'flex', flexDirection: 'column', gap: 7,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <GitPullRequest size={12} color={gateColor} />
+          <span style={{ fontSize: 11, fontFamily: tokens.fontMono, color: gateColor }}>
+            {hasPR ? `PR #${goal.pr_number}` : 'PR pending'}
+          </span>
+          <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted }}>
+            {goal.pr_status ?? 'not opened'}
+          </span>
+        </div>
+
+        {hasPR && (
+          <>
+            <Check ok={goal.pr_checks_passed} label={goal.pr_checks_passed ? 'CI checks passed' : 'CI checks pending/failing'} />
+            <Check ok={goal.pr_approved} label={goal.pr_approved ? 'Review approved' : 'Awaiting review approval'} />
+          </>
+        )}
+
+        {goal.pr_html_url && (
+          <a
+            href={goal.pr_html_url}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '6px 10px', borderRadius: tokens.r6,
+              background: gateColor + '18', border: `1px solid ${gateColor}44`,
+              color: gateColor, fontSize: 10, fontFamily: tokens.fontMono,
+              textDecoration: 'none', letterSpacing: '0.04em',
+            }}
+          >
+            <ExternalLink size={11} /> OPEN PR ON GITHUB
+          </a>
+        )}
+
+        {awaiting && (
+          <div style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted, lineHeight: 1.5 }}>
+            Merging happens on GitHub — the orchestrator advances once the PR is merged.
+          </div>
+        )}
+      </div>
+    </Field>
   );
 }
 

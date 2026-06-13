@@ -1,8 +1,7 @@
 """
 Unit tests for StreamingPlannerCallback.
 """
-from unittest.mock import MagicMock, call
-import pytest
+from unittest.mock import MagicMock
 
 from src.infra.logging.planner_callback import StreamingPlannerCallback
 

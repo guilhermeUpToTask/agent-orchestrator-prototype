@@ -21,7 +21,7 @@ def _default_log_base() -> Path:
     from src.infra.project_paths import ProjectPaths
     ctx = SettingsService().load()
     return ProjectPaths.for_project(
-        ctx.machine.orchestrator_home, ctx.machine.project_name
+        ctx.machine.orchestrator_home, ctx.machine.project_name or "default"
     ).logs_dir
 
 

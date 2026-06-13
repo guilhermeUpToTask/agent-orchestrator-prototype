@@ -70,8 +70,8 @@ def apply_decision_to_spec(
         )
         raise
 
-    # Save updated spec
-    spec_repo.save(project_name, new_spec)
+    # Save updated spec (the repository derives the path from spec.meta.name)
+    spec_repo.save(new_spec)
 
     log.info(
         "decision_apply.applied",

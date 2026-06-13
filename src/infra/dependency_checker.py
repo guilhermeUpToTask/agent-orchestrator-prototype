@@ -16,7 +16,7 @@ The orchestrator requires:
   • at least ONE runtime ✓
 
 Usage:
-    from src.dependency_checker import DependencyChecker
+    from src.infra.dependency_checker import DependencyChecker
     checker = DependencyChecker(redis_url="redis://localhost:6379/0")
     report = checker.run()
     if not report.can_start:

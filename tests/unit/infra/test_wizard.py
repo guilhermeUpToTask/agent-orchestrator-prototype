@@ -11,7 +11,7 @@ from src.infra.cli.wizard import run_wizard
 from src.infra.cli.wizard.steps.deps import check_and_report as _check_and_report
 from src.infra.cli.wizard.steps.registry import setup_registry as _setup_registry
 from src.infra.cli.wizard.steps.registry import _interactive_register_agent
-from src.dependency_checker import DependencyReport, DepResult
+from src.infra.dependency_checker import DependencyReport, DepResult
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

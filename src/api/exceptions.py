@@ -10,11 +10,12 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from src.api.schemas.common import ErrorResponse
+from src.api.schemas.common import ErrorResponse, PlanConflictResponse
 
 # Domain imports — only error types, never aggregates or use cases
 from src.domain.errors import (
     DomainError,
+    InvalidPlanTransitionError,
     InvalidStatusTransitionError,
     MaxRetriesExceededError,
     ForbiddenFileEditError,
@@ -26,6 +27,9 @@ from src.domain.project_spec.errors import (
     ForbiddenMutationError,
 )
 
+# Infra error — raised when the active project context cannot be resolved.
+from src.infra.settings.models import ConfigurationError
+
 
 def _error_body(detail: str) -> dict:
     return ErrorResponse(detail=detail).model_dump()
@@ -34,12 +38,37 @@ def _error_body(detail: str) -> dict:
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach all domain-to-HTTP exception handlers to *app*."""
 
+    # ── 400 Bad Request — unresolved project context ──────────────────────────
+    @app.exception_handler(ConfigurationError)
+    async def configuration_error_handler(
+        request: Request, exc: ConfigurationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content=_error_body(str(exc)),
+        )
+
     # ── 404 Not Found ─────────────────────────────────────────────────────────
     @app.exception_handler(KeyError)
     async def key_error_handler(request: Request, exc: KeyError) -> JSONResponse:
         return JSONResponse(
             status_code=404,
             content=_error_body(f"Resource not found: {exc}"),
+        )
+
+    # ── 409 Conflict — invalid plan lifecycle transition ──────────────────────
+    @app.exception_handler(InvalidPlanTransitionError)
+    async def invalid_plan_transition_handler(
+        request: Request, exc: InvalidPlanTransitionError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content=PlanConflictResponse(
+                detail=str(exc),
+                action=exc.action,
+                current_status=exc.current_status,
+                expected_status=exc.expected,
+            ).model_dump(),
         )
 
     # ── 409 Conflict — invalid state transition ───────────────────────────────

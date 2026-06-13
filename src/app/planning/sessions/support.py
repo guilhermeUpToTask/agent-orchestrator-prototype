@@ -51,8 +51,8 @@ class PlanningSessionSupport:
         self._plan_repo = plan_repo
         self._goal_repo = goal_repo
 
-        self._turn_callback: Optional[Callable[[str, list], None]] = None
-        self._planner_event_hook: Optional[Callable[[str, dict], None]] = None
+        self._turn_callback: Optional[Callable[[str, list[Any]], None]] = None
+        self._planner_event_hook: Optional[Callable[[str, dict[str, Any]], None]] = None
 
         spec_changes_parser = SpecChangesParser()
         self._brief_parser = BriefParser()
@@ -66,10 +66,10 @@ class PlanningSessionSupport:
         self._phase_review_prompt_builder = PhaseReviewPromptBuilder(renderer=renderer)
         self._spec_changes_parser = spec_changes_parser
 
-    def set_turn_callback(self, callback: Optional[Callable[[str, list], None]]) -> None:
+    def set_turn_callback(self, callback: Optional[Callable[[str, list[Any]], None]]) -> None:
         self._turn_callback = callback
 
-    def set_planner_event_hook(self, hook: Optional[Callable[[str, dict], None]]) -> None:
+    def set_planner_event_hook(self, hook: Optional[Callable[[str, dict[str, Any]], None]]) -> None:
         self._planner_event_hook = hook
 
     def find_resumable_session(self, mode: PlannerMode) -> Optional[PlannerSession]:
@@ -79,8 +79,8 @@ class PlanningSessionSupport:
                 return s
         return None
 
-    def make_session_callback(self, session: PlannerSession) -> Callable[[str, list], None]:
-        def callback(role: str, content_blocks: list) -> None:
+    def make_session_callback(self, session: PlannerSession) -> Callable[[str, list[Any]], None]:
+        def callback(role: str, content_blocks: list[Any]) -> None:
             turn_index = len(session.turns)
             session.add_turn(role, content_blocks, turn_index)
             self._session_repo.save(session)
@@ -132,7 +132,7 @@ class PlanningSessionSupport:
             build_submit_review_tool(session=session, session_save=self._session_repo.save),
         ]
 
-    def parse_brief(self, roadmap_raw: dict) -> ProjectBrief:
+    def parse_brief(self, roadmap_raw: dict[str, Any]) -> ProjectBrief:
         try:
             return self._brief_parser.parse(roadmap_raw)
         except BriefParseError as exc:
@@ -176,7 +176,7 @@ class PlanningSessionSupport:
                 continue
 
             description = phase_data.get("goal", f"Goal: {goal_name}")
-            goal_descs: dict = session.roadmap_data.get("goal_descriptions", {})
+            goal_descs: dict[str, str] = session.roadmap_data.get("goal_descriptions", {})
             if goal_name in goal_descs:
                 description = goal_descs[goal_name]
 

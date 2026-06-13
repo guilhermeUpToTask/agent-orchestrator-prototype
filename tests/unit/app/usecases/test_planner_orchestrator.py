@@ -8,7 +8,10 @@ import pytest
 from src.app.usecases.planner_orchestrator import (
     PlannerOrchestrator,
 )
-from src.app.services.planner_context import PlannerContextAssembler
+from src.app.services.planner_context import (
+    PlannerContextAssembler,
+    PlanningContextSnapshot,
+)
 from src.domain.aggregates.planner_session import (
     PlannerMode,
     PlannerSession,
@@ -21,6 +24,23 @@ from src.domain.aggregates.project_plan import (
     ProjectPlanStatus,
 )
 from src.domain.ports.planner import PlannerRuntimePort
+
+
+def _empty_snapshot() -> PlanningContextSnapshot:
+    """Minimal real snapshot — the prompt builders render it for real."""
+    return PlanningContextSnapshot(
+        architecture_constraints={},
+        decisions=[],
+        current_arch="",
+        extra_context="",
+        goals=[],
+        merged_goal_names=[],
+        active_task_count=0,
+        pending_goal_count=0,
+        plan_status=None,
+        current_phase_goal=None,
+        planned_phases=[],
+    )
 
 
 class TestPlannerOrchestratorDiscovery:
@@ -409,7 +429,6 @@ class TestPlannerOrchestratorCallbackHooks:
         assert self.orchestrator._turn_callback is cb
 
     def test_turn_callback_invoked_per_turn_during_architecture(self):
-        from src.domain.aggregates.project_plan import ProjectPlanStatus
         from src.domain.ports.planner import PlannerOutput
 
         # Set up plan in ARCHITECTURE state
@@ -425,7 +444,7 @@ class TestPlannerOrchestratorCallbackHooks:
 
         # Fresh session (no resumable)
         self.session_repo.list_all.return_value = []
-        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+        self.context_assembler.assemble.return_value = _empty_snapshot()
 
         turn_calls = []
         self.orchestrator.set_turn_callback(lambda role, blocks: turn_calls.append((role, blocks)))
@@ -434,13 +453,13 @@ class TestPlannerOrchestratorCallbackHooks:
         def fake_run_session(prompt, tools, max_turns, session_callback):
             session_callback("assistant", [{"type": "text", "text": "Thinking..."}])
             session_callback("user", [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}])
+            # Record a roadmap candidate so session.complete() is reachable
+            tool = next(t for t in tools if t.name == "propose_decision")
+            tool.handler({"id": "d1", "domain": "backend", "content": "Use FastAPI."})
             return PlannerOutput(
-                session_id="s1",
-                roadmap_raw={},
                 reasoning="done",
+                roadmap_raw={},
                 raw_text="",
-                validation_errors=[],
-                validation_warnings=[],
             )
 
         self.autonomous_runtime.run_session.side_effect = fake_run_session
@@ -457,7 +476,6 @@ class TestPlannerOrchestratorCallbackHooks:
         assert self.orchestrator._planner_event_hook is hook
 
     def test_planner_event_hook_fires_decision_proposed(self):
-        import json
         from src.domain.ports.planner import PlannerOutput
 
         plan = ProjectPlan.create("Test vision")
@@ -465,7 +483,7 @@ class TestPlannerOrchestratorCallbackHooks:
         plan = plan.approve_brief(brief)
         self.plan_repo.load.return_value = plan
         self.session_repo.list_all.return_value = []
-        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+        self.context_assembler.assemble.return_value = _empty_snapshot()
 
         hook_calls = []
         self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
@@ -479,12 +497,9 @@ class TestPlannerOrchestratorCallbackHooks:
                 "content": "Use FastAPI for the REST layer.",
             })
             return PlannerOutput(
-                session_id="s1",
-                roadmap_raw={},
                 reasoning="done",
+                roadmap_raw={},
                 raw_text="",
-                validation_errors=[],
-                validation_warnings=[],
             )
 
         self.autonomous_runtime.run_session.side_effect = fake_run
@@ -504,7 +519,7 @@ class TestPlannerOrchestratorCallbackHooks:
         plan = plan.approve_brief(brief)
         self.plan_repo.load.return_value = plan
         self.session_repo.list_all.return_value = []
-        self.context_assembler.assemble.return_value = MagicMock(to_prompt_context=lambda: "ctx")
+        self.context_assembler.assemble.return_value = _empty_snapshot()
 
         hook_calls = []
         self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
@@ -521,12 +536,9 @@ class TestPlannerOrchestratorCallbackHooks:
                 }])
             })
             return PlannerOutput(
-                session_id="s1",
-                roadmap_raw={},
                 reasoning="done",
+                roadmap_raw={},
                 raw_text="",
-                validation_errors=[],
-                validation_warnings=[],
             )
 
         self.autonomous_runtime.run_session.side_effect = fake_run

@@ -4,6 +4,11 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class ProjectContextResponse(BaseModel):
+    project_name: str
+    mode: str
+
+
 class ProjectResetRequest(BaseModel):
     keep_agents: bool = False
 

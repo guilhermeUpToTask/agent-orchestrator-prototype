@@ -1,8 +1,7 @@
 """
 Unit tests for PlanGoalTasksUseCase progress_hook injection.
 """
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from src.app.usecases.plan_goal_tasks import PlanGoalTasksUseCase
 from src.domain.aggregates.goal import GoalAggregate
@@ -32,6 +31,7 @@ def _make_goal(goal_id="goal-123", name="setup-auth"):
     goal.description = "Setup authentication"
     goal.tasks = []
     goal.branch = f"goal/{name}"
+    goal.state_version = 1
     return goal
 
 
@@ -58,7 +58,6 @@ class TestPlanGoalTasksProgressHook:
         assert start_events[0][1]["goal_name"] == "setup-auth"
 
     def test_progress_hook_fires_jit_end_with_task_ids(self):
-        from src.domain import GoalTaskDef
 
         fired = []
 
@@ -126,7 +125,6 @@ class TestPlanGoalTasksProgressHook:
         goal = _make_goal()
         goal_repo.get.return_value = goal
 
-        original_run = planner_runtime.run_session.side_effect
 
         def run_session_spy(*args, **kwargs):
             order.append("llm_called")

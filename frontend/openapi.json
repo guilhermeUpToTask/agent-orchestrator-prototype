@@ -1,0 +1,3004 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AIPOM Orchestrator API",
+    "description": "RESTful API for the AIPOM AI project orchestrator. Exposes plan lifecycle, goal/task management, agent registry, spec validation, and a real-time SSE event stream.",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/api/plan": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Current Plan",
+        "description": "Returns the full plan read-model including phases, brief, and history. Returns an empty discovery-stage plan when no plan file exists yet.",
+        "operationId": "plan-get_plan",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/history": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Plan History",
+        "description": "Returns the ordered history log of all plan state transitions.",
+        "operationId": "plan-get_plan_history",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlanHistoryEntryResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Plan-Get Plan History"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No plan exists yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/approve-brief": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Approve Discovery Brief",
+        "description": "Operator approves the discovery brief, advancing the plan from `discovery` to `architecture` status.",
+        "operationId": "plan-approve_brief",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveBriefResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plan is not in `discovery` status. The body reports the current vs expected status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanConflictResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/approve-architecture": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Approve Architecture Decisions",
+        "description": "**Mid-phase plan decision.** Operator selects which architecture decision IDs to apply while the plan is in `architecture` status, triggering goal dispatch for the first phase.",
+        "operationId": "plan-approve_architecture",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveArchitectureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveArchitectureResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plan is not in `architecture` status (e.g. already in `phase_review`). The body reports the current vs expected status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/approve-phase": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Approve Phase Review",
+        "description": "**End-of-phase plan review.** Operator greenlights the phase review while the plan is in `phase_review` status, releasing goals for the next phase. Set `approve_next=false` to finish and mark the plan `done`.",
+        "operationId": "plan-approve_phase",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePhaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovePhaseResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plan is not in `phase_review` status. The body reports the current vs expected status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/refine": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Refine Plan",
+        "description": "Starts a tactical LLM refinement session for the given message and returns immediately with a session id. The planner may add, update, or remove tasks and goals. Actions stream over SSE as `plan.refinement_action`; the outcome (actions taken, success, error) is available from `GET /plan/sessions/{session_id}` once the status is `done` or `failed`. Optionally scoped via `focused_node_id` / `focused_goal_id`.",
+        "operationId": "plan-refine_plan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Session",
+        "description": "Read the state of any long-running plan session (refinement or discovery). Terminal sessions carry their outcome in `result`.",
+        "operationId": "plan-get_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/discovery/start": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Start Discovery Session",
+        "description": "Launches the interactive discovery session in a background thread and returns immediately with a session id. Questions are published over SSE as `plan.discovery_question` and are also readable via `GET /plan/discovery/{session_id}`.",
+        "operationId": "plan-start_discovery",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A discovery session is already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/discovery/{session_id}/message": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Answer Discovery Question",
+        "description": "Submit the user's answer to the session's current question. The next question (or completion) arrives via SSE / the session GET endpoint.",
+        "operationId": "plan-send_discovery_message",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "The session is not waiting for input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/discovery/{session_id}": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Get Discovery Session",
+        "description": "Read the session's current state: `waiting_input` carries the pending question; `done` carries the final brief in `result.brief`.",
+        "operationId": "plan-get_discovery_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "List All Goals",
+        "description": "Returns all goal aggregates with their tasks and current status.",
+        "operationId": "goals-list_goals",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GoalResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Goals-List Goals"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Get Goal",
+        "description": "Fetches the current state of a goal aggregate by its ID.",
+        "operationId": "goals-get_goal",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/history": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Get Goal History",
+        "description": "Returns the ordered history log of state transitions for a goal.",
+        "operationId": "goals-get_goal_history",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GoalHistoryEntryResponse"
+                  },
+                  "title": "Response Goals-Get Goal History"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/finalize": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Finalize Goal",
+        "description": "Operator finalizes a goal that is in `APPROVED` or `MERGED` status. Records the finalization event; does **not** perform any git operations \u2014 the GitHub PR merge must happen through the GitHub UI.",
+        "operationId": "goals-finalize_goal",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalFinalizeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Goal is not in APPROVED or MERGED status, or already finalized.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/unblock": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Unblock Dependent Goals",
+        "description": "Scans all PENDING goals that declared this goal as a dependency and starts any that are now fully unblocked (all prerequisites merged).",
+        "operationId": "goals-unblock_goals",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Goals-Unblock Goals"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/pr/create": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Create GitHub PR for Goal",
+        "description": "Opens a GitHub PR for a goal that has reached `READY_FOR_REVIEW` status. Idempotent \u2014 re-calling returns the existing PR number.",
+        "operationId": "goals-create_goal_pr",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Goals-Create Goal Pr"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Goal is not in READY_FOR_REVIEW status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/pr/sync": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Sync Goal PR Status from GitHub",
+        "description": "Polls GitHub for the current PR state and syncs it into the goal aggregate. Only operates on goals in `AWAITING_PR_APPROVAL` or `APPROVED` status.",
+        "operationId": "goals-sync_goal_pr_status",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Goals-Sync Goal Pr Status"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/pr/advance": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Advance Goal from PR State",
+        "description": "Applies eligible PR-driven state transitions (e.g. AWAITING_PR_APPROVAL \u2192 APPROVED). Should be called after `/pr/sync`.",
+        "operationId": "goals-advance_goal_from_pr",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Goals-Advance Goal From Pr"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "List All Tasks",
+        "description": "Returns a lightweight summary of all task records.",
+        "operationId": "tasks-list_tasks",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Tasks-List Tasks"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Bulk-Prune Tasks",
+        "description": "Deletes multiple task records, optionally filtered by status. When `filter_statuses` is omitted, **all** tasks are deleted. Valid status values: `created`, `assigned`, `running`, `succeeded`, `failed`, `canceled`, `merged`.",
+        "operationId": "tasks-prune_tasks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPruneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPruneResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status value in filter_statuses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/retry": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Force-Retry Task",
+        "description": "Operator override: force-requeue a task regardless of its current status. The retry counter is **not** incremented \u2014 this is an explicit operator action. Cannot be applied to tasks in `MERGED` status.",
+        "operationId": "tasks-retry_task",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskRetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRetryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Task is in MERGED status and cannot be requeued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}": {
+      "delete": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Delete Task",
+        "description": "Permanently removes a single task record. Does **not** clean up git branches or Redis leases \u2014 use `POST /project/reset` for a full teardown.",
+        "operationId": "tasks-delete_task",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDeleteResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/assign": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Assign Task to Agent",
+        "description": "Triggers the assignment flow for a task: finds an eligible agent, checks dependencies, and transitions the task to `ASSIGNED`. Outcome values: `assigned`, `not_assignable`, `no_eligible_agent`, `deps_not_met`, `not_found`.",
+        "operationId": "tasks-assign_task",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAssignResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/unblock": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Unblock Dependent Tasks",
+        "description": "Scans all tasks that declared `task_id` as a dependency and dispatches any that are now fully unblocked (all depends_on tasks have succeeded).",
+        "operationId": "tasks-unblock_tasks",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskUnblockResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/fail": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Handle Task Failure",
+        "description": "Applies the failure-handling policy to a task: requeues if retries remain, cancels if the retry budget is exhausted. Outcome values: `requeued`, `canceled`, `skipped`, `not_found`.",
+        "operationId": "tasks-handle_task_failure",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFailHandlingResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Task state transition violated domain invariants.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "List Registered Agents",
+        "description": "Returns all agents currently registered in the agent registry.",
+        "operationId": "agents-list_agents",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Agents-List Agents"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Register Agent",
+        "description": "Add or update an agent entry in the registry. If an agent with the same `agent_id` already exists it is replaced. `trust_level` valid values: `low`, `medium`, `high`.",
+        "operationId": "agents-register_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRegisterResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field values (e.g. unknown trust_level).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spec": {
+      "get": {
+        "tags": [
+          "spec"
+        ],
+        "summary": "Get Active Spec",
+        "description": "Returns a flattened read-only view of the active `project_spec.yaml`.",
+        "operationId": "spec-get_spec",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No spec file found. Run `orchestrate init` first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spec/propose": {
+      "post": {
+        "tags": [
+          "spec"
+        ],
+        "summary": "Propose Spec Change",
+        "description": "Submits a change proposal for the `ProjectSpec`. The change is written atomically to `project_spec.proposed.yaml`. The live spec is **never** mutated directly \u2014 an operator must run `orchestrate spec apply` to promote the proposal.",
+        "operationId": "spec-propose_spec_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeSpecChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposeSpecChangeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active spec to base the proposal on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The proposed spec would fail validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spec/validate": {
+      "post": {
+        "tags": [
+          "spec"
+        ],
+        "summary": "Validate Artifact Against Spec",
+        "description": "Checks whether the submitted artifact text (task description, file path, or dependency declaration) satisfies the active `ProjectSpec` constraints. Returns `passed=true` when no hard violations were found.",
+        "operationId": "spec-validate_against_spec",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateSpecRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateSpecResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active spec loaded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/context": {
+      "get": {
+        "tags": [
+          "project"
+        ],
+        "summary": "Get Active Project Context",
+        "description": "Returns the project name and mode the API is currently scoped to, as resolved from `.orchestrator/config.json` and the environment.",
+        "operationId": "project-get_project_context",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No active project is configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/reset": {
+      "post": {
+        "tags": [
+          "project"
+        ],
+        "summary": "Reset Project State",
+        "description": "**Destructive operator action.** Wipes all tasks, Redis leases, and git branches matching the `task-<id>` naming pattern. Set `keep_agents=true` to preserve the agent registry across the reset. Each step is attempted independently; failures are collected in `errors` rather than aborting the remaining steps.",
+        "operationId": "project-reset_project",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResetResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Reset blocked by a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Real-Time Event Stream",
+        "description": "Opens a `text/event-stream` connection that delivers real-time domain events to the frontend. Each connection gets its own queue (multiple tabs all receive every event). Events are JSON objects with `type` and `payload` keys. A `: ping` keep-alive comment is sent every 25 s when idle. Reconnect timeout is set to 3 000 ms.",
+        "operationId": "events-event_stream",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health Check",
+        "description": "Returns `ok` when the API is up and the container is wired.",
+        "operationId": "system-health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentRegisterRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Agent Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Name"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Version"
+          },
+          "trust_level": {
+            "type": "string",
+            "title": "Trust Level",
+            "default": "low"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          },
+          "max_concurrent_tasks": {
+            "type": "integer",
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Concurrent Tasks",
+            "default": 1
+          },
+          "runtime_type": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Runtime Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "name",
+          "capabilities",
+          "version",
+          "runtime_type"
+        ],
+        "title": "AgentRegisterRequest"
+      },
+      "AgentRegisterResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "runtime_type": {
+            "type": "string",
+            "title": "Runtime Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "active",
+          "runtime_type"
+        ],
+        "title": "AgentRegisterResponse"
+      },
+      "AgentResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "trust_level": {
+            "type": "string",
+            "title": "Trust Level"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "max_concurrent_tasks": {
+            "type": "integer",
+            "title": "Max Concurrent Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "name",
+          "capabilities",
+          "version",
+          "trust_level",
+          "active",
+          "max_concurrent_tasks"
+        ],
+        "title": "AgentResponse",
+        "description": "Full agent read-model."
+      },
+      "ApproveArchitectureRequest": {
+        "properties": {
+          "decision_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decision Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_ids"
+        ],
+        "title": "ApproveArchitectureRequest"
+      },
+      "ApproveArchitectureResponse": {
+        "properties": {
+          "decisions_applied": {
+            "type": "integer",
+            "title": "Decisions Applied"
+          },
+          "goals_dispatched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goals Dispatched"
+          },
+          "plan_status": {
+            "$ref": "#/components/schemas/ProjectPlanStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisions_applied",
+          "goals_dispatched",
+          "plan_status"
+        ],
+        "title": "ApproveArchitectureResponse"
+      },
+      "ApproveBriefResponse": {
+        "properties": {
+          "plan_status": {
+            "$ref": "#/components/schemas/ProjectPlanStatus"
+          },
+          "vision": {
+            "type": "string",
+            "title": "Vision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_status",
+          "vision"
+        ],
+        "title": "ApproveBriefResponse"
+      },
+      "ApprovePhaseRequest": {
+        "properties": {
+          "approve_next": {
+            "type": "boolean",
+            "title": "Approve Next",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "ApprovePhaseRequest"
+      },
+      "ApprovePhaseResponse": {
+        "properties": {
+          "decisions_applied": {
+            "type": "integer",
+            "title": "Decisions Applied"
+          },
+          "goals_dispatched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goals Dispatched"
+          },
+          "plan_status": {
+            "$ref": "#/components/schemas/ProjectPlanStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisions_applied",
+          "goals_dispatched",
+          "plan_status"
+        ],
+        "title": "ApprovePhaseResponse"
+      },
+      "DiscoveryMessageRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "DiscoveryMessageRequest"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse"
+      },
+      "GoalFinalizeResponse": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "pr_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Number"
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "goal_status": {
+            "type": "string",
+            "title": "Goal Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "pr_number",
+          "pr_url",
+          "goal_status"
+        ],
+        "title": "GoalFinalizeResponse"
+      },
+      "GoalHistoryEntryResponse": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "title": "GoalHistoryEntryResponse"
+      },
+      "GoalResponse": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GoalStatus"
+          },
+          "feature_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Tag"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Depends On"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoalTaskResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/GoalHistoryEntryResponse"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "pr_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Number"
+          },
+          "pr_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Status"
+          },
+          "pr_html_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Html Url"
+          },
+          "pr_checks_passed": {
+            "type": "boolean",
+            "title": "Pr Checks Passed",
+            "default": false
+          },
+          "pr_approved": {
+            "type": "boolean",
+            "title": "Pr Approved",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "name",
+          "description",
+          "status",
+          "depends_on",
+          "tasks",
+          "history"
+        ],
+        "title": "GoalResponse",
+        "description": "Full goal read-model."
+      },
+      "GoalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "ready_for_review",
+          "awaiting_pr_approval",
+          "approved",
+          "merged",
+          "failed",
+          "completed"
+        ],
+        "title": "GoalStatus"
+      },
+      "GoalTaskResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Depends On"
+          },
+          "assigned_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Agent Id"
+          },
+          "retry_count": {
+            "type": "integer",
+            "title": "Retry Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "title",
+          "status",
+          "depends_on"
+        ],
+        "title": "GoalTaskResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version"
+        ],
+        "title": "HealthResponse"
+      },
+      "PhaseStatus": {
+        "type": "string",
+        "enum": [
+          "planned",
+          "active",
+          "completed"
+        ],
+        "title": "PhaseStatus"
+      },
+      "PlanBriefResponse": {
+        "properties": {
+          "vision": {
+            "type": "string",
+            "title": "Vision"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Constraints"
+          },
+          "phase_1_exit_criteria": {
+            "type": "string",
+            "title": "Phase 1 Exit Criteria"
+          },
+          "open_questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Open Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vision",
+          "constraints",
+          "phase_1_exit_criteria",
+          "open_questions"
+        ],
+        "title": "PlanBriefResponse"
+      },
+      "PlanConflictResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "current_status": {
+            "type": "string",
+            "title": "Current Status"
+          },
+          "expected_status": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expected Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail",
+          "action",
+          "current_status",
+          "expected_status"
+        ],
+        "title": "PlanConflictResponse",
+        "description": "409 body for plan lifecycle conflicts \u2014 tells the client exactly\nwhich transition was attempted and what the plan state actually is."
+      },
+      "PlanHistoryEntryResponse": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "title": "PlanHistoryEntryResponse"
+      },
+      "PlanPhaseResponse": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "goal_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goal Names"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PhaseStatus"
+          },
+          "exit_criteria": {
+            "type": "string",
+            "title": "Exit Criteria"
+          },
+          "lessons": {
+            "type": "string",
+            "title": "Lessons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "name",
+          "goal",
+          "goal_names",
+          "status",
+          "exit_criteria",
+          "lessons"
+        ],
+        "title": "PlanPhaseResponse"
+      },
+      "PlanResponse": {
+        "properties": {
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProjectPlanStatus"
+          },
+          "vision": {
+            "type": "string",
+            "title": "Vision"
+          },
+          "architecture_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Architecture Summary"
+          },
+          "current_phase_index": {
+            "type": "integer",
+            "title": "Current Phase Index"
+          },
+          "state_version": {
+            "type": "integer",
+            "title": "State Version"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/PlanPhaseResponse"
+            },
+            "type": "array",
+            "title": "Phases"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanBriefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/PlanHistoryEntryResponse"
+            },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id",
+          "status",
+          "vision",
+          "current_phase_index",
+          "state_version",
+          "phases",
+          "brief",
+          "history"
+        ],
+        "title": "PlanResponse",
+        "description": "Full plan read-model."
+      },
+      "ProjectContextResponse": {
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_name",
+          "mode"
+        ],
+        "title": "ProjectContextResponse"
+      },
+      "ProjectPlanStatus": {
+        "type": "string",
+        "enum": [
+          "discovery",
+          "architecture",
+          "phase_active",
+          "phase_review",
+          "done"
+        ],
+        "title": "ProjectPlanStatus"
+      },
+      "ProjectResetRequest": {
+        "properties": {
+          "keep_agents": {
+            "type": "boolean",
+            "title": "Keep Agents",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ProjectResetRequest"
+      },
+      "ProjectResetResponse": {
+        "properties": {
+          "tasks_deleted": {
+            "type": "integer",
+            "title": "Tasks Deleted"
+          },
+          "leases_released": {
+            "type": "integer",
+            "title": "Leases Released"
+          },
+          "branches_deleted": {
+            "type": "integer",
+            "title": "Branches Deleted"
+          },
+          "agents_removed": {
+            "type": "integer",
+            "title": "Agents Removed"
+          },
+          "had_errors": {
+            "type": "boolean",
+            "title": "Had Errors"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tasks_deleted",
+          "leases_released",
+          "branches_deleted",
+          "agents_removed",
+          "had_errors",
+          "errors"
+        ],
+        "title": "ProjectResetResponse"
+      },
+      "ProposeSpecChangeRequest": {
+        "properties": {
+          "new_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Version"
+          },
+          "new_objective_desc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Objective Desc"
+          },
+          "new_objective_domain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Objective Domain"
+          },
+          "add_forbidden": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Add Forbidden"
+          },
+          "remove_forbidden": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Remove Forbidden"
+          },
+          "add_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Add Required"
+          },
+          "remove_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Remove Required"
+          },
+          "add_directory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Add Directory"
+          },
+          "remove_directory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remove Directory"
+          },
+          "rationale": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Rationale",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ProposeSpecChangeRequest"
+      },
+      "ProposeSpecChangeResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "proposal_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Path"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted",
+          "proposal_path"
+        ],
+        "title": "ProposeSpecChangeResponse"
+      },
+      "RefineRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "focused_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focused Node Id"
+          },
+          "focused_goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focused Goal Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "RefineRequest"
+      },
+      "SessionAccepted": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting_input",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status"
+        ],
+        "title": "SessionAccepted",
+        "description": "Returned with 202 when a long-running session is started."
+      },
+      "SessionStatusResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "discovery",
+              "refine"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting_input",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "kind",
+          "status"
+        ],
+        "title": "SessionStatusResponse",
+        "description": "Current state of a long-running session."
+      },
+      "SpecResponse": {
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "objective_description": {
+            "type": "string",
+            "title": "Objective Description"
+          },
+          "objective_domain": {
+            "type": "string",
+            "title": "Objective Domain"
+          },
+          "forbidden_patterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Patterns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_name",
+          "version",
+          "objective_description",
+          "objective_domain",
+          "forbidden_patterns"
+        ],
+        "title": "SpecResponse",
+        "description": "Flattened read-only view of the active ProjectSpec."
+      },
+      "TaskAssignResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "outcome"
+        ],
+        "title": "TaskAssignResponse"
+      },
+      "TaskDeleteResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "previous_status": {
+            "type": "string",
+            "title": "Previous Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "previous_status"
+        ],
+        "title": "TaskDeleteResponse"
+      },
+      "TaskFailHandlingResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "outcome"
+        ],
+        "title": "TaskFailHandlingResponse"
+      },
+      "TaskPruneRequest": {
+        "properties": {
+          "filter_statuses": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Statuses",
+            "description": "List of task statuses to target. When omitted, ALL tasks are pruned."
+          }
+        },
+        "type": "object",
+        "title": "TaskPruneRequest"
+      },
+      "TaskPruneResponse": {
+        "properties": {
+          "deleted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Deleted"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted",
+          "count"
+        ],
+        "title": "TaskPruneResponse"
+      },
+      "TaskRetryRequest": {
+        "properties": {
+          "actor": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Actor",
+            "default": "api:task-retry"
+          }
+        },
+        "type": "object",
+        "title": "TaskRetryRequest"
+      },
+      "TaskRetryResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "previous_status": {
+            "type": "string",
+            "title": "Previous Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "previous_status"
+        ],
+        "title": "TaskRetryResponse"
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "created",
+          "assigned",
+          "in_progress",
+          "succeeded",
+          "failed",
+          "canceled",
+          "requeued",
+          "merged"
+        ],
+        "title": "TaskStatus"
+      },
+      "TaskUnblockResponse": {
+        "properties": {
+          "completed_task_id": {
+            "type": "string",
+            "title": "Completed Task Id"
+          },
+          "unblocked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unblocked"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "completed_task_id",
+          "unblocked",
+          "skipped",
+          "count"
+        ],
+        "title": "TaskUnblockResponse"
+      },
+      "ValidateSpecRequest": {
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Artifact",
+            "description": "The artifact text to validate (e.g. a task description, file path, or dependency declaration)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact"
+        ],
+        "title": "ValidateSpecRequest"
+      },
+      "ValidateSpecResponse": {
+        "properties": {
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Violations"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passed",
+          "violations",
+          "warnings"
+        ],
+        "title": "ValidateSpecResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

@@ -5,14 +5,20 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from src.domain.aggregates.goal import GoalStatus
+from src.domain.value_objects.status import TaskStatus
+
 
 class GoalTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     task_id: str
     title: str
-    status: str
+    status: TaskStatus
     depends_on: list[str]
+    # Enriched from the task repository when available
+    assigned_agent_id: Optional[str] = None
+    retry_count: int = 0
 
 
 class GoalHistoryEntryResponse(BaseModel):
@@ -29,11 +35,17 @@ class GoalResponse(BaseModel):
     goal_id: str
     name: str
     description: str
-    status: str
+    status: GoalStatus
     feature_tag: Optional[str] = None
     depends_on: list[str]
     tasks: list[GoalTaskResponse]
     history: list[GoalHistoryEntryResponse]
+    # GitHub PR gate state (None until a PR is opened for the goal branch)
+    pr_number: Optional[int] = None
+    pr_status: Optional[str] = None  # "open" | "closed" | "merged"
+    pr_html_url: Optional[str] = None
+    pr_checks_passed: bool = False
+    pr_approved: bool = False
 
 
 # ── Finalize ──────────────────────────────────────────────────────────────────

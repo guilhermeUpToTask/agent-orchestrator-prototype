@@ -5,20 +5,26 @@ Receives domain events from the Redis Streams consumer loop and routes
 each one to the appropriate use case. Contains no workflow logic itself.
 
 Event → Use case mapping:
-  task.created   → TaskAssignUseCase
-  task.requeued  → TaskAssignUseCase
-  task.completed → TaskUnblockUseCase
-  task.failed    → TaskFailHandlingUseCase
+  task.created             → TaskAssignUseCase
+  task.requeued            → TaskAssignUseCase
+  task.completed           → TaskUnblockUseCase
+  task.failed              → TaskFailHandlingUseCase
+  task.execution_started   → TaskRecordResultUseCase (sole task-state writer
+  task.execution_succeeded → TaskRecordResultUseCase  for worker outcomes —
+  task.execution_failed    → TaskRecordResultUseCase  workers only publish)
 """
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
-from src.domain import SchedulerService
+from src.domain import SchedulerService, TaskResult
 from src.domain.ports import EventPort, LeasePort
 from src.domain.repositories import AgentRegistryPort, TaskRepositoryPort
 from src.app.usecases.task_assign       import TaskAssignUseCase
 from src.app.usecases.task_fail_handling import TaskFailHandlingUseCase
+from src.app.usecases.task_record_result import TaskRecordResultUseCase
 from src.app.usecases.task_unblock      import TaskUnblockUseCase
 
 log = structlog.get_logger(__name__)
@@ -51,6 +57,7 @@ class TaskManagerHandler:
         self._assign  = assign
         self._unblock = TaskUnblockUseCase(task_repo=task_repo, assign_usecase=assign)
         self._fail    = TaskFailHandlingUseCase(task_repo=task_repo, event_port=event_port)
+        self._record  = TaskRecordResultUseCase(task_repo=task_repo, event_port=event_port)
 
     def handle_task_created(self, task_id: str) -> bool:
         return self._handle_assignable_task(task_id, event_type="task.created")
@@ -71,3 +78,32 @@ class TaskManagerHandler:
     def handle_task_failed(self, task_id: str) -> None:
         log.info("task_manager.handling_failed", task_id=task_id)
         self._fail.execute(task_id)
+
+    # ------------------------------------------------------------------
+    # Worker execution results (payload-carrying events)
+    # ------------------------------------------------------------------
+
+    def handle_execution_started(self, payload: dict[str, Any]) -> None:
+        self._record.record_started(
+            task_id=payload["task_id"],
+            agent_id=payload.get("agent_id", "unknown"),
+        )
+
+    def handle_execution_succeeded(self, payload: dict[str, Any]) -> None:
+        self._record.record_succeeded(
+            task_id=payload["task_id"],
+            agent_id=payload.get("agent_id", "unknown"),
+            result=TaskResult(
+                branch=payload.get("branch", ""),
+                commit_sha=payload.get("commit_sha", ""),
+                modified_files=payload.get("modified_files", []),
+                artifacts=payload.get("artifacts", {}),
+            ),
+        )
+
+    def handle_execution_failed(self, payload: dict[str, Any]) -> None:
+        self._record.record_failed(
+            task_id=payload["task_id"],
+            agent_id=payload.get("agent_id", "unknown"),
+            reason=payload.get("reason", "unknown"),
+        )

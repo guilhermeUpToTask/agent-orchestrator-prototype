@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import date
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from src.app.planning.parsing.spec_changes_parser import SpecChangesParseError, SpecChangesParser
 from src.domain.aggregates.planner_session import PlannerSession
@@ -15,10 +15,10 @@ def build_propose_decision_tool(
     session: PlannerSession,
     session_save: Callable[[PlannerSession], None],
     spec_changes_parser: SpecChangesParser,
-    event_hook: Optional[Callable[[str, dict], None]] = None,
+    event_hook: Optional[Callable[[str, dict[str, Any]], None]] = None,
     strict_schema: bool = False,
 ) -> PlannerTool:
-    def propose_decision_handler(inp: dict) -> str:
+    def propose_decision_handler(inp: dict[str, Any]) -> str:
         try:
             spec_changes = spec_changes_parser.parse(inp.get("spec_changes_json"))
         except SpecChangesParseError as exc:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from src.domain.ports.project_state import SpecChanges
 
@@ -34,7 +34,7 @@ class SpecChangesParser:
             remove_forbidden=self._parse_list(data, "remove_forbidden"),
         )
 
-    def _parse_list(self, data: dict, key: str) -> list[str]:
+    def _parse_list(self, data: dict[str, Any], key: str) -> list[str]:
         value = data.get(key, [])
         if not isinstance(value, list):
             raise SpecChangesParseError(f"'{key}' must be a list")

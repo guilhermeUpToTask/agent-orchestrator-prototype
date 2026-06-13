@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 import structlog
@@ -119,7 +119,7 @@ class RunRefinementUseCase:
         self,
         focused_node_id: Optional[str],
         focused_goal_id: Optional[str],
-    ) -> Optional[dict]:
+    ) -> Optional[dict[str, Any]]:
         if not focused_node_id:
             return None
         try:
@@ -153,7 +153,7 @@ class RunRefinementUseCase:
     def _update_task_tool(self, actions: list[str]) -> PlannerTool:
         task_repo, event_port = self._task_repo, self._event_port
 
-        def handler(inp: dict) -> str:
+        def handler(inp: dict[str, Any]) -> str:
             task_id = inp.get("task_id", "")
             field_name = inp.get("field", "")
             new_value = inp.get("value", "")
@@ -228,7 +228,7 @@ class RunRefinementUseCase:
     def _reassign_agent_tool(self, actions: list[str]) -> PlannerTool:
         task_repo, agent_registry, event_port = self._task_repo, self._agent_registry, self._event_port
 
-        def handler(inp: dict) -> str:
+        def handler(inp: dict[str, Any]) -> str:
             task_id = inp.get("task_id", "")
             agent_name = inp.get("agent_name", "")
             agents = agent_registry.list_agents()
@@ -281,7 +281,7 @@ class RunRefinementUseCase:
     def _add_task_tool(self, actions: list[str]) -> PlannerTool:
         goal_repo, task_creation = self._goal_repo, self._task_creation
 
-        def handler(inp: dict) -> str:
+        def handler(inp: dict[str, Any]) -> str:
             goal_id = inp.get("goal_id", "")
             title = inp.get("title", "")
             description = inp.get("description", "")
@@ -353,7 +353,7 @@ class RunRefinementUseCase:
     def _explain_task_tool(self) -> PlannerTool:
         task_repo, goal_repo = self._task_repo, self._goal_repo
 
-        def handler(inp: dict) -> str:
+        def handler(inp: dict[str, Any]) -> str:
             task_id = inp.get("task_id", "")
             try:
                 task = task_repo.load(task_id)
@@ -405,7 +405,7 @@ class RunRefinementUseCase:
             handler=handler,
         )
 
-    def _build_prompt(self, user_message: str, focused_task: Optional[dict]) -> str:
+    def _build_prompt(self, user_message: str, focused_task: Optional[dict[str, Any]]) -> str:
         goals_summary = ""
         try:
             for goal in self._goal_repo.list_all():
@@ -434,19 +434,19 @@ Make the minimum changes needed. Stop after calling the relevant tools.
 """
 
     @staticmethod
-    def _coerce_list_value(value: object) -> list:
+    def _coerce_list_value(value: object) -> list[str]:
         if isinstance(value, list):
-            return value
+            return [str(item) for item in value]
         if isinstance(value, str):
             try:
                 parsed = json.loads(value)
             except json.JSONDecodeError:
                 return [item.strip() for item in value.split(",") if item.strip()]
-            return parsed if isinstance(parsed, list) else [parsed]
-        return [value]
+            return [str(p) for p in parsed] if isinstance(parsed, list) else [str(parsed)]
+        return [str(value)]
 
     @staticmethod
-    def _publish_task_updated(payload: dict, event_port: EventPort) -> None:
+    def _publish_task_updated(payload: dict[str, Any], event_port: EventPort) -> None:
         try:
             from src.domain.events.domain_event import DomainEvent
 

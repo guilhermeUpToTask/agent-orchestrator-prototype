@@ -125,21 +125,21 @@ class ProjectSpec(BaseModel):
                 domain=objective_domain,
             ),
             tech_stack=TechStack(
-                backend=backend or [],
-                database=database or [],
-                infra=infra or [],
+                backend=tuple(backend or ()),
+                database=tuple(database or ()),
+                infra=tuple(infra or ()),
             ),
             constraints=SpecConstraints(
-                forbidden=forbidden or [],
-                required=required or [],
+                forbidden=tuple(forbidden or ()),
+                required=tuple(required or ()),
             ),
             structure=StructureSpec(
-                directories=[
+                directories=tuple(
                     DirectoryRule(**d) for d in (directories or [])
-                ]
+                )
             ),
             ci=CIConfig(
-                required_checks=ci_required_checks or [],
+                required_checks=tuple(ci_required_checks or ()),
                 min_approvals=ci_min_approvals,
             ),
         )
@@ -318,8 +318,8 @@ class ProjectSpec(BaseModel):
             current_required.discard(p)
 
         constraints = SpecConstraints(
-            forbidden=sorted(current_forbidden),
-            required=sorted(current_required),
+            forbidden=tuple(sorted(current_forbidden)),
+            required=tuple(sorted(current_required)),
         )
 
         # --- structure ---
@@ -329,7 +329,7 @@ class ProjectSpec(BaseModel):
         if add_directory is not None:
             dirs.append(DirectoryRule(**add_directory))
 
-        structure = StructureSpec(directories=dirs)
+        structure = StructureSpec(directories=tuple(dirs))
 
         return ProjectSpec(
             meta=meta,
@@ -413,7 +413,7 @@ class ProjectSpec(BaseModel):
                     directories=structure_raw.get("directories", []),
                 ),
                 ci=CIConfig(
-                    required_checks=data.get("ci", {}).get("required_checks") or [],
+                    required_checks=tuple(data.get("ci", {}).get("required_checks") or ()),
                     min_approvals=data.get("ci", {}).get("min_approvals", 0) or 0,
                 ),
             )

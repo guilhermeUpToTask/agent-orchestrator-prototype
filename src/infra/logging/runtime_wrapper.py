@@ -30,6 +30,13 @@ from .log_events import (
 )
 
 
+def _as_text(data: "bytes | str | None") -> str:
+    """TimeoutExpired captures bytes or str depending on text mode."""
+    if data is None:
+        return ""
+    return data.decode(errors="replace") if isinstance(data, bytes) else data
+
+
 class LoggingSessionHandle(SessionHandle):
     """
     Wrapper around a real SessionHandle that adds logging context.
@@ -287,9 +294,9 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
             )
 
             # Read output streams in real-time using select
+            assert proc.stdout is not None and proc.stderr is not None  # PIPE above
             stdout_lines = []
             stderr_lines = []
-            timeout_remaining = timeout_seconds
 
             while True:
                 # Check if process has finished
@@ -351,8 +358,8 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
             return AgentExecutionResult(
                 success=False,
                 exit_code=-1,
-                stdout=exc.stdout or "",
-                stderr=f"TIMEOUT after {timeout_seconds}s\n{exc.stderr or ''}",
+                stdout=_as_text(exc.stdout),
+                stderr=f"TIMEOUT after {timeout_seconds}s\n{_as_text(exc.stderr)}",
                 elapsed_seconds=elapsed,
             )
         except Exception as exc:

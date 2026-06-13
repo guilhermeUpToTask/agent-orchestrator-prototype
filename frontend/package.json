@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:api": "python ../scripts/export_openapi.py openapi.json && openapi-ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
+    "@tanstack/react-query": "^5.101.0",
     "@xyflow/react": "^12.0.0",
     "dagre": "^0.8.5",
     "immer": "^10.1.1",
@@ -20,6 +22,7 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "^0.98.2",
     "@types/dagre": "^0.7.52",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

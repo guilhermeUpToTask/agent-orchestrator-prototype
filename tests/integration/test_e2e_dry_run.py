@@ -143,6 +143,34 @@ def build_worker(agent_id, task_repo, agent_registry, event_port, lease_port, tm
 # E2E: full lifecycle
 # ---------------------------------------------------------------------------
 
+
+def apply_execution_results(event_port, task_repo) -> None:
+    """Apply worker-published execution results the way the task manager
+    does in production (workers publish, the task manager writes state).
+    Idempotent: already-applied transitions are skipped."""
+    from src.app.usecases.task_record_result import TaskRecordResultUseCase
+    from src.domain import TaskResult
+
+    record = TaskRecordResultUseCase(task_repo=task_repo, event_port=event_port)
+    for e in list(event_port.all_events):
+        p = e.payload
+        if e.type == "task.execution_started":
+            record.record_started(p["task_id"], p["agent_id"])
+        elif e.type == "task.execution_succeeded":
+            record.record_succeeded(
+                p["task_id"],
+                p["agent_id"],
+                TaskResult(
+                    branch=p.get("branch", ""),
+                    commit_sha=p.get("commit_sha", ""),
+                    modified_files=p.get("modified_files", []),
+                    artifacts=p.get("artifacts", {}),
+                ),
+            )
+        elif e.type == "task.execution_failed":
+            record.record_failed(p["task_id"], p["agent_id"], p.get("reason", "unknown"))
+
+
 class TestFullLifecycle:
 
     def test_created_to_succeeded(
@@ -194,6 +222,7 @@ class TestFullLifecycle:
             tmp_workflow,
         )
         worker.process(sample_task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         # 4. Final state
         final = task_repo.load(sample_task.task_id)
@@ -291,6 +320,7 @@ class TestFullLifecycle:
             tmp_workflow,
         )
         worker.process(sample_task.task_id, "proj-test")
+        apply_execution_results(event_port, task_repo)
 
         final = task_repo.load(sample_task.task_id)
         assert final.status == TaskStatus.FAILED

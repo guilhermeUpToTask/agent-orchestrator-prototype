@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from src.domain.aggregates.planner_session import PlannerSession
 from src.domain.ports.planner import PlannerTool
@@ -9,7 +9,7 @@ from src.domain.repositories.project_plan_repository import ProjectPlanRepositor
 
 
 def build_read_project_brief_tool(plan_repo: ProjectPlanRepositoryPort) -> PlannerTool:
-    def read_brief_handler(_: dict) -> str:
+    def read_brief_handler(_: dict[str, Any]) -> str:
         plan = plan_repo.get()
         if plan and plan.brief:
             brief = plan.brief
@@ -34,9 +34,9 @@ def build_read_project_brief_tool(plan_repo: ProjectPlanRepositoryPort) -> Plann
 def build_propose_phase_plan_tool(
     session: PlannerSession,
     session_save: Callable[[PlannerSession], None],
-    event_hook: Optional[Callable[[str, dict], None]] = None,
+    event_hook: Optional[Callable[[str, dict[str, Any]], None]] = None,
 ) -> PlannerTool:
-    def propose_phase_plan_handler(inp: dict) -> str:
+    def propose_phase_plan_handler(inp: dict[str, Any]) -> str:
         phases_json = inp.get("phases_json", "[]")
         try:
             phases_data = json.loads(phases_json)
@@ -89,7 +89,7 @@ def build_propose_phase_plan_tool(
 
 
 def build_submit_architecture_tool(session: PlannerSession) -> PlannerTool:
-    def submit_architecture_handler(_: dict) -> str:
+    def submit_architecture_handler(_: dict[str, Any]) -> str:
         data = session.roadmap_data or {}
         decisions = data.get("pending_decisions", [])
         phases = data.get("pending_phases", [])

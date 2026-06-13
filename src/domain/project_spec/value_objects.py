@@ -137,7 +137,7 @@ class TechStack(BaseModel):
 
     @field_validator("backend", "database", "infra", mode="before")
     @classmethod
-    def _coerce_to_tuple(cls, v: object) -> tuple:
+    def _coerce_to_tuple(cls, v: object) -> tuple[str, ...]:
         if isinstance(v, (list, tuple)):
             return tuple(str(x) for x in v)
         if v is None:
@@ -159,7 +159,7 @@ class SpecConstraints(BaseModel):
 
     @field_validator("forbidden", "required", mode="before")
     @classmethod
-    def _coerce_to_tuple(cls, v: object) -> tuple:
+    def _coerce_to_tuple(cls, v: object) -> tuple[str, ...]:
         if isinstance(v, (list, tuple)):
             return tuple(str(x) for x in v)
         if v is None:
@@ -185,7 +185,7 @@ class StructureSpec(BaseModel):
 
     @field_validator("directories", mode="before")
     @classmethod
-    def _coerce_to_tuple(cls, v: object) -> tuple:
+    def _coerce_to_tuple(cls, v: object) -> tuple["DirectoryRule", ...]:
         if isinstance(v, (list, tuple)):
             return tuple(
                 DirectoryRule(**x) if isinstance(x, dict) else x for x in v
@@ -232,7 +232,7 @@ class CIConfig(BaseModel):
 
     @field_validator("required_checks", mode="before")
     @classmethod
-    def _coerce_to_tuple(cls, v: object) -> tuple:
+    def _coerce_to_tuple(cls, v: object) -> tuple[str, ...]:
         if isinstance(v, (list, tuple)):
             return tuple(str(x) for x in v)
         if v is None:
@@ -246,9 +246,9 @@ class CIConfig(BaseModel):
     @classmethod
     def no_gate(cls) -> "CIConfig":
         """Return a CIConfig with no gates — all PRs pass immediately."""
-        return cls(required_checks=[], min_approvals=0)
+        return cls(required_checks=(), min_approvals=0)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "required_checks": list(self.required_checks),
             "min_approvals": self.min_approvals,
