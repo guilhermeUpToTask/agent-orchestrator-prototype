@@ -79,4 +79,6 @@ export interface PlannerUIState {
   chatPanelCollapsed: boolean;
   isThinking: boolean;
   layoutDirection: 'LR' | 'TB';
+  /** Approval gate panel (brief / architecture / phase review) */
+  gateOpen: boolean;
 }

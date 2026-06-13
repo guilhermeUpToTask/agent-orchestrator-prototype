@@ -1,0 +1,46 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.viewScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Stale data is visibly stale — dimmed, with a notice — never silently old. */
+.stale .viewScroll { opacity: 0.75; }
+
+.staleNotice {
+  flex-shrink: 0;
+  padding: 6px var(--sp-4);
+  background: var(--gate-bg);
+  border-bottom: 1px solid color-mix(in srgb, var(--gate) 45%, transparent);
+  color: var(--gate-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+/* Desktop-first, but don't break narrow: rail collapses to labels-under-icons */
+@media (max-width: 900px) {
+  .body { flex-wrap: nowrap; }
+}
