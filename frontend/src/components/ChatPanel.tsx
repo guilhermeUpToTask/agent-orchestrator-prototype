@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, ChevronRight, Bot, User, Loader2, Settings2, Wrench } from 'lucide-react';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import { useGoals, usePlan, useSendChatMessage, useStartDiscovery } from '../lib/queries';
+import { useGoals, usePlan, useSendChatMessage } from '../lib/queries';
+import { hasActiveDiscoverySession } from '../lib/api';
 import type { ChatMessage, ChatMode } from '../types/ui';
 
 function ToolCallBubble({ msg }: { msg: ChatMessage }) {
@@ -194,7 +195,6 @@ export function ChatPanel() {
   const { data: plan } = usePlan();
   const { data: goals = [] } = useGoals();
   const sendMessage = useSendChatMessage();
-  const startDiscovery = useStartDiscovery();
 
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
@@ -212,6 +212,15 @@ export function ChatPanel() {
     setInput('');
     await sendMessage(text);
   }, [ui.isThinking, sendMessage, mode.inputEnabled]);
+
+  // Discovery has no fixed turn count, so give the operator an explicit exit:
+  // a terminal answer that tells the planner to wrap up and draft the brief.
+  const discoverySessionActive = planStatus === 'discovery' && hasActiveDiscoverySession();
+  const finishDiscovery = useCallback(() => {
+    void send(
+      "That's enough context for now — please wrap up discovery and draft the project brief from what we've covered.",
+    );
+  }, [send]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
@@ -293,17 +302,29 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Discovery start button */}
-      {planStatus === 'discovery' && messages.length <= 2 && (
-        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${tokens.border}`, flexShrink: 0 }}>
-          <button onClick={() => startDiscovery.mutate()} disabled={ui.isThinking} style={{
-            width: '100%', padding: '8px', background: tokens.purpleDim,
-            border: `1px solid ${tokens.purple}44`, borderRadius: tokens.r6,
-            color: tokens.purple, cursor: 'pointer', fontFamily: tokens.fontMono,
-            fontSize: 10, letterSpacing: '0.06em',
-          }}>
-            ▶ START DISCOVERY SESSION
-          </button>
+      {/* Discovery controls. The single Start entry point lives in the left
+          rail (avoids the two-button desync); here we either point operators
+          there, or — once a session is live — let them finish it early. */}
+      {planStatus === 'discovery' && (
+        <div style={{ padding: '8px 14px', borderBottom: `1px solid ${tokens.border}`, flexShrink: 0 }}>
+          {discoverySessionActive ? (
+            <button onClick={finishDiscovery} disabled={ui.isThinking} style={{
+              width: '100%', padding: '8px', background: tokens.purpleDim,
+              border: `1px solid ${tokens.purple}44`, borderRadius: tokens.r6,
+              color: tokens.purple, cursor: ui.isThinking ? 'default' : 'pointer',
+              fontFamily: tokens.fontMono, fontSize: 10, letterSpacing: '0.06em',
+            }}>
+              ⏹ FINISH DISCOVERY &amp; DRAFT BRIEF
+            </button>
+          ) : (
+            <span style={{
+              fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textMuted,
+              lineHeight: 1.5,
+            }}>
+              Start a discovery session from the lifecycle rail on the left, then
+              answer the planner’s questions here.
+            </span>
+          )}
         </div>
       )}
 

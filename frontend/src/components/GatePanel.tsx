@@ -3,7 +3,9 @@ import { X } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
   useApproveArchitecture, useApproveBrief, useApprovePhase, usePlan,
+  useStartDiscovery,
 } from '../lib/queries';
+import { toast } from '../lib/toast';
 import { relTime, useNow } from '../lib/time';
 import styles from './GatePanel.module.css';
 
@@ -109,6 +111,7 @@ function ConfirmAction({
 function BriefGate({ onDone }: { onDone: () => void }) {
   const { data: plan } = usePlan();
   const approve = useApproveBrief();
+  const restart = useStartDiscovery();
   const brief = plan?.brief;
 
   return (
@@ -141,12 +144,31 @@ function BriefGate({ onDone }: { onDone: () => void }) {
       )}
 
       {brief && (
-        <ConfirmAction
-          label="Approve brief"
-          consequence="Locks the brief and starts architecture drafting."
-          pending={approve.isPending}
-          onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
-        />
+        <>
+          <ConfirmAction
+            label="Approve brief"
+            consequence="Locks the brief and starts architecture drafting."
+            pending={approve.isPending}
+            onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
+          />
+          <ConfirmAction
+            label="Discard & restart discovery"
+            consequence="Throws away this brief and starts a fresh discovery interview. The current brief is replaced once the new one is drafted."
+            pending={restart.isPending}
+            demoted
+            onConfirm={() => {
+              restart.mutate(undefined, {
+                onSuccess: () => {
+                  toast.info(
+                    'Discovery restarted',
+                    'Answer the planner’s questions in the chat to draft a new brief.',
+                  );
+                  onDone();
+                },
+              });
+            }}
+          />
+        </>
       )}
     </div>
   );
