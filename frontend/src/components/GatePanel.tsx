@@ -179,6 +179,7 @@ function BriefGate({ onDone }: { onDone: () => void }) {
 function ArchitectureGate({ onDone }: { onDone: () => void }) {
   const { data: plan } = usePlan();
   const decisions = usePlannerStore((s) => s.decisions);
+  const phases = usePlannerStore((s) => s.phases);
   const approve = useApproveArchitecture();
   const now = useNow(5000);
 
@@ -230,6 +231,31 @@ function ArchitectureGate({ onDone }: { onDone: () => void }) {
           loaded after they streamed). Approving applies <strong>all</strong> proposed
           decisions on the backend.
         </p>
+      )}
+
+      {phases.length > 0 && (
+        <fieldset className={styles.decisions}>
+          <legend className="label">Proposed phases &amp; goals — dispatched on approval</legend>
+          {[...phases]
+            .sort((a, b) => a.at - b.at)
+            .map((p) => (
+              <div key={p.name} className={styles.phaseRow}>
+                <span className={styles.phaseName}>{p.name}</span>
+                {p.goals.length > 0 ? (
+                  <ul className={styles.phaseGoals}>
+                    {p.goals.map((g) => (
+                      <li key={g.name}>
+                        <span className={styles.decisionId}>{g.name}</span>
+                        {g.description && <span className={styles.body}> — {g.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className={styles.body}> (no goals)</span>
+                )}
+              </div>
+            ))}
+        </fieldset>
       )}
 
       <ConfirmAction

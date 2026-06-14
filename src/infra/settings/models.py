@@ -34,6 +34,10 @@ class MachineSettings:
     task_timeout: int = 600
     orchestrator_home: Path = field(default_factory=lambda: Path.home() / ".orchestrator")
     project_name: str | None = None
+    # Turn budget for autonomous planner sessions (architecture / phase-review).
+    # Sessions that exhaust the budget auto-finalize whatever they have proposed
+    # rather than failing, so this is a soft cap, not a hard wall.
+    planner_max_turns: int = 25
 
     def to_persistable_dict(self) -> dict:
         """Return only the keys safe to write to config.json."""
@@ -43,6 +47,7 @@ class MachineSettings:
                 "project_name": self.project_name,
                 "redis_url": self.redis_url,
                 "task_timeout": self.task_timeout,
+                "planner_max_turns": self.planner_max_turns,
             }.items()
             if v is not None
         }

@@ -725,4 +725,5 @@ class AppContainer:
             project_name=project_name,
             event_port=self.event_port,
             interactive_runtime_factory=interactive_runtime_factory,
+            planner_max_turns=self._ctx.machine.planner_max_turns,
         )

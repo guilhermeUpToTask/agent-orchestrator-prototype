@@ -106,4 +106,5 @@ def build_submit_review_tool(
             "required": ["lessons", "architecture_summary"],
         },
         handler=submit_review_handler,
+        terminal=True,
     )

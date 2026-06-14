@@ -131,9 +131,15 @@ class PlannerSession(BaseModel):
         return self
 
     def record_roadmap_candidate(self, roadmap_data: dict[str, Any]) -> "PlannerSession":
-        """Record the roadmap data mid-session when submit_final_roadmap is called."""
+        """Merge roadmap data accumulated mid-session by the planner's tools.
+
+        Tools contribute different slices incrementally — ``pending_decisions``,
+        ``pending_phases``, ``lessons``, ``next_phase`` — across separate calls.
+        Merge (rather than replace) so proposing one slice does not discard an
+        earlier one; a repeated key is overwritten with its latest value.
+        """
         self._assert_status(PlannerSessionStatus.RUNNING)
-        self.roadmap_data = roadmap_data
+        self.roadmap_data = {**(self.roadmap_data or {}), **roadmap_data}
         self._bump("planner.roadmap_candidate_recorded", "planner")
         return self
 

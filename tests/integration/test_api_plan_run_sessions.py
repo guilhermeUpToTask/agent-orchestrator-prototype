@@ -53,12 +53,30 @@ class TestArchitectureRun:
         return container
 
     def test_run_returns_202_and_serializes_decisions_and_phases(self, fresh_registry):
-        decision = SimpleNamespace(id="d1", domain="backend", feature_tag="api")
-        phase = SimpleNamespace(index=0, name="Foundation", goal_names=["g1"])
+        from src.domain.aggregates.project_plan import Phase, PhaseStatus
+        from src.domain.value_objects.architecture_roadmap import ArchitectureRoadmap
+        from src.domain.value_objects.goal import GoalSpec
 
-        def fake_run():
+        decision = SimpleNamespace(id="d1", domain="backend", feature_tag="api")
+        phase = Phase(
+            index=0,
+            name="Foundation",
+            goal="Stand up the base",
+            goal_names=["g1"],
+            status=PhaseStatus.PLANNED,
+            lessons="",
+            exit_criteria="done",
+        )
+        roadmap = ArchitectureRoadmap(
+            phases=[phase],
+            decisions=[decision],
+            goal_specs={"g1": GoalSpec(name="g1", description="Build goal one.", tasks=[])},
+        )
+
+        def fake_run(**kwargs):
             return SimpleNamespace(
                 failure_reason=None,
+                roadmap=roadmap,
                 pending_decisions=[decision],
                 pending_phases=[phase],
             )
@@ -75,11 +93,16 @@ class TestArchitectureRun:
                 {"id": "d1", "domain": "backend", "feature_tag": "api"}
             ]
             assert session.result["phases"] == [
-                {"index": 0, "name": "Foundation", "goal_names": ["g1"]}
+                {
+                    "index": 0,
+                    "name": "Foundation",
+                    "goal_names": ["g1"],
+                    "goals": [{"name": "g1", "description": "Build goal one."}],
+                }
             ]
 
     def test_failure_reason_marks_session_failed(self, fresh_registry):
-        def fake_run():
+        def fake_run(**kwargs):
             return SimpleNamespace(
                 failure_reason="model does not support tool use",
                 pending_decisions=[],
@@ -95,7 +118,7 @@ class TestArchitectureRun:
     def test_second_run_while_active_conflicts(self, fresh_registry):
         gate = threading.Event()
 
-        def fake_run():
+        def fake_run(**kwargs):
             gate.wait(timeout=5)
             return SimpleNamespace(
                 failure_reason=None, pending_decisions=[], pending_phases=[]
@@ -108,6 +131,46 @@ class TestArchitectureRun:
                 assert client.post("/api/plan/architecture/run").status_code == 409
             finally:
                 gate.set()
+
+
+class TestArchitectureCancel:
+    """POST /architecture/cancel requests a cooperative stop of the live run.
+
+    Guards the interrupt plumbing end-to-end: the API sets the session's
+    cancel flag, the (faked) orchestrator observes it via cancel_check and
+    returns, and the background thread finalizes the session.
+    """
+
+    def _container(self, run_architecture):
+        container = MagicMock()
+        container.planner_orchestrator.run_architecture.side_effect = run_architecture
+        return container
+
+    def test_cancel_sets_flag_and_session_finalizes(self, fresh_registry):
+        started = threading.Event()
+
+        def fake_run(cancel_check=None, **kwargs):
+            started.set()
+            while not (cancel_check and cancel_check()):
+                time.sleep(0.01)
+            return SimpleNamespace(
+                failure_reason=None, pending_decisions=[], pending_phases=[]
+            )
+
+        client = _client(self._container(fake_run))
+        with client:
+            sid = client.post("/api/plan/architecture/run").json()["session_id"]
+            assert started.wait(timeout=5)
+
+            assert client.post("/api/plan/architecture/cancel").status_code == 200
+
+            session = _poll_session(fresh_registry, sid, {"done", "failed"})
+            assert session.status == "done"
+
+    def test_cancel_without_active_session_returns_404(self, fresh_registry):
+        client = _client(self._container(lambda **kw: None))
+        with client:
+            assert client.post("/api/plan/architecture/cancel").status_code == 404
 
 
 class TestPhaseReviewRun:

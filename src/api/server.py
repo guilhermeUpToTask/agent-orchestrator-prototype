@@ -45,6 +45,24 @@ def _coordinators_enabled() -> bool:
     return os.environ.get("ORCHESTRATOR_EMBED_COORDINATORS", "1") != "0"
 
 
+def _cors_origins() -> list[str]:
+    """Frontend origins allowed to read the API (incl. the SSE stream).
+
+    Defaults cover the Vite dev server, which falls back to 5174 when 5173
+    is already in use. Override with a comma-separated ``CORS_ALLOW_ORIGINS``
+    for staging/prod deployments.
+    """
+    raw = os.environ.get("CORS_ALLOW_ORIGINS")
+    if raw:
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ]
+
+
 def _start_coordinators(container: Any) -> None:
     """Resolve dependencies on this thread, then start the three loops.
 
@@ -258,7 +276,7 @@ def create_app(container=None) -> FastAPI:
     # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=_cors_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
     )

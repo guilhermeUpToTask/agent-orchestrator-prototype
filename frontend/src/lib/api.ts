@@ -274,7 +274,14 @@ export type SSEEvent =
   | { type: 'plan.refinement_action'; payload: { action: string } }
   // Planner tool calls forwarded through the planner event hook
   | { type: 'plan.decision_proposed'; payload: { id: string; domain: string } }
-  | { type: 'plan.phase_proposed'; payload: { name: string; goal_names: string[] } }
+  | {
+      type: 'plan.phase_proposed';
+      payload: {
+        name: string;
+        goal_names: string[];
+        goal_descriptions?: Record<string, string>;
+      };
+    }
   // Autonomous architecture / phase-review run lifecycle (202 + SSE)
   | { type: 'plan.architecture_completed'; payload: { session_id: string } }
   | { type: 'plan.architecture_failed'; payload: { session_id: string; error: string | null } }

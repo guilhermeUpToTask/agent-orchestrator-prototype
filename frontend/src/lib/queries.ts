@@ -280,6 +280,8 @@ export function useSSEBridge() {
   const setConnectionState = usePlannerStore((s) => s.setConnectionState);
   const addDecision = usePlannerStore((s) => s.addDecision);
   const clearDecisions = usePlannerStore((s) => s.clearDecisions);
+  const addPhase = usePlannerStore((s) => s.addPhase);
+  const clearPhases = usePlannerStore((s) => s.clearPhases);
   const markRunComplete = usePlannerStore((s) => s.markRunComplete);
   const setActiveRun = usePlannerStore((s) => s.setActiveRun);
   const resetRuns = usePlannerStore((s) => s.resetRuns);
@@ -309,6 +311,7 @@ export function useSSEBridge() {
             // once the phase activates or the project ends.
             if (status === 'phase_active' || status === 'done') {
               clearDecisions();
+              clearPhases();
               resetRuns();
             }
             break;
@@ -381,7 +384,16 @@ export function useSSEBridge() {
             });
             break;
 
-          case 'plan.phase_proposed':
+          case 'plan.phase_proposed': {
+            const descriptions = event.payload.goal_descriptions ?? {};
+            addPhase({
+              name: event.payload.name,
+              goal_names: event.payload.goal_names,
+              goals: event.payload.goal_names.map((name) => ({
+                name,
+                description: descriptions[name] ?? '',
+              })),
+            });
             addMessage({
               role: 'tool',
               toolName: 'propose_phases',
@@ -389,6 +401,7 @@ export function useSSEBridge() {
               ts: ts(),
             });
             break;
+          }
 
           default:
             // Unknown event forwarded by the backend bridge — refetch
