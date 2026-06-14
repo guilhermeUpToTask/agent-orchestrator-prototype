@@ -45,17 +45,22 @@ class SessionAbandoned(Exception):
 @dataclass
 class ApiSession:
     session_id: str
-    kind: str  # "discovery" | "refine"
+    kind: str  # "discovery" | "refine" | "architecture"
     status: str = STATUS_RUNNING
     current_question: Optional[str] = None
     result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     created_at: float = field(default_factory=time.monotonic)
     answer_q: "queue.Queue[str]" = field(default_factory=lambda: queue.Queue(maxsize=1))
+    cancel_requested: bool = False
 
     @property
     def is_terminal(self) -> bool:
         return self.status in _TERMINAL
+
+    def request_cancel(self) -> None:
+        """Signal a cooperative stop; the planner loop polls this between turns."""
+        self.cancel_requested = True
 
     # ------------------------------------------------------------------
     # Interactive Q&A plumbing (called from the planner executor thread)

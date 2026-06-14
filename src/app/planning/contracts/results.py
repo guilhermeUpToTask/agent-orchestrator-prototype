@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.domain.aggregates.project_plan import Phase, ProjectBrief
 from src.domain.ports.project_state import DecisionEntry
+from src.domain.value_objects.architecture_roadmap import ArchitectureRoadmap
 
 
 @dataclass
@@ -18,10 +19,19 @@ class DiscoveryResult:
 @dataclass
 class ArchitectureResult:
     session_id: str
-    pending_decisions: list[DecisionEntry]
-    pending_phases: list[Phase]
+    roadmap: Optional[ArchitectureRoadmap]
     needs_approval: bool
     failure_reason: Optional[str] = None
+
+    @property
+    def pending_decisions(self) -> list[DecisionEntry]:
+        """Decisions from the typed roadmap (empty when the run failed)."""
+        return self.roadmap.decisions if self.roadmap else []
+
+    @property
+    def pending_phases(self) -> list[Phase]:
+        """Phases from the typed roadmap (empty when the run failed)."""
+        return self.roadmap.phases if self.roadmap else []
 
 
 @dataclass

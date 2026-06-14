@@ -39,10 +39,14 @@ class OpenAIPlannerRuntime(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
         return self._runtime.run_session(
             prompt=prompt,
             tools=tools,
             max_turns=max_turns,
             session_callback=session_callback,
+            require_submit=require_submit,
+            cancel_check=cancel_check,
         )

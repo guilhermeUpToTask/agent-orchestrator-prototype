@@ -209,12 +209,15 @@ class SettingsService:
         # The active context MUST come from explicit CLI overrides or config.json.
         project_name = project_name_override or stored.get("project_name")
 
+        planner_max_turns = stored.get("planner_max_turns") or MACHINE_DEFAULTS["planner_max_turns"]
+
         return MachineSettings(
             mode=mode,
             redis_url=redis_url,
             task_timeout=int(task_timeout),
             orchestrator_home=orchestrator_home,
             project_name=project_name,
+            planner_max_turns=int(planner_max_turns),
         )
 
     def _load_project(self, machine: MachineSettings) -> ProjectSettings:

@@ -205,10 +205,14 @@ async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted
 
     def run() -> None:
         try:
-            result = orchestrator.run_architecture()
+            result = orchestrator.run_architecture(
+                cancel_check=lambda: session.cancel_requested
+            )
             if result.failure_reason:
                 session.fail(result.failure_reason)
             else:
+                roadmap = getattr(result, "roadmap", None)
+                goal_specs = roadmap.goal_specs if roadmap is not None else {}
                 session.complete(
                     {
                         "decisions": [
@@ -216,7 +220,22 @@ async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted
                             for d in result.pending_decisions
                         ],
                         "phases": [
-                            {"index": p.index, "name": p.name, "goal_names": p.goal_names}
+                            {
+                                "index": p.index,
+                                "name": p.name,
+                                "goal_names": p.goal_names,
+                                "goals": [
+                                    {
+                                        "name": name,
+                                        "description": (
+                                            goal_specs[name].description
+                                            if name in goal_specs
+                                            else ""
+                                        ),
+                                    }
+                                    for name in p.goal_names
+                                ],
+                            }
                             for p in result.pending_phases
                         ],
                     }
@@ -244,6 +263,35 @@ async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted
         target=run, daemon=True, name=f"architecture-{session.session_id}"
     ).start()
 
+    return SessionAccepted(session_id=session.session_id, status=session.status)
+
+
+@router.post(
+    "/architecture/cancel",
+    response_model=SessionAccepted,
+    summary="Cancel Architecture Session",
+    description=(
+        "Requests a cooperative stop of the in-progress architecture session. "
+        "The planner loop checks the flag between turns, so cancellation takes "
+        "effect after the current turn finishes. Any decisions and phases already "
+        "proposed are auto-finalized to the approval gate; if nothing usable was "
+        "produced the session ends as `plan.architecture_failed`."
+    ),
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "No architecture session is currently running.",
+        }
+    },
+)
+async def cancel_architecture() -> SessionAccepted:
+    session = registry.active("architecture")
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No architecture session is currently running.",
+        )
+    session.request_cancel()
     return SessionAccepted(session_id=session.session_id, status=session.status)
 
 

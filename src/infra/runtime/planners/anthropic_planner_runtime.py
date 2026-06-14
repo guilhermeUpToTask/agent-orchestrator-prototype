@@ -66,12 +66,16 @@ class AnthropicPlannerRuntime(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
         return self._runtime.run_session(
             prompt=prompt,
             tools=tools,
             max_turns=max_turns,
             session_callback=session_callback,
+            require_submit=require_submit,
+            cancel_check=cancel_check,
         )
 
 
@@ -92,33 +96,69 @@ class StubPlannerRuntime(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
-        tool_map = {t.name: t.handler for t in tools}
+        tool_map = {t.name: t for t in tools}
+
+        # Architecture mode populates session state via propose tools before
+        # the (empty-input) terminal tool reads it back. Drive those first so
+        # dry-run architecture sessions produce a usable roadmap.
+        if "propose_decision" in tool_map:
+            tool_map["propose_decision"].handler(
+                {
+                    "id": "stub-decision",
+                    "domain": "backend",
+                    "content": "Stub architecture decision for dry-run.",
+                }
+            )
+        if "propose_phase_plan" in tool_map:
+            tool_map["propose_phase_plan"].handler(
+                {
+                    "phases_json": json.dumps(
+                        [
+                            {
+                                "index": 0,
+                                "name": "Foundation",
+                                "goal": "Stand up the project skeleton.",
+                                "goal_names": ["stub-goal"],
+                                "exit_criteria": "Skeleton builds.",
+                            }
+                        ]
+                    )
+                }
+            )
+
+        terminal = next((t for t in tools if t.terminal), None)
+        if terminal is None:
+            terminal = tool_map.get("submit_final_roadmap")
+        terminal_name = terminal.name if terminal else "submit_final_roadmap"
+
         roadmap_json = json.dumps(self._custom_output)
+        terminal_input = {"roadmap_json": roadmap_json} if terminal_name == "submit_final_roadmap" else {}
 
         assistant_blocks = [
             {
                 "type": "tool_use",
                 "id": "stub-tool-1",
-                "name": "submit_final_roadmap",
-                "input": {"roadmap_json": roadmap_json},
+                "name": terminal_name,
+                "input": terminal_input,
             }
         ]
         if session_callback:
             session_callback("assistant", assistant_blocks)
 
-        handler = tool_map.get("submit_final_roadmap")
-        result_str = handler({"roadmap_json": roadmap_json}) if handler else json.dumps({"accepted": True})
+        result_str = terminal.handler(terminal_input) if terminal else json.dumps({"accepted": True})
 
         try:
             parsed = json.loads(result_str)
             if not parsed.get("accepted"):
+                detail = parsed.get("errors") or parsed.get("error", "unknown error")
                 raise PlannerRuntimeError(
-                    f"StubPlannerRuntime: submit_final_roadmap rejected: "
-                    f"{parsed.get('error', 'unknown error')}"
+                    f"StubPlannerRuntime: {terminal_name} rejected: {detail}"
                 )
         except json.JSONDecodeError:
-            raise PlannerRuntimeError("StubPlannerRuntime: invalid JSON from submit_final_roadmap handler")
+            raise PlannerRuntimeError(f"StubPlannerRuntime: invalid JSON from {terminal_name} handler")
 
         tool_result_blocks = [
             {
@@ -135,4 +175,5 @@ class StubPlannerRuntime(PlannerRuntimePort):
             roadmap_raw=self._custom_output,
             raw_text="Stub output: roadmap submitted.",
             turns=[],
+            submitted=True,
         )

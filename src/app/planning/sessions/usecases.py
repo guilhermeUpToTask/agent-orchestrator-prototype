@@ -34,11 +34,13 @@ class StartDiscoveryUseCase:
         session_repo: PlannerSessionRepositoryPort,
         runtime: PlannerRuntimePort,
         support: PlanningSessionSupport,
+        max_turns: int = 25,
     ) -> None:
         self._plan_repo = plan_repo
         self._session_repo = session_repo
         self._runtime = runtime
         self._support = support
+        self._max_turns = max_turns
 
     def execute(self, io_handler: Optional[Callable[[str], str]] = None) -> DiscoveryResult:
         plan = self._plan_repo.get()
@@ -60,7 +62,7 @@ class StartDiscoveryUseCase:
             output = self._runtime.run_session(
                 prompt=self._support.build_discovery_prompt(),
                 tools=tools,
-                max_turns=20,
+                max_turns=self._max_turns,
                 session_callback=self._support.make_session_callback(session),
             )
         except PlannerRuntimeError as exc:
@@ -114,17 +116,25 @@ class RunArchitectureUseCase:
         session_repo: PlannerSessionRepositoryPort,
         runtime: PlannerRuntimePort,
         support: PlanningSessionSupport,
+        max_turns: int = 25,
     ) -> None:
         self._plan_repo = plan_repo
         self._session_repo = session_repo
         self._runtime = runtime
         self._support = support
+        self._max_turns = max_turns
 
-    def execute(self, io_handler: Optional[Callable[[str], str]] = None) -> ArchitectureResult:
+    def execute(
+        self,
+        io_handler: Optional[Callable[[str], str]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> ArchitectureResult:
         _ = io_handler
         plan = self._plan_repo.load()
         if plan.status != ProjectPlanStatus.ARCHITECTURE:
-            return ArchitectureResult("", [], [], False, f"Plan must be in ARCHITECTURE state, got {plan.status.value}")
+            return ArchitectureResult(
+                "", None, False, f"Plan must be in ARCHITECTURE state, got {plan.status.value}"
+            )
 
         session = self._support.find_resumable_session(PlannerMode.ARCHITECTURE)
         if session is None:
@@ -132,24 +142,40 @@ class RunArchitectureUseCase:
             session.start()
             self._session_repo.save(session)
 
+        # require_submit=False: the agent may finish by calling submit_architecture,
+        # by exhausting the turn budget, or by user interrupt. In every case we keep
+        # whatever was proposed and auto-finalize below if it is usable, instead of
+        # discarding coherent work on a hard max-turns failure.
         try:
             output = self._runtime.run_session(
                 prompt=self._support.build_architecture_prompt(),
                 tools=self._support.build_architecture_tools(session),
-                max_turns=15,
+                max_turns=self._max_turns,
                 session_callback=self._support.make_session_callback(session),
+                require_submit=False,
+                cancel_check=cancel_check,
             )
         except PlannerRuntimeError as exc:
             session.fail(reason=str(exc))
             self._session_repo.save(session)
-            return ArchitectureResult(session.session_id, [], [], False, str(exc))
+            return ArchitectureResult(session.session_id, None, False, str(exc))
 
-        pending_decisions = self._support.extract_pending_decisions(session)
-        pending_phases = self._support.extract_pending_phases(session)
+        assembly = self._support.assemble_roadmap(session)
+        roadmap = assembly.roadmap
+
+        if roadmap is None or not roadmap.decisions:
+            detail = "; ".join(assembly.errors) if assembly.errors else (
+                "need at least one decision and one phase"
+            )
+            reason = f"Architecture session ended without a usable roadmap ({detail})."
+            session.fail(reason=reason)
+            self._session_repo.save(session)
+            return ArchitectureResult(session.session_id, None, False, reason)
+
         session.complete(reasoning=output.reasoning, raw_llm_output=output.raw_text, validation_errors=[], validation_warnings=[])
         self._session_repo.save(session)
 
-        return ArchitectureResult(session.session_id, pending_decisions, pending_phases, True)
+        return ArchitectureResult(session.session_id, roadmap, True)
 
 
 class ApproveArchitectureUseCase:
@@ -186,8 +212,15 @@ class ApproveArchitectureUseCase:
         if arch_session is None:
             raise ValueError("No completed ARCHITECTURE session found")
 
-        pending_decisions = self._support.extract_pending_decisions(arch_session)
-        pending_phases = self._support.extract_pending_phases(arch_session)
+        assembly = self._support.assemble_roadmap(arch_session)
+        if assembly.roadmap is None:
+            raise ValueError(
+                "Completed ARCHITECTURE session has an invalid roadmap: "
+                + "; ".join(assembly.errors)
+            )
+        roadmap = assembly.roadmap
+        pending_decisions = roadmap.decisions
+        pending_phases = roadmap.phases
 
         decisions_applied = 0
         spec_changes_applied = 0
@@ -208,7 +241,7 @@ class ApproveArchitectureUseCase:
         goals_dispatched: list[str] = []
         if pending_phases:
             for goal_name in pending_phases[0].goal_names:
-                goal_spec = self._support.find_goal_spec(arch_session, goal_name)
+                goal_spec = roadmap.goal_specs.get(goal_name)
                 if goal_spec:
                     try:
                         goal = self._goal_init.execute(goal_spec)
@@ -230,13 +263,19 @@ class RunPhaseReviewUseCase:
         session_repo: PlannerSessionRepositoryPort,
         runtime: PlannerRuntimePort,
         support: PlanningSessionSupport,
+        max_turns: int = 25,
     ) -> None:
         self._plan_repo = plan_repo
         self._session_repo = session_repo
         self._runtime = runtime
         self._support = support
+        self._max_turns = max_turns
 
-    def execute(self, io_handler: Optional[Callable[[str], str]] = None) -> PhaseReviewResult:
+    def execute(
+        self,
+        io_handler: Optional[Callable[[str], str]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> PhaseReviewResult:
         _ = io_handler
         plan = self._plan_repo.load()
         if plan.status != ProjectPlanStatus.PHASE_REVIEW:
@@ -248,12 +287,16 @@ class RunPhaseReviewUseCase:
             session.start()
             self._session_repo.save(session)
 
+        # See RunArchitectureUseCase: finish via submit_review, budget, or interrupt,
+        # and auto-finalize on usable output rather than hard-failing on max turns.
         try:
             output = self._runtime.run_session(
                 prompt=self._support.build_phase_review_prompt(plan),
                 tools=self._support.build_phase_review_tools(session, plan),
-                max_turns=15,
+                max_turns=self._max_turns,
                 session_callback=self._support.make_session_callback(session),
+                require_submit=False,
+                cancel_check=cancel_check,
             )
         except PlannerRuntimeError as exc:
             session.fail(reason=str(exc))
@@ -263,6 +306,13 @@ class RunPhaseReviewUseCase:
         lessons = self._support.extract_review_lessons(session)
         next_phase = self._support.extract_next_phase(session)
         pending_decisions = self._support.extract_pending_decisions(session)
+
+        if not lessons:
+            reason = "Phase review session ended without recording lessons."
+            session.fail(reason=reason)
+            self._session_repo.save(session)
+            return PhaseReviewResult(session.session_id, "", None, [], False, reason)
+
         session.complete(reasoning=output.reasoning, raw_llm_output=output.raw_text, validation_errors=[], validation_warnings=[])
         self._session_repo.save(session)
 

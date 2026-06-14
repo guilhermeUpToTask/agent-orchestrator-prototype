@@ -51,12 +51,16 @@ class AnthropicInteractivePlannerRuntime(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
         return self._runtime.run_session(
             prompt=prompt,
             tools=tools,
             max_turns=max_turns,
             session_callback=session_callback,
+            require_submit=require_submit,
+            cancel_check=cancel_check,
         )
 
 
@@ -82,6 +86,8 @@ class StubInteractivePlannerRuntime(AnthropicInteractivePlannerRuntime):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
         tool_map = {t.name: t.handler for t in tools}
         brief_json = json.dumps(self._custom_brief)
@@ -129,4 +135,5 @@ class StubInteractivePlannerRuntime(AnthropicInteractivePlannerRuntime):
             roadmap_raw=self._custom_brief,
             raw_text="Stub output: project brief submitted.",
             turns=[],
+            submitted=True,
         )

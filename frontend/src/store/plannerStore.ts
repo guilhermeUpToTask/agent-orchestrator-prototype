@@ -36,6 +36,18 @@ export interface DecisionProposal {
   at: number;
 }
 
+export interface PhaseGoal {
+  name: string;
+  description: string;
+}
+
+export interface PhaseProposal {
+  name: string;
+  goal_names: string[];
+  goals: PhaseGoal[];
+  at: number;
+}
+
 export type PlannerRunKind = 'architecture' | 'phase_review';
 
 const EVENT_BUFFER_MAX = 500;
@@ -49,6 +61,9 @@ interface PlannerState {
 
   // Architecture decision proposals captured from SSE
   decisions: DecisionProposal[];
+
+  // Architecture phase proposals (with per-goal descriptions) captured from SSE
+  phases: PhaseProposal[];
 
   // Which autonomous planner run (architecture / phase_review) is in flight,
   // and which kinds have completed this session. Drives the rail's
@@ -72,6 +87,8 @@ interface PlannerState {
   setConnectionState: (state: ConnectionState) => void;
   addDecision: (d: Omit<DecisionProposal, 'at'>) => void;
   clearDecisions: () => void;
+  addPhase: (p: Omit<PhaseProposal, 'at'>) => void;
+  clearPhases: () => void;
 
   // ── Autonomous planner runs ─────────────────────────────────────────────────
   setActiveRun: (kind: PlannerRunKind | null) => void;
@@ -90,6 +107,7 @@ export const usePlannerStore = create<PlannerState>()(
     messages: [],
     events: [],
     decisions: [],
+    phases: [],
     activeRun: null,
     completedRuns: [],
     connection: { state: 'connecting', lastEventAt: null },
@@ -136,6 +154,21 @@ export const usePlannerStore = create<PlannerState>()(
 
     clearDecisions: () => {
       set((s) => { s.decisions = []; });
+    },
+
+    addPhase: (p) => {
+      set((s) => {
+        const existing = s.phases.findIndex((x) => x.name === p.name);
+        if (existing >= 0) {
+          s.phases[existing] = { ...p, at: Date.now() };
+        } else {
+          s.phases.push({ ...p, at: Date.now() });
+        }
+      });
+    },
+
+    clearPhases: () => {
+      set((s) => { s.phases = []; });
     },
 
     setActiveRun: (kind) => {

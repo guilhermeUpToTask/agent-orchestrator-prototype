@@ -119,6 +119,8 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional["Callable[..., None]"] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PlannerOutput:
         span = self._telemetry.start_span(self._trace)
         self._telemetry.emit(
@@ -129,7 +131,14 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         )
         start = time.monotonic()
         try:
-            output = self._wrapped.run_session(prompt, tools, max_turns=max_turns, session_callback=session_callback)
+            output = self._wrapped.run_session(
+                prompt,
+                tools,
+                max_turns=max_turns,
+                session_callback=session_callback,
+                require_submit=require_submit,
+                cancel_check=cancel_check,
+            )
             self._telemetry.emit(
                 "llm.response",
                 span,

@@ -196,6 +196,7 @@ class PlanGoalTasksUseCase:
                 "required": ["tasks_json"],
             },
             handler=submit_tdd_tasks_handler,
+            terminal=True,
         )
 
         prompt = self._build_prompt(goal)

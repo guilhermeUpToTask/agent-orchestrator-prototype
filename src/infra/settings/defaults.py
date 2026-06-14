@@ -15,11 +15,14 @@ MACHINE_DEFAULTS: dict = {
     "task_timeout": 600,
     "orchestrator_home": Path.home() / ".orchestrator",
     "project_name": None,
+    "planner_max_turns": 25,
 }
 
 # Keys persisted by the wizard in config.json — subset of MachineSettings.
 # Schema metadata lives here, not on the dataclass.
-MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset({"project_name", "redis_url", "task_timeout"})
+MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset(
+    {"project_name", "redis_url", "task_timeout", "planner_max_turns"}
+)
 
 # Backward-compat alias used by a few test files
 MACHINE_MANAGED_KEYS = MACHINE_PERSISTABLE_KEYS
