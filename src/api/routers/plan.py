@@ -42,14 +42,16 @@ from src.api.schemas.plan import (
     ApproveArchitectureResponse,
     ApprovePhaseRequest,
     ApprovePhaseResponse,
+    ArchitectureStatusResponse,
     PlanBriefResponse,
     PlanHistoryEntryResponse,
     PlanPhaseResponse,
     PlanResponse,
 )
 from src.api.schemas.sessions import SessionAccepted
-from src.api.sessions import registry
+from src.api.sessions import ApiSession, registry
 from src.api.sse import publish_sse
+from src.domain.aggregates.project_plan import ProjectPlanStatus
 
 log = structlog.get_logger(__name__)
 
@@ -168,39 +170,30 @@ def get_plan_history(repo: ProjectPlanRepoDep) -> list[PlanHistoryEntryResponse]
 def approve_brief(orchestrator: PlanOrchestratorDep) -> ApproveBriefResponse:
     plan = orchestrator.approve_brief()
     publish_sse("plan.status_changed", {"status": plan.status.value})
+    # Auto-start architecture drafting — the approval's stated consequence.
+    # Best-effort: a launch failure must not fail the (already-applied) approval.
+    if (
+        plan.status == ProjectPlanStatus.ARCHITECTURE
+        and registry.active("architecture") is None
+    ):
+        try:
+            _launch_architecture_session(orchestrator)
+        except Exception as exc:
+            log.warning("plan.architecture_autostart_failed", error=str(exc))
     return ApproveBriefResponse(plan_status=plan.status.value, vision=plan.vision)
 
 
 # ── Run Architecture (session) ────────────────────────────────────────────────
 
-@router.post(
-    "/architecture/run",
-    response_model=SessionAccepted,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Run Architecture Session",
-    description=(
-        "Launches the autonomous architecture planner in a background thread "
-        "while the plan is in `architecture` status. The planner drafts the "
-        "phase plan and architecture decisions; each is published over SSE as "
-        "`plan.decision_proposed` / `plan.phase_proposed` as it is produced, and "
-        "the session emits `plan.architecture_completed` / "
-        "`plan.architecture_failed` on termination. Once decisions exist the "
-        "operator can call `POST /plan/approve-architecture`."
-    ),
-    responses={
-        status.HTTP_409_CONFLICT: {
-            "model": ErrorResponse,
-            "description": "An architecture session is already in progress.",
-        }
-    },
-)
-async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
-    if registry.active("architecture") is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An architecture session is already in progress.",
-        )
+def _launch_architecture_session(orchestrator) -> ApiSession:
+    """Create + start the autonomous architecture session on a daemon thread.
 
+    Shared by ``POST /plan/architecture/run`` (manual retry) and
+    ``POST /plan/approve-brief`` (auto-start), so drafting begins the moment
+    the plan enters ``architecture`` — fulfilling the approval copy and
+    removing the dead "press Draft, nothing happens" path. Callers guard
+    against a concurrent run via ``registry.active("architecture")``.
+    """
     session = registry.create("architecture")
 
     def run() -> None:
@@ -263,7 +256,70 @@ async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted
         target=run, daemon=True, name=f"architecture-{session.session_id}"
     ).start()
 
+    return session
+
+
+@router.post(
+    "/architecture/run",
+    response_model=SessionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Run Architecture Session",
+    description=(
+        "Launches the autonomous architecture planner in a background thread "
+        "while the plan is in `architecture` status. Normally drafting "
+        "auto-starts on `POST /plan/approve-brief`; this endpoint is the manual "
+        "retry. The planner drafts the phase plan and decisions; each is "
+        "published over SSE as `plan.decision_proposed` / `plan.phase_proposed`, "
+        "and the session emits `plan.architecture_completed` / "
+        "`plan.architecture_failed` on termination. Poll "
+        "`GET /plan/architecture/status` for reload-safe readiness."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "An architecture session is already in progress.",
+        }
+    },
+)
+async def run_architecture(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
+    if registry.active("architecture") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An architecture session is already in progress.",
+        )
+    session = _launch_architecture_session(orchestrator)
     return SessionAccepted(session_id=session.session_id, status=session.status)
+
+
+@router.get(
+    "/architecture/status",
+    response_model=ArchitectureStatusResponse,
+    summary="Architecture Session Status",
+    description=(
+        "Reload-resilient readiness of the autonomous architecture run. "
+        "`state` is `running` while drafting, `completed` once a usable roadmap "
+        "is ready to approve (decisions/phases included), `failed` if the run "
+        "ended without one, or `none` if no run has started in this process."
+    ),
+)
+def architecture_status() -> ArchitectureStatusResponse:
+    session = registry.latest("architecture")
+    if session is None:
+        return ArchitectureStatusResponse(state="none")
+    state_map = {
+        "running": "running",
+        "waiting_input": "running",
+        "done": "completed",
+        "failed": "failed",
+    }
+    result = session.result or {}
+    return ArchitectureStatusResponse(
+        state=state_map.get(session.status, "running"),
+        session_id=session.session_id,
+        decisions=result.get("decisions", []),
+        phases=result.get("phases", []),
+        error=session.error,
+    )
 
 
 @router.post(

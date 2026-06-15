@@ -213,6 +213,53 @@ class TestPlannerOrchestratorArchitecture:
         assert result.decisions_applied == 1
         self.plan_repo.save.assert_called()
 
+    def test_approve_architecture_empty_ids_applies_all(self):
+        """An empty selection means 'approve all' — how the gate's default and
+        the rail's 'Approve architecture' send it. Treating [] as 'apply none'
+        silently dropped the roadmap's decisions."""
+        plan = ProjectPlan.create("Test vision")
+        brief = ProjectBrief(
+            vision="Test", constraints=[], phase_1_exit_criteria="", open_questions=[]
+        )
+        plan = plan.approve_brief(brief)
+        self.plan_repo.load.return_value = plan
+
+        session = PlannerSession.create("Test", mode=PlannerMode.ARCHITECTURE)
+        session.start()
+        session = session.record_roadmap_candidate({
+            "pending_decisions": [
+                {
+                    "id": "test-decision",
+                    "date": "2024-01-01",
+                    "status": "active",
+                    "domain": "backend",
+                    "feature_tag": "",
+                    "content": "Test decision",
+                    "spec_changes_json": "{}",
+                }
+            ],
+            "pending_phases": [
+                {
+                    "index": 0,
+                    "name": "Foundation",
+                    "goal": "Auth system working",
+                    "goal_names": ["goal1"],
+                    "exit_criteria": "user can login",
+                }
+            ],
+        })
+        session = session.complete(
+            reasoning="Test", raw_llm_output="Test",
+            validation_errors=[], validation_warnings=[],
+        )
+        self.session_repo.list_all.return_value = [session]
+        self.goal_init.execute.return_value = Mock(goal_id="goal-1", name="goal1")
+        self.spec_repo.load.return_value = Mock()
+
+        result = self.orchestrator.approve_architecture([])
+
+        assert result.decisions_applied == 1
+
 
 class TestPlannerOrchestratorPhaseReview:
     """Test PlannerOrchestrator phase review mode."""

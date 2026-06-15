@@ -15,9 +15,10 @@ class OpenAIPlannerRuntime(PlannerRuntimePort):
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
+        model: str,
         base_url: Optional[str] = None,
     ) -> None:
+        self._model = model
         self._runtime = BasePlannerRuntime(
             adapter=OpenAIPlannerAdapter(
                 api_key=api_key,
@@ -32,6 +33,11 @@ class OpenAIPlannerRuntime(PlannerRuntimePort):
             submit_tool_name="submit_final_roadmap",
             artifact_arg="roadmap_json",
         )
+
+    @property
+    def model(self) -> str:
+        """Surfaced so telemetry wrappers report the real model, not 'unknown'."""
+        return self._model
 
     def run_session(
         self,

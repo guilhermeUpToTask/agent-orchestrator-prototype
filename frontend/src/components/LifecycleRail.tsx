@@ -74,10 +74,11 @@ export function LifecycleRail() {
   const briefReady = status === 'discovery' && plan?.brief != null;
 
   // The architecture/phase-review gates only make sense once the autonomous
-  // planner has actually run — approving before that 409'd ("no completed
-  // session"). Decisions on the stream (or a completed run) signal readiness.
-  const architectureReady =
-    decisions.length > 0 || completedRuns.includes('architecture');
+  // planner SESSION has COMPLETED — approving before that 409'd ("no completed
+  // session"). A streamed decision means the run is in progress, NOT ready;
+  // gating on it caused the premature-approve dangle. Completion is the only
+  // unlock (driven by plan.architecture_completed + the status-sync poll).
+  const architectureReady = completedRuns.includes('architecture');
   const phaseReviewReady = completedRuns.includes('phase_review');
 
   const needsArchitectureDraft =

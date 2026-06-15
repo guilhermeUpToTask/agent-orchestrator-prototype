@@ -79,20 +79,31 @@ def collect_project_settings(project_name: str, orchestrator_home: Path) -> dict
         default=existing.source_repo_url or "",
     )
 
+    # Every provider is reached through an OpenAI-compatible endpoint; there is
+    # no default provider or model — both must be chosen explicitly.
     planner_provider: str = click.prompt(
-        "  Planner Provider (anthropic, openai, openrouter)",
-        type=click.Choice(["anthropic", "openai", "openrouter"]),
-        default=existing.planner_provider or "anthropic",
+        "  Planner Provider (openai, openrouter, anthropic, gemini, local)",
+        type=click.Choice(["openai", "openrouter", "anthropic", "gemini", "local"]),
+        default=existing.planner_provider or None,
+        show_default=bool(existing.planner_provider),
     )
 
-    default_model = "claude-3-5-sonnet-20241022" if planner_provider == "anthropic" else "gpt-4o"
     planner_model: str = click.prompt(
-        "  Planner Model",
-        default=existing.planner_model or default_model,
+        "  Planner Model (e.g. gpt-4o, claude-sonnet-4-6)",
+        default=existing.planner_model or None,
+        show_default=bool(existing.planner_model),
+    )
+
+    # base_url is optional for hosted providers (the preset supplies a default),
+    # but required for `local` self-hosted OpenAI-compatible servers.
+    planner_base_url: str = click.prompt(
+        "  Planner Base URL  (blank → provider default; required for 'local')",
+        default=existing.planner_base_url or "",
     )
 
     return {
         "source_repo_url": source_repo_url.strip() or None,
         "planner_provider": planner_provider,
         "planner_model": planner_model.strip(),
+        "planner_base_url": planner_base_url.strip() or None,
     }

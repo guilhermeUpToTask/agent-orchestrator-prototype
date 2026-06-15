@@ -21,6 +21,7 @@ export function Overview() {
   const { data: agents = [] } = useAgents();
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
   const events = usePlannerStore((s) => s.events);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
   const now = useNow(1000);
 
   // ── Error state: direction, not mood ─────────────────────────────────────
@@ -56,11 +57,18 @@ export function Overview() {
   const agentName = (id: string | null | undefined) =>
     agents.find((a) => a.agent_id === id)?.name ?? 'unassigned';
 
-  // Amber queue: plan gates + goals waiting on review + failed tasks
+  // Amber queue: plan gates + goals waiting on review + failed tasks.
+  // Architecture/phase-review approvals are only "waiting on you" once the
+  // autonomous run has COMPLETED — offering them while the planner is still
+  // drafting let the operator approve into a 409 dangle. Completion is the
+  // unlock (completedRuns, kept durable by the status-sync poll).
   const planGate =
-    plan.status === 'phase_review' ? 'Phase review — approve the next phase or finish the project'
-    : plan.status === 'architecture' ? 'Architecture approval — review decisions and dispatch the first phase'
-    : plan.status === 'discovery' && plan.brief ? 'Project brief — review and approve to start architecture'
+    plan.status === 'phase_review' && completedRuns.includes('phase_review')
+      ? 'Phase review — approve the next phase or finish the project'
+    : plan.status === 'architecture' && completedRuns.includes('architecture')
+      ? 'Architecture approval — review decisions and dispatch the first phase'
+    : plan.status === 'discovery' && plan.brief
+      ? 'Project brief — review and approve to start architecture'
     : null;
 
   const gateGoals = goals.filter(

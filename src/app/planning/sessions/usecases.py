@@ -222,10 +222,15 @@ class ApproveArchitectureUseCase:
         pending_decisions = roadmap.decisions
         pending_phases = roadmap.phases
 
+        # An empty selection means "apply all proposed decisions" — that is how
+        # the gate's default (every decision checked) and the rail's "Approve
+        # architecture" send it. Treating [] as "apply none" silently dropped
+        # the whole roadmap's decisions.
+        apply_all = not decision_ids
         decisions_applied = 0
         spec_changes_applied = 0
         for entry in pending_decisions:
-            if entry.id in decision_ids:
+            if apply_all or entry.id in decision_ids:
                 self._project_state.write_decision(entry)
                 decisions_applied += 1
                 if entry.spec_changes and not entry.spec_changes.is_empty:

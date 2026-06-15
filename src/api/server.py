@@ -149,14 +149,51 @@ def _stop_coordinators() -> None:
     _COORDINATOR_STATE.clear()
 
 
+def _summarize_turn(role: str, content_blocks: list[Any]) -> str:
+    """Condense a planner turn into a one-line progress string for logs/SSE."""
+    texts: list[str] = []
+    tools: list[str] = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type", "")
+        if btype == "text":
+            snippet = str(block.get("text", "")).strip()
+            if snippet:
+                texts.append(snippet)
+        elif btype == "tool_use":
+            tools.append(str(block.get("name", "tool")))
+        elif btype == "tool_result":
+            tools.append("→result")
+    parts: list[str] = []
+    if tools:
+        parts.append(", ".join(tools))
+    if texts:
+        parts.append(" ".join(texts))
+    summary = " · ".join(parts) or f"{role} turn"
+    return summary[:240]
+
+
 def _wire_planner_sse_hook(container: Any) -> None:
-    """Forward planner events to the SSE stream; tolerate unconfigured projects."""
+    """Forward planner events + per-turn progress to the SSE stream and logs.
+
+    Without the turn callback the autonomous architecture / phase-review runs
+    produced zero live logs and zero SSE traffic between the 202 and the final
+    completion event — the run looked like it "did nothing." This makes every
+    planner turn visible in the backend logs and the frontend rail.
+    """
 
     def _planner_hook(event_type: str, data: dict[str, Any]) -> None:
         publish_sse(f"plan.{event_type}", data)
 
+    def _turn_callback(role: str, content_blocks: list[Any]) -> None:
+        summary = _summarize_turn(role, content_blocks)
+        log.info("planner.turn", role=role, summary=summary)
+        publish_sse("plan.jit_progress", {"message": summary, "role": role})
+
     try:
         container.planner_orchestrator.set_planner_event_hook(_planner_hook)
+        container.planner_orchestrator.set_turn_callback(_turn_callback)
     except Exception as exc:
         log.warning("api.planner_hook_setup_failed", error=str(exc))
 

@@ -19,7 +19,7 @@ class OpenAIPlannerAdapter:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
+        model: str,
         base_url: Optional[str] = None,
         system_prompt: Optional[str] = None,
         temperature: float = 0.2,

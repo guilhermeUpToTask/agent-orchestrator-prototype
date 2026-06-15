@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
   useApproveArchitecture, useApproveBrief, useApprovePhase, usePlan,
-  useStartDiscovery,
+  useRunArchitecture, useStartDiscovery,
 } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { relTime, useNow } from '../lib/time';
@@ -180,8 +180,36 @@ function ArchitectureGate({ onDone }: { onDone: () => void }) {
   const { data: plan } = usePlan();
   const decisions = usePlannerStore((s) => s.decisions);
   const phases = usePlannerStore((s) => s.phases);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
+  const activeRun = usePlannerStore((s) => s.activeRun);
   const approve = useApproveArchitecture();
+  const runArchitecture = useRunArchitecture();
   const now = useNow(5000);
+
+  // Approval requires a COMPLETED architecture session, not just a streamed
+  // decision — otherwise approve-architecture 409s ("no completed session").
+  const ready = completedRuns.includes('architecture');
+  if (!ready) {
+    const drafting = activeRun === 'architecture';
+    return (
+      <div className={styles.content}>
+        <h2 className={styles.title}>Approve architecture</h2>
+        <p className={styles.body}>
+          {drafting
+            ? 'The planner is still drafting the architecture. The approval opens automatically once it finishes — this usually takes a minute or two.'
+            : 'The architecture has not been drafted yet. Run the planner to produce the roadmap you’ll approve.'}
+        </p>
+        {!drafting && (
+          <ConfirmAction
+            label="Draft architecture"
+            consequence="Runs the architecture planner to produce decisions and the phase plan."
+            pending={runArchitecture.isPending}
+            onConfirm={() => runArchitecture.mutate(undefined, { onSuccess: onDone })}
+          />
+        )}
+      </div>
+    );
+  }
 
   // Default: every proposed decision selected. Unchecking excludes it.
   const [selected, setSelected] = useState<Set<string>>(() => new Set(decisions.map((d) => d.id)));

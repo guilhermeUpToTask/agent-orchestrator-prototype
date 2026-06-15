@@ -245,44 +245,41 @@ class AppContainer:
     @cached_property
     def planner_runtime(self):
         if self._ctx.machine.mode == "dry-run":
-            from src.infra.runtime.planners.anthropic_planner_runtime import StubPlannerRuntime
+            from src.infra.runtime.planners.stub_planner_runtime import StubPlannerRuntime
 
             return StubPlannerRuntime()
 
-        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+        from src.infra.runtime.planners.planner_factory import build_autonomous_planner
 
-        strategy = get_planner_strategy(self._ctx)
-        return strategy.build_autonomous(self._ctx)
+        return build_autonomous_planner(self._ctx)
 
     @cached_property
     def interactive_planner_runtime(self):
         if self._ctx.machine.mode == "dry-run":
-            from src.infra.runtime.planners.anthropic_interactive_planner_runtime import (
+            from src.infra.runtime.planners.stub_planner_runtime import (
                 StubInteractivePlannerRuntime,
             )
 
             return StubInteractivePlannerRuntime()
 
-        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+        from src.infra.runtime.planners.planner_factory import build_interactive_planner
 
-        strategy = get_planner_strategy(self._ctx)
-        return strategy.build_interactive(self._ctx)
+        return build_interactive_planner(self._ctx)
 
     def build_interactive_planner_runtime(
         self, io_handler: Callable[[str], str]
     ) -> PlannerRuntimePort:
         """Build a fresh interactive runtime for a single discovery session."""
         if self._ctx.machine.mode == "dry-run":
-            from src.infra.runtime.planners.anthropic_interactive_planner_runtime import (
+            from src.infra.runtime.planners.stub_planner_runtime import (
                 StubInteractivePlannerRuntime,
             )
 
             return StubInteractivePlannerRuntime()
 
-        from src.infra.runtime.planners.planner_factory import get_planner_strategy
+        from src.infra.runtime.planners.planner_factory import build_interactive_planner
 
-        strategy = get_planner_strategy(self._ctx)
-        runtime = strategy.build_interactive(self._ctx)
+        runtime = build_interactive_planner(self._ctx)
         # Inject the caller-controlled io_handler into the runtime.
         # Reaching into the adapter's internals is a known DI wart
         # (review §3.8) — tolerated until the runtime exposes a setter.
