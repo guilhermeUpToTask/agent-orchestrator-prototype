@@ -9,7 +9,7 @@ import { Overview } from './views/Overview';
 import { GoalsView, GoalDetail } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { usePlannerStore, ts } from './store/plannerStore';
-import { usePlan, useSSEBridge } from './lib/queries';
+import { useArchitectureStatusSync, usePlan, useSSEBridge } from './lib/queries';
 import { absTime } from './lib/time';
 import './styles/global.css';
 import styles from './App.module.css';
@@ -55,6 +55,7 @@ export default function App() {
   const connState = usePlannerStore((s) => s.connection.state);
 
   useSSEBridge();
+  useArchitectureStatusSync();
   useChatHydration();
 
   return (

@@ -1,8 +1,12 @@
 """
-src/infra/runtime/planner_runtime.py — Planner runtime implementations.
+src/infra/runtime/planners/stub_planner_runtime.py — Deterministic planner stubs.
 
-AnthropicPlannerRuntime: Real agentic loop via Anthropic API (claude-opus-4-6).
-StubPlannerRuntime: Deterministic stub for tests and dry-run mode.
+Provider-neutral stubs used in dry-run mode and unit tests. They implement
+PlannerRuntimePort directly and never touch any provider SDK, so they live
+apart from the real OpenAI-backed runtimes.
+
+StubPlannerRuntime: immediately calls the terminal/submit tool.
+StubInteractivePlannerRuntime: immediately calls submit_project_brief.
 """
 from __future__ import annotations
 
@@ -15,10 +19,32 @@ from src.domain.ports.planner import (
     PlannerRuntimePort,
     PlannerTool,
 )
-from src.infra.runtime.planners.adapters.anthropic_adapter import AnthropicPlannerAdapter
-from src.infra.runtime.planners.base_agent_runtime import BasePlannerRuntime
 
-_DEFAULT_MODEL = "claude-opus-4-6"
+# Two valid TDD task defs so dry-run JIT planning actually populates a goal
+# (test-writer + implementer), mirroring what the real planner emits via the
+# submit_tdd_tasks tool. Without this, dry-run goals stayed at 0 tasks.
+_STUB_TDD_TASKS = [
+    {
+        "task_id": "write-tests",
+        "title": "Write failing tests",
+        "description": "Stub test-writer task for dry-run.",
+        "capability": "coding",
+        "files_allowed_to_modify": ["tests/*"],
+        "depends_on": [],
+        "acceptance_criteria": ["Tests fail before implementation."],
+        "test_command": None,
+    },
+    {
+        "task_id": "implement",
+        "title": "Implement to pass the tests",
+        "description": "Stub implementer task for dry-run.",
+        "capability": "coding",
+        "files_allowed_to_modify": ["src/*"],
+        "depends_on": ["write-tests"],
+        "acceptance_criteria": ["All tests pass."],
+        "test_command": "pytest tests/",
+    },
+]
 
 _STUB_ROADMAP = {
     "goals": [
@@ -39,44 +65,6 @@ _STUB_ROADMAP = {
         }
     ]
 }
-
-
-class AnthropicPlannerRuntime(PlannerRuntimePort):
-    """Anthropic planner runtime backed by shared base loop + adapter."""
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = _DEFAULT_MODEL,
-        thinking_budget: int = 8000,
-    ) -> None:
-        self._runtime = BasePlannerRuntime(
-            adapter=AnthropicPlannerAdapter(
-                api_key=api_key,
-                model=model,
-                thinking_budget=thinking_budget,
-            ),
-            submit_tool_name="submit_final_roadmap",
-            artifact_arg="roadmap_json",
-        )
-
-    def run_session(
-        self,
-        prompt: str,
-        tools: list[PlannerTool],
-        max_turns: int = 15,
-        session_callback: Optional[Callable[[str, list[dict]], None]] = None,
-        require_submit: bool = True,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> PlannerOutput:
-        return self._runtime.run_session(
-            prompt=prompt,
-            tools=tools,
-            max_turns=max_turns,
-            session_callback=session_callback,
-            require_submit=require_submit,
-            cancel_check=cancel_check,
-        )
 
 
 class StubPlannerRuntime(PlannerRuntimePort):
@@ -135,7 +123,13 @@ class StubPlannerRuntime(PlannerRuntimePort):
         terminal_name = terminal.name if terminal else "submit_final_roadmap"
 
         roadmap_json = json.dumps(self._custom_output)
-        terminal_input = {"roadmap_json": roadmap_json} if terminal_name == "submit_final_roadmap" else {}
+        if terminal_name == "submit_final_roadmap":
+            terminal_input = {"roadmap_json": roadmap_json}
+        elif terminal_name == "submit_tdd_tasks":
+            # Tactical JIT planning path — supply the two TDD tasks the tool wants.
+            terminal_input = {"tasks_json": json.dumps(_STUB_TDD_TASKS)}
+        else:
+            terminal_input = {}
 
         assistant_blocks = [
             {
@@ -174,6 +168,81 @@ class StubPlannerRuntime(PlannerRuntimePort):
             reasoning="Stub reasoning: planning complete.",
             roadmap_raw=self._custom_output,
             raw_text="Stub output: roadmap submitted.",
+            turns=[],
+            submitted=True,
+        )
+
+
+class StubInteractivePlannerRuntime(PlannerRuntimePort):
+    """
+    For tests. Immediately calls submit_project_brief with a minimal valid
+    brief. Does not call ask_question.
+    """
+
+    _STUB_BRIEF = {
+        "vision": "Stub project vision for testing",
+        "constraints": ["no real constraints in stub"],
+        "phase_1_exit_criteria": "stub phase 1 done",
+        "open_questions": [],
+    }
+
+    def __init__(self, custom_brief: Optional[dict] = None) -> None:
+        self._custom_brief = custom_brief or self._STUB_BRIEF
+
+    def run_session(
+        self,
+        prompt: str,
+        tools: list[PlannerTool],
+        max_turns: int = 15,
+        session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> PlannerOutput:
+        tool_map = {t.name: t.handler for t in tools}
+        brief_json = json.dumps(self._custom_brief)
+
+        assistant_blocks = [
+            {
+                "type": "tool_use",
+                "id": "stub-tool-1",
+                "name": "submit_project_brief",
+                "input": {"brief_json": brief_json},
+            }
+        ]
+        if session_callback:
+            session_callback("assistant", assistant_blocks)
+
+        handler = tool_map.get("submit_project_brief")
+        result_str = (
+            handler({"brief_json": brief_json}) if handler else json.dumps({"accepted": True})
+        )
+
+        try:
+            parsed = json.loads(result_str)
+            if not parsed.get("accepted"):
+                raise PlannerRuntimeError(
+                    f"StubInteractivePlannerRuntime: submit_project_brief rejected: "
+                    f"{parsed.get('error', 'unknown error')}"
+                )
+        except json.JSONDecodeError:
+            raise PlannerRuntimeError(
+                "StubInteractivePlannerRuntime: invalid JSON from submit_project_brief handler"
+            )
+
+        tool_result_blocks = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "stub-tool-1",
+                "content": result_str,
+            }
+        ]
+        if session_callback:
+            session_callback("tool_result", tool_result_blocks)
+
+        return PlannerOutput(
+            reasoning="Stub reasoning: discovery complete.",
+            roadmap_raw=self._custom_brief,
+            raw_text="Stub output: project brief submitted.",
             turns=[],
             submitted=True,
         )

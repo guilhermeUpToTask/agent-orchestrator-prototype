@@ -36,8 +36,11 @@ PROJECT_DEFAULTS: dict = {
     "github_owner": None,
     "github_repo": None,
     "github_base_branch": "main",
-    "planner_provider": "anthropic",
-    "planner_model": "claude-3-5-sonnet-20241022",
+    # No default provider/model — both must be set explicitly in project.json
+    # (the planner factory fails fast when unset). base_url is optional.
+    "planner_provider": None,
+    "planner_model": None,
+    "planner_base_url": None,
 }
 
 PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
@@ -48,6 +51,7 @@ PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
         "github_base_branch",
         "planner_provider",
         "planner_model",
+        "planner_base_url",
     }
 )
 

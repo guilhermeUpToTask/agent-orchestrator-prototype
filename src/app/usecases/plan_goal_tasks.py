@@ -30,6 +30,7 @@ from typing import Any, Callable, Optional
 import structlog
 
 from src.domain import (
+    DomainEvent,
     EventPort,
     GoalTaskDef,
     TaskStatus,
@@ -110,8 +111,11 @@ class PlanGoalTasksUseCase:
             goal_description=goal.description,
         )
 
-        if self._progress_hook:
-            self._progress_hook("jit_start", {"goal_id": goal_id, "goal_name": goal.name})
+        self._emit_progress(
+            "jit_start",
+            {"goal_id": goal_id, "goal_name": goal.name},
+            message=f"Planning tasks for goal '{goal.name}'…",
+        )
 
         task_defs = self._invoke_llm(goal)
         if not task_defs:
@@ -119,15 +123,43 @@ class PlanGoalTasksUseCase:
                 "plan_goal_tasks.llm_returned_no_tasks",
                 goal_id=goal_id,
             )
+            self._emit_progress(
+                "jit_failed",
+                {"goal_id": goal_id, "goal_name": goal.name},
+                message=f"JIT planning produced no tasks for goal '{goal.name}'.",
+                error=True,
+            )
             return
 
         self._persist_tasks(goal, task_defs)
 
+        self._emit_progress(
+            "jit_end",
+            {"goal_id": goal_id, "task_ids": [t.task_id for t in task_defs]},
+            message=f"Goal '{goal.name}': {len(task_defs)} tasks created.",
+        )
+
+    def _emit_progress(
+        self, phase: str, payload: dict[str, Any], *, message: str, error: bool = False
+    ) -> None:
+        """Surface JIT progress to the CLI hook and the SSE stream.
+
+        The hook drives the CLI live logger; the domain event is forwarded by
+        the API event bridge to ``plan.jit_progress`` so the operator sees goals
+        being populated (and JIT failures) in the rail, not just a silent wait.
+        """
         if self._progress_hook:
-            self._progress_hook("jit_end", {
-                "goal_id": goal_id,
-                "task_ids": [t.task_id for t in task_defs],
-            })
+            self._progress_hook(phase, payload)
+        try:
+            self._events.publish(
+                DomainEvent(
+                    type="plan.jit_progress",
+                    producer=PRODUCER,
+                    payload={"message": message, "error": error, **payload},
+                )
+            )
+        except Exception as exc:  # observability must never break planning
+            log.warning("plan_goal_tasks.progress_emit_failed", error=str(exc))
 
     # ------------------------------------------------------------------
     # LLM interaction

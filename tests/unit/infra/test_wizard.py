@@ -121,7 +121,7 @@ def test_interactive_register_agent(monkeypatch):
 
 def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     # Step 1: project_name, redis_url  (orchestrator-global)
-    # Step 3: source_repo_url, planner_provider, planner_model (project-scoped)
+    # Step 3: source_repo_url, planner_provider, planner_model, planner_base_url
     prompts = iter(
         [
             "my-project",  # step 1 — project name
@@ -129,6 +129,7 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
             "https://github.com/x",  # step 3 — source_repo_url
             "openai",  # step 3 — planner_provider
             "gpt-4o",  # step 3 — planner_model
+            "",  # step 3 — planner_base_url (blank → provider default)
         ]
     )
     monkeypatch.setattr("click.prompt", lambda *a, **kw: next(prompts))
@@ -160,6 +161,7 @@ def test_run_wizard_succeeds_and_writes_config(tmp_path, monkeypatch):
     assert ps.source_repo_url == "https://github.com/x"
     assert ps.planner_provider == "openai"
     assert ps.planner_model == "gpt-4o"
+    assert ps.planner_base_url is None
 
 
 def test_run_wizard_returns_false_when_deps_fail(tmp_path, monkeypatch):

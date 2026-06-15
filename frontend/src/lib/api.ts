@@ -43,6 +43,20 @@ export interface RefineResponse {
   error: string | null;
 }
 
+/**
+ * Reload-resilient readiness of the autonomous architecture run.
+ * `state === 'completed'` is the ONLY signal that unlocks approval — a
+ * streamed decision alone does not, or approve-architecture 409s ("no
+ * completed session").
+ */
+export interface ArchitectureStatus {
+  state: 'none' | 'running' | 'completed' | 'failed';
+  session_id: string | null;
+  decisions: { id: string; domain: string; feature_tag?: string }[];
+  phases: { name: string; goal_names: string[]; goals: { name: string; description: string }[] }[];
+  error: string | null;
+}
+
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,6 +130,10 @@ export const runArchitecture = (): Promise<SessionAccepted> =>
 /** Kick off the autonomous phase-review planner (same 202 + SSE shape). */
 export const runPhaseReview = (): Promise<SessionAccepted> =>
   post('/api/plan/phase-review/run');
+
+/** Reload-safe readiness of the architecture run (survives a page refresh). */
+export const fetchArchitectureStatus = (): Promise<ArchitectureStatus> =>
+  get('/api/plan/architecture/status');
 
 // ─── Long-running sessions (202 + poll; progress also streams over SSE) ──────
 

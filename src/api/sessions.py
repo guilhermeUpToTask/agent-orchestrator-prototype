@@ -116,6 +116,19 @@ class SessionRegistry:
                     return s
         return None
 
+    def latest(self, kind: str) -> Optional[ApiSession]:
+        """Return the most recently created session of *kind* (any status).
+
+        Powers reload-resilient status reads: after a run completes the session
+        is still here until TTL, so the approval gate can be rebuilt without
+        relying on ephemeral client state.
+        """
+        with self._lock:
+            candidates = [s for s in self._sessions.values() if s.kind == kind]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: s.created_at)
+
     def _gc_locked(self) -> None:
         now = time.monotonic()
         stale = [

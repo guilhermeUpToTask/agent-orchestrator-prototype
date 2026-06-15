@@ -29,7 +29,7 @@ from src.infra.settings.defaults import (
 from src.infra.settings.models import ProjectSettings
 
 _SECRET_KEYS: frozenset[str] = frozenset(
-    {"github_token", "anthropic_api_key", "gemini_api_key", "openrouter_api_key"}
+    {"github_token", "anthropic_api_key", "openai_api_key", "gemini_api_key", "openrouter_api_key"}
 )
 
 

@@ -6,7 +6,7 @@ Field types strictly mirror the ProjectPlan aggregate
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -61,6 +61,22 @@ class PlanResponse(BaseModel):
 class ApproveBriefResponse(BaseModel):
     plan_status: ProjectPlanStatus
     vision: str
+
+
+# ── Architecture session status ───────────────────────────────────────────────
+
+class ArchitectureStatusResponse(BaseModel):
+    """Reload-resilient readiness of the autonomous architecture session.
+
+    The approval gate is offered only when ``state == "completed"``; clients
+    hydrate proposed decisions/phases from here so a page refresh mid/after the
+    run keeps the correct state instead of relying on ephemeral SSE buffers.
+    """
+    state: Literal["none", "running", "completed", "failed"]
+    session_id: Optional[str] = None
+    decisions: list[dict[str, Any]] = []
+    phases: list[dict[str, Any]] = []
+    error: Optional[str] = None
 
 
 # ── Approve-Architecture ──────────────────────────────────────────────────────

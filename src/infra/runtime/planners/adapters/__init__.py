@@ -20,12 +20,18 @@ def classify_provider_error(model: str, exc: Exception) -> PlannerRuntimeError:
     failure rather than letting it propagate as a 500.
     """
     status_code = getattr(exc, "status_code", None)
+    exc_name = type(exc).__name__
     text = str(exc).lower()
-    if status_code == 404 or "tool use" in text or "tool_use" in text:
+    if exc_name == "APITimeoutError" or "timed out" in text or "timeout" in text:
+        message = (
+            f"Planner LLM request to model '{model}' timed out. The model may be "
+            "slow, overloaded, or unreachable — retry, or pick a faster model."
+        )
+    elif status_code == 404 or "tool use" in text or "tool_use" in text:
         message = (
             f"The configured model '{model}' does not support tool use, which the "
             "planner requires. Select a tool-capable model/provider."
         )
     else:
-        message = f"Planner LLM request failed ({type(exc).__name__}): {exc}"
+        message = f"Planner LLM request failed ({exc_name}): {exc}"
     return PlannerRuntimeError(message)

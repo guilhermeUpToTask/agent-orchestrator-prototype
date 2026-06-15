@@ -22,6 +22,7 @@ import {
   approveBrief,
   approvePhase,
   fetchAgents,
+  fetchArchitectureStatus,
   fetchGoals,
   fetchPlan,
   fetchPlanHistory,
@@ -88,10 +89,14 @@ export function useAgents() {
 export function useApproveBrief() {
   const qc = useQueryClient();
   const addMessage = usePlannerStore((s) => s.addMessage);
+  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
   return useMutation({
     mutationFn: approveBrief,
     onSuccess: (result) => {
       addMessage({ role: 'system', text: `Brief approved → ${result.plan_status}`, ts: ts() });
+      // The backend auto-starts architecture drafting on approval; reflect it
+      // immediately so the rail shows "Drafting…" before the first status poll.
+      if (result.plan_status === 'architecture') setActiveRun('architecture');
       qc.invalidateQueries({ queryKey: keys.plan });
     },
     onError: (err) => {
@@ -175,6 +180,63 @@ export function useRunArchitecture() {
       toast.error('Could not start architecture drafting', errorDetail(err));
     },
   });
+}
+
+/**
+ * Reload-resilient architecture readiness. Polls `/api/plan/architecture/status`
+ * while the plan is in `architecture` and mirrors the backend session state into
+ * the Zustand run-state, so `completedRuns`/`decisions` survive a page refresh
+ * and a streamed decision never prematurely unlocks approval. Mount once in App.
+ */
+export function useArchitectureStatusSync() {
+  const { data: plan } = usePlan();
+  const status = plan?.status;
+  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
+  const markRunComplete = usePlannerStore((s) => s.markRunComplete);
+  const addDecision = usePlannerStore((s) => s.addDecision);
+  const addPhase = usePlannerStore((s) => s.addPhase);
+  const decisions = usePlannerStore((s) => s.decisions);
+  const phases = usePlannerStore((s) => s.phases);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
+  const activeRun = usePlannerStore((s) => s.activeRun);
+
+  const { data } = useQuery({
+    queryKey: ['plan', 'architecture', 'status'],
+    queryFn: fetchArchitectureStatus,
+    enabled: status === 'architecture',
+    refetchInterval: (query) => {
+      const s = query.state.data?.state;
+      // Poll while drafting; stop once the run is terminal (completed/failed).
+      return status === 'architecture' && (s === undefined || s === 'running')
+        ? 2000
+        : false;
+    },
+  });
+
+  useEffect(() => {
+    if (status !== 'architecture' || !data) return;
+    if (data.state === 'running' && activeRun !== 'architecture') {
+      setActiveRun('architecture');
+    }
+    if (data.state === 'completed') {
+      if (!completedRuns.includes('architecture')) markRunComplete('architecture');
+      // Hydrate proposals after a reload (the SSE buffer is gone by then).
+      if (decisions.length === 0 && data.decisions.length > 0) {
+        data.decisions.forEach((d) => addDecision({ id: d.id, domain: d.domain }));
+      }
+      if (phases.length === 0 && data.phases.length > 0) {
+        data.phases.forEach((p) =>
+          addPhase({ name: p.name, goal_names: p.goal_names, goals: p.goals }),
+        );
+      }
+    }
+    if (data.state === 'failed' && activeRun === 'architecture') {
+      setActiveRun(null);
+    }
+  }, [
+    status, data, activeRun, completedRuns, decisions.length, phases.length,
+    setActiveRun, markRunComplete, addDecision, addPhase,
+  ]);
 }
 
 /** Kick off the autonomous phase-review planner (202; SSE-driven). */

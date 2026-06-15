@@ -23,6 +23,18 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _model_of(wrapped: object) -> str:
+    """Resolve the wrapped runtime's model id for telemetry.
+
+    Runtimes expose the configured model as a public ``model`` property; the
+    older private ``_model`` is checked as a fallback. Without this, telemetry
+    reported ``model: 'unknown'`` because ``_model`` lives on the adapter, not
+    the runtime the wrapper holds.
+    """
+    model = getattr(wrapped, "model", None) or getattr(wrapped, "_model", None)
+    return str(model) if model else "unknown"
+
+
 class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
     def __init__(
         self,
@@ -52,7 +64,7 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
         self._telemetry.emit(
             "llm.request",
             span,
-            payload={"model": getattr(self._wrapped, "_model", "unknown"), "prompt_hash": _sha256(prompt_material)},
+            payload={"model": _model_of(self._wrapped), "prompt_hash": _sha256(prompt_material)},
             task_id=context.task_id,
             agent_id=self._agent_id,
         )
@@ -68,7 +80,7 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
                 "llm.response" if result.success else "llm.error",
                 span,
                 payload={
-                    "model": getattr(self._wrapped, "_model", "unknown"),
+                    "model": _model_of(self._wrapped),
                     "latency_ms": elapsed_ms,
                     "success": result.success,
                     "exit_code": result.exit_code,
@@ -88,7 +100,7 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
             self._telemetry.emit(
                 "llm.error",
                 span,
-                payload={"model": getattr(self._wrapped, "_model", "unknown"), "latency_ms": elapsed_ms},
+                payload={"model": _model_of(self._wrapped), "latency_ms": elapsed_ms},
                 metadata={"error_type": type(exc).__name__, "message": str(exc)},
                 agent_id=self._agent_id,
             )
@@ -126,7 +138,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         self._telemetry.emit(
             "llm.request",
             span,
-            payload={"model": getattr(self._wrapped, "_model", "unknown"), "prompt_hash": _sha256(prompt)},
+            payload={"model": _model_of(self._wrapped), "prompt_hash": _sha256(prompt)},
             metadata={"tool_count": len(tools), "max_turns": max_turns},
         )
         start = time.monotonic()
@@ -143,7 +155,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
                 "llm.response",
                 span,
                 payload={
-                    "model": getattr(self._wrapped, "_model", "unknown"),
+                    "model": _model_of(self._wrapped),
                     "latency_ms": int((time.monotonic() - start) * 1000),
                     "success": True,
                     "token_usage": {},
@@ -154,7 +166,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
             self._telemetry.emit(
                 "llm.error",
                 span,
-                payload={"model": getattr(self._wrapped, "_model", "unknown"), "success": False},
+                payload={"model": _model_of(self._wrapped), "success": False},
                 metadata={"error_type": type(exc).__name__, "message": str(exc)},
             )
             raise
