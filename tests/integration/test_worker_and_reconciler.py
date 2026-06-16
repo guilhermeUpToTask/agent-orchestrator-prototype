@@ -295,19 +295,20 @@ class TestWorkerHandlerErrors:
         with pytest.raises(RuntimeError, match="not found in registry"):
             worker.process(task.task_id, "proj-test")
 
-    def test_wrong_agent_id_raises(
+    def test_wrong_agent_id_skips(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         task = make_task(agent_id="other-agent")
         task_repo.save(task)
 
-        # Worker is agent-worker-001 but task is assigned to other-agent
+        # Worker is agent-worker-001 but task is assigned to other-agent — a
+        # stale/duplicate delivery: skip idempotently, do not crash or execute.
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
-        with pytest.raises(RuntimeError, match="not this worker"):
-            worker.process(task.task_id, "proj-test")
+        assert worker.process(task.task_id, "proj-test") is None
+        assert task_repo.load(task.task_id).assignment.agent_id == "other-agent"
 
-    def test_task_not_assigned_raises(
+    def test_task_not_assigned_skips(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
@@ -316,22 +317,22 @@ class TestWorkerHandlerErrors:
         task_repo.save(task)
 
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
-        with pytest.raises(RuntimeError, match="no assignment"):
-            worker.process(task.task_id, "proj-test")
+        assert worker.process(task.task_id, "proj-test") is None
+        assert task_repo.load(task.task_id).status == TaskStatus.CREATED
 
-    def test_task_in_wrong_status_raises(
+    def test_task_in_wrong_status_skips(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
     ):
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
-        # Task is IN_PROGRESS (not ASSIGNED) but assignment is present — must
-        # reach the status guard, not the "has no assignment" guard.
+        # Task is IN_PROGRESS (not ASSIGNED) — a redelivered task.assigned event.
+        # The worker must skip it, not crash (which would loop on the redelivery).
         task = make_task(status=TaskStatus.IN_PROGRESS)
         task.assignment = Assignment(agent_id=worker_agent.agent_id, lease_token="tok")
         task_repo.save(task)
 
         worker = build_worker(worker_agent.agent_id, task_repo, agent_registry, event_port, lease_port, tmp_workflow)
-        with pytest.raises(RuntimeError, match="expected assigned"):
-            worker.process(task.task_id, "proj-test")
+        assert worker.process(task.task_id, "proj-test") is None
+        assert task_repo.load(task.task_id).status == TaskStatus.IN_PROGRESS
 
     def test_agent_failure_causes_task_failed(
         self, task_repo, agent_registry, event_port, lease_port, worker_agent, tmp_workflow, monkeypatch
@@ -410,7 +411,7 @@ class TestWorkerHandlerErrors:
 
         monkeypatch.setattr("src.infra.logs_and_tests.LOG_BASE", tmp_workflow / "logs")
         monkeypatch.setattr(SimulatedAgentRuntime, "wait_for_completion",
-                            lambda self, h, timeout_seconds=600: AgentExecutionResult(success=True, exit_code=0))
+                            lambda self, h, timeout_seconds=600, progress_cb=None: AgentExecutionResult(success=True, exit_code=0))
         monkeypatch.setattr(DryRunGitWorkspaceAdapter, "get_modified_files",
                             lambda self, ws: ["forbidden.txt"])
 

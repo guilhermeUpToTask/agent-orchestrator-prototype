@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from src.app.usecases.task_execute import TaskExecuteUseCase as WorkerExecutionService
 from src.domain import (
@@ -174,13 +173,14 @@ class TestWorkerExecutionService:
     # Wrong agent → raises before any event
     # ------------------------------------------------------------------
 
-    def test_wrong_agent_raises(self):
+    def test_wrong_agent_skips(self):
+        # Assigned to another worker → stale/duplicate delivery: skip idempotently
+        # (no crash, no execution) rather than raising and crash-looping.
         task = _make_task(agent_id="other-agent")
         svc = _make_service()
         svc._task_repo.load.return_value = task
 
-        with pytest.raises(RuntimeError, match="not this worker"):
-            svc.execute("t-001", "p-001", "worker-1")
+        assert svc.execute("t-001", "p-001", "worker-1") is None
 
         assert task.status == TaskStatus.ASSIGNED
         svc._events.publish.assert_not_called()
