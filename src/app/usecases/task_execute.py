@@ -121,7 +121,19 @@ class TaskExecuteUseCase:
         trace = self._telemetry.start_trace(correlation_id=task_id)
 
         task = self._task_repo.load(task_id)
-        self._validate_assignment(task, agent_id)
+        # task.assigned events can be redelivered (worker restart with an unacked
+        # message, duplicate publish). If the task is no longer freshly ASSIGNED
+        # to this worker, the event is stale — skip it idempotently instead of
+        # crashing the whole worker (which would loop forever on the redelivery).
+        if not self._assignment_is_fresh(task, agent_id):
+            log.warning(
+                "worker.skip_stale_assignment",
+                task_id=task_id,
+                agent_id=agent_id,
+                status=task.status.value,
+                assigned_to=task.assignment.agent_id if task.assignment else None,
+            )
+            return
 
         lease_token: str | None = task.assignment.lease_token if task.assignment else None
 
@@ -278,18 +290,18 @@ class TaskExecuteUseCase:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _validate_assignment(task: TaskAggregate, agent_id: str) -> None:
-        if task.assignment is None:
-            raise RuntimeError(f"Task {task.task_id} has no assignment")
-        if task.assignment.agent_id != agent_id:
-            raise RuntimeError(
-                f"Task {task.task_id} assigned to {task.assignment.agent_id}, "
-                f"not this worker ({agent_id})"
-            )
-        if task.status != TaskStatus.ASSIGNED:
-            raise RuntimeError(
-                f"Task {task.task_id} is {task.status.value}, expected assigned"
-            )
+    def _assignment_is_fresh(task: TaskAggregate, agent_id: str) -> bool:
+        """True only if the task is freshly ASSIGNED to this worker.
+
+        Anything else (no assignment, assigned elsewhere, already in_progress or
+        terminal) means the task.assigned event is stale/duplicate and must be
+        skipped — never executed twice.
+        """
+        return (
+            task.assignment is not None
+            and task.assignment.agent_id == agent_id
+            and task.status == TaskStatus.ASSIGNED
+        )
 
     def _build_env(
         self,
