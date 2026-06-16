@@ -35,6 +35,7 @@ from src.domain import (
     GoalTaskDef,
     TaskStatus,
     TaskSummary,
+    task_branch_name,
 )
 from src.domain.aggregates.goal import GoalAggregate
 from src.domain.ports.planner import (
@@ -212,12 +213,12 @@ class PlanGoalTasksUseCase:
                             "acceptance_criteria (list), test_command (str or null). "
                             "Example: "
                             '[{"task_id": "write-tests", "title": "Write failing tests", '
-                            '"description": "...", "capability": "coding", '
+                            '"description": "...", "capability": "code:backend", '
                             '"files_allowed_to_modify": ["tests/*"], "depends_on": [], '
                             '"acceptance_criteria": ["Tests fail before impl"], '
                             '"test_command": null}, '
                             '{"task_id": "implement", "title": "Implement to pass tests", '
-                            '"description": "...", "capability": "coding", '
+                            '"description": "...", "capability": "code:backend", '
                             '"files_allowed_to_modify": ["src/*"], '
                             '"depends_on": ["write-tests"], '
                             '"acceptance_criteria": ["All tests pass"], '
@@ -276,12 +277,12 @@ class PlanGoalTasksUseCase:
             "- Writes failing tests that define the contract for this goal.\n"
             "- `files_allowed_to_modify` MUST be limited to `tests/*`.\n"
             "- `depends_on` must be `[]`.\n"
-            "- `capability` should be `\"coding\"`.\n\n"
+            "- `capability` should be `\"code:backend\"`.\n\n"
             "**Task 2 — Implementer**\n"
             "- Writes the implementation to make Task 1's tests pass.\n"
             "- `files_allowed_to_modify` MUST be limited to `src/*`.\n"
             "- `depends_on` MUST reference Task 1's `task_id`.\n"
-            "- `capability` should be `\"coding\"`.\n\n"
+            "- `capability` should be `\"code:backend\"`.\n\n"
             "Call `submit_tdd_tasks` now with a `tasks_json` array containing "
             "both task definitions."
         )
@@ -299,7 +300,7 @@ class PlanGoalTasksUseCase:
         """
         # Create task aggregates first (idempotent if task_id already exists).
         for tdef in task_defs:
-            task_branch = f"goal/{goal.name}/task/{tdef.task_id}"
+            task_branch = task_branch_name(goal.name, tdef.task_id)
             constraints = {
                 **tdef.constraints,
                 "goal_branch": goal.branch,
@@ -335,7 +336,7 @@ class PlanGoalTasksUseCase:
             expected_v = fresh_goal.state_version
 
             for tdef in task_defs:
-                task_branch = f"goal/{goal.name}/task/{tdef.task_id}"
+                task_branch = task_branch_name(goal.name, tdef.task_id)
                 summary = TaskSummary(
                     task_id=tdef.task_id,
                     title=tdef.title,

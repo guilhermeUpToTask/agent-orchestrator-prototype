@@ -38,6 +38,7 @@ export function DetailPanel() {
   const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
   const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
   const selectNode = usePlannerStore((s) => s.selectNode);
+  const progress = usePlannerStore((s) => (selectedNodeId ? s.taskProgress[selectedNodeId] : undefined));
 
   const { data: goals = [] } = useGoals();
   const { data: agentRegistry = [] } = useAgents();
@@ -129,6 +130,44 @@ export function DetailPanel() {
             )}
           </div>
         </Field>
+
+        {progress && progress.length > 0 && (
+          <Field label="Live output">
+            <div style={{
+              fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textSecond,
+              background: '#0a0c12', border: `1px solid ${tokens.borderMuted}`,
+              borderRadius: 6, padding: '6px 8px', lineHeight: 1.45,
+              maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}>
+              {progress.slice(-100).join('\n')}
+            </div>
+          </Field>
+        )}
+
+        {task.unassignable_reason && status !== 'succeeded' && status !== 'merged' && (
+          <Field label="Cannot assign">
+            <div style={{
+              fontSize: 11, color: tokens.yellow, fontFamily: tokens.fontMono,
+              lineHeight: 1.4, background: tokens.yellow + '14',
+              border: `1px solid ${tokens.yellow}33`, borderRadius: 6, padding: '6px 8px',
+            }}>
+              ⚠ {task.unassignable_reason}
+            </div>
+          </Field>
+        )}
+
+        {task.last_error && status === 'failed' && (
+          <Field label="Failure reason">
+            <div style={{
+              fontSize: 11, color: tokens.red, fontFamily: tokens.fontMono,
+              lineHeight: 1.4, background: tokens.redDim,
+              border: `1px solid ${tokens.red}33`, borderRadius: 6, padding: '6px 8px',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflow: 'auto',
+            }}>
+              {task.last_error}
+            </div>
+          </Field>
+        )}
 
         <Field label="Agent">
           {agent ? (

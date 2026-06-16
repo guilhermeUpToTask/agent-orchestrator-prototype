@@ -88,10 +88,16 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
         )
         return session.ask(question)
 
+    # Set when discovery ends transiently (provider blip) but the PlannerSession
+    # is left resumable — the UI offers "Resume discovery" rather than restart.
+    resumable = False
+
     def run() -> None:
+        nonlocal resumable
         try:
             result = orchestrator.start_discovery(io_handler=io_handler)
             if result.failure_reason:
+                resumable = result.resumable
                 session.fail(result.failure_reason)
             else:
                 session.complete(
@@ -105,11 +111,12 @@ async def start_discovery(orchestrator: PlanOrchestratorDep) -> SessionAccepted:
             )
             session.fail(str(exc))
         finally:
-            event = (
-                "plan.discovery_completed"
-                if session.status == "done"
-                else "plan.discovery_failed"
-            )
+            if session.status == "done":
+                event = "plan.discovery_completed"
+            elif resumable:
+                event = "plan.discovery_interrupted"
+            else:
+                event = "plan.discovery_failed"
             publish_sse(event, {"session_id": session.session_id})
 
     # Daemon thread, not the loop's executor: an abandoned session parked on

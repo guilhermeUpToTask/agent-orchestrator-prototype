@@ -8,6 +8,7 @@ from src.app.planning.contracts.results import (
     ApprovalResult,
     ArchitectureResult,
     DiscoveryResult,
+    GoalDispatchFailure,
     PhaseReviewResult,
 )
 from src.app.planning.sessions.support import PlanningSessionSupport
@@ -20,6 +21,7 @@ from src.domain.events.domain_event import DomainEvent
 from src.domain.ports.messaging import EventPort
 from src.domain.ports.planner import PlannerRuntimeError, PlannerRuntimePort
 from src.domain.ports.project_state import ProjectStatePort
+from src.domain.repositories.goal_repository import GoalRepositoryPort
 from src.domain.repositories.planner_session_repository import PlannerSessionRepositoryPort
 from src.domain.repositories.project_plan_repository import ProjectPlanRepositoryPort
 from src.domain.project_spec import ProjectSpecRepository
@@ -58,14 +60,26 @@ class StartDiscoveryUseCase:
 
         tools = self._support.build_discovery_tools(session, io_handler)
 
+        # Replay a resumed session's saved transcript so the planner continues
+        # in context instead of re-asking everything from scratch.
+        prior_turns = [{"role": t.role, "content": t.content} for t in session.turns] or None
+
         try:
             output = self._runtime.run_session(
                 prompt=self._support.build_discovery_prompt(),
                 tools=tools,
                 max_turns=self._max_turns,
                 session_callback=self._support.make_session_callback(session),
+                prior_turns=prior_turns,
             )
         except PlannerRuntimeError as exc:
+            # A transient failure (provider timeout/blip, exhausted retries) keeps
+            # the session RUNNING so it stays resumable; a permanent error (e.g.
+            # tool-use unsupported) fails it terminally.
+            if exc.transient:
+                session.interrupt(reason=str(exc))
+                self._session_repo.save(session)
+                return DiscoveryResult(session.session_id, None, False, str(exc), resumable=True)
             session.fail(reason=str(exc))
             self._session_repo.save(session)
             return DiscoveryResult(session.session_id, None, False, str(exc))
@@ -244,6 +258,7 @@ class ApproveArchitectureUseCase:
         self._plan_repo.save(plan)
 
         goals_dispatched: list[str] = []
+        goals_failed: list[GoalDispatchFailure] = []
         if pending_phases:
             for goal_name in pending_phases[0].goal_names:
                 goal_spec = roadmap.goal_specs.get(goal_name)
@@ -256,9 +271,10 @@ class ApproveArchitectureUseCase:
                             self._event_port.publish(DomainEvent(type="goal.unblocked", producer="planner-orchestrator", payload={"goal_id": goal.goal_id, "name": goal.name, "feature_tag": goal.feature_tag}))
                     except Exception as exc:
                         log.error("planner_orchestrator.goal_dispatch_failed", goal_name=goal_name, error=str(exc))
+                        goals_failed.append(GoalDispatchFailure(goal_name=goal_name, error=str(exc)))
 
         self._plan_repo.save(plan)
-        return ApprovalResult(decisions_applied, goals_dispatched, plan.status.value, spec_changes_applied)
+        return ApprovalResult(decisions_applied, goals_dispatched, plan.status.value, spec_changes_applied, goals_failed)
 
 
 class RunPhaseReviewUseCase:
@@ -374,6 +390,7 @@ class ApprovePhaseReviewUseCase:
                     log.error("planner_orchestrator.spec_apply_failed", decision_id=entry.id, error=str(exc))
 
         goals_dispatched: list[str] = []
+        goals_failed: list[GoalDispatchFailure] = []
         if approve_next and next_phase:
             plan = plan.approve_phase([next_phase])
             self._plan_repo.save(plan)
@@ -387,9 +404,104 @@ class ApprovePhaseReviewUseCase:
                         goals_dispatched.append(goal.goal_id)
                     except Exception as exc:
                         log.error("planner_orchestrator.goal_dispatch_failed", goal_name=goal_name, error=str(exc))
+                        goals_failed.append(GoalDispatchFailure(goal_name=goal_name, error=str(exc)))
         else:
             plan = plan.mark_done()
             self._plan_repo.save(plan)
 
         self._plan_repo.save(plan)
-        return ApprovalResult(decisions_applied, goals_dispatched, plan.status.value)
+        return ApprovalResult(decisions_applied, goals_dispatched, plan.status.value, goals_failed=goals_failed)
+
+
+class ResumePhaseDispatchUseCase:
+    """Re-dispatch active-phase goals that never got created.
+
+    Recovery path for a *partial* goal-dispatch failure. When approve-architecture
+    (or approve-phase) dispatched some of a phase's goals but one or more failed
+    — e.g. a transient git error during ``create_goal_branch`` — those goal names
+    end up with no GoalAggregate. Nothing retries them automatically: the
+    Reconciler only watches in-flight *tasks* and PR-phase goals, so a missing
+    (or never-tasked PENDING) goal is invisible to it. The goal spec it needs to
+    rebuild the branch + tasks lives in the completed planner session, not in the
+    goal repo — which is why the retry belongs here in the planner layer.
+
+    Idempotent: goal names that already have an aggregate are skipped, so this is
+    safe to call repeatedly. Any goal stuck as a branch-less PENDING zombie must
+    first be removed (quarantined) so its name reads as missing again.
+    """
+
+    def __init__(
+        self,
+        plan_repo: ProjectPlanRepositoryPort,
+        session_repo: PlannerSessionRepositoryPort,
+        goal_repo: GoalRepositoryPort,
+        goal_init: GoalInitUseCase,
+        support: PlanningSessionSupport,
+        event_port: Optional[EventPort] = None,
+    ) -> None:
+        self._plan_repo = plan_repo
+        self._session_repo = session_repo
+        self._goal_repo = goal_repo
+        self._goal_init = goal_init
+        self._support = support
+        self._event_port = event_port
+
+    def execute(self) -> ApprovalResult:
+        plan = self._plan_repo.load()
+        if plan.status != ProjectPlanStatus.PHASE_ACTIVE:
+            raise InvalidPlanTransitionError(
+                action="resume phase dispatch",
+                current_status=plan.status.value,
+                expected=[ProjectPlanStatus.PHASE_ACTIVE.value],
+            )
+
+        phase = plan.current_phase()
+        if phase is None:
+            raise ValueError("No active phase to resume dispatch for")
+
+        existing = {g.name for g in self._goal_repo.list_all()}
+        missing = [name for name in phase.goal_names if name not in existing]
+
+        # Specs for the active phase live in whichever completed planner session
+        # proposed it (architecture for phase 0, phase-review for later phases).
+        completed_sessions = [
+            s
+            for s in self._session_repo.list_all()
+            if s.status == PlannerSessionStatus.COMPLETED
+            and s.mode in (PlannerMode.ARCHITECTURE, PlannerMode.PHASE_REVIEW)
+        ]
+
+        goals_dispatched: list[str] = []
+        goals_failed: list[GoalDispatchFailure] = []
+        for goal_name in missing:
+            goal_spec = self._lookup_spec(completed_sessions, goal_name)
+            if goal_spec is None:
+                goals_failed.append(GoalDispatchFailure(
+                    goal_name=goal_name,
+                    error="No goal spec found in completed planner sessions.",
+                ))
+                continue
+            try:
+                goal = self._goal_init.execute(goal_spec)
+                plan = plan.record_goal_registered(goal.name)
+                goals_dispatched.append(goal.goal_id)
+                if self._event_port is not None:
+                    self._event_port.publish(DomainEvent(
+                        type="goal.unblocked",
+                        producer="planner-orchestrator",
+                        payload={"goal_id": goal.goal_id, "name": goal.name, "feature_tag": goal.feature_tag},
+                    ))
+            except Exception as exc:
+                log.error("planner_orchestrator.goal_dispatch_failed", goal_name=goal_name, error=str(exc))
+                goals_failed.append(GoalDispatchFailure(goal_name=goal_name, error=str(exc)))
+
+        self._plan_repo.save(plan)
+        return ApprovalResult(0, goals_dispatched, plan.status.value, goals_failed=goals_failed)
+
+    def _lookup_spec(self, sessions: list[PlannerSession], goal_name: str):  # type: ignore[no-untyped-def]
+        """Return the first GoalSpec for *goal_name* across completed sessions."""
+        for session in sessions:
+            spec = self._support.find_goal_spec(session, goal_name)
+            if spec is not None:
+                return spec
+        return None

@@ -15,6 +15,9 @@ class PlannerModelAdapter(Protocol):
     def initial_messages(self, prompt: str) -> list[dict]:
         ...
 
+    def messages_from_turns(self, prompt: str, prior_turns: list[dict]) -> list[dict]:
+        ...
+
     def to_provider_tools(self, tools: list[PlannerTool]) -> list[dict]:
         ...
 
@@ -52,9 +55,14 @@ class BasePlannerRuntime:
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         provider_tools = self._adapter.to_provider_tools(tools)
-        messages = self._adapter.initial_messages(prompt)
+        messages = (
+            self._adapter.messages_from_turns(prompt, prior_turns)
+            if prior_turns
+            else self._adapter.initial_messages(prompt)
+        )
 
         # A terminal tool is identified by its `terminal` flag, not by a
         # hardcoded name — different modes (architecture, phase-review,

@@ -36,7 +36,16 @@ class PlannerOutput:
 
 
 class PlannerRuntimeError(Exception):
-    """Raised when the planner runtime cannot produce a valid roadmap."""
+    """Raised when the planner runtime cannot produce a valid roadmap.
+
+    ``transient`` marks a failure worth retrying / keeping the session resumable
+    (provider timeout, rate-limit, upstream blip) as opposed to a permanent
+    config error (e.g. a model that does not support tool use).
+    """
+
+    def __init__(self, *args: object, transient: bool = False) -> None:
+        super().__init__(*args)
+        self.transient = transient
 
 
 class PlannerRuntimePort(ABC):
@@ -57,9 +66,14 @@ class PlannerRuntimePort(ABC):
         session_callback: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict[str, Any]]] = None,
     ) -> PlannerOutput:
         """
         Run the agentic planning loop and return a PlannerOutput.
+
+        prior_turns, if provided, is the persisted transcript of an interrupted
+        session ({"role", "content"} per turn); interactive runtimes replay it
+        into the model so a resumed session continues instead of restarting.
 
         session_callback(role, content_blocks) is called after each turn so
         the PlannerSession can persist turns in real time.

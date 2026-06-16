@@ -11,8 +11,9 @@ from unittest.mock import MagicMock
 
 
 from src.domain import (
-    AgentProps, AgentSelector, ExecutionSpec, TaskAggregate, TaskStatus,
+    AgentProps, AgentSelector, ExecutionSpec, SchedulerService, TaskAggregate, TaskStatus,
 )
+from src.domain import Assignment
 from src.app.usecases.task_assign import (
     TaskAssignUseCase, AssignOutcome,
 )
@@ -63,7 +64,8 @@ class TestTaskAssignUseCase:
         self.registry  = MagicMock()
         self.events    = MagicMock()
         self.lease     = MagicMock()
-        self.scheduler = MagicMock()
+        self.scheduler = SchedulerService()  # real: exercises eligibility + capacity
+        self.repo.list_all.return_value = []  # no in-flight tasks by default
         self.uc = TaskAssignUseCase(
             task_repo=self.repo,
             agent_registry=self.registry,
@@ -77,7 +79,6 @@ class TestTaskAssignUseCase:
         self.repo.update_if_version.return_value = True
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "lease-token"
         return agent
 
@@ -128,9 +129,74 @@ class TestTaskAssignUseCase:
     def test_returns_no_eligible_agent_when_scheduler_returns_none(self):
         self.repo.load.return_value = _task()
         self.registry.list_agents.return_value = []
-        self.scheduler.select_agent.return_value = None
         result = self.uc.execute("t-001")
         assert result.outcome == AssignOutcome.NO_ELIGIBLE_AGENT
+
+    def test_no_eligible_agent_marks_unassignable_and_emits_once(self):
+        task = _task()
+        self.repo.load.return_value = task
+        self.repo.update_if_version.return_value = True
+        self.registry.list_agents.return_value = []
+
+        self.uc.execute("t-001")
+
+        # Task is annotated with the reason naming the missing capability.
+        assert task.unassignable_reason is not None
+        assert "code" in task.unassignable_reason
+        event = self.events.publish.call_args[0][0]
+        assert event.type == "task.unassignable"
+        assert event.payload["required_capability"] == "code"
+
+        # A second pass with the same reason already set must not re-emit.
+        self.events.publish.reset_mock()
+        self.uc.execute("t-001")
+        self.events.publish.assert_not_called()
+
+    def test_assign_clears_unassignable_reason(self):
+        task = _task()
+        task.mark_unassignable("No active agent with capability 'code'")
+        self._setup_happy_path(task)
+
+        self.uc.execute("t-001")
+
+        assert task.unassignable_reason is None
+
+    # Capacity gating
+
+    def _busy_task(self, agent_id: str = "a-001") -> TaskAggregate:
+        t = _task("busy", TaskStatus.IN_PROGRESS)
+        t.assignment = Assignment(agent_id=agent_id, lease_seconds=300)
+        return t
+
+    def test_at_capacity_leaves_task_created(self):
+        task = _task()
+        self.repo.load.return_value = task
+        agent = _alive_agent()  # max_concurrent_tasks defaults to 1
+        self.registry.list_agents.return_value = [agent]
+        self.repo.list_all.return_value = [self._busy_task()]  # agent already full
+
+        result = self.uc.execute("t-001")
+
+        assert result.outcome == AssignOutcome.AT_CAPACITY
+        assert task.status == TaskStatus.CREATED      # stays queued
+        assert task.unassignable_reason is None       # NOT a capability gap
+        self.events.publish.assert_not_called()
+
+    def test_assigns_when_capacity_available(self):
+        task = _task()
+        self.repo.load.return_value = task
+        self.repo.update_if_version.return_value = True
+        agent = AgentProps(
+            agent_id="a-001", name="A", capabilities=["code"],
+            last_heartbeat=datetime.now(timezone.utc), max_concurrent_tasks=2,
+        )
+        self.registry.list_agents.return_value = [agent]
+        self.repo.list_all.return_value = [self._busy_task()]  # 1 in-flight < 2
+        self.lease.create_lease.return_value = "tok"
+
+        result = self.uc.execute("t-001")
+
+        assert result.outcome == AssignOutcome.ASSIGNED
 
     # Deps not met
 
@@ -149,7 +215,6 @@ class TestTaskAssignUseCase:
         self.repo.update_if_version.return_value = True
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
 
         result = self.uc.execute("t-001")
@@ -169,7 +234,6 @@ class TestTaskAssignUseCase:
         self.repo.update_if_version.side_effect = [False, True, True]
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
 
         result = self.uc.execute("t-001")
@@ -181,7 +245,6 @@ class TestTaskAssignUseCase:
         self.repo.load.return_value = task
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
         # First write OK, second write fails → lease must be revoked
         self.repo.update_if_version.side_effect = [True, False] + [True, True] * 5
@@ -198,12 +261,13 @@ class TestTaskAssignUseCase:
         self.repo.update_if_version.return_value = True
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
 
         self.uc.execute("t-001", preloaded_succeeded={"t-dep"})
 
-        self.repo.list_all.assert_not_called()
+        # Preloaded deps skip the dependency scan; the capacity gate still needs
+        # one scan — so list_all is called exactly once, never twice.
+        self.repo.list_all.assert_called_once()
 
 
 # ===========================================================================
@@ -391,6 +455,10 @@ class TestTaskAssignCasExhaustion:
         self.events    = MagicMock()
         self.lease     = MagicMock()
         self.scheduler = MagicMock()
+        # All listed agents are eligible; capacity sees no in-flight tasks.
+        self.scheduler.eligible_agents.side_effect = lambda task, agents: list(agents)
+        self.repo.list_all.return_value = []
+        self.scheduler.select_agent.side_effect = lambda task, agents: agents[0] if agents else None
         self.uc = TaskAssignUseCase(
             task_repo=self.repo,
             agent_registry=self.registry,
@@ -406,7 +474,6 @@ class TestTaskAssignCasExhaustion:
         self.repo.update_if_version.return_value = False
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
 
         result = self.uc.execute("t-001")
@@ -421,7 +488,6 @@ class TestTaskAssignCasExhaustion:
         self.repo.update_if_version.return_value = False
         agent = _alive_agent()
         self.registry.list_agents.return_value = [agent]
-        self.scheduler.select_agent.return_value = agent
         self.lease.create_lease.return_value = "tok"
 
         self.uc.execute("t-001")

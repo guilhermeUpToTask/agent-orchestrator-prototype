@@ -96,6 +96,124 @@
         }
       }
     },
+    "/api/plan/architecture/run": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Run Architecture Session",
+        "description": "Launches the autonomous architecture planner in a background thread while the plan is in `architecture` status. Normally drafting auto-starts on `POST /plan/approve-brief`; this endpoint is the manual retry. The planner drafts the phase plan and decisions; each is published over SSE as `plan.decision_proposed` / `plan.phase_proposed`, and the session emits `plan.architecture_completed` / `plan.architecture_failed` on termination. Poll `GET /plan/architecture/status` for reload-safe readiness.",
+        "operationId": "plan-run_architecture",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An architecture session is already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/architecture/status": {
+      "get": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Architecture Session Status",
+        "description": "Reload-resilient readiness of the autonomous architecture run. `state` is `running` while drafting, `completed` once a usable roadmap is ready to approve (decisions/phases included), `failed` if the run ended without one, or `none` if no run has started in this process.",
+        "operationId": "plan-architecture_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchitectureStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/architecture/cancel": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Cancel Architecture Session",
+        "description": "Requests a cooperative stop of the in-progress architecture session. The planner loop checks the flag between turns, so cancellation takes effect after the current turn finishes. Any decisions and phases already proposed are auto-finalized to the approval gate; if nothing usable was produced the session ends as `plan.architecture_failed`.",
+        "operationId": "plan-cancel_architecture",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No architecture session is currently running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/phase-review/run": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Run Phase Review Session",
+        "description": "Launches the autonomous phase-review planner in a background thread while the plan is in `phase_review` status. The planner records lessons and proposes the next phase; the session emits `plan.phase_review_completed` / `plan.phase_review_failed` on termination. The operator then calls `POST /plan/approve-phase`.",
+        "operationId": "plan-run_phase_review",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccepted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A phase-review session is already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plan/approve-architecture": {
       "post": {
         "tags": [
@@ -193,6 +311,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/resume-dispatch": {
+      "post": {
+        "tags": [
+          "plan"
+        ],
+        "summary": "Resume Phase Goal Dispatch",
+        "description": "**Recovery action.** Re-dispatches goals for the active phase that never got created \u2014 e.g. when a goal's branch creation failed during approve-architecture, leaving the phase under-populated with no automatic retry. Reloads each missing goal's spec from the completed planner session and dispatches it. Idempotent: already-dispatched goals are skipped.",
+        "operationId": "plan-resume_dispatch",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeDispatchResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plan is not in `phase_active` status. The body reports the current vs expected status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanConflictResponse"
                 }
               }
             }
@@ -562,6 +712,81 @@
                     "$ref": "#/components/schemas/GoalHistoryEntryResponse"
                   },
                   "title": "Response Goals-Get Goal History"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Goal not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/retry-failed": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Retry All Failed Tasks",
+        "description": "Force-requeues every FAILED task across all goals.",
+        "operationId": "goals-retry_all_failed",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalRetryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/goals/{goal_id}/retry-failed": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Retry Goal's Failed Tasks",
+        "description": "Force-requeues every FAILED task belonging to the goal.",
+        "operationId": "goals-retry_goal_failed",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalRetryResponse"
                 }
               }
             }
@@ -1310,6 +1535,218 @@
         }
       }
     },
+    "/api/agents/{agent_id}": {
+      "put": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Update Agent",
+        "description": "Replace an existing agent entry. The path `agent_id` is authoritative (any `agent_id` in the body is ignored). Returns the updated agent.",
+        "operationId": "agents-update_agent",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent with that id is registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Delete Agent",
+        "description": "Remove an agent entry from the registry.",
+        "operationId": "agents-delete_agent",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No agent with that id is registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/capabilities": {
+      "get": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "List Capability Tags",
+        "description": "Returns all capability tags registered for this project.",
+        "operationId": "capabilities-list_capabilities",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "Register Capability Tag",
+        "description": "Registers a new capability tag (normalized; a malformed tag is rejected). Idempotent \u2014 registering an existing tag is a no-op.",
+        "operationId": "capabilities-create_capability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/capabilities/{tag}": {
+      "delete": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "Remove Capability Tag",
+        "description": "Removes a capability tag. No-op if the tag is not registered.",
+        "operationId": "capabilities-delete_capability",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/spec": {
       "get": {
         "tags": [
@@ -1733,6 +2170,14 @@
           },
           "plan_status": {
             "$ref": "#/components/schemas/ProjectPlanStatus"
+          },
+          "goals_failed": {
+            "items": {
+              "$ref": "#/components/schemas/GoalDispatchFailureResponse"
+            },
+            "type": "array",
+            "title": "Goals Failed",
+            "default": []
           }
         },
         "type": "object",
@@ -1786,6 +2231,14 @@
           },
           "plan_status": {
             "$ref": "#/components/schemas/ProjectPlanStatus"
+          },
+          "goals_failed": {
+            "items": {
+              "$ref": "#/components/schemas/GoalDispatchFailureResponse"
+            },
+            "type": "array",
+            "title": "Goals Failed",
+            "default": []
           }
         },
         "type": "object",
@@ -1795,6 +2248,98 @@
           "plan_status"
         ],
         "title": "ApprovePhaseResponse"
+      },
+      "ArchitectureStatusResponse": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "decisions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Decisions",
+            "default": []
+          },
+          "phases": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Phases",
+            "default": []
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "ArchitectureStatusResponse",
+        "description": "Reload-resilient readiness of the autonomous architecture session.\n\nThe approval gate is offered only when ``state == \"completed\"``; clients\nhydrate proposed decisions/phases from here so a page refresh mid/after the\nrun keeps the correct state instead of relying on ephemeral SSE buffers."
+      },
+      "CapabilityCreateRequest": {
+        "properties": {
+          "tag": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Tag",
+            "description": "e.g. 'code:backend', 'test:write'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag"
+        ],
+        "title": "CapabilityCreateRequest"
+      },
+      "CapabilityListResponse": {
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tags"
+        ],
+        "title": "CapabilityListResponse",
+        "description": "The full set of registered capability tags."
       },
       "DiscoveryMessageRequest": {
         "properties": {
@@ -1823,6 +2368,24 @@
           "detail"
         ],
         "title": "ErrorResponse"
+      },
+      "GoalDispatchFailureResponse": {
+        "properties": {
+          "goal_name": {
+            "type": "string",
+            "title": "Goal Name"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_name",
+          "error"
+        ],
+        "title": "GoalDispatchFailureResponse"
       },
       "GoalFinalizeResponse": {
         "properties": {
@@ -1875,7 +2438,8 @@
           "timestamp": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -2019,6 +2583,31 @@
         "title": "GoalResponse",
         "description": "Full goal read-model."
       },
+      "GoalRetryResponse": {
+        "properties": {
+          "requeued": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Requeued"
+          },
+          "goals_touched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goals Touched"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requeued",
+          "goals_touched"
+        ],
+        "title": "GoalRetryResponse",
+        "description": "Result of a bulk 'retry failed tasks' action."
+      },
       "GoalStatus": {
         "type": "string",
         "enum": [
@@ -2068,6 +2657,28 @@
             "type": "integer",
             "title": "Retry Count",
             "default": 0
+          },
+          "unassignable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unassignable Reason"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
           }
         },
         "type": "object",
@@ -2609,6 +3220,34 @@
           "message"
         ],
         "title": "RefineRequest"
+      },
+      "ResumeDispatchResponse": {
+        "properties": {
+          "goals_dispatched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goals Dispatched"
+          },
+          "plan_status": {
+            "$ref": "#/components/schemas/ProjectPlanStatus"
+          },
+          "goals_failed": {
+            "items": {
+              "$ref": "#/components/schemas/GoalDispatchFailureResponse"
+            },
+            "type": "array",
+            "title": "Goals Failed",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "goals_dispatched",
+          "plan_status"
+        ],
+        "title": "ResumeDispatchResponse"
       },
       "SessionAccepted": {
         "properties": {

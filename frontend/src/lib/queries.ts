@@ -21,6 +21,9 @@ import {
   approveArchitecture,
   approveBrief,
   approvePhase,
+  resumeDispatch,
+  retryGoalFailed,
+  retryAllFailed,
   fetchAgents,
   fetchArchitectureStatus,
   fetchGoals,
@@ -111,11 +114,20 @@ export function useApproveArchitecture() {
   return useMutation({
     mutationFn: (decisionIds: string[]) => approveArchitecture(decisionIds),
     onSuccess: (result) => {
+      const failed = result.goals_failed ?? [];
+      const failSuffix =
+        failed.length > 0 ? ` ${failed.length} failed to dispatch.` : '';
       addMessage({
         role: 'assistant',
-        text: `Architecture approved. ${result.decisions_applied} decisions applied. ${result.goals_dispatched.length} goals dispatched.`,
+        text: `Architecture approved. ${result.decisions_applied} decisions applied. ${result.goals_dispatched.length} goals dispatched.${failSuffix}`,
         ts: ts(),
       });
+      if (failed.length > 0) {
+        toast.error(
+          `${failed.length} goal(s) failed to dispatch`,
+          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
+        );
+      }
       qc.invalidateQueries({ queryKey: keys.plan });
       qc.invalidateQueries({ queryKey: keys.goals });
     },
@@ -125,17 +137,81 @@ export function useApproveArchitecture() {
   });
 }
 
+export function useResumeDispatch() {
+  const qc = useQueryClient();
+  const addMessage = usePlannerStore((s) => s.addMessage);
+  return useMutation({
+    mutationFn: () => resumeDispatch(),
+    onSuccess: (result) => {
+      const failed = result.goals_failed ?? [];
+      const failSuffix =
+        failed.length > 0 ? ` ${failed.length} still failed.` : '';
+      addMessage({
+        role: 'assistant',
+        text: `Resumed dispatch. ${result.goals_dispatched.length} goals dispatched.${failSuffix}`,
+        ts: ts(),
+      });
+      if (failed.length > 0) {
+        toast.error(
+          `${failed.length} goal(s) still failed to dispatch`,
+          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
+        );
+      }
+      qc.invalidateQueries({ queryKey: keys.plan });
+      qc.invalidateQueries({ queryKey: keys.goals });
+    },
+    onError: (err) => {
+      toast.error('Resume dispatch failed', errorDetail(err));
+    },
+  });
+}
+
+export function useRetryGoalFailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (goalId: string) => retryGoalFailed(goalId),
+    onSuccess: (result) => {
+      toast.success(`Requeued ${result.requeued.length} failed task(s)`);
+      qc.invalidateQueries({ queryKey: keys.goals });
+    },
+    onError: (err) => toast.error('Retry failed', errorDetail(err)),
+  });
+}
+
+export function useRetryAllFailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => retryAllFailed(),
+    onSuccess: (result) => {
+      toast.success(
+        `Requeued ${result.requeued.length} failed task(s) across ${result.goals_touched.length} goal(s)`,
+      );
+      qc.invalidateQueries({ queryKey: keys.goals });
+    },
+    onError: (err) => toast.error('Retry all failed', errorDetail(err)),
+  });
+}
+
 export function useApprovePhase() {
   const qc = useQueryClient();
   const addMessage = usePlannerStore((s) => s.addMessage);
   return useMutation({
     mutationFn: (approveNext: boolean) => approvePhase(approveNext),
     onSuccess: (result) => {
+      const failed = result.goals_failed ?? [];
+      const failSuffix =
+        failed.length > 0 ? ` ${failed.length} failed to dispatch.` : '';
       addMessage({
         role: 'assistant',
-        text: `Phase approved → ${result.plan_status}. ${result.goals_dispatched.length} new goals dispatched.`,
+        text: `Phase approved → ${result.plan_status}. ${result.goals_dispatched.length} new goals dispatched.${failSuffix}`,
         ts: ts(),
       });
+      if (failed.length > 0) {
+        toast.error(
+          `${failed.length} goal(s) failed to dispatch`,
+          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
+        );
+      }
       qc.invalidateQueries({ queryKey: keys.plan });
       qc.invalidateQueries({ queryKey: keys.goals });
     },
@@ -416,7 +492,33 @@ export function useSSEBridge() {
                 ),
               })),
             );
+            // Drop the live-progress buffer once the task reaches a terminal state.
+            if (['succeeded', 'failed', 'canceled', 'merged'].includes(status)) {
+              usePlannerStore.getState().clearTaskProgress(task_id);
+            }
             qc.invalidateQueries({ queryKey: keys.goals });
+            break;
+          }
+
+          case 'task.progress': {
+            // Live agent output — pure UI state, no cache invalidation (too frequent).
+            usePlannerStore.getState().appendTaskProgress(event.payload.task_id, event.payload.lines);
+            break;
+          }
+
+          case 'task.unassignable': {
+            const { task_id, reason } = event.payload;
+            // Patch the sticky reason into the cache so the node badge shows it
+            // (and survives until a capable agent is registered), then notify once.
+            qc.setQueryData<GoalAggregate[]>(keys.goals, (goals) =>
+              goals?.map((g) => ({
+                ...g,
+                tasks: g.tasks.map((t) =>
+                  t.task_id === task_id ? { ...t, unassignable_reason: reason } : t,
+                ),
+              })),
+            );
+            toast.error(`Task "${task_id}" cannot be assigned`, reason);
             break;
           }
 
@@ -424,6 +526,19 @@ export function useSSEBridge() {
           case 'goal.pr_opened':
           case 'goal.pr_state_synced':
           case 'goal.finalized':
+            qc.invalidateQueries({ queryKey: keys.goals });
+            break;
+
+          case 'goal.dispatch_failed':
+            toast.error(
+              `Goal "${event.payload.goal_name}" failed to dispatch`,
+              event.payload.error,
+            );
+            addMessage({
+              role: 'system',
+              text: `⚠ Goal "${event.payload.goal_name}" failed to dispatch: ${event.payload.error}`,
+              ts: ts(),
+            });
             qc.invalidateQueries({ queryKey: keys.goals });
             break;
 

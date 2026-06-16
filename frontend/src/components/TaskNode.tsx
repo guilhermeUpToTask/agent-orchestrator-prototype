@@ -22,10 +22,15 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
 
   const status = (data.task?.status ?? 'created') as StatusKey;
   const meta = STATUS_META[status] ?? STATUS_META.created;
+  const progress = usePlannerStore((s) => s.taskProgress[data.task?.task_id ?? '']);
+  const latestProgress = progress?.[progress.length - 1];
   const agentColor = data.agent ? (AGENT_COLORS[data.agent.name] ?? tokens.textSecond) : tokens.textMuted;
   const isRunning = status === 'in_progress' || status === 'assigned';
   const isSucceeded = status === 'succeeded' || status === 'merged';
   const isFailed = status === 'failed' || status === 'canceled';
+  // Stuck in queue because no active agent matches the required capability.
+  const unassignableReason =
+    !isRunning && !isSucceeded && !isFailed ? data.task?.unassignable_reason : null;
 
   return (
     <>
@@ -111,6 +116,17 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
             </div>
           )}
 
+          {isRunning && latestProgress && (
+            <div style={{
+              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textSecond,
+              background: '#0d1018', border: `1px solid ${tokens.borderMuted}`,
+              borderRadius: 4, padding: '3px 6px', marginBottom: 4,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {latestProgress}
+            </div>
+          )}
+
           {isSucceeded && (
             <div style={{
               padding: '3px 7px', borderRadius: 5,
@@ -126,8 +142,22 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
               padding: '3px 7px', borderRadius: 5,
               background: tokens.redDim, border: `1px solid ${tokens.red}33`,
               fontSize: 9, fontFamily: tokens.fontMono, color: tokens.red,
+              lineHeight: 1.3,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
             }}>
-              ✗ {status}
+              ✗ {data.task?.last_error ? data.task.last_error : status}
+            </div>
+          )}
+
+          {unassignableReason && (
+            <div style={{
+              padding: '3px 7px', borderRadius: 5,
+              background: tokens.yellow + '18', border: `1px solid ${tokens.yellow}44`,
+              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.yellow,
+              lineHeight: 1.3,
+            }}>
+              ⚠ {unassignableReason}
             </div>
           )}
         </div>

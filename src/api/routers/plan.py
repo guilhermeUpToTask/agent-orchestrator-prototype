@@ -43,10 +43,12 @@ from src.api.schemas.plan import (
     ApprovePhaseRequest,
     ApprovePhaseResponse,
     ArchitectureStatusResponse,
+    GoalDispatchFailureResponse,
     PlanBriefResponse,
     PlanHistoryEntryResponse,
     PlanPhaseResponse,
     PlanResponse,
+    ResumeDispatchResponse,
 )
 from src.api.schemas.sessions import SessionAccepted
 from src.api.sessions import ApiSession, registry
@@ -95,6 +97,25 @@ def _plan_to_response(plan) -> PlanResponse:
         brief=brief,
         history=history,
     )
+
+
+def _publish_goal_dispatch_failures(failures) -> None:
+    """Surface partial-dispatch failures to the operator over SSE.
+
+    Goal dispatch happens after the plan transition is already committed, so a
+    failed goal can't fail the HTTP request — without this, a goal that never
+    got a branch would vanish silently. The frontend renders these as errors.
+    """
+    for failure in failures:
+        log.warning(
+            "plan.goal_dispatch_failed",
+            goal_name=failure.goal_name,
+            error=failure.error,
+        )
+        publish_sse(
+            "goal.dispatch_failed",
+            {"goal_name": failure.goal_name, "error": failure.error},
+        )
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
@@ -458,10 +479,15 @@ def approve_architecture(
     publish_sse("plan.status_changed", {"status": result.plan_status})
     for goal_id in result.goals_dispatched:
         publish_sse("goal.dispatched", {"goal_id": goal_id})
+    _publish_goal_dispatch_failures(result.goals_failed)
     return ApproveArchitectureResponse(
         decisions_applied=result.decisions_applied,
         goals_dispatched=result.goals_dispatched,
         plan_status=result.plan_status,
+        goals_failed=[
+            GoalDispatchFailureResponse(goal_name=f.goal_name, error=f.error)
+            for f in result.goals_failed
+        ],
     )
 
 
@@ -493,8 +519,55 @@ def approve_phase(
 ) -> ApprovePhaseResponse:
     result = orchestrator.approve_phase_review(approve_next=payload.approve_next)
     publish_sse("plan.status_changed", {"status": result.plan_status})
+    for goal_id in result.goals_dispatched:
+        publish_sse("goal.dispatched", {"goal_id": goal_id})
+    _publish_goal_dispatch_failures(result.goals_failed)
     return ApprovePhaseResponse(
         decisions_applied=result.decisions_applied,
         goals_dispatched=result.goals_dispatched,
         plan_status=result.plan_status,
+        goals_failed=[
+            GoalDispatchFailureResponse(goal_name=f.goal_name, error=f.error)
+            for f in result.goals_failed
+        ],
+    )
+
+
+# ── Resume Phase Dispatch ─────────────────────────────────────────────────────
+
+@router.post(
+    "/resume-dispatch",
+    response_model=ResumeDispatchResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Resume Phase Goal Dispatch",
+    description=(
+        "**Recovery action.** Re-dispatches goals for the active phase that "
+        "never got created — e.g. when a goal's branch creation failed during "
+        "approve-architecture, leaving the phase under-populated with no "
+        "automatic retry. Reloads each missing goal's spec from the completed "
+        "planner session and dispatches it. Idempotent: already-dispatched "
+        "goals are skipped."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": PlanConflictResponse,
+            "description": (
+                "Plan is not in `phase_active` status. The body reports the "
+                "current vs expected status."
+            ),
+        }
+    },
+)
+def resume_dispatch(orchestrator: PlanOrchestratorDep) -> ResumeDispatchResponse:
+    result = orchestrator.resume_phase_dispatch()
+    for goal_id in result.goals_dispatched:
+        publish_sse("goal.dispatched", {"goal_id": goal_id})
+    _publish_goal_dispatch_failures(result.goals_failed)
+    return ResumeDispatchResponse(
+        goals_dispatched=result.goals_dispatched,
+        plan_status=result.plan_status,
+        goals_failed=[
+            GoalDispatchFailureResponse(goal_name=f.goal_name, error=f.error)
+            for f in result.goals_failed
+        ],
     )

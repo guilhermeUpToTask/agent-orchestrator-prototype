@@ -22,6 +22,9 @@ def classify_provider_error(model: str, exc: Exception) -> PlannerRuntimeError:
     status_code = getattr(exc, "status_code", None)
     exc_name = type(exc).__name__
     text = str(exc).lower()
+    # Transient by default: timeouts and generic provider/network failures are
+    # worth a retry. A tool-use rejection is a permanent config error.
+    transient = True
     if exc_name == "APITimeoutError" or "timed out" in text or "timeout" in text:
         message = (
             f"Planner LLM request to model '{model}' timed out. The model may be "
@@ -32,6 +35,48 @@ def classify_provider_error(model: str, exc: Exception) -> PlannerRuntimeError:
             f"The configured model '{model}' does not support tool use, which the "
             "planner requires. Select a tool-capable model/provider."
         )
+        transient = False
     else:
         message = f"Planner LLM request failed ({exc_name}): {exc}"
-    return PlannerRuntimeError(message)
+    return PlannerRuntimeError(message, transient=transient)
+
+
+def provider_error_from_empty_choices(model: str, response: object) -> PlannerRuntimeError:
+    """Build a PlannerRuntimeError for a 200 response that carries no choices.
+
+    Some OpenAI-compatible providers (OpenRouter and similar proxies) return an
+    error inside an HTTP 200 body instead of a non-2xx status. The OpenAI SDK
+    parses that body into a completion with ``choices=None`` and an extra
+    ``error`` field, so it never raises ``openai.APIError`` and the runtime would
+    otherwise crash indexing ``None``. This turns it into an actionable failure.
+    """
+    detail = _extract_provider_error_text(response)
+    message = (
+        f"Planner LLM request to model '{model}' returned no choices: {detail}. "
+        "The provider rejected the request (e.g. out of credits, rate limited, "
+        "or upstream error)."
+    )
+    return PlannerRuntimeError(message, transient=True)
+
+
+def _extract_provider_error_text(response: object) -> str:
+    """Pull a human-readable error string from an in-band provider error.
+
+    Handles both dict-shaped and object-shaped ``error`` payloads, and falls
+    back to a truncated dump of the whole response when no ``error`` is present.
+    """
+    error = getattr(response, "error", None)
+    if error is not None:
+        if isinstance(error, dict):
+            message = error.get("message")
+            code = error.get("code")
+        else:
+            message = getattr(error, "message", None)
+            code = getattr(error, "code", None)
+        if message:
+            return f"{message}" + (f" (code={code})" if code is not None else "")
+        return str(error)
+
+    dump = getattr(response, "model_dump", None)
+    raw = str(dump()) if callable(dump) else str(response)
+    return raw[:500]

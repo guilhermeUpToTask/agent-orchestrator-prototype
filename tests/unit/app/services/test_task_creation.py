@@ -3,10 +3,40 @@ from src.app.services.task_creation import TaskCreationService
 from src.domain import TaskAggregate, TaskStatus
 
 
-def _make_svc():
+def _make_svc(capability_registry=None):
     repo = MagicMock()
     events = MagicMock()
-    return TaskCreationService(repo, events), repo, events
+    return TaskCreationService(repo, events, capability_registry), repo, events
+
+
+class TestCapabilityResolution:
+    def test_unregistered_capability_coerced_to_default(self):
+        caps = MagicMock()
+        caps.exists.return_value = False  # nothing is registered
+        svc, _, _ = _make_svc(capability_registry=caps)
+        task = svc.create_task(
+            title="T", description="D",
+            capability="bogus:tag", files_allowed_to_modify=[],
+        )
+        assert task.agent_selector.required_capability == "code:backend"
+
+    def test_malformed_capability_coerced_to_default(self):
+        svc, _, _ = _make_svc()  # no registry → only format check
+        task = svc.create_task(
+            title="T", description="D",
+            capability="not a tag!", files_allowed_to_modify=[],
+        )
+        assert task.agent_selector.required_capability == "code:backend"
+
+    def test_registered_capability_preserved(self):
+        caps = MagicMock()
+        caps.exists.return_value = True
+        svc, _, _ = _make_svc(capability_registry=caps)
+        task = svc.create_task(
+            title="T", description="D",
+            capability="code:frontend", files_allowed_to_modify=[],
+        )
+        assert task.agent_selector.required_capability == "code:frontend"
 
 
 class TestTaskCreationService:

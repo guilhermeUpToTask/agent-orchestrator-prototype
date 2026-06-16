@@ -28,7 +28,7 @@ _STUB_TDD_TASKS = [
         "task_id": "write-tests",
         "title": "Write failing tests",
         "description": "Stub test-writer task for dry-run.",
-        "capability": "coding",
+        "capability": "code:backend",
         "files_allowed_to_modify": ["tests/*"],
         "depends_on": [],
         "acceptance_criteria": ["Tests fail before implementation."],
@@ -38,7 +38,7 @@ _STUB_TDD_TASKS = [
         "task_id": "implement",
         "title": "Implement to pass the tests",
         "description": "Stub implementer task for dry-run.",
-        "capability": "coding",
+        "capability": "code:backend",
         "files_allowed_to_modify": ["src/*"],
         "depends_on": ["write-tests"],
         "acceptance_criteria": ["All tests pass."],
@@ -86,6 +86,7 @@ class StubPlannerRuntime(PlannerRuntimePort):
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         tool_map = {t.name: t for t in tools}
 
@@ -197,6 +198,7 @@ class StubInteractivePlannerRuntime(PlannerRuntimePort):
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         tool_map = {t.name: t.handler for t in tools}
         brief_json = json.dumps(self._custom_brief)

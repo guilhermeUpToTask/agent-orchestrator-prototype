@@ -51,6 +51,7 @@ export interface PhaseProposal {
 export type PlannerRunKind = 'architecture' | 'phase_review';
 
 const EVENT_BUFFER_MAX = 500;
+const TASK_PROGRESS_MAX = 200;  // per-task live log ring
 
 interface PlannerState {
   // Chat transcript (operator ↔ planner — system noise lives in `events`)
@@ -72,6 +73,9 @@ interface PlannerState {
   activeRun: PlannerRunKind | null;
   completedRuns: PlannerRunKind[];
 
+  // Live agent output per task (capped ring), streamed via task.progress SSE.
+  taskProgress: Record<string, string[]>;
+
   // SSE connection
   connection: { state: ConnectionState; lastEventAt: number | null };
 
@@ -84,6 +88,8 @@ interface PlannerState {
 
   // ── Stream ────────────────────────────────────────────────────────────────
   pushEvent: (type: string, payload: Record<string, unknown>) => void;
+  appendTaskProgress: (taskId: string, lines: string[]) => void;
+  clearTaskProgress: (taskId: string) => void;
   setConnectionState: (state: ConnectionState) => void;
   addDecision: (d: Omit<DecisionProposal, 'at'>) => void;
   clearDecisions: () => void;
@@ -110,6 +116,7 @@ export const usePlannerStore = create<PlannerState>()(
     phases: [],
     activeRun: null,
     completedRuns: [],
+    taskProgress: {},
     connection: { state: 'connecting', lastEventAt: null },
 
     ui: {
@@ -138,6 +145,21 @@ export const usePlannerStore = create<PlannerState>()(
         }
         s.connection.lastEventAt = Date.now();
       });
+    },
+
+    appendTaskProgress: (taskId, lines) => {
+      if (!lines.length) return;
+      set((s) => {
+        const buf = s.taskProgress[taskId] ?? (s.taskProgress[taskId] = []);
+        buf.push(...lines);
+        if (buf.length > TASK_PROGRESS_MAX) {
+          buf.splice(0, buf.length - TASK_PROGRESS_MAX);
+        }
+      });
+    },
+
+    clearTaskProgress: (taskId) => {
+      set((s) => { delete s.taskProgress[taskId]; });
     },
 
     setConnectionState: (state) => {

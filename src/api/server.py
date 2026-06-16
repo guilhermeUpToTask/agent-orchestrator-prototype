@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import set_container, set_container_provider
 from src.api.exceptions import register_exception_handlers
-from src.api.routers import agents, discovery, events, goals, plan, project, refinement, spec, tasks
+from src.api.routers import agents, capabilities, discovery, events, goals, plan, project, refinement, spec, tasks
 from src.api.schemas.common import HealthResponse
 from src.api.sse import publish_sse
 
@@ -83,7 +83,10 @@ def _start_coordinators(container: Any) -> None:
     handler = container.task_manager_handler
     events_port = container.event_port
     orchestrator = container.task_graph_orchestrator
-    reconciler = container.get_reconciler(
+    # Federated reconciler: task watchdog + PR polling + phase-dispatch backstop,
+    # each on its own cadence under one scheduler. run_forever()/shutdown() match
+    # the legacy Reconciler surface, so the runner and shutdown paths are unchanged.
+    reconciler = container.get_reconciler_scheduler(
         interval_seconds=interval,
         stuck_task_min_age_seconds=stuck_age,
     )
@@ -335,6 +338,7 @@ def create_app(container=None) -> FastAPI:
     app.include_router(goals.router,       prefix=_prefix)
     app.include_router(tasks.router,       prefix=_prefix)
     app.include_router(agents.router,      prefix=_prefix)
+    app.include_router(capabilities.router, prefix=_prefix)
     app.include_router(spec.router,        prefix=_prefix)
     app.include_router(project.router,     prefix=_prefix)
     app.include_router(events.router,      prefix=_prefix)

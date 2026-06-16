@@ -172,6 +172,18 @@ class PlannerSession(BaseModel):
         )
         return self
 
+    def interrupt(self, reason: str) -> "PlannerSession":
+        """RUNNING → RUNNING (records an interruption, stays resumable).
+
+        Used for a transient mid-session failure (provider timeout/blip): the
+        per-turn transcript is intact, so the session is left RUNNING — and thus
+        picked up by ``find_resumable_session`` — instead of being marked FAILED.
+        """
+        self._assert_status(PlannerSessionStatus.RUNNING)
+        self.failure_reason = reason
+        self._bump("planner.session_interrupted", "planner", {"reason": reason})
+        return self
+
     def fail(self, reason: str, raw_llm_output: str = "") -> "PlannerSession":
         """RUNNING → FAILED."""
         self._assert_status(PlannerSessionStatus.RUNNING)

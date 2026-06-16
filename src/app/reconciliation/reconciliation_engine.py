@@ -1,63 +1,48 @@
 """
-src/app/reconciliation/reconciliation_engine.py — Reconciler application engine.
+src/app/reconciliation/reconciliation_engine.py — Reconciler facade.
 
-Owns the poll loop, CAS writes, and event publishing.
-All task-level domain decisions are delegated to ReconciliationService.
-PR-phase polling is delegated to SyncGoalPRStatusUseCase + AdvanceGoalFromPRUseCase.
+Backward-compatible entry point. Historically a single watchdog over tasks +
+PR polling; now a thin composition over the federated ControlLoops:
 
-Split of responsibilities:
-  ReconciliationService (src/domain/services/reconciler.py)
-      Pure domain: given a task + context → ReconciliationDecision
-  Reconciler (this file)
-      Application: loop + act on task decisions + run PR polling pass
+  * it IS the TaskReconciler (so ``reconciler._process`` and ``run_once`` keep
+    working for existing callers/tests), and
+  * it additionally schedules a GoalPRReconciler when PR dependencies are
+    provided, under a shared ReconcilerScheduler.
 
-PR polling:
-  When github and goal_repo are provided, the reconciler also runs a PR sync
-  pass on every iteration for all goals in a PR-phase status
-  (AWAITING_PR_APPROVAL or APPROVED). Each pass calls:
-    1. SyncGoalPRStatusUseCase.execute(goal_id)
-    2. AdvanceGoalFromPRUseCase.execute(goal_id)
-  Failures are logged but never stop the loop.
+New code should build a ``ReconcilerScheduler`` directly with the loops it needs
+(see ``AppContainer.get_reconciler_scheduler``, which also wires the
+PhaseDispatchReconciler). This class exists for the established constructor
+contract and the ``run_once`` / ``run_forever`` / ``shutdown`` surface.
+
+Re-exported here for stable import paths:
+  MAX_CAS_RETRIES, STUCK_TASK_MIN_AGE_SECONDS
 """
 from __future__ import annotations
 
-import threading
 from typing import Any, Optional
 
-import structlog
-
-from src.domain import (
-    DomainEvent,
-    ReconciliationAction,
-    ReconciliationService,
-    TaskAggregate,
-    TaskStatus,
+from src.app.reconciliation.control_loop import ControlLoop, ReconcilerScheduler
+from src.app.reconciliation.goal_pr_reconciler import GoalPRReconciler
+from src.app.reconciliation.task_reconciler import (
+    MAX_CAS_RETRIES,
+    STUCK_TASK_MIN_AGE_SECONDS,
+    TaskReconciler,
 )
 from src.domain import AgentRegistryPort, EventPort, LeasePort, TaskRepositoryPort
-from src.domain.aggregates.goal import GoalStatus
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 
-log = structlog.get_logger(__name__)
-
-MAX_CAS_RETRIES = 3
-STUCK_TASK_MIN_AGE_SECONDS = 120
-
-_PR_PHASE_STATUSES = {
-    GoalStatus.AWAITING_PR_APPROVAL,
-    GoalStatus.APPROVED,
-}
+__all__ = ["Reconciler", "MAX_CAS_RETRIES", "STUCK_TASK_MIN_AGE_SECONDS"]
 
 
-class Reconciler:
+class Reconciler(TaskReconciler):
+    """Task watchdog + optional PR polling, behind the legacy public API.
+
+    Inherits the task pass from ``TaskReconciler`` (so ``self`` is the task
+    ControlLoop and ``self._process`` remains the patchable seam), then composes
+    a ``GoalPRReconciler`` and a ``ReconcilerScheduler`` to run both passes.
     """
-    Application-layer watchdog loop.
 
-    On each pass:
-      1. Task reconciliation — loads all active tasks, asks ReconciliationService
-         what to do with each one, then acts: re-publishes events or fails the task.
-      2. PR polling pass — for each goal in a PR-phase status, syncs GitHub PR
-         state and drives eligible state machine transitions.
-    """
+    name = "tasks"
 
     def __init__(
         self,
@@ -72,172 +57,40 @@ class Reconciler:
         sync_pr_usecase: Any = None,
         advance_pr_usecase: Any = None,
     ) -> None:
-        self._repo     = task_repo
-        self._lease    = lease_port
-        self._events   = event_port
-        self._registry = agent_registry
-        self._interval = interval_seconds
-        self._svc      = ReconciliationService(
-            stuck_task_min_age_seconds=stuck_task_min_age_seconds
+        super().__init__(
+            task_repo=task_repo,
+            lease_port=lease_port,
+            event_port=event_port,
+            agent_registry=agent_registry,
+            interval_seconds=interval_seconds,
+            stuck_task_min_age_seconds=stuck_task_min_age_seconds,
         )
 
-        # PR polling (optional — only active when github client is configured)
-        self._goal_repo    = goal_repo
-        self._sync_pr      = sync_pr_usecase
-        self._advance_pr   = advance_pr_usecase
+        loops: list[ControlLoop] = [self]
+        self._pr_loop: Optional[GoalPRReconciler] = None
+        if goal_repo is not None and sync_pr_usecase is not None and advance_pr_usecase is not None:
+            self._pr_loop = GoalPRReconciler(
+                goal_repo=goal_repo,
+                sync_pr_usecase=sync_pr_usecase,
+                advance_pr_usecase=advance_pr_usecase,
+                interval_seconds=interval_seconds,
+            )
+            loops.append(self._pr_loop)
 
-        self._stop = threading.Event()
+        self._scheduler = ReconcilerScheduler(loops)
 
     # ------------------------------------------------------------------
-    # Loop
+    # Legacy public API — delegates to the scheduler
     # ------------------------------------------------------------------
 
     def run_once(self) -> None:
         """Run a single reconciliation pass (tasks + PR polling)."""
-        self._run_task_pass()
-        if self._goal_repo and self._sync_pr and self._advance_pr:
-            self._run_pr_polling_pass()
+        self._scheduler.run_once()
 
     def run_forever(self) -> None:
-        """Run the reconcile loop until shutdown() is called.
-
-        Waits one full interval BEFORE the first pass: at boot, workers may
-        not have heartbeated yet, and an eager pass would fail their ASSIGNED
-        tasks as dead-agent.
-        """
-        log.info("reconciler.started", interval=self._interval)
-        while not self._stop.wait(self._interval):
-            self.run_once()
-        log.info("reconciler.stopped")
+        """Run the reconcile loop until ``shutdown()`` is called."""
+        self._scheduler.run_forever()
 
     def shutdown(self) -> None:
-        """Unblock run_forever() at the next interval check."""
-        log.info("reconciler.shutdown_requested")
-        self._stop.set()
-
-    # ------------------------------------------------------------------
-    # Task reconciliation pass (unchanged from original)
-    # ------------------------------------------------------------------
-
-    def _run_task_pass(self) -> None:
-        tasks  = self._repo.list_all()
-        active = [t for t in tasks if t.status not in TaskStatus.terminal()]
-        log.info("reconciler.pass", total_tasks=len(tasks), active_tasks=len(active))
-        for task in active:
-            try:
-                self._process(task)
-            except Exception as exc:
-                log.exception("reconciler.error", task_id=task.task_id, error=str(exc))
-
-    # ------------------------------------------------------------------
-    # PR polling pass
-    # ------------------------------------------------------------------
-
-    def _run_pr_polling_pass(self) -> None:
-        assert self._goal_repo is not None  # guarded by run_once()
-        """
-        Poll GitHub for every goal in a PR-phase status.
-
-        Errors are caught per-goal — a single failing API call must not
-        block the entire polling pass.
-        """
-        try:
-            goals = self._goal_repo.list_all()
-        except Exception as exc:
-            log.error("reconciler.pr_poll.list_goals_failed", error=str(exc))
-            return
-
-        pr_phase_goals = [g for g in goals if g.status in _PR_PHASE_STATUSES]
-        log.info(
-            "reconciler.pr_poll.pass",
-            pr_phase_goals=len(pr_phase_goals),
-        )
-
-        for goal in pr_phase_goals:
-            try:
-                self._poll_goal_pr(goal.goal_id)
-            except Exception as exc:
-                log.exception(
-                    "reconciler.pr_poll.goal_error",
-                    goal_id=goal.goal_id,
-                    error=str(exc),
-                )
-
-    def _poll_goal_pr(self, goal_id: str) -> None:
-        """Sync + advance a single goal's PR state."""
-        log.debug("reconciler.pr_poll.goal", goal_id=goal_id)
-        self._sync_pr.execute(goal_id)
-        self._advance_pr.execute(goal_id)
-
-    # ------------------------------------------------------------------
-    # Per-task: assess via domain service → act on decision
-    # ------------------------------------------------------------------
-
-    def _process(self, task: TaskAggregate) -> None:
-        lease_active = self._lease.is_lease_active(task.task_id)
-        agent = (
-            self._registry.get(task.assignment.agent_id)
-            if task.assignment
-            else None
-        )
-
-        decision = self._svc.assess(task, lease_active, agent)
-
-        if decision.action == ReconciliationAction.NO_ACTION:
-            return
-
-        if decision.action == ReconciliationAction.REPUBLISH_PENDING:
-            self._republish(task, event_type=decision.reason)
-            return
-
-        if decision.action in (
-            ReconciliationAction.FAIL_DEAD_AGENT,
-            ReconciliationAction.FAIL_LEASE_EXPIRED,
-        ):
-            log.warning(
-                f"reconciler.{decision.action.value}",
-                task_id=task.task_id,
-                reason=decision.reason,
-            )
-            self._fail(task, reason=decision.reason)
-
-    # ------------------------------------------------------------------
-    # Side effects
-    # ------------------------------------------------------------------
-
-    def _republish(self, task: TaskAggregate, event_type: str) -> None:
-        """Re-emit task.created or task.requeued without modifying state."""
-        self._events.publish(DomainEvent(
-            type=event_type,
-            producer="reconciler",
-            payload={"task_id": task.task_id},
-        ))
-        log.info("reconciler.republished_pending",
-                 task_id=task.task_id, event_type=event_type)
-
-    def _fail(self, task: TaskAggregate, reason: str) -> None:
-        """
-        Transition task → FAILED via CAS write, then emit task.failed.
-        If the task moved on before we act (worker recovered), skip silently.
-        """
-        log.info("reconciler.failing_task", task_id=task.task_id, reason=reason)
-        for attempt in range(MAX_CAS_RETRIES):
-            fresh = self._repo.load(task.task_id)
-            if fresh.status not in TaskStatus.active():
-                log.info("reconciler.fail_skipped_status_changed",
-                         task_id=task.task_id, current_status=fresh.status.value)
-                return
-            expected_v = fresh.state_version
-            fresh.fail(reason)
-            if self._repo.update_if_version(task.task_id, fresh, expected_v):
-                self._events.publish(DomainEvent(
-                    type="task.failed",
-                    producer="reconciler",
-                    payload={"task_id": task.task_id, "reason": reason},
-                ))
-                log.info("reconciler.task_failed",
-                         task_id=task.task_id, attempt=attempt, reason=reason)
-                return
-            log.warning("reconciler.fail_cas_conflict",
-                        task_id=task.task_id, attempt=attempt)
-        log.error("reconciler.fail_cas_exhausted", task_id=task.task_id)
+        """Unblock ``run_forever()`` at the next interval check."""
+        self._scheduler.shutdown()

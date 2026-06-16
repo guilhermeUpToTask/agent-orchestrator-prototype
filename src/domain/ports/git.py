@@ -14,6 +14,22 @@ class GitWorkspacePort(ABC):
     """
 
     @abstractmethod
+    def ensure_repo_initialized(self, repo_url: str) -> None:
+        """
+        Ensure the project repo backing *repo_url* exists and is a git repo.
+
+        For a local ``file://`` repo, create the directory and ``git init`` it
+        (seeding ``main`` from ``source_repo_url`` when configured, otherwise an
+        empty initial commit) if it has no ``.git``. Must be idempotent: a
+        no-op when the repo already exists.
+
+        This is the precondition for every clone-based operation
+        (``create_goal_branch``, ``create_workspace``, ``merge_task_into_goal``)
+        — the first one to run must not fail because the repo was never seeded.
+        """
+        ...
+
+    @abstractmethod
     def create_workspace(self, repo_url: str, task_id: str) -> str:
         """Clone the repo into an ephemeral directory. Returns workspace_path."""
         ...

@@ -119,6 +119,10 @@ export type ApproveArchitectureResponse = {
      */
     goals_dispatched: Array<string>;
     plan_status: ProjectPlanStatus;
+    /**
+     * Goals Failed
+     */
+    goals_failed?: Array<GoalDispatchFailureResponse>;
 };
 
 /**
@@ -155,6 +159,70 @@ export type ApprovePhaseResponse = {
      */
     goals_dispatched: Array<string>;
     plan_status: ProjectPlanStatus;
+    /**
+     * Goals Failed
+     */
+    goals_failed?: Array<GoalDispatchFailureResponse>;
+};
+
+/**
+ * ArchitectureStatusResponse
+ *
+ * Reload-resilient readiness of the autonomous architecture session.
+ *
+ * The approval gate is offered only when ``state == "completed"``; clients
+ * hydrate proposed decisions/phases from here so a page refresh mid/after the
+ * run keeps the correct state instead of relying on ephemeral SSE buffers.
+ */
+export type ArchitectureStatusResponse = {
+    /**
+     * State
+     */
+    state: 'none' | 'running' | 'completed' | 'failed';
+    /**
+     * Session Id
+     */
+    session_id?: string | null;
+    /**
+     * Decisions
+     */
+    decisions?: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Phases
+     */
+    phases?: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Error
+     */
+    error?: string | null;
+};
+
+/**
+ * CapabilityCreateRequest
+ */
+export type CapabilityCreateRequest = {
+    /**
+     * Tag
+     *
+     * e.g. 'code:backend', 'test:write'
+     */
+    tag: string;
+};
+
+/**
+ * CapabilityListResponse
+ *
+ * The full set of registered capability tags.
+ */
+export type CapabilityListResponse = {
+    /**
+     * Tags
+     */
+    tags: Array<string>;
 };
 
 /**
@@ -175,6 +243,20 @@ export type ErrorResponse = {
      * Detail
      */
     detail: string;
+};
+
+/**
+ * GoalDispatchFailureResponse
+ */
+export type GoalDispatchFailureResponse = {
+    /**
+     * Goal Name
+     */
+    goal_name: string;
+    /**
+     * Error
+     */
+    error: string;
 };
 
 /**
@@ -281,6 +363,22 @@ export type GoalResponse = {
 };
 
 /**
+ * GoalRetryResponse
+ *
+ * Result of a bulk 'retry failed tasks' action.
+ */
+export type GoalRetryResponse = {
+    /**
+     * Requeued
+     */
+    requeued: Array<string>;
+    /**
+     * Goals Touched
+     */
+    goals_touched: Array<string>;
+};
+
+/**
  * GoalStatus
  */
 export type GoalStatus = 'pending' | 'running' | 'ready_for_review' | 'awaiting_pr_approval' | 'approved' | 'merged' | 'failed' | 'completed';
@@ -310,6 +408,14 @@ export type GoalTaskResponse = {
      * Retry Count
      */
     retry_count?: number;
+    /**
+     * Unassignable Reason
+     */
+    unassignable_reason?: string | null;
+    /**
+     * Last Error
+     */
+    last_error?: string | null;
 };
 
 /**
@@ -622,6 +728,21 @@ export type RefineRequest = {
      * Focused Goal Id
      */
     focused_goal_id?: string | null;
+};
+
+/**
+ * ResumeDispatchResponse
+ */
+export type ResumeDispatchResponse = {
+    /**
+     * Goals Dispatched
+     */
+    goals_dispatched: Array<string>;
+    plan_status: ProjectPlanStatus;
+    /**
+     * Goals Failed
+     */
+    goals_failed?: Array<GoalDispatchFailureResponse>;
 };
 
 /**
@@ -947,6 +1068,97 @@ export type PlanApproveBriefResponses = {
 
 export type PlanApproveBriefResponse = PlanApproveBriefResponses[keyof PlanApproveBriefResponses];
 
+export type PlanRunArchitectureData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/plan/architecture/run';
+};
+
+export type PlanRunArchitectureErrors = {
+    /**
+     * An architecture session is already in progress.
+     */
+    409: ErrorResponse;
+};
+
+export type PlanRunArchitectureError = PlanRunArchitectureErrors[keyof PlanRunArchitectureErrors];
+
+export type PlanRunArchitectureResponses = {
+    /**
+     * Successful Response
+     */
+    202: SessionAccepted;
+};
+
+export type PlanRunArchitectureResponse = PlanRunArchitectureResponses[keyof PlanRunArchitectureResponses];
+
+export type PlanArchitectureStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/plan/architecture/status';
+};
+
+export type PlanArchitectureStatusResponses = {
+    /**
+     * Successful Response
+     */
+    200: ArchitectureStatusResponse;
+};
+
+export type PlanArchitectureStatusResponse = PlanArchitectureStatusResponses[keyof PlanArchitectureStatusResponses];
+
+export type PlanCancelArchitectureData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/plan/architecture/cancel';
+};
+
+export type PlanCancelArchitectureErrors = {
+    /**
+     * No architecture session is currently running.
+     */
+    404: ErrorResponse;
+};
+
+export type PlanCancelArchitectureError = PlanCancelArchitectureErrors[keyof PlanCancelArchitectureErrors];
+
+export type PlanCancelArchitectureResponses = {
+    /**
+     * Successful Response
+     */
+    200: SessionAccepted;
+};
+
+export type PlanCancelArchitectureResponse = PlanCancelArchitectureResponses[keyof PlanCancelArchitectureResponses];
+
+export type PlanRunPhaseReviewData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/plan/phase-review/run';
+};
+
+export type PlanRunPhaseReviewErrors = {
+    /**
+     * A phase-review session is already in progress.
+     */
+    409: ErrorResponse;
+};
+
+export type PlanRunPhaseReviewError = PlanRunPhaseReviewErrors[keyof PlanRunPhaseReviewErrors];
+
+export type PlanRunPhaseReviewResponses = {
+    /**
+     * Successful Response
+     */
+    202: SessionAccepted;
+};
+
+export type PlanRunPhaseReviewResponse = PlanRunPhaseReviewResponses[keyof PlanRunPhaseReviewResponses];
+
 export type PlanApproveArchitectureData = {
     body: ApproveArchitectureRequest;
     path?: never;
@@ -1004,6 +1216,31 @@ export type PlanApprovePhaseResponses = {
 };
 
 export type PlanApprovePhaseResponse = PlanApprovePhaseResponses[keyof PlanApprovePhaseResponses];
+
+export type PlanResumeDispatchData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/plan/resume-dispatch';
+};
+
+export type PlanResumeDispatchErrors = {
+    /**
+     * Plan is not in `phase_active` status. The body reports the current vs expected status.
+     */
+    409: PlanConflictResponse;
+};
+
+export type PlanResumeDispatchError = PlanResumeDispatchErrors[keyof PlanResumeDispatchErrors];
+
+export type PlanResumeDispatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: ResumeDispatchResponse;
+};
+
+export type PlanResumeDispatchResponse = PlanResumeDispatchResponses[keyof PlanResumeDispatchResponses];
 
 export type PlanRefinePlanData = {
     body: RefineRequest;
@@ -1248,6 +1485,56 @@ export type GoalsGetGoalHistoryResponses = {
 };
 
 export type GoalsGetGoalHistoryResponse = GoalsGetGoalHistoryResponses[keyof GoalsGetGoalHistoryResponses];
+
+export type GoalsRetryAllFailedData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/goals/retry-failed';
+};
+
+export type GoalsRetryAllFailedResponses = {
+    /**
+     * Successful Response
+     */
+    200: GoalRetryResponse;
+};
+
+export type GoalsRetryAllFailedResponse = GoalsRetryAllFailedResponses[keyof GoalsRetryAllFailedResponses];
+
+export type GoalsRetryGoalFailedData = {
+    body?: never;
+    path: {
+        /**
+         * Goal Id
+         */
+        goal_id: string;
+    };
+    query?: never;
+    url: '/api/goals/{goal_id}/retry-failed';
+};
+
+export type GoalsRetryGoalFailedErrors = {
+    /**
+     * Goal not found.
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GoalsRetryGoalFailedError = GoalsRetryGoalFailedErrors[keyof GoalsRetryGoalFailedErrors];
+
+export type GoalsRetryGoalFailedResponses = {
+    /**
+     * Successful Response
+     */
+    200: GoalRetryResponse;
+};
+
+export type GoalsRetryGoalFailedResponse = GoalsRetryGoalFailedResponses[keyof GoalsRetryGoalFailedResponses];
 
 export type GoalsFinalizeGoalData = {
     body?: never;
@@ -1708,6 +1995,145 @@ export type AgentsRegisterAgentResponses = {
 };
 
 export type AgentsRegisterAgentResponse = AgentsRegisterAgentResponses[keyof AgentsRegisterAgentResponses];
+
+export type AgentsDeleteAgentData = {
+    body?: never;
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/api/agents/{agent_id}';
+};
+
+export type AgentsDeleteAgentErrors = {
+    /**
+     * No agent with that id is registered.
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AgentsDeleteAgentError = AgentsDeleteAgentErrors[keyof AgentsDeleteAgentErrors];
+
+export type AgentsDeleteAgentResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type AgentsDeleteAgentResponse = AgentsDeleteAgentResponses[keyof AgentsDeleteAgentResponses];
+
+export type AgentsUpdateAgentData = {
+    body: AgentRegisterRequest;
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/api/agents/{agent_id}';
+};
+
+export type AgentsUpdateAgentErrors = {
+    /**
+     * No agent with that id is registered.
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AgentsUpdateAgentError = AgentsUpdateAgentErrors[keyof AgentsUpdateAgentErrors];
+
+export type AgentsUpdateAgentResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentResponse;
+};
+
+export type AgentsUpdateAgentResponse = AgentsUpdateAgentResponses[keyof AgentsUpdateAgentResponses];
+
+export type CapabilitiesListCapabilitiesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/capabilities';
+};
+
+export type CapabilitiesListCapabilitiesResponses = {
+    /**
+     * Successful Response
+     */
+    200: CapabilityListResponse;
+};
+
+export type CapabilitiesListCapabilitiesResponse = CapabilitiesListCapabilitiesResponses[keyof CapabilitiesListCapabilitiesResponses];
+
+export type CapabilitiesCreateCapabilityData = {
+    body: CapabilityCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/api/capabilities';
+};
+
+export type CapabilitiesCreateCapabilityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CapabilitiesCreateCapabilityError = CapabilitiesCreateCapabilityErrors[keyof CapabilitiesCreateCapabilityErrors];
+
+export type CapabilitiesCreateCapabilityResponses = {
+    /**
+     * Successful Response
+     */
+    201: CapabilityListResponse;
+};
+
+export type CapabilitiesCreateCapabilityResponse = CapabilitiesCreateCapabilityResponses[keyof CapabilitiesCreateCapabilityResponses];
+
+export type CapabilitiesDeleteCapabilityData = {
+    body?: never;
+    path: {
+        /**
+         * Tag
+         */
+        tag: string;
+    };
+    query?: never;
+    url: '/api/capabilities/{tag}';
+};
+
+export type CapabilitiesDeleteCapabilityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CapabilitiesDeleteCapabilityError = CapabilitiesDeleteCapabilityErrors[keyof CapabilitiesDeleteCapabilityErrors];
+
+export type CapabilitiesDeleteCapabilityResponses = {
+    /**
+     * Successful Response
+     */
+    200: CapabilityListResponse;
+};
+
+export type CapabilitiesDeleteCapabilityResponse = CapabilitiesDeleteCapabilityResponses[keyof CapabilitiesDeleteCapabilityResponses];
 
 export type SpecGetSpecData = {
     body?: never;

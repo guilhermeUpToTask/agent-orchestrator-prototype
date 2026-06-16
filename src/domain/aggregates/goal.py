@@ -42,6 +42,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.domain.value_objects.branches import goal_branch_name
 from src.domain.value_objects.status import TaskStatus
 from src.domain.value_objects.task import HistoryEntry
 
@@ -144,7 +145,7 @@ class GoalAggregate(BaseModel):
             goal_id=gid,
             name=name,
             description=description,
-            branch=f"goal/{name}",
+            branch=goal_branch_name(name),
             tasks={t.task_id: t for t in task_summaries},
             depends_on=depends_on or [],
             feature_tag=feature_tag,
@@ -253,6 +254,21 @@ class GoalAggregate(BaseModel):
             "jit-planner",
             {"task_id": summary.task_id, "title": summary.title},
         )
+        return self
+
+    def reopen(self) -> "GoalAggregate":
+        """FAILED → RUNNING (operator retry of failed/canceled tasks).
+
+        Clears the failure reason so the goal can make progress again once its
+        requeued tasks succeed. Only a FAILED goal can be reopened.
+        """
+        if self.status != GoalStatus.FAILED:
+            raise ValueError(
+                f"Goal {self.goal_id} is '{self.status.value}'; only a FAILED goal can be reopened."
+            )
+        self.status = GoalStatus.RUNNING
+        self.failure_reason = None
+        self._bump("goal.reopened", "operator")
         return self
 
     def record_task_status(self, task_id: str, status: TaskStatus) -> "GoalAggregate":

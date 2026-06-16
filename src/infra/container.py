@@ -118,6 +118,15 @@ class AppContainer:
         return JsonAgentRegistry(self.paths.registry_path)
 
     @cached_property
+    def capability_registry(self):
+        from src.domain import DEFAULT_CAPABILITIES
+        from src.infra.fs.capability_registry import JsonCapabilityRegistry
+
+        registry = JsonCapabilityRegistry(self.paths.capabilities_path)
+        registry.ensure_defaults(DEFAULT_CAPABILITIES)
+        return registry
+
+    @cached_property
     def project_plan_repo(self):
         if self._ctx.machine.mode == "dry-run":
             from src.infra.fs.project_plan_repository import InMemoryProjectPlanRepository
@@ -322,6 +331,7 @@ class AppContainer:
         return TaskCreationService(
             task_repo=self.task_repo,
             event_port=self.event_port,
+            capability_registry=self.capability_registry,
         )
 
     @cached_property
@@ -418,6 +428,16 @@ class AppContainer:
         return TaskRetryUseCase(task_repo=self.task_repo, event_port=self.event_port)
 
     @cached_property
+    def retry_goal_tasks_usecase(self):
+        from src.app.usecases.retry_goal_tasks import RetryGoalTasksUseCase
+
+        return RetryGoalTasksUseCase(
+            goal_repo=self.goal_repo,
+            task_repo=self.task_repo,
+            task_retry=self.task_retry_usecase,
+        )
+
+    @cached_property
     def task_delete_usecase(self):
         from src.app.usecases.task_delete import TaskDeleteUseCase
 
@@ -448,7 +468,10 @@ class AppContainer:
     def agent_register_usecase(self):
         from src.app.usecases.agent_register import AgentRegisterUseCase
 
-        return AgentRegisterUseCase(agent_registry=self.agent_registry)
+        return AgentRegisterUseCase(
+            agent_registry=self.agent_registry,
+            capability_registry=self.capability_registry,
+        )
 
     @cached_property
     def project_reset_usecase(self):
@@ -652,6 +675,93 @@ class AppContainer:
             sync_pr_usecase=self.sync_goal_pr_usecase,
             advance_pr_usecase=self.advance_goal_from_pr_usecase,
         )
+
+    @cached_property
+    def resume_phase_dispatch_usecase(self):
+        """Standalone ResumePhaseDispatchUseCase (no planner runtimes needed).
+
+        Builds its own PlanningSessionSupport — only ``find_goal_spec`` is used,
+        which reads persisted session roadmap_data, so no LLM runtime is touched.
+        """
+        from src.app.planning.sessions.support import PlanningSessionSupport
+        from src.app.planning.sessions.usecases import ResumePhaseDispatchUseCase
+
+        support = PlanningSessionSupport(
+            context_assembler=self.planner_context_assembler,
+            session_repo=self.planner_session_repo,
+            plan_repo=self.project_plan_repo,
+            goal_repo=self.goal_repo,
+        )
+        return ResumePhaseDispatchUseCase(
+            plan_repo=self.project_plan_repo,
+            session_repo=self.planner_session_repo,
+            goal_repo=self.goal_repo,
+            goal_init=self.goal_init_usecase,
+            support=support,
+            event_port=self.event_port,
+        )
+
+    def get_reconciler_scheduler(
+        self,
+        interval_seconds: int = 60,
+        stuck_task_min_age_seconds: int = 120,
+        phase_dispatch_interval_seconds: int = 120,
+    ):
+        """Federated reconciler: task watchdog + PR polling + phase dispatch.
+
+        Each loop runs at its own cadence under one ReconcilerScheduler. The
+        phase-dispatch loop is best-effort — if its (spec-dependent) use case
+        can't be built, the scheduler still runs the task + PR loops.
+        """
+        from src.app.reconciliation import (
+            ControlLoop,
+            GoalPRReconciler,
+            PhaseDispatchReconciler,
+            ReconcilerScheduler,
+            TaskReconciler,
+        )
+
+        # Task watchdog is the only mandatory loop.
+        loops: list[ControlLoop] = [
+            TaskReconciler(
+                task_repo=self.task_repo,
+                lease_port=self.lease_port,
+                event_port=self.event_port,
+                agent_registry=self.agent_registry,
+                interval_seconds=interval_seconds,
+                stuck_task_min_age_seconds=stuck_task_min_age_seconds,
+            ),
+        ]
+
+        # PR polling needs a configured GitHub client; skip it (rather than fail
+        # the whole reconciler) when GitHub isn't set up for this project.
+        try:
+            loops.append(
+                GoalPRReconciler(
+                    goal_repo=self.goal_repo,
+                    sync_pr_usecase=self.sync_goal_pr_usecase,
+                    advance_pr_usecase=self.advance_goal_from_pr_usecase,
+                    interval_seconds=interval_seconds,
+                )
+            )
+        except Exception as exc:
+            log.warning("container.goal_pr_reconciler_skipped", error=str(exc))
+
+        # Phase-dispatch backstop needs the planner spec; best-effort likewise.
+        try:
+            resume = self.resume_phase_dispatch_usecase
+            loops.append(
+                PhaseDispatchReconciler(
+                    plan_repo=self.project_plan_repo,
+                    goal_repo=self.goal_repo,
+                    resume_dispatch=resume.execute,
+                    interval_seconds=phase_dispatch_interval_seconds,
+                )
+            )
+        except Exception as exc:
+            log.warning("container.phase_dispatch_reconciler_skipped", error=str(exc))
+
+        return ReconcilerScheduler(loops)
 
     def make_planner_logger(self, session_id: str, mode: str) -> "PlannerLiveLogger":
         """
