@@ -36,62 +36,77 @@ class GitWorkspaceAdapter(GitWorkspacePort):
     # GitWorkspacePort
     # ------------------------------------------------------------------
 
+    def ensure_repo_initialized(self, repo_url: str) -> None:
+        """Idempotently create + seed the local repo backing a file:// URL.
+
+        Non-local (remote) repo_urls are assumed to already exist on their
+        remote, so this is a no-op for them.
+        """
+        if not repo_url.startswith("file://"):
+            return
+
+        local_path = repo_url[len("file://") :]
+        p = Path(local_path)
+
+        if not p.exists() or not (p / ".git").exists():
+            p.mkdir(parents=True, exist_ok=True)
+            if self._source_repo_url:
+                # Clone upstream into the local repo folder
+                log.info("git.cloning_upstream", source=self._source_repo_url, dest=local_path)
+                subprocess.run(
+                    ["git", "clone", self._source_repo_url, local_path],
+                    check=True,
+                    capture_output=True,
+                )
+                log.info("git.upstream_cloned", path=local_path)
+            else:
+                # New project — init an empty repo and seed main
+                log.info("git.repo_creating", path=local_path)
+                env = {
+                    **os.environ,
+                    "GIT_AUTHOR_NAME": "orchestrator",
+                    "GIT_AUTHOR_EMAIL": "orchestrator@local",
+                    "GIT_COMMITTER_NAME": "orchestrator",
+                    "GIT_COMMITTER_EMAIL": "orchestrator@local",
+                }
+                subprocess.run(
+                    ["git", "init", local_path],
+                    check=True,
+                    capture_output=True,
+                )
+                # Ensure the seeded branch matches our default_branch, regardless
+                # of the host's init.defaultBranch git config (often "master").
+                subprocess.run(
+                    ["git", "-C", local_path, "checkout", "-B", self._default_branch],
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        local_path,
+                        "commit",
+                        "--allow-empty",
+                        "-m",
+                        "chore: initial commit",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+                log.info("git.repo_created", path=local_path)
+
+        # Allow agents to push task branches while main is checked out.
+        # Safe — agents only push to task/<id>, never to main.
+        subprocess.run(
+            ["git", "-C", local_path, "config", "receive.denyCurrentBranch", "ignore"],
+            check=True,
+            capture_output=True,
+        )
+
     def create_workspace(self, repo_url: str, task_id: str) -> str:
-        if repo_url.startswith("file://"):
-            local_path = repo_url[len("file://") :]
-            from pathlib import Path as P
-
-            p = P(local_path)
-
-            if not p.exists() or not (p / ".git").exists():
-                p.mkdir(parents=True, exist_ok=True)
-                if self._source_repo_url:
-                    # Clone upstream into the local repo folder
-                    log.info("git.cloning_upstream", source=self._source_repo_url, dest=local_path)
-                    subprocess.run(
-                        ["git", "clone", self._source_repo_url, local_path],
-                        check=True,
-                        capture_output=True,
-                    )
-                    log.info("git.upstream_cloned", path=local_path)
-                else:
-                    # New project — init an empty repo and seed main
-                    log.info("git.repo_creating", path=local_path)
-                    env = {
-                        **os.environ,
-                        "GIT_AUTHOR_NAME": "orchestrator",
-                        "GIT_AUTHOR_EMAIL": "orchestrator@local",
-                        "GIT_COMMITTER_NAME": "orchestrator",
-                        "GIT_COMMITTER_EMAIL": "orchestrator@local",
-                    }
-                    subprocess.run(
-                        ["git", "init", local_path],
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        [
-                            "git",
-                            "-C",
-                            local_path,
-                            "commit",
-                            "--allow-empty",
-                            "-m",
-                            "chore: initial commit",
-                        ],
-                        check=True,
-                        capture_output=True,
-                        env=env,
-                    )
-                    log.info("git.repo_created", path=local_path)
-
-            # Allow agents to push task branches while main is checked out.
-            # Safe — agents only push to task/<id>, never to main.
-            subprocess.run(
-                ["git", "-C", local_path, "config", "receive.denyCurrentBranch", "ignore"],
-                check=True,
-                capture_output=True,
-            )
+        self.ensure_repo_initialized(repo_url)
 
         ws = self._base / task_id
         if ws.exists():
@@ -151,6 +166,10 @@ class GitWorkspaceAdapter(GitWorkspacePort):
                 self._run(["git", "checkout", self._default_branch], cwd=ws)
                 self._run(["git", "pull", "--ff-only"], cwd=ws)
 
+        # Best-effort: drop any stale local branch of this name so a re-run
+        # after a partial failure (or a freshly-cloned ws that already tracks
+        # the remote task branch) is idempotent instead of failing on -b.
+        subprocess.run(["git", "branch", "-D", branch_name], cwd=ws, capture_output=True)
         self._run(["git", "checkout", "-b", branch_name], cwd=ws)
 
     def create_goal_branch(self, repo_url: str, goal_branch: str) -> None:
@@ -310,6 +329,10 @@ class DryRunGitWorkspaceAdapter(GitWorkspacePort):
 
     def __init__(self) -> None:
         self._workspaces: dict[str, str] = {}
+
+    def ensure_repo_initialized(self, repo_url: str) -> None:
+        # No-op in dry-run — each create_workspace seeds its own throwaway repo.
+        pass
 
     def create_workspace(self, repo_url: str, task_id: str) -> str:
         ws = tempfile.mkdtemp(prefix=f"dryrun-task-{task_id}-")

@@ -12,6 +12,7 @@ import structlog
 
 from src.app.services.planner_context import PlannerContextAssembler
 from src.app.services.task_creation import TaskCreationService
+from src.domain import task_branch_name
 from src.domain.aggregates.planner_session import PlannerMode, PlannerSession
 from src.domain.ports.messaging import EventPort
 from src.domain.ports.planner import PlannerRuntimeError, PlannerRuntimePort, PlannerTool
@@ -294,7 +295,7 @@ class RunRefinementUseCase:
                 return json.dumps({"ok": False, "error": f"Goal {goal_id} not found."})
 
             tid = inp.get("task_id") or f"task-{uuid4().hex[:6]}"
-            task_branch = f"goal/{goal.name}/task/{tid}"
+            task_branch = task_branch_name(goal.name, tid)
 
             try:
                 task = task_creation.create_task(

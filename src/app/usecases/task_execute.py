@@ -29,6 +29,7 @@ the canonical task.started / task.completed / task.failed notifications.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable
 
 import structlog
@@ -37,7 +38,7 @@ from src.app.telemetry.runtime_wrappers import TelemetryAgentRuntimeWrapper
 from src.app.telemetry.service import TelemetryService
 from src.domain import (
     AgentExecutionResult, AgentProps, DomainEvent, ExecutionContext,
-    ForbiddenFileEditError, TaskAggregate, TaskStatus,
+    ForbiddenFileEditError, TaskAggregate, TaskStatus, task_branch_name,
 )
 from src.domain import (
     AgentRegistryPort, AgentRuntimePort, EventPort, GitWorkspacePort,
@@ -340,12 +341,59 @@ class TaskExecuteUseCase:
             task = self._task_repo.load(task_id)
             constraints = task.execution.constraints
 
-        branch      = constraints.get("task_branch", f"task/{task_id}")
         base_branch = constraints.get("goal_branch", "main")
+        # Derive the task branch from the goal branch rather than trusting a
+        # persisted constraint — older tasks stored the colliding
+        # ``goal/<g>/task/<id>`` name, so deriving here self-heals them on retry.
+        if base_branch.startswith("goal/"):
+            branch = task_branch_name(base_branch, task_id)
+        else:
+            branch = constraints.get("task_branch", f"task/{task_id}")
 
         self._git.checkout_main_and_create_branch(ws_path, branch, base_branch=base_branch)
         log.info("worker.workspace_ready", task_id=task_id, path=ws_path, branch=branch)
         return ws_path, branch
+
+    def _make_progress_publisher(
+        self, task: TaskAggregate
+    ) -> tuple[Callable[[str], None], Callable[[], None]]:
+        """Build a throttled agent-output publisher.
+
+        Returns (progress_cb, flush). progress_cb buffers each output line and
+        publishes a ``task.progress`` event at most every ~0.5s (or every 50
+        lines); flush emits the remaining tail. Throttling keeps Redis/SSE from
+        flooding on chatty agents. Publishing never raises — observability must
+        not break execution.
+        """
+        buffer: list[str] = []
+        last_flush = [0.0]
+        agent_id = task.assignment.agent_id if task.assignment else "worker"
+
+        def _flush() -> None:
+            if not buffer:
+                return
+            lines = buffer[:]
+            buffer.clear()
+            last_flush[0] = time.monotonic()
+            try:
+                self._events.publish(DomainEvent(
+                    type="task.progress",
+                    producer=agent_id,
+                    correlation_id=task.feature_id,
+                    payload={"task_id": task.task_id, "lines": lines, "ts": time.time()},
+                ))
+            except Exception as exc:
+                log.warning("worker.progress_publish_failed", task_id=task.task_id, error=str(exc))
+
+        def _cb(line: str) -> None:
+            line = line.rstrip()[:2000]
+            if not line:
+                return
+            buffer.append(line)
+            if time.monotonic() - last_flush[0] >= 0.5 or len(buffer) >= 50:
+                _flush()
+
+        return _cb, _flush
 
     def _run_agent_session(
         self,
@@ -378,7 +426,11 @@ class TaskExecuteUseCase:
             task_id=task.task_id,
             timeout=self._timeout,
         )
-        result: AgentExecutionResult = runtime.wait_for_completion(session, self._timeout)
+        progress_cb, flush_progress = self._make_progress_publisher(task)
+        result: AgentExecutionResult = runtime.wait_for_completion(
+            session, self._timeout, progress_cb
+        )
+        flush_progress()  # emit any buffered tail lines
         log.info(
             "worker.agent_session_completed",
             task_id=task.task_id,

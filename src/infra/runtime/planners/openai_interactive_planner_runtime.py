@@ -48,6 +48,7 @@ class OpenAIInteractivePlannerRuntime(PlannerRuntimePort):
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         return self._runtime.run_session(
             prompt=prompt,
@@ -56,4 +57,5 @@ class OpenAIInteractivePlannerRuntime(PlannerRuntimePort):
             session_callback=session_callback,
             require_submit=require_submit,
             cancel_check=cancel_check,
+            prior_turns=prior_turns,
         )

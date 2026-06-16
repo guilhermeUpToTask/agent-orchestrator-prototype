@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import {
   usePlan, useStartDiscovery, useGoals, useRunArchitecture, useRunPhaseReview,
+  useResumeDispatch, useRetryAllFailed,
 } from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { relTime, useNow } from '../lib/time';
@@ -40,9 +41,30 @@ export function LifecycleRail() {
   const startDiscovery = useStartDiscovery();
   const runArchitecture = useRunArchitecture();
   const runPhaseReview = useRunPhaseReview();
+  const resumeDispatch = useResumeDispatch();
+  const retryAllFailed = useRetryAllFailed();
   const now = useNow(1000);
 
+  // Retryable (failed or canceled) tasks across all goals — drives the global
+  // "Retry all failed" action. Also offered when a goal itself has failed.
+  const failedTaskCount = goals.reduce(
+    (sum, g) =>
+      sum + g.tasks.filter((t) => t.status === 'failed' || t.status === 'canceled').length,
+    0,
+  );
+  const anyGoalFailed = goals.some((g) => g.status === 'failed');
+  const showRetryAll = failedTaskCount > 0 || anyGoalFailed;
+
   const status = plan?.status;
+
+  // Divergence: the active phase declares goals that have no aggregate yet —
+  // e.g. a dispatch whose branch creation failed. Surfaces the recovery action
+  // (the reconciler also self-heals this on its slow cadence, but the operator
+  // shouldn't have to wait or guess).
+  const activePhase = plan?.phases.find((p) => p.status === 'active');
+  const missingGoals = activePhase
+    ? activePhase.goal_names.filter((n) => !goals.some((g) => g.name === n))
+    : [];
 
   // ── Build the step list ───────────────────────────────────────────────────
   const steps: Step[] = [];
@@ -197,6 +219,49 @@ export function LifecycleRail() {
               disabled={runPhaseReview.isPending}
             >
               Run phase review
+            </button>
+          </div>
+        )}
+
+        {/* Recovery: active-phase goals that never got dispatched (e.g. a goal
+            whose branch creation failed). Re-dispatch the missing ones. */}
+        {status === 'phase_active' && missingGoals.length > 0 && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>
+              {missingGoals.length} goal{missingGoals.length > 1 ? 's' : ''} not dispatched
+            </div>
+            <p className={styles.cardBody}>
+              This phase expects {missingGoals.join(', ')}, which never got created.
+              Re-dispatch the missing goals — already-dispatched goals are untouched.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => resumeDispatch.mutate()}
+              disabled={resumeDispatch.isPending}
+            >
+              {resumeDispatch.isPending ? 'Dispatching…' : 'Resume dispatch'}
+            </button>
+          </div>
+        )}
+
+        {/* Recovery: failed/canceled tasks anywhere — bulk requeue across goals */}
+        {showRetryAll && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>
+              {failedTaskCount > 0
+                ? `${failedTaskCount} failed task${failedTaskCount > 1 ? 's' : ''}`
+                : 'Failed goal(s)'}
+            </div>
+            <p className={styles.cardBody}>
+              Requeue every failed or canceled task across all goals and reopen failed goals.
+              Already-succeeded tasks are untouched.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => retryAllFailed.mutate()}
+              disabled={retryAllFailed.isPending}
+            >
+              {retryAllFailed.isPending ? 'Requeuing…' : 'Retry all failed'}
             </button>
           </div>
         )}

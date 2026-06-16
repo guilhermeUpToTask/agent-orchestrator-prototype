@@ -20,6 +20,10 @@ class TestTaskManagerHandler:
         self.events = MagicMock()
         self.lease = MagicMock()
         self.scheduler = MagicMock()
+        # All listed agents are eligible; capacity sees no in-flight tasks.
+        self.scheduler.eligible_agents.side_effect = lambda task, agents: list(agents)
+        self.repo.list_all.return_value = []
+        self.scheduler.select_agent.side_effect = lambda task, agents: agents[0] if agents else None
         self.handler = TaskManagerHandler(self.repo, self.registry, self.events, self.lease, scheduler=self.scheduler)
 
     def test_handle_task_created_success(self):

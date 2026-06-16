@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from src.domain.aggregates.project_plan import Phase, ProjectBrief
@@ -14,6 +14,7 @@ class DiscoveryResult:
     brief: Optional[ProjectBrief]
     needs_approval: bool
     failure_reason: Optional[str] = None
+    resumable: bool = False
 
 
 @dataclass
@@ -45,8 +46,18 @@ class PhaseReviewResult:
 
 
 @dataclass
+class GoalDispatchFailure:
+    """A goal that failed to dispatch during approval (e.g. branch creation
+    failed). Surfaced to the operator so a partial dispatch is never silent."""
+
+    goal_name: str
+    error: str
+
+
+@dataclass
 class ApprovalResult:
     decisions_applied: int
     goals_dispatched: list[str]
     plan_status: str
     spec_changes_applied: int = 0
+    goals_failed: list[GoalDispatchFailure] = field(default_factory=list)

@@ -12,11 +12,12 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from src.domain.errors import ForbiddenFileEditError
+from src.domain.value_objects.capability import CapabilityTag
 
 
 class AgentSelector(BaseModel):
     """Declares what kind of agent a task requires."""
-    required_capability: str
+    required_capability: CapabilityTag
     min_version: str = ">=1.0.0"
 
 

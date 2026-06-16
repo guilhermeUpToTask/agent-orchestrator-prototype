@@ -1,12 +1,23 @@
 """
-src/app/reconciliation/ — Reconciliation engine package.
+src/app/reconciliation/ — Reconciliation control-loop package.
 
-Phase 1 of the orchestration refactoring: the Reconciler has been extracted
-from the monolithic src/app/reconciler.py into this package so its single
-responsibility (watchdog loop) is clearly separated from scheduling,
-assignment, and retry policies that live in core/services.py.
+A federated set of ``ControlLoop`` implementations — one per layer/aggregate —
+run under a single ``ReconcilerScheduler`` (shared timing, telemetry, backoff,
+single-writer guard). The legacy ``Reconciler`` remains as a task+PR facade for
+established callers; new wiring composes the loops directly.
 """
 
+from src.app.reconciliation.control_loop import ControlLoop, ReconcilerScheduler
+from src.app.reconciliation.goal_pr_reconciler import GoalPRReconciler
+from src.app.reconciliation.phase_dispatch_reconciler import PhaseDispatchReconciler
 from src.app.reconciliation.reconciliation_engine import Reconciler
+from src.app.reconciliation.task_reconciler import TaskReconciler
 
-__all__ = ["Reconciler"]
+__all__ = [
+    "ControlLoop",
+    "ReconcilerScheduler",
+    "TaskReconciler",
+    "GoalPRReconciler",
+    "PhaseDispatchReconciler",
+    "Reconciler",
+]

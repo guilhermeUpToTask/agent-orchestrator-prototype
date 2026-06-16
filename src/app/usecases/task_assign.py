@@ -26,6 +26,7 @@ from src.domain import (
     Assignment,
     DomainEvent,
     SchedulerService,
+    TaskAggregate,
     TaskStatus,
 )
 from src.domain.ports import EventPort, LeasePort
@@ -42,6 +43,7 @@ class AssignOutcome(str, Enum):
     NOT_ASSIGNABLE    = "not_assignable"    # wrong status
     DEPS_NOT_MET      = "deps_not_met"      # dependencies not yet succeeded
     NO_ELIGIBLE_AGENT = "no_eligible_agent" # scheduler found no match
+    AT_CAPACITY       = "at_capacity"       # capable agent(s) exist but all are full
     NOT_FOUND         = "not_found"         # task deleted between events
 
 
@@ -105,6 +107,15 @@ class TaskAssignUseCase:
     # Single attempt
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _in_flight_by_agent(all_tasks: list[TaskAggregate]) -> dict[str, int]:
+        """Count non-terminal in-flight tasks (ASSIGNED/IN_PROGRESS) per agent."""
+        counts: dict[str, int] = {}
+        for t in all_tasks:
+            if t.status in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS) and t.assignment:
+                counts[t.assignment.agent_id] = counts.get(t.assignment.agent_id, 0) + 1
+        return counts
+
     def _attempt(
         self,
         task_id: str,
@@ -126,6 +137,10 @@ class TaskAssignUseCase:
             )
             return TaskAssignResult(outcome=AssignOutcome.NOT_ASSIGNABLE, task_id=task_id)
 
+        # A single repo scan serves both the dependency check and the capacity
+        # gate; reused so we never list_all twice in one attempt.
+        all_tasks: list[TaskAggregate] | None = None
+
         # Dependency check
         if task.depends_on:
             if preloaded_succeeded is None:
@@ -145,10 +160,45 @@ class TaskAssignUseCase:
 
         # Agent selection
         agents = self._registry.list_agents()
-        agent  = self._scheduler.select_agent(task, agents)
-        if agent is None:
-            log.warning("task_assign.no_eligible_agent", task_id=task_id)
+        eligible = self._scheduler.eligible_agents(task, agents)
+        if not eligible:
+            required = task.agent_selector.required_capability
+            reason = f"No active agent with capability '{required}'"
+            # Persist + publish only on transition into the flagged state — this
+            # runs every reconciler pass, so we must not re-emit each time.
+            if task.unassignable_reason != reason:
+                expected_v = task.state_version
+                task.mark_unassignable(reason)
+                if not self._repo.update_if_version(task_id, task, expected_v):
+                    raise _VersionConflict()
+                self._events.publish(DomainEvent(
+                    type="task.unassignable",
+                    producer=PRODUCER,
+                    correlation_id=task.feature_id,
+                    payload={
+                        "task_id": task_id,
+                        "required_capability": required,
+                        "reason": reason,
+                    },
+                ))
+            log.warning("task_assign.no_eligible_agent", task_id=task_id, required_capability=required)
             return TaskAssignResult(outcome=AssignOutcome.NO_ELIGIBLE_AGENT, task_id=task_id)
+
+        # Capacity gate: a capable agent exists, but skip any that are already
+        # running their max_concurrent_tasks. Tasks then stay CREATED (queued)
+        # until a worker frees up, instead of being assigned in bulk to one
+        # worker that can only run them serially.
+        if all_tasks is None:
+            all_tasks = self._repo.list_all()
+        in_flight = self._in_flight_by_agent(all_tasks)
+        free = [a for a in eligible if in_flight.get(a.agent_id, 0) < a.max_concurrent_tasks]
+        if not free:
+            log.info("task_assign.at_capacity", task_id=task_id)
+            return TaskAssignResult(outcome=AssignOutcome.AT_CAPACITY, task_id=task_id)
+
+        agent = self._scheduler.select_agent(task, free)
+        if agent is None:  # defensive — free is non-empty and capability-matched
+            return TaskAssignResult(outcome=AssignOutcome.AT_CAPACITY, task_id=task_id)
 
         # Write 1 — persist assignment before touching Redis
         expected_v = task.state_version

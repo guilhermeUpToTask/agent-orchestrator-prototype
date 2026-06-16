@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 import structlog
 
@@ -62,7 +62,10 @@ class SimulatedAgentRuntime(AgentRuntimePort):
         self,
         handle: SimulatedSessionHandle,
         timeout_seconds: int = 600,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
+        if progress_cb is not None:
+            progress_cb("[dry-run] simulating agent execution…")
         if self._simulate_failure:
             return AgentExecutionResult(
                 success=False,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from src.app.telemetry.service import TelemetryService
 from src.app.telemetry.tracing import TraceContext
@@ -70,11 +70,16 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
         )
         self._wrapped.send_execution_payload(handle, context)
 
-    def wait_for_completion(self, handle: SessionHandle, timeout_seconds: int = 600) -> AgentExecutionResult:
+    def wait_for_completion(
+        self,
+        handle: SessionHandle,
+        timeout_seconds: int = 600,
+        progress_cb: "Optional[Callable[[str], None]]" = None,
+    ) -> AgentExecutionResult:
         span = self._telemetry.start_span(self._trace)
         start = time.monotonic()
         try:
-            result = self._wrapped.wait_for_completion(handle, timeout_seconds)
+            result = self._wrapped.wait_for_completion(handle, timeout_seconds, progress_cb)
             elapsed_ms = int((time.monotonic() - start) * 1000)
             self._telemetry.emit(
                 "llm.response" if result.success else "llm.error",
@@ -133,6 +138,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         session_callback: Optional["Callable[..., None]"] = None,
         require_submit: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict[str, Any]]] = None,
     ) -> PlannerOutput:
         span = self._telemetry.start_span(self._trace)
         self._telemetry.emit(
@@ -150,6 +156,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
                 session_callback=session_callback,
                 require_submit=require_submit,
                 cancel_check=cancel_check,
+                prior_turns=prior_turns,
             )
             self._telemetry.emit(
                 "llm.response",

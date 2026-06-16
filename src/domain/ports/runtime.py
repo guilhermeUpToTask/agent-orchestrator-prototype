@@ -4,7 +4,7 @@ src/domain/ports/runtime.py — Agent runtime port.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 from src.domain.entities.agent import AgentProps
 from src.domain.value_objects.execution import AgentExecutionResult, ExecutionContext
@@ -51,8 +51,14 @@ class AgentRuntimePort(ABC):
         self,
         handle: SessionHandle,
         timeout_seconds: int = 600,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
-        """Block until the agent finishes or the timeout elapses."""
+        """Block until the agent finishes or the timeout elapses.
+
+        progress_cb, if provided, is called with each line of agent output as it
+        streams, so callers can surface live progress. Runtimes that cannot
+        stream may ignore it.
+        """
         ...
 
     @abstractmethod

@@ -34,6 +34,7 @@ from src.domain import (
     GoalTaskDef,
     TaskStatus,
     TaskSummary,
+    task_branch_name,
 )
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 from src.domain.repositories import TaskRepositoryPort
@@ -120,7 +121,7 @@ class GoalInitUseCase:
                 task_id=tdef.task_id,
                 title=tdef.title,
                 status=TaskStatus.CREATED,
-                branch=f"goal/{spec.name}/task/{tdef.task_id}",
+                branch=task_branch_name(spec.name, tdef.task_id),
                 depends_on=tdef.depends_on,
             )
             for tdef in spec.tasks
@@ -136,16 +137,26 @@ class GoalInitUseCase:
         )
 
         # ------------------------------------------------------------------
-        # 3. Persist goal (PENDING)
+        # 3. Create goal branch on the target repo — BEFORE persisting the
+        #    goal, so a git failure leaves no zombie PENDING goal behind. The
+        #    idempotency guard above would otherwise block any retry, since the
+        #    goal would already exist with no branch backing it.
+        #
+        #    Goal dispatch is typically the first git operation against a brand
+        #    new project, so the local repo may not be seeded yet. Ensure it has
+        #    been git-init'd (with a main branch) before we try to clone it —
+        #    otherwise create_goal_branch fails with "does not appear to be a
+        #    git repository". Both calls are idempotent.
+        # ------------------------------------------------------------------
+        self._git.ensure_repo_initialized(self._repo_url)
+        self._git.create_goal_branch(self._repo_url, goal.branch)
+        log.info("goal_init.branch_created", branch=goal.branch)
+
+        # ------------------------------------------------------------------
+        # 4. Persist goal (PENDING)
         # ------------------------------------------------------------------
         self._goal_repo.save(goal)
         log.info("goal_init.goal_created", goal_id=goal.goal_id, name=goal.name)
-
-        # ------------------------------------------------------------------
-        # 4. Create goal branch on the target repo
-        # ------------------------------------------------------------------
-        self._git.create_goal_branch(self._repo_url, goal.branch)
-        log.info("goal_init.branch_created", branch=goal.branch)
 
         # ------------------------------------------------------------------
         # 5. Create all tasks (dependency-ordered: roots first)
@@ -154,7 +165,7 @@ class GoalInitUseCase:
         if spec.tasks:
             ordered = _topological_order(spec)
             for tdef in ordered:
-                task_branch = f"goal/{spec.name}/task/{tdef.task_id}"
+                task_branch = task_branch_name(spec.name, tdef.task_id)
                 constraints = {
                     **tdef.constraints,
                     "goal_branch": goal.branch,

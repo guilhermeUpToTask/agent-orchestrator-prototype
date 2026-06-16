@@ -53,6 +53,9 @@ class TaskAggregate(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_error: Optional[str] = None
     depends_on: list[str] = Field(default_factory=list)
+    # Set when assignment finds no eligible agent for required_capability;
+    # cleared on a successful assign(). Surfaced to the UI as a sticky warning.
+    unassignable_reason: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Factory
@@ -170,11 +173,26 @@ class TaskAggregate(BaseModel):
         self._assert_status(*TaskStatus.assignable())
         self.assignment = assignment
         self.status = TaskStatus.ASSIGNED
+        self.unassignable_reason = None  # cleared: a capable agent was found
         self._bump(
             "task.assigned",
             assignment.agent_id,
             {"lease_seconds": assignment.lease_seconds},
         )
+        return self
+
+    def mark_unassignable(self, reason: str) -> "TaskAggregate":
+        """Record that no eligible agent exists for this task's capability.
+
+        Status is unchanged (the task stays assignable and the reconciler keeps
+        retrying); this only annotates *why* it is stuck so the UI can surface
+        it. Returns self unchanged if the reason already matches, so callers can
+        dedupe the accompanying ``task.unassignable`` event.
+        """
+        if self.unassignable_reason == reason:
+            return self
+        self.unassignable_reason = reason
+        self._bump("task.unassignable", "scheduler", {"reason": reason})
         return self
 
     def start(self) -> "TaskAggregate":
@@ -230,6 +248,7 @@ class TaskAggregate(BaseModel):
             raise ValueError(f"Task {self.task_id} is MERGED and cannot be requeued.")
         previous = self.status
         self.assignment = None
+        self.unassignable_reason = None  # clear stale badge; reassignment re-checks
         self.status = TaskStatus.REQUEUED
         self._bump("task.force_requeued", actor, {"previous_status": previous.value})
         return self

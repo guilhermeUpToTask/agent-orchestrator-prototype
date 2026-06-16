@@ -85,6 +85,10 @@ class StubGitWorkspace:
     def __init__(self):
         self.goal_branches_created: list[str] = []
         self.merges: list[dict] = []
+        self.repos_initialized: list[str] = []
+
+    def ensure_repo_initialized(self, repo_url: str) -> None:
+        self.repos_initialized.append(repo_url)
 
     def create_goal_branch(self, repo_url: str, goal_branch: str) -> None:
         self.goal_branches_created.append(goal_branch)
@@ -310,7 +314,8 @@ class TestGoalMergeTaskUseCase:
         uc, _, _, _, git = self._build()
         uc.execute("task-a")
         assert len(git.merges) == 1
-        assert git.merges[0]["task_branch"] == "goal/test-goal/task/task-a"
+        # Task branch derived as a sibling namespace (no nesting under goal/).
+        assert git.merges[0]["task_branch"] == "task/test-goal/task-a"
         assert git.merges[0]["goal_branch"] == "goal/test-goal"
 
     def test_task_marked_merged(self):

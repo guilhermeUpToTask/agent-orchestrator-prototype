@@ -16,6 +16,7 @@ import type {
   ApproveArchitectureResponse,
   ApproveBriefResponse,
   ApprovePhaseResponse,
+  ResumeDispatchResponse,
   SessionAccepted,
   SessionStatusResponse,
 } from '../types/generated';
@@ -24,6 +25,7 @@ export type {
   ApproveArchitectureResponse,
   ApproveBriefResponse,
   ApprovePhaseResponse,
+  ResumeDispatchResponse,
   SessionAccepted,
   SessionStatusResponse,
 };
@@ -114,6 +116,28 @@ export const approvePhase = (
   approveNext = true,
 ): Promise<ApprovePhaseResponse> =>
   post('/api/plan/approve-phase', { approve_next: approveNext });
+
+/**
+ * Recovery: re-dispatch active-phase goals that never got created (e.g. a goal
+ * whose branch creation failed during approve-architecture). Idempotent.
+ */
+export const resumeDispatch = (): Promise<ResumeDispatchResponse> =>
+  post('/api/plan/resume-dispatch');
+
+// ─── Bulk retry of failed tasks ───────────────────────────────────────────────
+
+export interface GoalRetryResponse {
+  requeued: string[];
+  goals_touched: string[];
+}
+
+/** Force-requeue every FAILED task belonging to a single goal. */
+export const retryGoalFailed = (goalId: string): Promise<GoalRetryResponse> =>
+  post(`/api/goals/${goalId}/retry-failed`);
+
+/** Force-requeue every FAILED task across all goals. */
+export const retryAllFailed = (): Promise<GoalRetryResponse> =>
+  post('/api/goals/retry-failed');
 
 // ─── Autonomous planner runs (202; progress + completion stream over SSE) ─────
 
@@ -287,7 +311,13 @@ export async function startDiscovery(): Promise<DiscoveryTurn> {
 export type SSEEvent =
   | { type: 'plan.status_changed'; payload: { status: string } }
   | { type: 'goal.dispatched'; payload: { goal_id: string } }
+  | { type: 'goal.dispatch_failed'; payload: { goal_name: string; error: string } }
   | { type: 'task.status_changed'; payload: { task_id: string; status: string } }
+  | {
+      type: 'task.unassignable';
+      payload: { task_id: string; required_capability: string; reason: string };
+    }
+  | { type: 'task.progress'; payload: { task_id: string; lines: string[]; ts: number } }
   | { type: 'plan.jit_progress'; payload: Record<string, unknown> }
   | { type: 'plan.refinement_action'; payload: { action: string } }
   // Planner tool calls forwarded through the planner event hook

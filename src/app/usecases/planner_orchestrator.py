@@ -17,6 +17,7 @@ from src.app.planning.sessions.usecases import (
     ApproveArchitectureUseCase,
     ApproveBriefUseCase,
     ApprovePhaseReviewUseCase,
+    ResumePhaseDispatchUseCase,
     RunArchitectureUseCase,
     RunPhaseReviewUseCase,
     StartDiscoveryUseCase,
@@ -111,6 +112,14 @@ class PlannerOrchestrator:
             project_name=project_name,
             support=self._support,
         )
+        self._resume_phase_dispatch = ResumePhaseDispatchUseCase(
+            plan_repo=plan_repo,
+            session_repo=session_repo,
+            goal_repo=goal_repo,
+            goal_init=goal_init,
+            support=self._support,
+            event_port=event_port,
+        )
         self._interactive_runtime_factory = interactive_runtime_factory
 
     def start_discovery(self, io_handler: Optional[Callable[[str], str]] = None) -> DiscoveryResult:
@@ -144,6 +153,9 @@ class PlannerOrchestrator:
 
     def approve_phase_review(self, approve_next: bool = True) -> ApprovalResult:
         return self._approve_phase_review.execute(approve_next=approve_next)
+
+    def resume_phase_dispatch(self) -> ApprovalResult:
+        return self._resume_phase_dispatch.execute()
 
     def get_status(self) -> ProjectPlan:
         return self._plan_repo.load()

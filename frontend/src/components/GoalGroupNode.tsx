@@ -1,9 +1,10 @@
 import React from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, RotateCw } from 'lucide-react';
 import { tokens, GOAL_STATUS_META } from '../styles/tokens';
 import type { GoalGroupData } from '../lib/layout';
+import { useRetryGoalFailed } from '../lib/queries';
 
 /**
  * Group node that visually contains a goal's task nodes.
@@ -13,6 +14,14 @@ import type { GoalGroupData } from '../lib/layout';
 export function GoalGroupNode({ data }: NodeProps) {
   const { goal, color, phaseIndex, inActivePhase } = data as GoalGroupData;
   const statusMeta = GOAL_STATUS_META[goal.status] ?? { label: goal.status.toUpperCase(), color: tokens.textMuted };
+
+  const retryFailed = useRetryGoalFailed();
+  // Retryable = terminal-but-unsuccessful (failed or canceled). A canceled task
+  // also fails its goal, so offer retry whenever the goal itself has failed too.
+  const failedCount = goal.tasks.filter(
+    (t) => t.status === 'failed' || t.status === 'canceled',
+  ).length;
+  const canRetry = failedCount > 0 || goal.status === 'failed';
 
   // PR review gates take visual priority: goals blocked on a human PR
   // decision are highlighted purple; merged goals settle to green.
@@ -58,6 +67,23 @@ export function GoalGroupNode({ data }: NodeProps) {
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {canRetry && (
+          <button
+            onClick={(e) => { e.stopPropagation(); retryFailed.mutate(goal.goal_id); }}
+            disabled={retryFailed.isPending}
+            title={failedCount > 0 ? `Retry ${failedCount} failed/canceled task(s)` : 'Retry this failed goal'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0,
+              fontSize: 8, fontFamily: tokens.fontMono, cursor: 'pointer',
+              padding: '2px 6px', borderRadius: 4,
+              background: tokens.red + '1a', border: `1px solid ${tokens.red}44`,
+              color: tokens.red,
+            }}
+          >
+            <RotateCw size={9} />
+            retry{failedCount > 0 ? ` ${failedCount}` : ''}
+          </button>
+        )}
         <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: statusMeta.color, flexShrink: 0 }}>
           [{statusMeta.label}]
         </span>

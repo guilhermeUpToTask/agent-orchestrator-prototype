@@ -20,6 +20,7 @@ from src.api.dependencies import (
     CreateGoalPRUseCaseDep,
     GoalFinalizeUseCaseDep,
     GoalRepoDep,
+    RetryGoalTasksUseCaseDep,
     SyncGoalPRUseCaseDep,
     TaskRepoDep,
     UnblockGoalsUseCaseDep,
@@ -29,6 +30,7 @@ from src.api.schemas.goals import (
     GoalFinalizeResponse,
     GoalHistoryEntryResponse,
     GoalResponse,
+    GoalRetryResponse,
     GoalTaskResponse,
 )
 from src.api.sse import publish_sse
@@ -43,13 +45,18 @@ def _goal_to_response(goal, task_lookup: dict | None = None) -> GoalResponse:
 
     def _task_response(t) -> GoalTaskResponse:
         full = task_lookup.get(t.task_id)
+        # Prefer the live task status over the goal's TaskSummary mirror, which
+        # can lag (e.g. a task that failed/canceled after the summary was written).
+        status = (full.status if full else t.status).value
         return GoalTaskResponse(
             task_id=t.task_id,
             title=t.title,
-            status=t.status.value,
+            status=status,
             depends_on=t.depends_on,
             assigned_agent_id=full.assignment.agent_id if full and full.assignment else None,
             retry_count=full.retry_policy.attempt if full else 0,
+            unassignable_reason=full.unassignable_reason if full else None,
+            last_error=full.last_error if full else None,
         )
 
     tasks = [_task_response(t) for t in goal.tasks.values()]
@@ -116,6 +123,31 @@ def get_goal(goal_id: str, repo: GoalRepoDep) -> GoalResponse:
 def get_goal_history(goal_id: str, repo: GoalRepoDep) -> list[GoalHistoryEntryResponse]:
     goal = repo.load(goal_id)  # raises KeyError → 404
     return [GoalHistoryEntryResponse(**h.model_dump()) for h in goal.history]
+
+
+# ── Retry failed ──────────────────────────────────────────────────────────────
+
+@router.post(
+    "/retry-failed",
+    response_model=GoalRetryResponse,
+    summary="Retry All Failed Tasks",
+    description="Force-requeues every FAILED task across all goals.",
+)
+def retry_all_failed(use_case: RetryGoalTasksUseCaseDep) -> GoalRetryResponse:
+    result = use_case.retry_all()
+    return GoalRetryResponse(requeued=result.requeued, goals_touched=result.goals_touched)
+
+
+@router.post(
+    "/{goal_id}/retry-failed",
+    response_model=GoalRetryResponse,
+    summary="Retry Goal's Failed Tasks",
+    description="Force-requeues every FAILED task belonging to the goal.",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Goal not found."}},
+)
+def retry_goal_failed(goal_id: str, use_case: RetryGoalTasksUseCaseDep) -> GoalRetryResponse:
+    result = use_case.retry_goal(goal_id)  # raises KeyError → 404
+    return GoalRetryResponse(requeued=result.requeued, goals_touched=result.goals_touched)
 
 
 # ── Finalize ──────────────────────────────────────────────────────────────────

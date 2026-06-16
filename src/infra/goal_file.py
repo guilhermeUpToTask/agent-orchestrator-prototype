@@ -14,14 +14,14 @@ Example goal file structure:
     - task_id: setup-deps
       title: "Install auth dependencies"
       description: "Add pyjwt and passlib to requirements"
-      capability: coding
+      capability: code:backend
       files_allowed_to_modify: ["requirements.txt"]
       depends_on: []
 
     - task_id: add-middleware
       title: "Implement JWT middleware"
       description: "Create src/middleware/auth.py"
-      capability: coding
+      capability: code:backend
       files_allowed_to_modify: ["src/middleware/auth.py"]
       depends_on: ["setup-deps"]
       acceptance_criteria:

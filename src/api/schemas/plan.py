@@ -85,10 +85,16 @@ class ApproveArchitectureRequest(BaseModel):
     decision_ids: list[str]
 
 
+class GoalDispatchFailureResponse(BaseModel):
+    goal_name: str
+    error: str
+
+
 class ApproveArchitectureResponse(BaseModel):
     decisions_applied: int
     goals_dispatched: list[str]
     plan_status: ProjectPlanStatus
+    goals_failed: list[GoalDispatchFailureResponse] = []
 
 
 # ── Approve-Phase ─────────────────────────────────────────────────────────────
@@ -101,3 +107,12 @@ class ApprovePhaseResponse(BaseModel):
     decisions_applied: int
     goals_dispatched: list[str]
     plan_status: ProjectPlanStatus
+    goals_failed: list[GoalDispatchFailureResponse] = []
+
+
+# ── Resume-Dispatch ───────────────────────────────────────────────────────────
+
+class ResumeDispatchResponse(BaseModel):
+    goals_dispatched: list[str]
+    plan_status: ProjectPlanStatus
+    goals_failed: list[GoalDispatchFailureResponse] = []
