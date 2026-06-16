@@ -96,11 +96,11 @@ def test_fresh_pending_no_action():
 # ASSIGNED — dead agent
 # ---------------------------------------------------------------------------
 
-def test_assigned_dead_agent_returns_fail():
+def test_assigned_dead_agent_returns_reclaim():
     task = make_task(status=TaskStatus.ASSIGNED)
     task.assignment = Assignment(agent_id="a-001")
     d = SVC.assess(task, lease_active=True, agent=make_agent(alive=False))
-    assert d.action == ReconciliationAction.FAIL_DEAD_AGENT
+    assert d.action == ReconciliationAction.RECLAIM_STALE
     assert "a-001" in d.reason
 
 
@@ -115,11 +115,11 @@ def test_assigned_live_agent_active_lease_no_action():
 # ASSIGNED — lease expired (agent alive but lease gone)
 # ---------------------------------------------------------------------------
 
-def test_assigned_expired_lease_returns_fail():
+def test_assigned_expired_lease_returns_reclaim():
     task = make_task(status=TaskStatus.ASSIGNED)
     task.assignment = Assignment(agent_id="a-001")
     d = SVC.assess(task, lease_active=False, agent=make_agent(alive=True))
-    assert d.action == ReconciliationAction.FAIL_LEASE_EXPIRED
+    assert d.action == ReconciliationAction.RECLAIM_STALE
     assert "ASSIGNED" in d.reason
 
 
@@ -127,10 +127,10 @@ def test_assigned_expired_lease_returns_fail():
 # IN_PROGRESS — lease expired
 # ---------------------------------------------------------------------------
 
-def test_in_progress_expired_lease_returns_fail():
+def test_in_progress_expired_lease_returns_reclaim():
     task = make_task(status=TaskStatus.IN_PROGRESS)
     d = SVC.assess(task, lease_active=False)
-    assert d.action == ReconciliationAction.FAIL_LEASE_EXPIRED
+    assert d.action == ReconciliationAction.RECLAIM_STALE
     assert "IN_PROGRESS" in d.reason
 
 

@@ -356,6 +356,12 @@ class AppContainer:
     # Use cases
     # ------------------------------------------------------------------
 
+    @property
+    def task_lease_seconds(self) -> int:
+        """Initial task-lease TTL: the agent timeout plus headroom, so a task
+        running its full timeout never outlives its lease if a refresh is missed."""
+        return self._ctx.machine.task_timeout + 120
+
     @cached_property
     def task_manager_handler(self):
         from src.app.handlers.task_manager import TaskManagerHandler
@@ -367,6 +373,7 @@ class AppContainer:
             event_port=self.event_port,
             lease_port=self.lease_port,
             scheduler=SchedulerService(),
+            lease_seconds=self.task_lease_seconds,
         )
 
     # @cached_property
@@ -419,6 +426,7 @@ class AppContainer:
             event_port=self.event_port,
             lease_port=self.lease_port,
             scheduler=SchedulerService(),
+            lease_seconds=self.task_lease_seconds,
         )
 
     @cached_property

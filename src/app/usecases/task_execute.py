@@ -160,6 +160,16 @@ class TaskExecuteUseCase:
 
         try:
             self._publish_execution_started(task_id, agent_id)
+
+            # Start lease refresh BEFORE workspace prep: a slow git clone/fetch
+            # would otherwise leave the lease unrefreshed and let the reconciler
+            # reclaim a task that is actually being set up.
+            if lease_token:
+                lease_refresher = self._lease_refresher_factory(
+                    self._lease, lease_token
+                )
+                lease_refresher.start()
+
             ws_path, branch = self._prepare_workspace(task_id, task.execution.constraints)
             self._telemetry.emit(
                 "state.updated",
@@ -168,12 +178,6 @@ class TaskExecuteUseCase:
                 task_id=task_id,
                 agent_id=agent_id,
             )
-
-            if lease_token:
-                lease_refresher = self._lease_refresher_factory(
-                    self._lease, lease_token
-                )
-                lease_refresher.start()
 
             session, result = self._run_agent_session(
                 runtime, agent_props, task, ws_path, branch, project_id

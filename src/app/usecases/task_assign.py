@@ -77,12 +77,17 @@ class TaskAssignUseCase:
         event_port: EventPort,
         lease_port: LeasePort,
         scheduler: SchedulerService | None = None,
+        lease_seconds: int = 300,
     ) -> None:
         self._repo      = task_repo
         self._registry  = agent_registry
         self._events    = event_port
         self._lease     = lease_port
         self._scheduler = scheduler or SchedulerService()
+        # Initial lease TTL. Set ≥ the agent timeout (+buffer) by the container
+        # so a task running its full timeout never outlives its lease even if a
+        # refresh is missed; the background refresher then keeps extending it.
+        self._lease_seconds = lease_seconds
 
     def execute(
         self,
@@ -202,7 +207,7 @@ class TaskAssignUseCase:
 
         # Write 1 — persist assignment before touching Redis
         expected_v = task.state_version
-        assignment = Assignment(agent_id=agent.agent_id, lease_seconds=300)
+        assignment = Assignment(agent_id=agent.agent_id, lease_seconds=self._lease_seconds)
         task.assign(assignment)
         if not self._repo.update_if_version(task_id, task, expected_v):
             raise _VersionConflict()

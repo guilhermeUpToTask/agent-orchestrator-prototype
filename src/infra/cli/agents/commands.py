@@ -62,6 +62,9 @@ def agent_create(
         runtime_type=runtime_type,
         runtime_config=config,
     )
+    from src.infra.runtime.factory import require_runtime_config
+
+    require_runtime_config(agent)  # reject a missing model/backend at registration
     result = AppContainer.from_env().agent_register_usecase.execute(agent)
     status = "active" if result.active else "inactive"
     ok(f"Agent registered: {result.agent_id}  ({status}, runtime: {result.runtime_type})")
@@ -158,8 +161,10 @@ def agent_edit(
             die(f"Invalid --runtime-config JSON: {exc}")
 
     from src.domain import AgentProps
+    from src.infra.runtime.factory import require_runtime_config
 
     updated = AgentProps(**data)
+    require_runtime_config(updated)  # reject a missing model/backend on edit too
     # Route through the use case so capability tags are validated on edit too.
     container.agent_register_usecase.execute(updated)
     ok(f"Agent {agent_id} updated")

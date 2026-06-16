@@ -27,6 +27,11 @@ from src.domain.value_objects.task import (
 if TYPE_CHECKING:
     from src.domain.entities.agent import AgentProps
 
+# Upper bound on liveness reclaims (lease-expiry / dead-agent requeues). Unlike
+# the genuine-failure retry budget, reclaims do not mean the task is broken — a
+# generous cap just prevents an unrunnable task from churning forever.
+MAX_RECLAIMS = 10
+
 
 class TaskAggregate(BaseModel):
     """
@@ -53,6 +58,10 @@ class TaskAggregate(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_error: Optional[str] = None
     depends_on: list[str] = Field(default_factory=list)
+    # Count of liveness reclaims (lease-expiry / dead-agent requeues). Tracked
+    # separately from retry_policy so infra hiccups don't consume the
+    # genuine-failure budget.
+    reclaim_count: int = 0
     # Set when assignment finds no eligible agent for required_capability;
     # cleared on a successful assign(). Surfaced to the UI as a sticky warning.
     unassignable_reason: Optional[str] = None
@@ -146,6 +155,11 @@ class TaskAggregate(BaseModel):
         """Return True if the retry policy still has budget remaining."""
         return self.retry_policy.can_retry()
 
+    def can_reclaim(self) -> bool:
+        """Return True if this task may still be reclaimed (requeued) after a
+        lease expiry / dead agent — i.e. it hasn't churned past MAX_RECLAIMS."""
+        return self.reclaim_count < MAX_RECLAIMS
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -236,6 +250,23 @@ class TaskAggregate(BaseModel):
             "task.requeued",
             "reconciler",
             {"attempt": self.retry_policy.attempt},
+        )
+        return self
+
+    def reclaim(self, reason: str) -> "TaskAggregate":
+        """Liveness reclaim — ASSIGNED/IN_PROGRESS → REQUEUED after a lease
+        expiry or dead agent. The worker is presumed gone, so the task returns
+        to the queue. Increments reclaim_count (its own budget) and deliberately
+        does NOT touch retry_policy — a slow/restarted worker is not a task failure.
+        """
+        self._assert_status(TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS)
+        self.assignment = None
+        self.reclaim_count += 1
+        self.status = TaskStatus.REQUEUED
+        self._bump(
+            "task.reclaimed",
+            "reconciler",
+            {"reason": reason, "reclaim_count": self.reclaim_count},
         )
         return self
 

@@ -684,7 +684,7 @@ class TestReconcilerPaths:
     ):
         """
         A task gets stuck ASSIGNED with an expired lease (worker crashed).
-        Reconciler detects → marks FAILED → task_manager requeues → worker succeeds.
+        Reconciler detects → reclaims (REQUEUED) → reassigned → worker succeeds.
         """
         task = make_task(max_retries=2)
         task_repo.save(task)
@@ -698,13 +698,9 @@ class TestReconcilerPaths:
             lease_port._r.delete(key)
         assert not lease_port.is_lease_active(task.task_id)
 
-        # Reconciler detects expired lease → FAILED + task.failed event
+        # Reconciler detects expired lease → reclaims (REQUEUED) directly, no fail
         reconciler = make_reconciler(task_repo, lease_port, event_port, agent_registry)
         reconciler.run_once()
-        assert task_repo.load(task.task_id).status == TaskStatus.FAILED
-
-        # task_manager handles failure → REQUEUED (retries remain)
-        tm.handle_task_failed(task.task_id)
         assert task_repo.load(task.task_id).status == TaskStatus.REQUEUED
 
         # Assign and execute successfully
@@ -781,7 +777,7 @@ class TestReconcilerPaths:
     ):
         """
         A task is IN_PROGRESS and its lease expires (worker timed out mid-execution).
-        Reconciler marks it FAILED.
+        Reconciler reclaims it (REQUEUED) — liveness, not a task failure.
         """
         task = make_task(max_retries=2)
         assignment = Assignment(agent_id=alive_agent.agent_id, lease_seconds=60)
@@ -796,7 +792,7 @@ class TestReconcilerPaths:
         reconciler = make_reconciler(task_repo, lease_port, event_port, agent_registry)
         reconciler.run_once()
 
-        assert task_repo.load(task.task_id).status == TaskStatus.FAILED
+        assert task_repo.load(task.task_id).status == TaskStatus.REQUEUED
 
     def test_reconciler_skips_terminal_tasks(
         self,
