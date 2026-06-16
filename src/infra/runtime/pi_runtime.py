@@ -39,7 +39,6 @@ from src.infra.runtime.agent_runtime import CliAgentRuntime, CliSessionHandle
 
 log = structlog.get_logger(__name__)
 
-# TODO: check if the correct backend is passin to pi runtime, no default backends should be setted, as we read from the agent registry, if there is none we raise a error
 Backend = Literal["anthropic", "gemini", "openrouter"]
 
 # Maps backend name → the env var name pi reads for that provider.
@@ -63,16 +62,18 @@ class PiAgentRuntime(CliAgentRuntime):
     the underlying LLM with full workspace context already available.
     """
 
-    DEFAULT_MODEL = "claude-sonnet-4-5"
-    DEFAULT_BACKEND: Backend = "anthropic"
     VALID_BACKENDS = frozenset(_BACKEND_ENV_VAR.keys())
+    # Convenience default for direct construction only. The registry path does
+    # NOT use it: factory.require_runtime_config requires an explicit model, so
+    # an agent can never silently run an unintended model.
+    DEFAULT_MODEL = "claude-sonnet-4-5"
 
     def __init__(
         self,
         api_key: str,
         model: str = DEFAULT_MODEL,
         extra_flags: list[str] | None = None,
-        backend: Backend = DEFAULT_BACKEND,
+        backend: Backend = "anthropic",
     ) -> None:
         if backend not in self.VALID_BACKENDS:
             raise ValueError(
@@ -103,9 +104,8 @@ class PiAgentRuntime(CliAgentRuntime):
     def _build_cmd(self, handle: CliSessionHandle) -> list[str]:
         cmd = ["pi"]
 
-        # Model override — only pass if non-default to keep CLI output clean
-        if self._model != self.DEFAULT_MODEL:
-            cmd += ["--model", self._model]
+        # Model comes from the agent registry (no implicit default) — always pass it.
+        cmd += ["--model", self._model]
 
         # One-shot prompt mode
         cmd += ["-p", handle.prompt]

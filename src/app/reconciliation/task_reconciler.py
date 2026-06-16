@@ -83,16 +83,13 @@ class TaskReconciler(ControlLoop):
             self._republish(task, event_type=decision.reason)
             return
 
-        if decision.action in (
-            ReconciliationAction.FAIL_DEAD_AGENT,
-            ReconciliationAction.FAIL_LEASE_EXPIRED,
-        ):
+        if decision.action == ReconciliationAction.RECLAIM_STALE:
             log.warning(
-                f"reconciler.{decision.action.value}",
+                "reconciler.reclaim_stale",
                 task_id=task.task_id,
                 reason=decision.reason,
             )
-            self._fail(task, reason=decision.reason)
+            self._reclaim(task, reason=decision.reason)
 
     # ------------------------------------------------------------------
     # Side effects
@@ -108,29 +105,47 @@ class TaskReconciler(ControlLoop):
         log.info("reconciler.republished_pending",
                  task_id=task.task_id, event_type=event_type)
 
-    def _fail(self, task: TaskAggregate, reason: str) -> None:
+    def _reclaim(self, task: TaskAggregate, reason: str) -> None:
+        """Liveness reclaim of a stale ASSIGNED/IN_PROGRESS task via CAS.
+
+        A lapsed lease / dead agent means the worker is gone — so REQUEUE the
+        task (it returns to the scheduler) rather than failing it, and revoke
+        the stale lease so the old worker's refresher stops. This keeps infra
+        liveness off the genuine-failure retry budget. Only once a task has
+        churned past its reclaim budget do we fall back to failing it, so a
+        genuinely unrunnable task still terminates instead of looping forever.
         """
-        Transition task → FAILED via CAS write, then emit task.failed.
-        If the task moved on before we act (worker recovered), skip silently.
-        """
-        log.info("reconciler.failing_task", task_id=task.task_id, reason=reason)
         for attempt in range(MAX_CAS_RETRIES):
             fresh = self._repo.load(task.task_id)
             if fresh.status not in TaskStatus.active():
-                log.info("reconciler.fail_skipped_status_changed",
+                log.info("reconciler.reclaim_skipped_status_changed",
                          task_id=task.task_id, current_status=fresh.status.value)
                 return
+
+            # Best-effort: drop the stale lease so the dead worker's refresher
+            # can't keep it alive (no-op if it already expired).
+            if fresh.assignment and fresh.assignment.lease_token:
+                self._lease.revoke_lease(fresh.assignment.lease_token)
+
             expected_v = fresh.state_version
-            fresh.fail(reason)
+            if fresh.can_reclaim():
+                fresh.reclaim(reason)
+                event_type, event_payload = "task.requeued", {"task_id": task.task_id}
+                done_log = ("reconciler.task_reclaimed",
+                            {"reclaim_count": fresh.reclaim_count})
+            else:
+                fresh.fail(reason)  # reclaim budget exhausted → genuine failure path
+                event_type, event_payload = (
+                    "task.failed", {"task_id": task.task_id, "reason": reason},
+                )
+                done_log = ("reconciler.reclaim_budget_exhausted", {})
+
             if self._repo.update_if_version(task.task_id, fresh, expected_v):
                 self._events.publish(DomainEvent(
-                    type="task.failed",
-                    producer="reconciler",
-                    payload={"task_id": task.task_id, "reason": reason},
+                    type=event_type, producer="reconciler", payload=event_payload,
                 ))
-                log.info("reconciler.task_failed",
-                         task_id=task.task_id, attempt=attempt, reason=reason)
+                log.info(done_log[0], task_id=task.task_id, reason=reason, **done_log[1])
                 return
-            log.warning("reconciler.fail_cas_conflict",
+            log.warning("reconciler.reclaim_cas_conflict",
                         task_id=task.task_id, attempt=attempt)
-        log.error("reconciler.fail_cas_exhausted", task_id=task.task_id)
+        log.error("reconciler.reclaim_cas_exhausted", task_id=task.task_id)

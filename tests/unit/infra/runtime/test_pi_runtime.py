@@ -133,8 +133,8 @@ class TestPiAgentRuntimeSession:
 
 class TestPiAgentRuntimeBuildCmd:
     @patch("subprocess.run")
-    def test_default_model_not_passed_as_flag(self, mock_run):
-        """When using the default model, --model should be omitted."""
+    def test_model_always_passed_as_flag(self, mock_run):
+        """The model is explicit (from the registry) and always passed to pi."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         runtime = PiAgentRuntime(api_key="key", model=PiAgentRuntime.DEFAULT_MODEL)
@@ -144,7 +144,8 @@ class TestPiAgentRuntimeBuildCmd:
 
         args, _ = mock_run.call_args
         cmd = args[0]
-        assert "--model" not in cmd
+        assert "--model" in cmd
+        assert PiAgentRuntime.DEFAULT_MODEL in cmd
 
     @patch("subprocess.run")
     def test_non_default_model_passed_as_flag(self, mock_run):

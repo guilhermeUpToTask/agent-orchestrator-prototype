@@ -31,8 +31,7 @@ class ReconciliationAction(str, Enum):
 
     NO_ACTION        = "no_action"
     REPUBLISH_PENDING = "republish_pending"   # task stuck in CREATED/REQUEUED
-    FAIL_DEAD_AGENT  = "fail_dead_agent"      # assigned agent missed heartbeat
-    FAIL_LEASE_EXPIRED = "fail_lease_expired" # lease expired on ASSIGNED or IN_PROGRESS
+    RECLAIM_STALE    = "reclaim_stale"        # dead agent OR expired lease → requeue (not fail)
     WARN_NO_COMMIT   = "warn_no_commit"       # SUCCEEDED but no commit_sha (data quality)
 
 
@@ -127,12 +126,12 @@ class ReconciliationService:
         if task.status == TaskStatus.ASSIGNED and task.assignment:
             if TaskRules.is_assigned_to_dead_agent(task, agent):
                 return ReconciliationDecision(
-                    action=ReconciliationAction.FAIL_DEAD_AGENT,
+                    action=ReconciliationAction.RECLAIM_STALE,
                     reason=f"Agent {task.assignment.agent_id} missed heartbeat threshold",
                 )
             if TaskRules.is_lease_expired(task, lease_active):
                 return ReconciliationDecision(
-                    action=ReconciliationAction.FAIL_LEASE_EXPIRED,
+                    action=ReconciliationAction.RECLAIM_STALE,
                     reason="Lease expired while ASSIGNED",
                 )
 
@@ -142,7 +141,7 @@ class ReconciliationService:
         if task.status == TaskStatus.IN_PROGRESS:
             if TaskRules.is_lease_expired(task, lease_active):
                 return ReconciliationDecision(
-                    action=ReconciliationAction.FAIL_LEASE_EXPIRED,
+                    action=ReconciliationAction.RECLAIM_STALE,
                     reason="Lease expired while IN_PROGRESS",
                 )
 

@@ -46,6 +46,7 @@ class TaskManagerHandler:
         event_port: EventPort,
         lease_port: LeasePort,
         scheduler: SchedulerService | None = None,
+        lease_seconds: int = 300,
     ) -> None:
         assign = TaskAssignUseCase(
             task_repo=task_repo,
@@ -53,6 +54,7 @@ class TaskManagerHandler:
             event_port=event_port,
             lease_port=lease_port,
             scheduler=scheduler or SchedulerService(),
+            lease_seconds=lease_seconds,
         )
         self._assign  = assign
         self._unblock = TaskUnblockUseCase(task_repo=task_repo, assign_usecase=assign)

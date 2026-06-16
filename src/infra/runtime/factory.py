@@ -10,8 +10,37 @@ from __future__ import annotations
 from typing import Callable
 from src.domain import AgentProps
 from src.domain.ports import AgentRuntimePort
-from src.infra.settings import SettingsContext
+from src.infra.settings import ConfigurationError, SettingsContext
 from src.infra.logging import LoggingRuntimeWrapper
+
+# Runtimes that need an explicit model in the agent's runtime_config (dry-run
+# does not run a real model, so it is exempt).
+_MODEL_REQUIRED = {"gemini", "claude", "pi"}
+
+
+def require_runtime_config(agent_props: AgentProps) -> None:
+    """Validate that an agent declares the runtime config its type needs.
+
+    Model (and, for pi, backend) must come from the agent registry — there are
+    no silent defaults, so a misconfigured agent fails fast with a clear,
+    actionable message instead of running an unintended model. dry-run exempt.
+    """
+    if agent_props.runtime_type == "dry-run":
+        return
+    cfg = agent_props.runtime_config
+    if agent_props.runtime_type in _MODEL_REQUIRED and not cfg.get("model"):
+        raise ConfigurationError(
+            f"Agent '{agent_props.agent_id}' ({agent_props.runtime_type}) has no 'model' in "
+            "its runtime_config. Set it, e.g. "
+            f"orchestrate agents edit {agent_props.agent_id} --runtime-config '{{\"model\": \"...\"}}'."
+        )
+    if agent_props.runtime_type == "pi" and not cfg.get("backend"):
+        raise ConfigurationError(
+            f"Agent '{agent_props.agent_id}' (pi) has no 'backend' in its runtime_config. "
+            "Set one of anthropic|gemini|openrouter, e.g. "
+            f"orchestrate agents edit {agent_props.agent_id} "
+            "--runtime-config '{\"model\": \"...\", \"backend\": \"anthropic\"}'."
+        )
 
 
 def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentRuntimePort:
@@ -22,13 +51,14 @@ def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentR
 
         base_runtime: AgentRuntimePort = SimulatedAgentRuntime()
     else:
+        require_runtime_config(agent_props)  # fail fast on missing model/backend
 
         def _build_gemini(cfg: dict) -> AgentRuntimePort:
             from src.infra.runtime.gemini_runtime import GeminiAgentRuntime
 
             return GeminiAgentRuntime(
                 api_key=secrets.require_gemini_key(),
-                model=cfg.get("model", GeminiAgentRuntime.DEFAULT_MODEL),
+                model=cfg["model"],
                 extra_flags=cfg.get("extra_flags", []),
             )
 
@@ -37,14 +67,14 @@ def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentR
 
             return ClaudeCodeRuntime(
                 api_key=secrets.require_anthropic_key(),
-                model=cfg.get("model", ClaudeCodeRuntime.DEFAULT_MODEL),
+                model=cfg["model"],
                 extra_flags=cfg.get("extra_flags", []),
             )
 
         def _build_pi(cfg: dict) -> AgentRuntimePort:
             from src.infra.runtime.pi_runtime import PiAgentRuntime
 
-            backend = cfg.get("backend", "openrouter")
+            backend = cfg["backend"]
             if backend == "gemini":
                 api_key = secrets.require_gemini_key()
             elif backend == "openrouter":
@@ -53,7 +83,7 @@ def build_agent_runtime(agent_props: AgentProps, ctx: SettingsContext) -> AgentR
                 api_key = secrets.require_anthropic_key()
             return PiAgentRuntime(
                 api_key=api_key,
-                model=cfg.get("model", PiAgentRuntime.DEFAULT_MODEL),
+                model=cfg["model"],
                 extra_flags=cfg.get("extra_flags", []),
                 backend=backend,
             )

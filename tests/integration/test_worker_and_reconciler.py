@@ -537,9 +537,9 @@ class TestReconcilerPendingTasks:
 
 class TestReconcilerLeaseExpiry:
 
-    def test_assigned_with_expired_lease_gets_failed(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
-        # Reconciler's job: detect expired lease, write FAILED, emit task.failed.
-        # The task manager then decides to requeue.
+    def test_assigned_with_expired_lease_gets_reclaimed(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+        # Reconciler's job: an expired lease is a liveness signal → REQUEUE
+        # (reclaim), not fail. The genuine-failure retry budget is untouched.
         task = TaskAggregate(
             task_id="task-exp",
             feature_id="f", title="T", description="D",
@@ -558,38 +558,11 @@ class TestReconcilerLeaseExpiry:
         reconciler.run_once()
 
         final = task_repo.load("task-exp")
-        assert final.status == TaskStatus.FAILED
-
-    def test_assigned_with_expired_lease_task_manager_requeues(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
-        # Full two-step: reconciler fails, task manager requeues.
-        task = TaskAggregate(
-            task_id="task-exp-tm",
-            feature_id="f", title="T", description="D",
-            agent_selector=AgentSelector(required_capability="backend_dev"),
-            execution=ExecutionSpec(type="code:backend"),
-            status=TaskStatus.ASSIGNED,
-            retry_policy=RetryPolicy(max_retries=2, attempt=0),
-        )
-        task.assignment = Assignment(agent_id=worker_agent.agent_id)
-        task_repo.save(task)
-
-        lease_port.create_lease("task-exp-tm", worker_agent.agent_id, 1)
-        lease_port.expire_all()
-
-        build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        assert len(event_port.events_of_type("task.failed")) >= 1
-
-        from src.app.handlers.task_manager import TaskManagerHandler
-        tm = TaskManagerHandler(
-            task_repo=task_repo, agent_registry=agent_registry,
-            event_port=event_port, lease_port=lease_port,
-        )
-        tm.handle_task_failed("task-exp-tm")
-
-        final = task_repo.load("task-exp-tm")
         assert final.status == TaskStatus.REQUEUED
+        assert final.reclaim_count == 1
+        assert final.retry_policy.attempt == 0  # genuine-failure budget untouched
 
-    def test_assigned_expired_lease_emits_failed_event(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_assigned_expired_lease_emits_requeued_event(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
         task = make_task("task-lease-evt", status=TaskStatus.ASSIGNED, agent_id=worker_agent.agent_id)
         task_repo.save(task)
         lease_port.create_lease("task-lease-evt", worker_agent.agent_id, 1)
@@ -597,9 +570,10 @@ class TestReconcilerLeaseExpiry:
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
 
-        assert len(event_port.events_of_type("task.failed")) >= 1
+        assert len(event_port.events_of_type("task.requeued")) >= 1
+        assert event_port.events_of_type("task.failed") == []
 
-    def test_in_progress_expired_lease_fails_task(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_in_progress_expired_lease_reclaims_task(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
         task = TaskAggregate(
             task_id="task-stale",
             feature_id="f", title="T", description="D",
@@ -617,23 +591,30 @@ class TestReconcilerLeaseExpiry:
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
 
         final = task_repo.load("task-stale")
-        assert final.status == TaskStatus.FAILED
+        assert final.status == TaskStatus.REQUEUED
+        assert final.reclaim_count == 1
 
-    def test_in_progress_expired_lease_emits_failed_event(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+    def test_reclaim_budget_exhausted_fails_task(self, task_repo, lease_port, event_port, agent_registry, worker_agent):
+        # Once a task has churned past its reclaim budget, the reconciler stops
+        # requeuing and fails it so a genuinely unrunnable task still terminates.
+        from src.domain.aggregates.task import MAX_RECLAIMS
         task = TaskAggregate(
-            task_id="task-stale-evt",
+            task_id="task-reclaim-max",
             feature_id="f", title="T", description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
-            status=TaskStatus.IN_PROGRESS,
+            status=TaskStatus.ASSIGNED,
+            reclaim_count=MAX_RECLAIMS,
         )
         task.assignment = Assignment(agent_id=worker_agent.agent_id)
         task_repo.save(task)
-        lease_port.create_lease("task-stale-evt", worker_agent.agent_id, 1)
+        lease_port.create_lease("task-reclaim-max", worker_agent.agent_id, 1)
         lease_port.expire_all()
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
 
+        final = task_repo.load("task-reclaim-max")
+        assert final.status == TaskStatus.FAILED
         assert len(event_port.events_of_type("task.failed")) >= 1
 
 
@@ -657,8 +638,8 @@ class TestReconcilerDeadAgent:
             event_port=event_port, lease_port=lease_port,
         )
 
-    def test_assigned_dead_agent_reconciler_fails_task(self, task_repo, lease_port, event_port, agent_registry):
-        # Reconciler detects dead agent → writes FAILED, emits task.failed.
+    def test_assigned_dead_agent_reconciler_reclaims_task(self, task_repo, lease_port, event_port, agent_registry):
+        # A dead agent is a liveness signal → reclaim (REQUEUE), emit task.requeued.
         agent_registry.register(self._dead_agent("dead-agent"))
         task = make_task("task-dead", agent_id="dead-agent")
         lease_port.create_lease("task-dead", "dead-agent", 300)
@@ -667,24 +648,14 @@ class TestReconcilerDeadAgent:
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
 
         final = task_repo.load("task-dead")
-        assert final.status == TaskStatus.FAILED
-        assert len(event_port.events_of_type("task.failed")) == 1
-
-    def test_assigned_dead_agent_task_manager_requeues(self, task_repo, lease_port, event_port, agent_registry):
-        # Full two-step: reconciler fails → task manager requeues (retries left).
-        agent_registry.register(self._dead_agent("dead-agent-r"))
-        task = make_task("task-dead-r", agent_id="dead-agent-r", max_retries=2)
-        lease_port.create_lease("task-dead-r", "dead-agent-r", 300)
-        task_repo.save(task)
-
-        build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-dead-r")
-
-        final = task_repo.load("task-dead-r")
         assert final.status == TaskStatus.REQUEUED
+        assert final.reclaim_count == 1
+        assert len(event_port.events_of_type("task.requeued")) == 1
+        assert event_port.events_of_type("task.failed") == []
 
-    def test_dead_agent_max_retries_exhausted_cancels(self, task_repo, lease_port, event_port, agent_registry):
-        # Retries already exhausted → task manager cancels after reconciler fails.
+    def test_dead_agent_reclaims_despite_exhausted_retry_budget(self, task_repo, lease_port, event_port, agent_registry):
+        # Liveness reclaim is independent of the genuine-failure retry budget:
+        # a dead-agent task is requeued even if retry attempts are exhausted.
         agent_registry.register(self._dead_agent("dead-agent-2"))
         task = TaskAggregate(
             task_id="task-dead-max",
@@ -699,26 +670,23 @@ class TestReconcilerDeadAgent:
         task_repo.save(task)
 
         build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
-        self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-dead-max")
 
         final = task_repo.load("task-dead-max")
-        assert final.status == TaskStatus.CANCELED
+        assert final.status == TaskStatus.REQUEUED  # reclaimed, not canceled
+        assert final.retry_policy.attempt == 2       # genuine-failure budget untouched
 
     def test_canceled_task_emits_canceled_event(self, task_repo, lease_port, event_port, agent_registry):
-        agent_registry.register(self._dead_agent("dead-agent-3"))
+        # A genuine failure with the retry budget exhausted → cancel + event.
         task = TaskAggregate(
             task_id="task-cancel-evt",
             feature_id="f", title="T", description="D",
             agent_selector=AgentSelector(required_capability="backend_dev"),
             execution=ExecutionSpec(type="code:backend"),
-            status=TaskStatus.ASSIGNED,
+            status=TaskStatus.FAILED,
             retry_policy=RetryPolicy(max_retries=2, attempt=2),
         )
-        task.assignment = Assignment(agent_id="dead-agent-3")
-        lease_port.create_lease("task-cancel-evt", "dead-agent-3", 300)
         task_repo.save(task)
 
-        build_reconciler(task_repo, lease_port, event_port, agent_registry).run_once()
         self._task_manager(task_repo, agent_registry, event_port, lease_port).handle_task_failed("task-cancel-evt")
 
         assert len(event_port.events_of_type("task.canceled")) >= 1

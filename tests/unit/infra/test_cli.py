@@ -81,7 +81,7 @@ def test_register_agent(mock_container, runner):
             "--capabilities",
             "c1,c2",
             "--runtime-config",
-            '{"k":"v"}',
+            '{"model":"gemini-2.0-flash"}',
         ],
     )
 
