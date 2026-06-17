@@ -6,6 +6,19 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+# ── Task Logs ─────────────────────────────────────────────────────────────────
+
+class TaskLogsResponse(BaseModel):
+    """Persisted agent console output for a finished task."""
+    task_id: str
+    stdout: str
+    stderr: str
+    exit_code: Optional[int] = None
+    success: Optional[bool] = None
+    elapsed_seconds: Optional[float] = None
+    modified_files: list[str] = []
+
+
 # ── Task Retry ────────────────────────────────────────────────────────────────
 
 class TaskRetryRequest(BaseModel):

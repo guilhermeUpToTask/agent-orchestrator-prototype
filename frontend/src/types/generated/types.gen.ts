@@ -420,6 +420,18 @@ export type GoalTaskResponse = {
      * Last Error
      */
     last_error?: string | null;
+    /**
+     * Commit Sha
+     */
+    commit_sha?: string | null;
+    /**
+     * Branch
+     */
+    branch?: string | null;
+    /**
+     * Modified Files
+     */
+    modified_files?: Array<string>;
 };
 
 /**
@@ -867,6 +879,42 @@ export type TaskFailHandlingResponse = {
      * Outcome
      */
     outcome: string;
+};
+
+/**
+ * TaskLogsResponse
+ *
+ * Persisted agent console output for a finished task.
+ */
+export type TaskLogsResponse = {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Stdout
+     */
+    stdout: string;
+    /**
+     * Stderr
+     */
+    stderr: string;
+    /**
+     * Exit Code
+     */
+    exit_code?: number | null;
+    /**
+     * Success
+     */
+    success?: boolean | null;
+    /**
+     * Elapsed Seconds
+     */
+    elapsed_seconds?: number | null;
+    /**
+     * Modified Files
+     */
+    modified_files?: Array<string>;
 };
 
 /**
@@ -1778,6 +1826,40 @@ export type TasksListTasksResponses = {
 };
 
 export type TasksListTasksResponse = TasksListTasksResponses[keyof TasksListTasksResponses];
+
+export type TasksGetTaskLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Task Id
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/tasks/{task_id}/logs';
+};
+
+export type TasksGetTaskLogsErrors = {
+    /**
+     * No logs for this task.
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type TasksGetTaskLogsError = TasksGetTaskLogsErrors[keyof TasksGetTaskLogsErrors];
+
+export type TasksGetTaskLogsResponses = {
+    /**
+     * Successful Response
+     */
+    200: TaskLogsResponse;
+};
+
+export type TasksGetTaskLogsResponse = TasksGetTaskLogsResponses[keyof TasksGetTaskLogsResponses];
 
 export type TasksRetryTaskData = {
     body: TaskRetryRequest;

@@ -139,6 +139,10 @@ def get_retry_goal_tasks_usecase(c=Depends(_get_container)):
     return c.retry_goal_tasks_usecase
 
 
+def get_logs_adapter(c=Depends(_get_container)):
+    return c.logs_adapter
+
+
 # ── Refinement ────────────────────────────────────────────────────────────────
 
 def get_run_refinement_usecase(c=Depends(_get_container)):
@@ -209,6 +213,7 @@ AgentRegisterUseCaseDep = Annotated[object, Depends(get_agent_register_usecase)]
 
 CapabilityRegistryDep = Annotated[object, Depends(get_capability_registry)]
 RetryGoalTasksUseCaseDep = Annotated[object, Depends(get_retry_goal_tasks_usecase)]
+LogsAdapterDep = Annotated[object, Depends(get_logs_adapter)]
 
 RunRefinementUseCaseDep = Annotated[object, Depends(get_run_refinement_usecase)]
 

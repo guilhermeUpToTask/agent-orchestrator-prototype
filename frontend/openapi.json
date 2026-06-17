@@ -1174,6 +1174,59 @@
         }
       }
     },
+    "/api/tasks/{task_id}/logs": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Get Task Console Logs",
+        "description": "Returns the persisted agent stdout/stderr + metadata for a finished task.",
+        "operationId": "tasks-get_task_logs",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLogsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No logs for this task.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{task_id}/retry": {
       "post": {
         "tags": [
@@ -2687,6 +2740,36 @@
               }
             ],
             "title": "Last Error"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "modified_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modified Files",
+            "default": []
           }
         },
         "type": "object",
@@ -3440,6 +3523,71 @@
           "outcome"
         ],
         "title": "TaskFailHandlingResponse"
+      },
+      "TaskLogsResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "stdout": {
+            "type": "string",
+            "title": "Stdout"
+          },
+          "stderr": {
+            "type": "string",
+            "title": "Stderr"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "success": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
+          },
+          "modified_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modified Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "stdout",
+          "stderr"
+        ],
+        "title": "TaskLogsResponse",
+        "description": "Persisted agent console output for a finished task."
       },
       "TaskPruneRequest": {
         "properties": {

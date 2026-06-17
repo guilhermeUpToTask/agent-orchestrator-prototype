@@ -12,9 +12,12 @@ Covers:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies import (
+    LogsAdapterDep,
     TaskAssignUseCaseDep,
     TaskDeleteUseCaseDep,
     TaskFailHandlingUseCaseDep,
@@ -30,11 +33,15 @@ from src.api.schemas.tasks import (
     TaskFailHandlingResponse,
     TaskPruneRequest,
     TaskPruneResponse,
+    TaskLogsResponse,
     TaskRetryRequest,
     TaskRetryResponse,
     TaskUnblockResponse,
 )
 from src.domain import TaskStatus
+
+if TYPE_CHECKING:
+    from src.domain import TaskLogsPort
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -59,6 +66,21 @@ def list_tasks(repo: TaskRepoDep) -> list[dict]:
         }
         for t in repo.list_all()
     ]
+
+
+@router.get(
+    "/{task_id}/logs",
+    response_model=TaskLogsResponse,
+    summary="Get Task Console Logs",
+    description="Returns the persisted agent stdout/stderr + metadata for a finished task.",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "No logs for this task."}},
+)
+def get_task_logs(task_id: str, logs: LogsAdapterDep) -> TaskLogsResponse:
+    adapter: "TaskLogsPort" = logs  # type: ignore[assignment]
+    data = adapter.read_logs(task_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No logs for task '{task_id}'.")
+    return TaskLogsResponse(task_id=task_id, **data)
 
 
 # ── Retry ─────────────────────────────────────────────────────────────────────
