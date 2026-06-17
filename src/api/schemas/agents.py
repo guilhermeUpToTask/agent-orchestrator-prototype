@@ -1,6 +1,8 @@
 """src/api/schemas/agents.py — Agent-related API DTOs."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +16,9 @@ class AgentResponse(BaseModel):
     trust_level: str
     active: bool
     max_concurrent_tasks: int
+    # Liveness: a fresh heartbeat means the worker is up and able to take work.
+    alive: bool = False
+    last_heartbeat: Optional[datetime] = None
 
 
 class AgentRegisterRequest(BaseModel):
