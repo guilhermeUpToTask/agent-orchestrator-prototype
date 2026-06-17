@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import set_container, set_container_provider
 from src.api.exceptions import register_exception_handlers
-from src.api.routers import agents, discovery, events, goals, plan, project, refinement, spec, tasks
+from src.api.routers import agents, capabilities, discovery, events, goals, plan, project, refinement, spec, tasks
 from src.api.schemas.common import HealthResponse
 from src.api.sse import publish_sse
 
@@ -43,6 +43,24 @@ _COORDINATOR_STATE: dict[str, Any] = {}
 
 def _coordinators_enabled() -> bool:
     return os.environ.get("ORCHESTRATOR_EMBED_COORDINATORS", "1") != "0"
+
+
+def _cors_origins() -> list[str]:
+    """Frontend origins allowed to read the API (incl. the SSE stream).
+
+    Defaults cover the Vite dev server, which falls back to 5174 when 5173
+    is already in use. Override with a comma-separated ``CORS_ALLOW_ORIGINS``
+    for staging/prod deployments.
+    """
+    raw = os.environ.get("CORS_ALLOW_ORIGINS")
+    if raw:
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ]
 
 
 def _start_coordinators(container: Any) -> None:
@@ -65,7 +83,10 @@ def _start_coordinators(container: Any) -> None:
     handler = container.task_manager_handler
     events_port = container.event_port
     orchestrator = container.task_graph_orchestrator
-    reconciler = container.get_reconciler(
+    # Federated reconciler: task watchdog + PR polling + phase-dispatch backstop,
+    # each on its own cadence under one scheduler. run_forever()/shutdown() match
+    # the legacy Reconciler surface, so the runner and shutdown paths are unchanged.
+    reconciler = container.get_reconciler_scheduler(
         interval_seconds=interval,
         stuck_task_min_age_seconds=stuck_age,
     )
@@ -131,14 +152,51 @@ def _stop_coordinators() -> None:
     _COORDINATOR_STATE.clear()
 
 
+def _summarize_turn(role: str, content_blocks: list[Any]) -> str:
+    """Condense a planner turn into a one-line progress string for logs/SSE."""
+    texts: list[str] = []
+    tools: list[str] = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type", "")
+        if btype == "text":
+            snippet = str(block.get("text", "")).strip()
+            if snippet:
+                texts.append(snippet)
+        elif btype == "tool_use":
+            tools.append(str(block.get("name", "tool")))
+        elif btype == "tool_result":
+            tools.append("→result")
+    parts: list[str] = []
+    if tools:
+        parts.append(", ".join(tools))
+    if texts:
+        parts.append(" ".join(texts))
+    summary = " · ".join(parts) or f"{role} turn"
+    return summary[:240]
+
+
 def _wire_planner_sse_hook(container: Any) -> None:
-    """Forward planner events to the SSE stream; tolerate unconfigured projects."""
+    """Forward planner events + per-turn progress to the SSE stream and logs.
+
+    Without the turn callback the autonomous architecture / phase-review runs
+    produced zero live logs and zero SSE traffic between the 202 and the final
+    completion event — the run looked like it "did nothing." This makes every
+    planner turn visible in the backend logs and the frontend rail.
+    """
 
     def _planner_hook(event_type: str, data: dict[str, Any]) -> None:
         publish_sse(f"plan.{event_type}", data)
 
+    def _turn_callback(role: str, content_blocks: list[Any]) -> None:
+        summary = _summarize_turn(role, content_blocks)
+        log.info("planner.turn", role=role, summary=summary)
+        publish_sse("plan.jit_progress", {"message": summary, "role": role})
+
     try:
         container.planner_orchestrator.set_planner_event_hook(_planner_hook)
+        container.planner_orchestrator.set_turn_callback(_turn_callback)
     except Exception as exc:
         log.warning("api.planner_hook_setup_failed", error=str(exc))
 
@@ -258,7 +316,7 @@ def create_app(container=None) -> FastAPI:
     # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=_cors_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -280,6 +338,7 @@ def create_app(container=None) -> FastAPI:
     app.include_router(goals.router,       prefix=_prefix)
     app.include_router(tasks.router,       prefix=_prefix)
     app.include_router(agents.router,      prefix=_prefix)
+    app.include_router(capabilities.router, prefix=_prefix)
     app.include_router(spec.router,        prefix=_prefix)
     app.include_router(project.router,     prefix=_prefix)
     app.include_router(events.router,      prefix=_prefix)

@@ -45,17 +45,22 @@ class SessionAbandoned(Exception):
 @dataclass
 class ApiSession:
     session_id: str
-    kind: str  # "discovery" | "refine"
+    kind: str  # "discovery" | "refine" | "architecture"
     status: str = STATUS_RUNNING
     current_question: Optional[str] = None
     result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     created_at: float = field(default_factory=time.monotonic)
     answer_q: "queue.Queue[str]" = field(default_factory=lambda: queue.Queue(maxsize=1))
+    cancel_requested: bool = False
 
     @property
     def is_terminal(self) -> bool:
         return self.status in _TERMINAL
+
+    def request_cancel(self) -> None:
+        """Signal a cooperative stop; the planner loop polls this between turns."""
+        self.cancel_requested = True
 
     # ------------------------------------------------------------------
     # Interactive Q&A plumbing (called from the planner executor thread)
@@ -110,6 +115,19 @@ class SessionRegistry:
                 if s.kind == kind and not s.is_terminal:
                     return s
         return None
+
+    def latest(self, kind: str) -> Optional[ApiSession]:
+        """Return the most recently created session of *kind* (any status).
+
+        Powers reload-resilient status reads: after a run completes the session
+        is still here until TTL, so the approval gate can be rebuilt without
+        relying on ephemeral client state.
+        """
+        with self._lock:
+            candidates = [s for s in self._sessions.values() if s.kind == kind]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: s.created_at)
 
     def _gc_locked(self) -> None:
         now = time.monotonic()

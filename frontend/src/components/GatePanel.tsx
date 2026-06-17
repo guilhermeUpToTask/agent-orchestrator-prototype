@@ -3,7 +3,9 @@ import { X } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
   useApproveArchitecture, useApproveBrief, useApprovePhase, usePlan,
+  useRunArchitecture, useStartDiscovery,
 } from '../lib/queries';
+import { toast } from '../lib/toast';
 import { relTime, useNow } from '../lib/time';
 import styles from './GatePanel.module.css';
 
@@ -109,6 +111,7 @@ function ConfirmAction({
 function BriefGate({ onDone }: { onDone: () => void }) {
   const { data: plan } = usePlan();
   const approve = useApproveBrief();
+  const restart = useStartDiscovery();
   const brief = plan?.brief;
 
   return (
@@ -141,12 +144,31 @@ function BriefGate({ onDone }: { onDone: () => void }) {
       )}
 
       {brief && (
-        <ConfirmAction
-          label="Approve brief"
-          consequence="Locks the brief and starts architecture drafting."
-          pending={approve.isPending}
-          onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
-        />
+        <>
+          <ConfirmAction
+            label="Approve brief"
+            consequence="Locks the brief and starts architecture drafting."
+            pending={approve.isPending}
+            onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
+          />
+          <ConfirmAction
+            label="Discard & restart discovery"
+            consequence="Throws away this brief and starts a fresh discovery interview. The current brief is replaced once the new one is drafted."
+            pending={restart.isPending}
+            demoted
+            onConfirm={() => {
+              restart.mutate(undefined, {
+                onSuccess: () => {
+                  toast.info(
+                    'Discovery restarted',
+                    'Answer the planner’s questions in the chat to draft a new brief.',
+                  );
+                  onDone();
+                },
+              });
+            }}
+          />
+        </>
       )}
     </div>
   );
@@ -157,8 +179,37 @@ function BriefGate({ onDone }: { onDone: () => void }) {
 function ArchitectureGate({ onDone }: { onDone: () => void }) {
   const { data: plan } = usePlan();
   const decisions = usePlannerStore((s) => s.decisions);
+  const phases = usePlannerStore((s) => s.phases);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
+  const activeRun = usePlannerStore((s) => s.activeRun);
   const approve = useApproveArchitecture();
+  const runArchitecture = useRunArchitecture();
   const now = useNow(5000);
+
+  // Approval requires a COMPLETED architecture session, not just a streamed
+  // decision — otherwise approve-architecture 409s ("no completed session").
+  const ready = completedRuns.includes('architecture');
+  if (!ready) {
+    const drafting = activeRun === 'architecture';
+    return (
+      <div className={styles.content}>
+        <h2 className={styles.title}>Approve architecture</h2>
+        <p className={styles.body}>
+          {drafting
+            ? 'The planner is still drafting the architecture. The approval opens automatically once it finishes — this usually takes a minute or two.'
+            : 'The architecture has not been drafted yet. Run the planner to produce the roadmap you’ll approve.'}
+        </p>
+        {!drafting && (
+          <ConfirmAction
+            label="Draft architecture"
+            consequence="Runs the architecture planner to produce decisions and the phase plan."
+            pending={runArchitecture.isPending}
+            onConfirm={() => runArchitecture.mutate(undefined, { onSuccess: onDone })}
+          />
+        )}
+      </div>
+    );
+  }
 
   // Default: every proposed decision selected. Unchecking excludes it.
   const [selected, setSelected] = useState<Set<string>>(() => new Set(decisions.map((d) => d.id)));
@@ -208,6 +259,31 @@ function ArchitectureGate({ onDone }: { onDone: () => void }) {
           loaded after they streamed). Approving applies <strong>all</strong> proposed
           decisions on the backend.
         </p>
+      )}
+
+      {phases.length > 0 && (
+        <fieldset className={styles.decisions}>
+          <legend className="label">Proposed phases &amp; goals — dispatched on approval</legend>
+          {[...phases]
+            .sort((a, b) => a.at - b.at)
+            .map((p) => (
+              <div key={p.name} className={styles.phaseRow}>
+                <span className={styles.phaseName}>{p.name}</span>
+                {p.goals.length > 0 ? (
+                  <ul className={styles.phaseGoals}>
+                    {p.goals.map((g) => (
+                      <li key={g.name}>
+                        <span className={styles.decisionId}>{g.name}</span>
+                        {g.description && <span className={styles.body}> — {g.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className={styles.body}> (no goals)</span>
+                )}
+              </div>
+            ))}
+        </fieldset>
       )}
 
       <ConfirmAction

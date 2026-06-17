@@ -36,7 +36,22 @@ export interface DecisionProposal {
   at: number;
 }
 
+export interface PhaseGoal {
+  name: string;
+  description: string;
+}
+
+export interface PhaseProposal {
+  name: string;
+  goal_names: string[];
+  goals: PhaseGoal[];
+  at: number;
+}
+
+export type PlannerRunKind = 'architecture' | 'phase_review';
+
 const EVENT_BUFFER_MAX = 500;
+const TASK_PROGRESS_MAX = 200;  // per-task live log ring
 
 interface PlannerState {
   // Chat transcript (operator ↔ planner — system noise lives in `events`)
@@ -47,6 +62,19 @@ interface PlannerState {
 
   // Architecture decision proposals captured from SSE
   decisions: DecisionProposal[];
+
+  // Architecture phase proposals (with per-goal descriptions) captured from SSE
+  phases: PhaseProposal[];
+
+  // Which autonomous planner run (architecture / phase_review) is in flight,
+  // and which kinds have completed this session. Drives the rail's
+  // "Draft architecture" / "Run phase review" affordances and gate gating,
+  // since these runs have no REST read-model — only SSE start/finish events.
+  activeRun: PlannerRunKind | null;
+  completedRuns: PlannerRunKind[];
+
+  // Live agent output per task (capped ring), streamed via task.progress SSE.
+  taskProgress: Record<string, string[]>;
 
   // SSE connection
   connection: { state: ConnectionState; lastEventAt: number | null };
@@ -60,9 +88,18 @@ interface PlannerState {
 
   // ── Stream ────────────────────────────────────────────────────────────────
   pushEvent: (type: string, payload: Record<string, unknown>) => void;
+  appendTaskProgress: (taskId: string, lines: string[]) => void;
+  clearTaskProgress: (taskId: string) => void;
   setConnectionState: (state: ConnectionState) => void;
   addDecision: (d: Omit<DecisionProposal, 'at'>) => void;
   clearDecisions: () => void;
+  addPhase: (p: Omit<PhaseProposal, 'at'>) => void;
+  clearPhases: () => void;
+
+  // ── Autonomous planner runs ─────────────────────────────────────────────────
+  setActiveRun: (kind: PlannerRunKind | null) => void;
+  markRunComplete: (kind: PlannerRunKind) => void;
+  resetRuns: () => void;
 
   // ── Selection / panels ────────────────────────────────────────────────────
   selectNode: (id: string | null) => void;
@@ -76,6 +113,10 @@ export const usePlannerStore = create<PlannerState>()(
     messages: [],
     events: [],
     decisions: [],
+    phases: [],
+    activeRun: null,
+    completedRuns: [],
+    taskProgress: {},
     connection: { state: 'connecting', lastEventAt: null },
 
     ui: {
@@ -106,6 +147,21 @@ export const usePlannerStore = create<PlannerState>()(
       });
     },
 
+    appendTaskProgress: (taskId, lines) => {
+      if (!lines.length) return;
+      set((s) => {
+        const buf = s.taskProgress[taskId] ?? (s.taskProgress[taskId] = []);
+        buf.push(...lines);
+        if (buf.length > TASK_PROGRESS_MAX) {
+          buf.splice(0, buf.length - TASK_PROGRESS_MAX);
+        }
+      });
+    },
+
+    clearTaskProgress: (taskId) => {
+      set((s) => { delete s.taskProgress[taskId]; });
+    },
+
     setConnectionState: (state) => {
       set((s) => { s.connection.state = state; });
     },
@@ -120,6 +176,36 @@ export const usePlannerStore = create<PlannerState>()(
 
     clearDecisions: () => {
       set((s) => { s.decisions = []; });
+    },
+
+    addPhase: (p) => {
+      set((s) => {
+        const existing = s.phases.findIndex((x) => x.name === p.name);
+        if (existing >= 0) {
+          s.phases[existing] = { ...p, at: Date.now() };
+        } else {
+          s.phases.push({ ...p, at: Date.now() });
+        }
+      });
+    },
+
+    clearPhases: () => {
+      set((s) => { s.phases = []; });
+    },
+
+    setActiveRun: (kind) => {
+      set((s) => { s.activeRun = kind; });
+    },
+
+    markRunComplete: (kind) => {
+      set((s) => {
+        s.activeRun = null;
+        if (!s.completedRuns.includes(kind)) s.completedRuns.push(kind);
+      });
+    },
+
+    resetRuns: () => {
+      set((s) => { s.activeRun = null; s.completedRuns = []; });
     },
 
     selectNode: (id) => {

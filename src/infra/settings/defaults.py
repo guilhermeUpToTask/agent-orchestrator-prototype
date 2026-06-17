@@ -15,11 +15,14 @@ MACHINE_DEFAULTS: dict = {
     "task_timeout": 600,
     "orchestrator_home": Path.home() / ".orchestrator",
     "project_name": None,
+    "planner_max_turns": 25,
 }
 
 # Keys persisted by the wizard in config.json — subset of MachineSettings.
 # Schema metadata lives here, not on the dataclass.
-MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset({"project_name", "redis_url", "task_timeout"})
+MACHINE_PERSISTABLE_KEYS: frozenset[str] = frozenset(
+    {"project_name", "redis_url", "task_timeout", "planner_max_turns"}
+)
 
 # Backward-compat alias used by a few test files
 MACHINE_MANAGED_KEYS = MACHINE_PERSISTABLE_KEYS
@@ -33,8 +36,11 @@ PROJECT_DEFAULTS: dict = {
     "github_owner": None,
     "github_repo": None,
     "github_base_branch": "main",
-    "planner_provider": "anthropic",
-    "planner_model": "claude-3-5-sonnet-20241022",
+    # No default provider/model — both must be set explicitly in project.json
+    # (the planner factory fails fast when unset). base_url is optional.
+    "planner_provider": None,
+    "planner_model": None,
+    "planner_base_url": None,
 }
 
 PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
@@ -45,6 +51,7 @@ PROJECT_MANAGED_KEYS: frozenset[str] = frozenset(
         "github_base_branch",
         "planner_provider",
         "planner_model",
+        "planner_base_url",
     }
 )
 

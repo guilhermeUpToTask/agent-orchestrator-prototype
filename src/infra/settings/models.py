@@ -18,6 +18,17 @@ class ConfigurationError(RuntimeError):
     """Raised when a required configuration value is missing."""
 
 
+# Maps a planner provider's API-key environment variable to the SecretSettings
+# field that holds it. Keeps SecretSettings.require_planner_key generic so the
+# planner factory can resolve any provider preset's key by env-var name.
+_PLANNER_KEY_FIELD_BY_ENV: dict[str, str] = {
+    "OPENAI_API_KEY": "openai_api_key",
+    "OPENROUTER_API_KEY": "openrouter_api_key",
+    "ANTHROPIC_API_KEY": "anthropic_api_key",
+    "GEMINI_API_KEY": "gemini_api_key",
+}
+
+
 # ---------------------------------------------------------------------------
 # MachineSettings
 # ---------------------------------------------------------------------------
@@ -34,6 +45,10 @@ class MachineSettings:
     task_timeout: int = 600
     orchestrator_home: Path = field(default_factory=lambda: Path.home() / ".orchestrator")
     project_name: str | None = None
+    # Turn budget for autonomous planner sessions (architecture / phase-review).
+    # Sessions that exhaust the budget auto-finalize whatever they have proposed
+    # rather than failing, so this is a soft cap, not a hard wall.
+    planner_max_turns: int = 25
 
     def to_persistable_dict(self) -> dict:
         """Return only the keys safe to write to config.json."""
@@ -43,6 +58,7 @@ class MachineSettings:
                 "project_name": self.project_name,
                 "redis_url": self.redis_url,
                 "task_timeout": self.task_timeout,
+                "planner_max_turns": self.planner_max_turns,
             }.items()
             if v is not None
         }
@@ -65,9 +81,14 @@ class ProjectSettings:
     github_repo: str | None = None
     github_base_branch: str = "main"
 
-    # --- NEW PLANNER FIELDS ---
-    planner_provider: str = "anthropic"
-    planner_model: str = "claude-3-5-sonnet-20241022"
+    # --- PLANNER FIELDS ---
+    # No defaults: provider + model must be set explicitly in project.json.
+    # The planner factory fails fast (ConfigurationError) when either is unset,
+    # rather than silently planning with an assumed provider/model. base_url is
+    # optional — each provider preset supplies a default endpoint.
+    planner_provider: str | None = None
+    planner_model: str | None = None
+    planner_base_url: str | None = None
 
     @property
     def github_repo_configured(self) -> bool:
@@ -81,6 +102,7 @@ class ProjectSettings:
             "github_base_branch": self.github_base_branch,
             "planner_provider": self.planner_provider,
             "planner_model": self.planner_model,
+            "planner_base_url": self.planner_base_url,
         }
 
     @classmethod
@@ -90,8 +112,9 @@ class ProjectSettings:
             github_owner=data.get("github_owner"),
             github_repo=data.get("github_repo"),
             github_base_branch=data.get("github_base_branch", "main"),
-            planner_provider=data.get("planner_provider", "anthropic"),
-            planner_model=data.get("planner_model", "claude-3-5-sonnet-20241022"),
+            planner_provider=data.get("planner_provider"),
+            planner_model=data.get("planner_model"),
+            planner_base_url=data.get("planner_base_url"),
         )
 
 
@@ -108,6 +131,7 @@ class SecretSettings:
     """
 
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
     github_token: str = ""
@@ -153,11 +177,29 @@ class SecretSettings:
             )
         return self.openrouter_api_key
 
+    def require_planner_key(self, env_var: str) -> str:
+        """Return the planner provider's API key, resolved by env-var name.
+
+        The planner factory maps each provider preset to the environment
+        variable that holds its key; this looks up the matching loaded field
+        and raises a clear ConfigurationError naming that env var if unset.
+        """
+        field = _PLANNER_KEY_FIELD_BY_ENV.get(env_var)
+        value = getattr(self, field) if field else ""
+        if not value:
+            raise ConfigurationError(
+                f"{env_var} is not set.\n"
+                "Export it before running this command:\n"
+                f"  export {env_var}=..."
+            )
+        return value
+
     def __repr__(self) -> str:
         fields = ", ".join(
             f"{k}={'***' if v else 'unset'}"
             for k, v in {
                 "anthropic_api_key": self.anthropic_api_key,
+                "openai_api_key": self.openai_api_key,
                 "gemini_api_key": self.gemini_api_key,
                 "openrouter_api_key": self.openrouter_api_key,
                 "github_token": self.github_token,

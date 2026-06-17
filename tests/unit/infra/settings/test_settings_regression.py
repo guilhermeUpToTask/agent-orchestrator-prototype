@@ -272,7 +272,7 @@ class TestPersistenceBoundaries:
         on_disk = json.loads((tmp_path / "config.json").read_text())
         # Only allowed keys should be present
         for key in on_disk:
-            assert key in ("project_name", "redis_url", "task_timeout"), (
+            assert key in ("project_name", "redis_url", "task_timeout", "planner_max_turns"), (
                 f"Unexpected key persisted: {key}"
             )
 

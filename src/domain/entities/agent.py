@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from src.domain.value_objects.capability import CapabilityTag
 from src.domain.value_objects.status import TrustLevel
 from src.domain.value_objects.task import AgentSelector
 
@@ -46,7 +47,7 @@ def _satisfies_version(agent_version: str, constraint: str) -> bool:
 class AgentProps(BaseModel):
     agent_id: str
     name: str
-    capabilities: list[str] = Field(default_factory=list)
+    capabilities: list[CapabilityTag] = Field(default_factory=list)
     version: str = "1.0.0"
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)

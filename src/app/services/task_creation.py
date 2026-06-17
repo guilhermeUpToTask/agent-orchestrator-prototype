@@ -1,7 +1,17 @@
 from typing import Any, Optional
 
+import structlog
+
 from src.domain import AgentSelector, DomainEvent, ExecutionSpec, TaskAggregate
-from src.domain import EventPort, TaskRepositoryPort
+from src.domain import CapabilityRegistryPort, EventPort, TaskRepositoryPort
+from src.domain import normalize_capability
+
+log = structlog.get_logger(__name__)
+
+# Fallback when a task is created with an unregistered/malformed capability.
+# Task creation is largely LLM-driven (JIT planner), so we coerce-and-warn
+# rather than hard-fail a whole goal on a single bad tag.
+_DEFAULT_CAPABILITY = "code:backend"
 
 
 class TaskCreationService:
@@ -11,9 +21,31 @@ class TaskCreationService:
     and publishes the domain event to trigger the task manager.
     """
 
-    def __init__(self, task_repo: TaskRepositoryPort, event_port: EventPort):
+    def __init__(
+        self,
+        task_repo: TaskRepositoryPort,
+        event_port: EventPort,
+        capability_registry: Optional[CapabilityRegistryPort] = None,
+    ):
         self._repo = task_repo
         self._events = event_port
+        self._capabilities = capability_registry
+
+    def _resolve_capability(self, capability: str) -> str:
+        """Normalize + validate against the registry, coercing unknowns.
+
+        Keeps the planner resilient: a malformed or unregistered capability is
+        mapped to the default with a warning instead of crashing goal planning.
+        """
+        try:
+            tag = normalize_capability(capability)
+        except ValueError:
+            log.warning("task_creation.capability_malformed", raw=capability, fallback=_DEFAULT_CAPABILITY)
+            return _DEFAULT_CAPABILITY
+        if self._capabilities is not None and not self._capabilities.exists(tag):
+            log.warning("task_creation.capability_unregistered", tag=tag, fallback=_DEFAULT_CAPABILITY)
+            return _DEFAULT_CAPABILITY
+        return tag
 
     def create_task(
         self,
@@ -33,6 +65,8 @@ class TaskCreationService:
         # Single quotes in test commands survive the shell but break when
         # PyYAML stores them and bash re-executes. Replace with double quotes.
         safe_test = test_command.replace("'", '"') if test_command else None
+
+        capability = self._resolve_capability(capability)
 
         task = TaskAggregate.create(
             title=title,

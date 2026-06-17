@@ -15,6 +15,9 @@ class PlannerModelAdapter(Protocol):
     def initial_messages(self, prompt: str) -> list[dict]:
         ...
 
+    def messages_from_turns(self, prompt: str, prior_turns: list[dict]) -> list[dict]:
+        ...
+
     def to_provider_tools(self, tools: list[PlannerTool]) -> list[dict]:
         ...
 
@@ -50,9 +53,24 @@ class BasePlannerRuntime:
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         provider_tools = self._adapter.to_provider_tools(tools)
-        messages = self._adapter.initial_messages(prompt)
+        messages = (
+            self._adapter.messages_from_turns(prompt, prior_turns)
+            if prior_turns
+            else self._adapter.initial_messages(prompt)
+        )
+
+        # A terminal tool is identified by its `terminal` flag, not by a
+        # hardcoded name — different modes (architecture, phase-review,
+        # discovery, tactical) each submit via a differently-named tool.
+        # Fall back to the configured submit name only if nothing is flagged.
+        terminal_names = {t.name for t in tools if t.terminal}
+        if not terminal_names:
+            terminal_names = {self._submit_tool_name}
 
         final_text = ""
         reasoning = ""
@@ -60,6 +78,9 @@ class BasePlannerRuntime:
         artifact: dict = {}
 
         for _ in range(max_turns):
+            if cancel_check is not None and cancel_check():
+                break
+
             turn = self._adapter.send_turn(messages, provider_tools)
             final_text = turn.final_text or final_text
             reasoning = turn.reasoning or reasoning
@@ -76,7 +97,7 @@ class BasePlannerRuntime:
             for tool_call in turn.tool_calls:
                 result = execute_tool_call(tools=tools, tool_call=tool_call)
                 tool_results.append(result)
-                if tool_call.name == self._submit_tool_name:
+                if tool_call.name in terminal_names:
                     try:
                         parsed = json.loads(result.result_str)
                         if parsed.get("accepted"):
@@ -103,12 +124,12 @@ class BasePlannerRuntime:
             if submitted:
                 break
 
-        if not submitted:
+        if not submitted and require_submit:
             raise PlannerRuntimeError(
                 "Planning session exceeded max turns without submitting a roadmap"
             )
 
-        if not artifact:
+        if submitted and not artifact:
             artifact = self._adapter.extract_artifact(
                 messages,
                 submit_tool_name=self._submit_tool_name,
@@ -120,6 +141,7 @@ class BasePlannerRuntime:
             roadmap_raw=artifact,
             raw_text=final_text,
             turns=messages,
+            submitted=submitted,
         )
 
 

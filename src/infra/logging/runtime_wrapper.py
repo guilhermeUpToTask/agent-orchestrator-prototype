@@ -16,7 +16,7 @@ from __future__ import annotations
 import select
 import subprocess
 import time
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 from src.domain import AgentExecutionResult, AgentProps, ExecutionContext
 from src.domain import AgentRuntimePort, SessionHandle
@@ -160,12 +160,15 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         self,
         handle: SessionHandle,
         timeout_seconds: int = 600,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
         """
         Wait for agent completion with real-time stdout/stderr streaming.
 
         This method intercepts subprocess execution and streams output
         line-by-line as it arrives, rather than buffering all at once.
+        progress_cb, if given, is invoked with each output line so callers can
+        surface live progress (e.g. publish task.progress events).
         """
         if not isinstance(handle, LoggingSessionHandle):
             raise TypeError(f"Expected LoggingSessionHandle, got {type(handle)}")
@@ -176,6 +179,8 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
             # Try to use native streaming if available
             for line in self._base_runtime.stream_logs(handle.real_handle):
                 self._logger.log_event(build_stdout_event(self._agent_name, line))
+                if progress_cb is not None:
+                    progress_cb(line)
         except Exception:
             # Fall back to subprocess-based streaming
             pass
@@ -185,6 +190,7 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         result = self._capture_streamed_execution(
             handle,
             timeout_seconds,
+            progress_cb,
         )
 
         # Emit final events
@@ -217,6 +223,7 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         self,
         handle: LoggingSessionHandle,
         timeout_seconds: int,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
         """
         Execute the agent with real-time output streaming.
@@ -243,6 +250,7 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
                     workspace,
                     env,
                     timeout_seconds,
+                    progress_cb,
                 )
         except Exception as e:
             # If we can't intercept, fall back to base runtime
@@ -259,10 +267,14 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         if result.stdout:
             for line in result.stdout.splitlines():
                 self._logger.log_event(build_stdout_event(self._agent_name, line))
+                if progress_cb is not None:
+                    progress_cb(line)
 
         if result.stderr:
             for line in result.stderr.splitlines():
                 self._logger.log_event(build_stderr_event(self._agent_name, line))
+                if progress_cb is not None:
+                    progress_cb(line)
 
         return result
 
@@ -272,6 +284,7 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         cwd: str,
         env: dict[str, str],
         timeout_seconds: int,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
         """
         Execute a subprocess with real-time output streaming.
@@ -308,10 +321,14 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
                         for line in remaining_stdout.splitlines():
                             stdout_lines.append(line)
                             self._logger.log_event(build_stdout_event(self._agent_name, line))
+                            if progress_cb is not None:
+                                progress_cb(line)
                     if remaining_stderr:
                         for line in remaining_stderr.splitlines():
                             stderr_lines.append(line)
                             self._logger.log_event(build_stderr_event(self._agent_name, line))
+                            if progress_cb is not None:
+                                progress_cb(line)
                     break
 
                 # Use select to check which streams have data
@@ -331,6 +348,8 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
                         else:
                             stderr_lines.append(line.rstrip())
                             self._logger.log_event(build_stderr_event(self._agent_name, line))
+                        if progress_cb is not None:
+                            progress_cb(line.rstrip())
 
                 # Update timeout
                 elapsed = time.monotonic() - start_time

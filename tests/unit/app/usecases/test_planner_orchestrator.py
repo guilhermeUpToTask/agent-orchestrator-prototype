@@ -15,6 +15,7 @@ from src.app.services.planner_context import (
 from src.domain.aggregates.planner_session import (
     PlannerMode,
     PlannerSession,
+    PlannerSessionStatus,
 )
 from src.domain.aggregates.project_plan import (
     Phase,
@@ -211,6 +212,53 @@ class TestPlannerOrchestratorArchitecture:
         assert result.plan_status == ProjectPlanStatus.PHASE_ACTIVE.value
         assert result.decisions_applied == 1
         self.plan_repo.save.assert_called()
+
+    def test_approve_architecture_empty_ids_applies_all(self):
+        """An empty selection means 'approve all' — how the gate's default and
+        the rail's 'Approve architecture' send it. Treating [] as 'apply none'
+        silently dropped the roadmap's decisions."""
+        plan = ProjectPlan.create("Test vision")
+        brief = ProjectBrief(
+            vision="Test", constraints=[], phase_1_exit_criteria="", open_questions=[]
+        )
+        plan = plan.approve_brief(brief)
+        self.plan_repo.load.return_value = plan
+
+        session = PlannerSession.create("Test", mode=PlannerMode.ARCHITECTURE)
+        session.start()
+        session = session.record_roadmap_candidate({
+            "pending_decisions": [
+                {
+                    "id": "test-decision",
+                    "date": "2024-01-01",
+                    "status": "active",
+                    "domain": "backend",
+                    "feature_tag": "",
+                    "content": "Test decision",
+                    "spec_changes_json": "{}",
+                }
+            ],
+            "pending_phases": [
+                {
+                    "index": 0,
+                    "name": "Foundation",
+                    "goal": "Auth system working",
+                    "goal_names": ["goal1"],
+                    "exit_criteria": "user can login",
+                }
+            ],
+        })
+        session = session.complete(
+            reasoning="Test", raw_llm_output="Test",
+            validation_errors=[], validation_warnings=[],
+        )
+        self.session_repo.list_all.return_value = [session]
+        self.goal_init.execute.return_value = Mock(goal_id="goal-1", name="goal1")
+        self.spec_repo.load.return_value = Mock()
+
+        result = self.orchestrator.approve_architecture([])
+
+        assert result.decisions_applied == 1
 
 
 class TestPlannerOrchestratorPhaseReview:
@@ -450,7 +498,7 @@ class TestPlannerOrchestratorCallbackHooks:
         self.orchestrator.set_turn_callback(lambda role, blocks: turn_calls.append((role, blocks)))
 
         # Simulate the runtime firing the session_callback twice
-        def fake_run_session(prompt, tools, max_turns, session_callback):
+        def fake_run_session(prompt, tools, max_turns, session_callback, **kwargs):
             session_callback("assistant", [{"type": "text", "text": "Thinking..."}])
             session_callback("user", [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}])
             # Record a roadmap candidate so session.complete() is reachable
@@ -488,7 +536,7 @@ class TestPlannerOrchestratorCallbackHooks:
         hook_calls = []
         self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
 
-        def fake_run(prompt, tools, max_turns, session_callback):
+        def fake_run(prompt, tools, max_turns, session_callback, **kwargs):
             # Find and invoke the propose_decision tool handler directly
             tool = next(t for t in tools if t.name == "propose_decision")
             tool.handler({
@@ -524,7 +572,7 @@ class TestPlannerOrchestratorCallbackHooks:
         hook_calls = []
         self.orchestrator.set_planner_event_hook(lambda et, d: hook_calls.append((et, d)))
 
-        def fake_run(prompt, tools, max_turns, session_callback):
+        def fake_run(prompt, tools, max_turns, session_callback, **kwargs):
             phase_tool = next(t for t in tools if t.name == "propose_phase_plan")
             phase_tool.handler({
                 "phases_json": json.dumps([{
@@ -548,3 +596,97 @@ class TestPlannerOrchestratorCallbackHooks:
         assert len(phase_hooks) == 1
         assert phase_hooks[0][1]["name"] == "Foundation"
         assert "setup-db" in phase_hooks[0][1]["goal_names"]
+
+
+class TestArchitectureAutoFinalize:
+    """The architecture session must keep coherent work even when the agent
+    never calls submit_architecture (budget exhausted or user interrupt),
+    and only fail when nothing usable was produced."""
+
+    def setup_method(self):
+        self.plan_repo = MagicMock()
+        self.session_repo = MagicMock()
+        self.context_assembler = MagicMock(spec=PlannerContextAssembler)
+        self.autonomous_runtime = MagicMock(spec=PlannerRuntimePort)
+        self.interactive_runtime = MagicMock(spec=PlannerRuntimePort)
+
+        self.orchestrator = PlannerOrchestrator(
+            plan_repo=self.plan_repo,
+            session_repo=self.session_repo,
+            context_assembler=self.context_assembler,
+            autonomous_runtime=self.autonomous_runtime,
+            interactive_runtime=self.interactive_runtime,
+            goal_init=MagicMock(),
+            validator=MagicMock(),
+            project_state=MagicMock(),
+            agent_registry=MagicMock(),
+            goal_repo=MagicMock(),
+            spec_repo=MagicMock(),
+            project_name="test-project",
+        )
+
+        plan = ProjectPlan.create("Test vision")
+        plan = plan.approve_brief(
+            ProjectBrief(vision="Test", constraints=[], phase_1_exit_criteria="", open_questions=[])
+        )
+        self.plan_repo.load.return_value = plan
+        self.session_repo.list_all.return_value = []
+        self.context_assembler.assemble.return_value = _empty_snapshot()
+
+    def test_auto_finalizes_valid_work_without_explicit_submit(self):
+        import json
+
+        from src.domain.ports.planner import PlannerOutput
+
+        def fake_run(prompt, tools, max_turns, session_callback, **kwargs):
+            # No submit tool is ever called — only proposals — and the runtime
+            # was asked not to require submit.
+            assert kwargs.get("require_submit") is False
+            next(t for t in tools if t.name == "propose_decision").handler(
+                {"id": "use-fastapi", "domain": "backend", "content": "Use FastAPI."}
+            )
+            next(t for t in tools if t.name == "propose_phase_plan").handler(
+                {
+                    "phases_json": json.dumps(
+                        [
+                            {
+                                "index": 0,
+                                "name": "Foundation",
+                                "goal": "Setup base",
+                                "goal_names": ["setup-db"],
+                                "exit_criteria": "DB is up",
+                            }
+                        ]
+                    )
+                }
+            )
+            return PlannerOutput(reasoning="done", roadmap_raw={}, raw_text="", submitted=False)
+
+        self.autonomous_runtime.run_session.side_effect = fake_run
+
+        result = self.orchestrator.run_architecture()
+
+        assert result.failure_reason is None
+        assert result.needs_approval is True
+        assert len(result.pending_decisions) == 1
+        assert len(result.pending_phases) == 1
+        # The session was completed (saved at least once after the run).
+        saved = [c.args[0] for c in self.session_repo.save.call_args_list]
+        assert any(s.status == PlannerSessionStatus.COMPLETED for s in saved)
+
+    def test_fails_when_no_usable_output(self):
+        from src.domain.ports.planner import PlannerOutput
+
+        def fake_run(prompt, tools, max_turns, session_callback, **kwargs):
+            # Agent produced nothing usable.
+            return PlannerOutput(reasoning="", roadmap_raw={}, raw_text="", submitted=False)
+
+        self.autonomous_runtime.run_session.side_effect = fake_run
+
+        result = self.orchestrator.run_architecture()
+
+        assert result.needs_approval is False
+        assert result.failure_reason is not None
+        assert "usable roadmap" in result.failure_reason
+        saved = [c.args[0] for c in self.session_repo.save.call_args_list]
+        assert any(s.status == PlannerSessionStatus.FAILED for s in saved)

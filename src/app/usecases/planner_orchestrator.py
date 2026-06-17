@@ -17,6 +17,7 @@ from src.app.planning.sessions.usecases import (
     ApproveArchitectureUseCase,
     ApproveBriefUseCase,
     ApprovePhaseReviewUseCase,
+    ResumePhaseDispatchUseCase,
     RunArchitectureUseCase,
     RunPhaseReviewUseCase,
     StartDiscoveryUseCase,
@@ -54,6 +55,7 @@ class PlannerOrchestrator:
         project_name: str,
         event_port: Optional[EventPort] = None,
         interactive_runtime_factory: Optional[Callable[[Callable[[str], str]], PlannerRuntimePort]] = None,
+        planner_max_turns: int = 25,
     ) -> None:
         _ = validator
         _ = agent_registry
@@ -74,6 +76,7 @@ class PlannerOrchestrator:
             session_repo=session_repo,
             runtime=interactive_runtime,
             support=self._support,
+            max_turns=planner_max_turns,
         )
         self._approve_brief = ApproveBriefUseCase(plan_repo=plan_repo)
         self._run_architecture = RunArchitectureUseCase(
@@ -81,6 +84,7 @@ class PlannerOrchestrator:
             session_repo=session_repo,
             runtime=autonomous_runtime,
             support=self._support,
+            max_turns=planner_max_turns,
         )
         self._approve_architecture = ApproveArchitectureUseCase(
             plan_repo=plan_repo,
@@ -97,6 +101,7 @@ class PlannerOrchestrator:
             session_repo=session_repo,
             runtime=autonomous_runtime,
             support=self._support,
+            max_turns=planner_max_turns,
         )
         self._approve_phase_review = ApprovePhaseReviewUseCase(
             plan_repo=plan_repo,
@@ -106,6 +111,14 @@ class PlannerOrchestrator:
             spec_repo=spec_repo,
             project_name=project_name,
             support=self._support,
+        )
+        self._resume_phase_dispatch = ResumePhaseDispatchUseCase(
+            plan_repo=plan_repo,
+            session_repo=session_repo,
+            goal_repo=goal_repo,
+            goal_init=goal_init,
+            support=self._support,
+            event_port=event_port,
         )
         self._interactive_runtime_factory = interactive_runtime_factory
 
@@ -125,8 +138,12 @@ class PlannerOrchestrator:
     def approve_brief(self) -> ProjectPlan:
         return self._approve_brief.execute()
 
-    def run_architecture(self, io_handler: Optional[Callable[[str], str]] = None) -> ArchitectureResult:
-        return self._run_architecture.execute(io_handler=io_handler)
+    def run_architecture(
+        self,
+        io_handler: Optional[Callable[[str], str]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> ArchitectureResult:
+        return self._run_architecture.execute(io_handler=io_handler, cancel_check=cancel_check)
 
     def approve_architecture(self, decision_ids: list[str]) -> ApprovalResult:
         return self._approve_architecture.execute(decision_ids=decision_ids)
@@ -136,6 +153,9 @@ class PlannerOrchestrator:
 
     def approve_phase_review(self, approve_next: bool = True) -> ApprovalResult:
         return self._approve_phase_review.execute(approve_next=approve_next)
+
+    def resume_phase_dispatch(self) -> ApprovalResult:
+        return self._resume_phase_dispatch.execute()
 
     def get_status(self) -> ProjectPlan:
         return self._plan_repo.load()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from src.domain.aggregates.project_plan import Phase, ProjectBrief
 from src.domain.ports.project_state import DecisionEntry
+from src.domain.value_objects.architecture_roadmap import ArchitectureRoadmap
 
 
 @dataclass
@@ -13,15 +14,25 @@ class DiscoveryResult:
     brief: Optional[ProjectBrief]
     needs_approval: bool
     failure_reason: Optional[str] = None
+    resumable: bool = False
 
 
 @dataclass
 class ArchitectureResult:
     session_id: str
-    pending_decisions: list[DecisionEntry]
-    pending_phases: list[Phase]
+    roadmap: Optional[ArchitectureRoadmap]
     needs_approval: bool
     failure_reason: Optional[str] = None
+
+    @property
+    def pending_decisions(self) -> list[DecisionEntry]:
+        """Decisions from the typed roadmap (empty when the run failed)."""
+        return self.roadmap.decisions if self.roadmap else []
+
+    @property
+    def pending_phases(self) -> list[Phase]:
+        """Phases from the typed roadmap (empty when the run failed)."""
+        return self.roadmap.phases if self.roadmap else []
 
 
 @dataclass
@@ -35,8 +46,18 @@ class PhaseReviewResult:
 
 
 @dataclass
+class GoalDispatchFailure:
+    """A goal that failed to dispatch during approval (e.g. branch creation
+    failed). Surfaced to the operator so a partial dispatch is never silent."""
+
+    goal_name: str
+    error: str
+
+
+@dataclass
 class ApprovalResult:
     decisions_applied: int
     goals_dispatched: list[str]
     plan_status: str
     spec_changes_applied: int = 0
+    goals_failed: list[GoalDispatchFailure] = field(default_factory=list)

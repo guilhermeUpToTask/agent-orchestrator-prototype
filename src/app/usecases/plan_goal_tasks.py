@@ -30,10 +30,12 @@ from typing import Any, Callable, Optional
 import structlog
 
 from src.domain import (
+    DomainEvent,
     EventPort,
     GoalTaskDef,
     TaskStatus,
     TaskSummary,
+    task_branch_name,
 )
 from src.domain.aggregates.goal import GoalAggregate
 from src.domain.ports.planner import (
@@ -110,8 +112,11 @@ class PlanGoalTasksUseCase:
             goal_description=goal.description,
         )
 
-        if self._progress_hook:
-            self._progress_hook("jit_start", {"goal_id": goal_id, "goal_name": goal.name})
+        self._emit_progress(
+            "jit_start",
+            {"goal_id": goal_id, "goal_name": goal.name},
+            message=f"Planning tasks for goal '{goal.name}'…",
+        )
 
         task_defs = self._invoke_llm(goal)
         if not task_defs:
@@ -119,15 +124,43 @@ class PlanGoalTasksUseCase:
                 "plan_goal_tasks.llm_returned_no_tasks",
                 goal_id=goal_id,
             )
+            self._emit_progress(
+                "jit_failed",
+                {"goal_id": goal_id, "goal_name": goal.name},
+                message=f"JIT planning produced no tasks for goal '{goal.name}'.",
+                error=True,
+            )
             return
 
         self._persist_tasks(goal, task_defs)
 
+        self._emit_progress(
+            "jit_end",
+            {"goal_id": goal_id, "task_ids": [t.task_id for t in task_defs]},
+            message=f"Goal '{goal.name}': {len(task_defs)} tasks created.",
+        )
+
+    def _emit_progress(
+        self, phase: str, payload: dict[str, Any], *, message: str, error: bool = False
+    ) -> None:
+        """Surface JIT progress to the CLI hook and the SSE stream.
+
+        The hook drives the CLI live logger; the domain event is forwarded by
+        the API event bridge to ``plan.jit_progress`` so the operator sees goals
+        being populated (and JIT failures) in the rail, not just a silent wait.
+        """
         if self._progress_hook:
-            self._progress_hook("jit_end", {
-                "goal_id": goal_id,
-                "task_ids": [t.task_id for t in task_defs],
-            })
+            self._progress_hook(phase, payload)
+        try:
+            self._events.publish(
+                DomainEvent(
+                    type="plan.jit_progress",
+                    producer=PRODUCER,
+                    payload={"message": message, "error": error, **payload},
+                )
+            )
+        except Exception as exc:  # observability must never break planning
+            log.warning("plan_goal_tasks.progress_emit_failed", error=str(exc))
 
     # ------------------------------------------------------------------
     # LLM interaction
@@ -180,12 +213,12 @@ class PlanGoalTasksUseCase:
                             "acceptance_criteria (list), test_command (str or null). "
                             "Example: "
                             '[{"task_id": "write-tests", "title": "Write failing tests", '
-                            '"description": "...", "capability": "coding", '
+                            '"description": "...", "capability": "code:backend", '
                             '"files_allowed_to_modify": ["tests/*"], "depends_on": [], '
                             '"acceptance_criteria": ["Tests fail before impl"], '
                             '"test_command": null}, '
                             '{"task_id": "implement", "title": "Implement to pass tests", '
-                            '"description": "...", "capability": "coding", '
+                            '"description": "...", "capability": "code:backend", '
                             '"files_allowed_to_modify": ["src/*"], '
                             '"depends_on": ["write-tests"], '
                             '"acceptance_criteria": ["All tests pass"], '
@@ -196,6 +229,7 @@ class PlanGoalTasksUseCase:
                 "required": ["tasks_json"],
             },
             handler=submit_tdd_tasks_handler,
+            terminal=True,
         )
 
         prompt = self._build_prompt(goal)
@@ -243,12 +277,12 @@ class PlanGoalTasksUseCase:
             "- Writes failing tests that define the contract for this goal.\n"
             "- `files_allowed_to_modify` MUST be limited to `tests/*`.\n"
             "- `depends_on` must be `[]`.\n"
-            "- `capability` should be `\"coding\"`.\n\n"
+            "- `capability` should be `\"code:backend\"`.\n\n"
             "**Task 2 — Implementer**\n"
             "- Writes the implementation to make Task 1's tests pass.\n"
             "- `files_allowed_to_modify` MUST be limited to `src/*`.\n"
             "- `depends_on` MUST reference Task 1's `task_id`.\n"
-            "- `capability` should be `\"coding\"`.\n\n"
+            "- `capability` should be `\"code:backend\"`.\n\n"
             "Call `submit_tdd_tasks` now with a `tasks_json` array containing "
             "both task definitions."
         )
@@ -266,7 +300,7 @@ class PlanGoalTasksUseCase:
         """
         # Create task aggregates first (idempotent if task_id already exists).
         for tdef in task_defs:
-            task_branch = f"goal/{goal.name}/task/{tdef.task_id}"
+            task_branch = task_branch_name(goal.name, tdef.task_id)
             constraints = {
                 **tdef.constraints,
                 "goal_branch": goal.branch,
@@ -302,7 +336,7 @@ class PlanGoalTasksUseCase:
             expected_v = fresh_goal.state_version
 
             for tdef in task_defs:
-                task_branch = f"goal/{goal.name}/task/{tdef.task_id}"
+                task_branch = task_branch_name(goal.name, tdef.task_id)
                 summary = TaskSummary(
                     task_id=tdef.task_id,
                     title=tdef.title,
