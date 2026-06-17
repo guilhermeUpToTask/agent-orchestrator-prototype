@@ -94,6 +94,14 @@ export type AgentResponse = {
      * Max Concurrent Tasks
      */
     max_concurrent_tasks: number;
+    /**
+     * Alive
+     */
+    alive?: boolean;
+    /**
+     * Last Heartbeat
+     */
+    last_heartbeat?: string | null;
 };
 
 /**

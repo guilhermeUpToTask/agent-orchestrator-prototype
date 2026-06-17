@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  Activity, Check, ChevronRight, Compass, LayoutDashboard, Play, Target,
+  Activity, Check, ChevronRight, Compass, Cpu, LayoutDashboard, Play, Target,
 } from 'lucide-react';
 import {
   usePlan, useStartDiscovery, useGoals, useRunArchitecture, useRunPhaseReview,
@@ -138,6 +138,7 @@ export function LifecycleRail() {
           label="Goals"
           badge={gateGoals.length > 0 ? gateGoals.length : undefined}
         />
+        <RailLink to="/agents" icon={<Cpu size={14} aria-hidden />} label="Agents" />
         <RailLink to="/activity" icon={<Activity size={14} aria-hidden />} label="Activity" />
       </div>
 

@@ -38,6 +38,8 @@ def _to_response(a: "AgentProps") -> AgentResponse:
         ),
         active=a.active,
         max_concurrent_tasks=a.max_concurrent_tasks,
+        alive=a.is_alive(),
+        last_heartbeat=a.last_heartbeat,
     )
 
 

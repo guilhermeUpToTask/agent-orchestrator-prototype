@@ -2177,6 +2177,23 @@
           "max_concurrent_tasks": {
             "type": "integer",
             "title": "Max Concurrent Tasks"
+          },
+          "alive": {
+            "type": "boolean",
+            "title": "Alive",
+            "default": false
+          },
+          "last_heartbeat": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Heartbeat"
           }
         },
         "type": "object",
