@@ -24,6 +24,17 @@ def test_task_assigned_still_maps_to_status_changed():
     assert mapped == ("task.status_changed", {"task_id": "t-1", "status": "assigned"})
 
 
+def test_reconciler_republish_is_dropped():
+    # Reconciler re-kicks of still-pending tasks are internal noise → not bridged.
+    assert map_domain_event_to_sse(
+        "task.created", {"task_id": "t-1", "republish": True}
+    ) is None
+    # A genuine task.created (no republish tag) still maps.
+    assert map_domain_event_to_sse("task.created", {"task_id": "t-1"}) == (
+        "task.status_changed", {"task_id": "t-1", "status": "created"}
+    )
+
+
 def test_task_progress_maps_with_lines():
     mapped = map_domain_event_to_sse(
         "task.progress", {"task_id": "t-1", "lines": ["building…", "done step 1"], "ts": 123.0}

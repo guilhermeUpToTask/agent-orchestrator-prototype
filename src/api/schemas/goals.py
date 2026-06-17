@@ -43,6 +43,9 @@ class GoalResponse(BaseModel):
     status: GoalStatus
     feature_tag: Optional[str] = None
     depends_on: list[str]
+    # Prerequisite goal names not yet merged — non-empty means this goal is
+    # blocked and intentionally stays queued (PENDING) rather than starting.
+    blocked_by: list[str] = []
     tasks: list[GoalTaskResponse]
     history: list[GoalHistoryEntryResponse]
     # GitHub PR gate state (None until a PR is opened for the goal branch)

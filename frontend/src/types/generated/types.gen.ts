@@ -333,6 +333,10 @@ export type GoalResponse = {
      */
     depends_on: Array<string>;
     /**
+     * Blocked By
+     */
+    blocked_by?: Array<string>;
+    /**
      * Tasks
      */
     tasks: Array<GoalTaskResponse>;

@@ -127,7 +127,14 @@ export function buildFlowFromGoals(
       zIndex: -1,
     });
 
+    // Sibling tasks that have finished — a CREATED task waiting on any unfinished
+    // dependency is "blocked", not merely queued.
+    const doneIds = new Set(
+      goal.tasks.filter((t) => t.status === 'succeeded' || t.status === 'merged').map((t) => t.task_id),
+    );
     for (const task of goal.tasks) {
+      const blockedBy =
+        task.status === 'created' ? task.depends_on.filter((d) => !doneIds.has(d)) : [];
       rfNodes.push({
         id: task.task_id,
         type: 'taskNode',
@@ -139,6 +146,7 @@ export function buildFlowFromGoals(
           goalId: goal.goal_id,
           goalName: goal.name,
           agent: task.assigned_agent_id ? (agentMap.get(task.assigned_agent_id) ?? null) : null,
+          blockedBy,
           selected: false,
         } satisfies TaskNodeData,
       });
