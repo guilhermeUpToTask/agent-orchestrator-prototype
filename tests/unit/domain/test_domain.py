@@ -249,6 +249,17 @@ class TestExecutionSpec:
         with pytest.raises(ForbiddenFileEditError):
             spec.validate_modifications(["any.py"])
 
+    def test_validate_modifications_matches_glob_patterns(self):
+        # Allowed entries are globs (as the JIT planner sets them), not literals.
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["tests/*"])
+        spec.validate_modifications(["tests/test_database_contract.py"])  # no exception
+
+    def test_validate_modifications_glob_still_blocks_outside(self):
+        spec = ExecutionSpec(type="code", files_allowed_to_modify=["tests/*"])
+        with pytest.raises(ForbiddenFileEditError) as exc_info:
+            spec.validate_modifications(["tests/ok.py", "src/sneaky.py"])
+        assert exc_info.value.violations == ["src/sneaky.py"]
+
     def test_validate_modifications_empty_modified_never_raises(self):
         spec = ExecutionSpec(type="code", files_allowed_to_modify=[])
         spec.validate_modifications([])  # no exception
