@@ -30,9 +30,21 @@ class ExecutionSpec(BaseModel):
     test_command: Optional[str] = None
 
     def validate_modifications(self, modified_files: list[str]) -> None:
-        """Raise ForbiddenFileEditError listing every file outside the allowed set."""
-        allowed = set(self.files_allowed_to_modify)
-        violations = [f for f in modified_files if f not in allowed]
+        """Raise ForbiddenFileEditError for every modified file not matching an
+        allowed pattern.
+
+        ``files_allowed_to_modify`` entries are globs (e.g. ``tests/*``,
+        ``src/**/*.py``), not literal paths — the JIT planner scopes a
+        test-writer to ``tests/*`` and an implementer to ``src/*``. An empty
+        allow-list permits nothing.
+        """
+        from fnmatch import fnmatch
+
+        patterns = self.files_allowed_to_modify
+        violations = [
+            f for f in modified_files
+            if not any(fnmatch(f, pattern) for pattern in patterns)
+        ]
         if violations:
             raise ForbiddenFileEditError(violations)
 
