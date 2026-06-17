@@ -165,6 +165,24 @@ def test_fail_from_wrong_state_raises():
         s.fail("too early")
 
 
+def test_interrupt_keeps_running_and_resumable():
+    s = make_session()
+    s.start()
+    v = s.state_version
+    s.interrupt("provider blip")
+    # Stays RUNNING so find_resumable_session still picks it up.
+    assert s.status == PlannerSessionStatus.RUNNING
+    assert s.failure_reason == "provider blip"
+    assert s.state_version == v + 1
+    assert any(e.event == "planner.session_interrupted" for e in s.history)
+
+
+def test_interrupt_from_wrong_state_raises():
+    s = make_session()
+    with pytest.raises(ValueError):
+        s.interrupt("too early")
+
+
 # ---------------------------------------------------------------------------
 # record_goal_dispatched / record_dispatch_failure
 # ---------------------------------------------------------------------------

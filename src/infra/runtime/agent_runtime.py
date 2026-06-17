@@ -6,7 +6,7 @@ from __future__ import annotations
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 import structlog
 
@@ -93,6 +93,7 @@ class CliAgentRuntime(AgentRuntimePort, ABC):
         self,
         handle: CliSessionHandle,
         timeout_seconds: int = 600,
+        progress_cb: Optional[Callable[[str], None]] = None,
     ) -> AgentExecutionResult:
         if not isinstance(handle, CliSessionHandle):
             raise TypeError(f"Expected CliSessionHandle, got {type(handle)}")

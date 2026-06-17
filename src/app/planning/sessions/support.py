@@ -14,6 +14,7 @@ from src.app.planning.prompts.planning_prompt_builders import (
     DiscoveryPromptBuilder,
     PhaseReviewPromptBuilder,
 )
+from src.app.planning.roadmap_assembler import RoadmapAssembler, RoadmapAssembly
 from src.app.planning.tools.architecture_tools import (
     build_propose_phase_plan_tool,
     build_read_project_brief_tool,
@@ -59,6 +60,7 @@ class PlanningSessionSupport:
         self._decisions_parser = DecisionsParser(spec_changes_parser)
         self._phase_parser = PhaseParser()
         self._review_parser = ReviewParser()
+        self._roadmap_assembler = RoadmapAssembler(self._decisions_parser, self._phase_parser)
 
         renderer = PlanningContextRenderer()
         self._discovery_prompt_builder = DiscoveryPromptBuilder(renderer=renderer)
@@ -112,7 +114,7 @@ class PlanningSessionSupport:
                 session_save=self._session_repo.save,
                 event_hook=self._planner_event_hook,
             ),
-            build_submit_architecture_tool(session),
+            build_submit_architecture_tool(session, self._roadmap_assembler),
         ]
 
     def build_phase_review_tools(self, session: PlannerSession, plan: ProjectPlan) -> list[PlannerTool]:
@@ -151,6 +153,16 @@ class PlanningSessionSupport:
         except PhaseParseError as exc:
             log.warning("planner_orchestrator.pending_phases_parse_failed", error=str(exc))
             return []
+
+    def assemble_roadmap(self, session: PlannerSession) -> RoadmapAssembly:
+        """Build the typed ArchitectureRoadmap from the session's roadmap_data.
+
+        Returns a RoadmapAssembly carrying either the validated roadmap or the
+        list of actionable validation errors — the single typed boundary that
+        replaces the ad-hoc extract_pending_* / find_goal_spec lookups for the
+        architecture path.
+        """
+        return self._roadmap_assembler.assemble(session.roadmap_data)
 
     def extract_review_lessons(self, session: PlannerSession) -> str:
         return self._review_parser.parse_lessons(session.roadmap_data)

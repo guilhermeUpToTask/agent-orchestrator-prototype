@@ -134,6 +134,26 @@
   color: var(--text-3);
 }
 
+.phaseRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px var(--sp-2);
+}
+
+.phaseName {
+  font-weight: 600;
+  font-size: var(--fs-body);
+}
+
+.phaseGoals {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* ── Two-step confirm ───────────────────────────────────────────────────── */
 
 .armBtn,

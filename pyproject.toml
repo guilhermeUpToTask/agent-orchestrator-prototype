@@ -81,8 +81,3 @@ disable_error_code = ["union-attr", "arg-type", "index"]
 [[tool.mypy.overrides]]
 module = ["src.infra.runtime.*"]
 disable_error_code = ["override", "arg-type"]
-
-# Optional LLM SDK — imported lazily, not a declared dependency.
-[[tool.mypy.overrides]]
-module = ["anthropic", "anthropic.*"]
-ignore_missing_imports = true

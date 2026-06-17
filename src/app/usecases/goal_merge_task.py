@@ -28,6 +28,7 @@ from src.domain import (
     GoalStatus,
     TelemetryEmitterPort,
     TaskStatus,
+    task_branch_name,
 )
 from src.domain.repositories import TaskRepositoryPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
@@ -112,9 +113,11 @@ class GoalMergeTaskUseCase:
         # 3. Merge task branch into goal branch
         # ------------------------------------------------------------------
         constraints  = task.execution.constraints
-        task_branch  = constraints.get("task_branch", f"task/{task_id}")
         goal_branch  = constraints.get("goal_branch", goal.branch)
-        commit_msg   = f"merge: task/{task_id} into {goal_branch}"
+        # Derive from the goal branch (matches task_execute) so the merge reads
+        # the same corrected branch the worker pushed, healing stale constraints.
+        task_branch  = task_branch_name(goal_branch, task_id)
+        commit_msg   = f"merge: {task_branch} into {goal_branch}"
 
         log.info(
             "goal_merge.merging",

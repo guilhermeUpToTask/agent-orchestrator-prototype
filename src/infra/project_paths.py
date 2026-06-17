@@ -33,6 +33,7 @@ class ProjectPaths:
     tasks_dir: Path
     goals_dir: Path
     registry_path: Path
+    capabilities_path: Path
     repo_url: str           # file:// URL pointing at the local bare repo
     workspace_dir: Path
     logs_dir: Path
@@ -77,6 +78,7 @@ class ProjectPaths:
             tasks_dir=base / "tasks",
             goals_dir=base / "goals",
             registry_path=base / "agents" / "registry.json",
+            capabilities_path=base / "capabilities" / "registry.json",
             repo_url=f"file://{base / 'repo'}",
             workspace_dir=base / "workspaces",
             logs_dir=base / "logs",
@@ -101,6 +103,7 @@ class ProjectPaths:
             self.tasks_dir,
             self.goals_dir,
             self.registry_path.parent,
+            self.capabilities_path.parent,
             self.workspace_dir,
             self.logs_dir,
             self.events_dir,

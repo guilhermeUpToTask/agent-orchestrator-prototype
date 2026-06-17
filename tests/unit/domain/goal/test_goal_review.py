@@ -85,6 +85,8 @@ class _Git:
         self.branches = []
         self.merges = []
 
+    def ensure_repo_initialized(self, repo_url): pass
+
     def create_goal_branch(self, url, branch):
         self.branches.append(branch)
 
@@ -702,7 +704,9 @@ class TestPrepareWorkspaceBaseBranch:
         uc._prepare_workspace("t1")
 
         assert len(git_calls) == 1
-        assert git_calls[0]["branch"] == "goal/my-feat/task/t1"
+        # Task branch is derived as a collision-free sibling of the goal branch,
+        # even though the persisted constraint still holds the old nested name.
+        assert git_calls[0]["branch"] == "task/my-feat/t1"
         assert git_calls[0]["base"] == "goal/my-feat"
 
     def test_standalone_task_uses_main_as_base(self):

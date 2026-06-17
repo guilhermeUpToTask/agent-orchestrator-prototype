@@ -97,6 +97,28 @@ def test_generate_defaults_returns_managed_keys(store):
     assert "redis_url" in data
 
 
+def test_initialize_preserves_existing_project_name(store):
+    """`init --defaults` must not orphan an already-configured project.
+
+    Regression: initialize() used to blindly overwrite config.json with
+    defaults, wiping project_name and detaching a live project on disk.
+    """
+    store.save({"project_name": "testing rest api", "redis_url": "redis://x:6379/0"})
+    store.initialize()
+    data = store.load_raw()
+    assert data["project_name"] == "testing rest api"
+    assert data["redis_url"] == "redis://x:6379/0"
+
+
+def test_initialize_omits_project_name_when_unset(store):
+    """On a truly fresh machine, defaults carry no project_name (None dropped)."""
+    data = store.initialize()
+    assert data.get("project_name") is None
+    on_disk = json.loads(store.config_path.read_text())
+    assert "project_name" not in on_disk
+    assert on_disk["redis_url"] == MACHINE_DEFAULTS["redis_url"]
+
+
 # ---------------------------------------------------------------------------
 # update
 # ---------------------------------------------------------------------------

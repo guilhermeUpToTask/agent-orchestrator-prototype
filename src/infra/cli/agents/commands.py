@@ -132,7 +132,8 @@ def agent_edit(
     """Update one or more fields of an existing agent."""
     from src.infra.container import AppContainer
 
-    registry = AppContainer.from_env().agent_registry
+    container = AppContainer.from_env()
+    registry = container.agent_registry
     agent = registry.get(agent_id)
     if agent is None:
         die(f"Agent not found: {agent_id}")
@@ -159,5 +160,6 @@ def agent_edit(
     from src.domain import AgentProps
 
     updated = AgentProps(**data)
-    registry.register(updated)
+    # Route through the use case so capability tags are validated on edit too.
+    container.agent_register_usecase.execute(updated)
     ok(f"Agent {agent_id} updated")

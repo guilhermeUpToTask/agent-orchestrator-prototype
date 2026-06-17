@@ -10,6 +10,7 @@ from src.infra.cli.container_provider import LazyContainerProvider
 from src.infra.cli.system.commands  import system_group
 from src.infra.cli.tasks.commands   import tasks_group
 from src.infra.cli.agents.commands  import agents_group
+from src.infra.cli.capabilities.commands import capabilities_group
 from src.infra.cli.project.commands import project_group
 from src.infra.cli.goals.commands   import goals_group
 from src.infra.cli.spec.commands    import spec_group
@@ -50,6 +51,7 @@ def init_wizard(defaults: bool):
 cli.add_command(system_group)
 cli.add_command(tasks_group)
 cli.add_command(agents_group)
+cli.add_command(capabilities_group)
 cli.add_command(project_group)
 cli.add_command(goals_group)
 cli.add_command(spec_group)

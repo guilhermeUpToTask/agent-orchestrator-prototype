@@ -53,7 +53,17 @@ class TestDiscoverySessions:
         return container
 
     def test_full_question_answer_completion_flow(self):
-        brief = SimpleNamespace(model_dump=lambda: {"vision": "v1"})
+        # The discovery router serializes the brief with dataclasses.asdict,
+        # so the brief must be a real ProjectBrief dataclass (not a stub with
+        # model_dump — ProjectBrief is not a pydantic model).
+        from src.domain.aggregates.project_plan import ProjectBrief
+
+        brief = ProjectBrief(
+            vision="v1",
+            constraints=[],
+            phase_1_exit_criteria="ship /health",
+            open_questions=[],
+        )
 
         def fake_discovery(io_handler):
             answer = io_handler("What are we building?")
@@ -76,7 +86,8 @@ class TestDiscoverySessions:
 
             body = _poll(client, f"/api/plan/discovery/{sid}", {"done", "failed"})
             assert body["status"] == "done"
-            assert body["result"]["brief"] == {"vision": "v1"}
+            assert body["result"]["brief"]["vision"] == "v1"
+            assert body["result"]["brief"]["phase_1_exit_criteria"] == "ship /health"
 
     def test_failed_session_does_not_block_next_start(self):
         calls = {"n": 0}

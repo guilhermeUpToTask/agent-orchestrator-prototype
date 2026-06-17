@@ -22,9 +22,16 @@ from src.domain.errors import (
     ForbiddenFileEditError,
     InvalidStatusTransitionError,
     MaxRetriesExceededError,
+    UnknownCapabilityError,
 )
 
 # Value objects
+from src.domain.value_objects.branches import goal_branch_name, task_branch_name
+from src.domain.value_objects.capability import (
+    DEFAULT_CAPABILITIES,
+    CapabilityTag,
+    normalize_capability,
+)
 from src.domain.value_objects.task import (
     AgentSelector,
     Assignment,
@@ -43,6 +50,7 @@ from src.domain.aggregates.goal import GoalAggregate, GoalStatus, TaskSummary
 
 # Repositories
 from src.domain.repositories import AgentRegistryPort, TaskRepositoryPort
+from src.domain.repositories.capability_registry import CapabilityRegistryPort
 from src.domain.repositories.goal_repository import GoalRepositoryPort
 
 # Goal value objects
@@ -97,9 +105,14 @@ __all__ = [
     # errors
     "DomainError", "ForbiddenFileEditError",
     "InvalidStatusTransitionError", "MaxRetriesExceededError",
+    "UnknownCapabilityError",
     # value objects — task
     "AgentSelector", "Assignment", "ExecutionSpec",
     "HistoryEntry", "RetryPolicy", "TaskResult",
+    # value objects — capability
+    "CapabilityTag", "normalize_capability", "DEFAULT_CAPABILITIES",
+    # value objects — branches
+    "goal_branch_name", "task_branch_name",
     # value objects — goal
     "GoalSpec", "GoalTaskDef",
     # entities
@@ -109,6 +122,7 @@ __all__ = [
     "GoalAggregate", "GoalStatus", "TaskSummary",
     # repositories
     "AgentRegistryPort", "TaskRepositoryPort", "GoalRepositoryPort",
+    "CapabilityRegistryPort",
     # ports
     "AgentRuntimePort", "EventPort", "TelemetryEmitterPort", "GitWorkspacePort",
     "LeasePort", "SessionHandle", "TaskLogsPort", "TestRunnerPort",

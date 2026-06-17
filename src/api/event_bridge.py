@@ -59,6 +59,24 @@ def map_domain_event_to_sse(event_type: str, payload: dict) -> tuple[str, dict] 
             "task.status_changed",
             {"task_id": payload.get("task_id"), "status": status},
         )
+    if event_type == "task.unassignable":
+        return (
+            "task.unassignable",
+            {
+                "task_id": payload.get("task_id"),
+                "required_capability": payload.get("required_capability"),
+                "reason": payload.get("reason"),
+            },
+        )
+    if event_type == "task.progress":
+        return (
+            "task.progress",
+            {
+                "task_id": payload.get("task_id"),
+                "lines": payload.get("lines", []),
+                "ts": payload.get("ts"),
+            },
+        )
     if event_type == "goal.pr_opened":
         return (
             "goal.pr_opened",

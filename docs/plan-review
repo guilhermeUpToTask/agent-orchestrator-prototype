@@ -1,0 +1,12 @@
+
+Here's the concrete change I'd make â small and surgical:
+
+1. planner_factory.py: drop AnthropicPlannerStrategy; the planner always builds the OpenAI-spec runtime (OpenAIPlannerRuntime / OpenAIInteractivePlannerRuntime) pointed at a config base_url. planner_provider just selects the endpoint (openrouter / openai / custom).
+2. Delete the anthropic planner path: AnthropicPlannerAdapter, AnthropicPlannerRuntime, AnthropicInteractivePlannerRuntime, and AnthropicPlannerStrategy â no import anthropic in the planner layer. (That also retires the adaptive-vs-budget thinking workaround entirely â the OpenAI spec doesn't have it.)
+3. Config (ProjectSettings): planner_model required, no default (per your earlier point); add planner_base_url defaulting to OpenRouter (https://openrouter.ai/api/v1), overridable; default planner_provider â openrouter. The factory raises a clear ConfigurationError if planner_model is unset.
+4. Secrets/key: the OpenAI client uses the key for the configured endpoint (OpenRouter key by default), resolved from config/secrets â no hardcoded model or provider anywhere.
+5. Migration: an existing planner_provider: "anthropic" config maps to OpenRouter (which serves Claude models via the same spec) so your current project keeps working â I'll surface a one-line warning rather than break it.
+
+The rest of the bug fix (auto-start drafting, architecture/status, frontend gate-on-completion, JIT population, observability) is provider-independent and stays.
+
+Want me to proceed with this? If so I'll also revert the now-moot claude-sonnet-4-6 default I'd added (since model becomes config-required).

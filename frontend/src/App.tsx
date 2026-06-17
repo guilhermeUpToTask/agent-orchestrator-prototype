@@ -4,11 +4,12 @@ import { TopBar } from './components/TopBar';
 import { LifecycleRail } from './components/LifecycleRail';
 import { GatePanel } from './components/GatePanel';
 import { ChatPanel } from './components/ChatPanel';
+import { Toaster } from './components/Toaster';
 import { Overview } from './views/Overview';
 import { GoalsView, GoalDetail } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { usePlannerStore, ts } from './store/plannerStore';
-import { usePlan, useSSEBridge } from './lib/queries';
+import { useArchitectureStatusSync, usePlan, useSSEBridge } from './lib/queries';
 import { absTime } from './lib/time';
 import './styles/global.css';
 import styles from './App.module.css';
@@ -28,7 +29,7 @@ function useChatHydration() {
         plan.status === 'phase_active'
           ? 'Connected. Chat is wired to the tactical planner — type a refinement request.'
           : plan.status === 'discovery'
-            ? 'Connected. Discovery is active — answer questions here to build the project brief.'
+            ? 'Connected. Start a discovery session from the lifecycle rail on the left — then answer the planner’s questions here to build the project brief.'
             : 'Connected. Approvals live in the gate card on the left rail.',
       ts: ts(),
     });
@@ -54,6 +55,7 @@ export default function App() {
   const connState = usePlannerStore((s) => s.connection.state);
 
   useSSEBridge();
+  useArchitectureStatusSync();
   useChatHydration();
 
   return (
@@ -77,6 +79,7 @@ export default function App() {
           <ChatPanel />
         </div>
         <GatePanel />
+        <Toaster />
       </div>
     </BrowserRouter>
   );

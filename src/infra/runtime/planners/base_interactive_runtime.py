@@ -32,9 +32,16 @@ class BaseInteractivePlannerRuntime:
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional[Callable[[str, list[dict]], None]] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict]] = None,
     ) -> PlannerOutput:
         provider_tools = self._adapter.to_provider_tools(tools)
-        messages = self._adapter.initial_messages(prompt)
+        messages = (
+            self._adapter.messages_from_turns(prompt, prior_turns)
+            if prior_turns
+            else self._adapter.initial_messages(prompt)
+        )
 
         brief_submitted = False
         final_text = ""
@@ -42,6 +49,9 @@ class BaseInteractivePlannerRuntime:
         artifact: dict = {}
 
         for _ in range(max_turns):
+            if cancel_check is not None and cancel_check():
+                break
+
             turn = self._adapter.send_turn(messages, provider_tools)
             final_text = turn.final_text or final_text
             reasoning = turn.reasoning or reasoning
@@ -99,12 +109,12 @@ class BaseInteractivePlannerRuntime:
             if brief_submitted:
                 break
 
-        if not brief_submitted:
+        if not brief_submitted and require_submit:
             raise PlannerRuntimeError(
                 f"Interactive planning session exceeded max turns ({max_turns}) without submitting project brief"
             )
 
-        if not artifact:
+        if brief_submitted and not artifact:
             artifact = self._adapter.extract_artifact(
                 messages,
                 submit_tool_name=self._submit_tool_name,
@@ -116,6 +126,7 @@ class BaseInteractivePlannerRuntime:
             roadmap_raw=artifact,
             raw_text=final_text,
             turns=messages,
+            submitted=brief_submitted,
         )
 
 

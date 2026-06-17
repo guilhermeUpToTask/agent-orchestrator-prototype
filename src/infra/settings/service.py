@@ -136,12 +136,16 @@ class SettingsService:
         task_timeout: int = 600,
         github_token: str = "",
         anthropic_api_key: str = "",
+        openai_api_key: str = "",
         gemini_api_key: str = "",
         openrouter_api_key: str = "",
         source_repo_url: str | None = None,
         github_owner: str | None = None,
         github_repo: str | None = None,
         github_base_branch: str = "main",
+        planner_provider: str | None = None,
+        planner_model: str | None = None,
+        planner_base_url: str | None = None,
     ) -> "SettingsContext":
         """
         Build a SettingsContext suitable for unit tests.
@@ -160,10 +164,14 @@ class SettingsService:
             github_owner=github_owner,
             github_repo=github_repo,
             github_base_branch=github_base_branch,
+            planner_provider=planner_provider,
+            planner_model=planner_model,
+            planner_base_url=planner_base_url,
         )
         secrets = SecretSettings(
             github_token=github_token,
             anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
             openrouter_api_key=openrouter_api_key,
         )
@@ -209,12 +217,15 @@ class SettingsService:
         # The active context MUST come from explicit CLI overrides or config.json.
         project_name = project_name_override or stored.get("project_name")
 
+        planner_max_turns = stored.get("planner_max_turns") or MACHINE_DEFAULTS["planner_max_turns"]
+
         return MachineSettings(
             mode=mode,
             redis_url=redis_url,
             task_timeout=int(task_timeout),
             orchestrator_home=orchestrator_home,
             project_name=project_name,
+            planner_max_turns=int(planner_max_turns),
         )
 
     def _load_project(self, machine: MachineSettings) -> ProjectSettings:
@@ -229,6 +240,7 @@ class SettingsService:
         """Load secrets from env only — never from disk."""
         return SecretSettings(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
             gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
             openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
             github_token=os.environ.get("GITHUB_TOKEN", ""),

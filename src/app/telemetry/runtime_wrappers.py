@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from src.app.telemetry.service import TelemetryService
 from src.app.telemetry.tracing import TraceContext
@@ -21,6 +21,18 @@ from src.domain import (
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _model_of(wrapped: object) -> str:
+    """Resolve the wrapped runtime's model id for telemetry.
+
+    Runtimes expose the configured model as a public ``model`` property; the
+    older private ``_model`` is checked as a fallback. Without this, telemetry
+    reported ``model: 'unknown'`` because ``_model`` lives on the adapter, not
+    the runtime the wrapper holds.
+    """
+    model = getattr(wrapped, "model", None) or getattr(wrapped, "_model", None)
+    return str(model) if model else "unknown"
 
 
 class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
@@ -52,23 +64,28 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
         self._telemetry.emit(
             "llm.request",
             span,
-            payload={"model": getattr(self._wrapped, "_model", "unknown"), "prompt_hash": _sha256(prompt_material)},
+            payload={"model": _model_of(self._wrapped), "prompt_hash": _sha256(prompt_material)},
             task_id=context.task_id,
             agent_id=self._agent_id,
         )
         self._wrapped.send_execution_payload(handle, context)
 
-    def wait_for_completion(self, handle: SessionHandle, timeout_seconds: int = 600) -> AgentExecutionResult:
+    def wait_for_completion(
+        self,
+        handle: SessionHandle,
+        timeout_seconds: int = 600,
+        progress_cb: "Optional[Callable[[str], None]]" = None,
+    ) -> AgentExecutionResult:
         span = self._telemetry.start_span(self._trace)
         start = time.monotonic()
         try:
-            result = self._wrapped.wait_for_completion(handle, timeout_seconds)
+            result = self._wrapped.wait_for_completion(handle, timeout_seconds, progress_cb)
             elapsed_ms = int((time.monotonic() - start) * 1000)
             self._telemetry.emit(
                 "llm.response" if result.success else "llm.error",
                 span,
                 payload={
-                    "model": getattr(self._wrapped, "_model", "unknown"),
+                    "model": _model_of(self._wrapped),
                     "latency_ms": elapsed_ms,
                     "success": result.success,
                     "exit_code": result.exit_code,
@@ -88,7 +105,7 @@ class TelemetryAgentRuntimeWrapper(AgentRuntimePort):
             self._telemetry.emit(
                 "llm.error",
                 span,
-                payload={"model": getattr(self._wrapped, "_model", "unknown"), "latency_ms": elapsed_ms},
+                payload={"model": _model_of(self._wrapped), "latency_ms": elapsed_ms},
                 metadata={"error_type": type(exc).__name__, "message": str(exc)},
                 agent_id=self._agent_id,
             )
@@ -119,22 +136,33 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
         tools: list[PlannerTool],
         max_turns: int = 15,
         session_callback: Optional["Callable[..., None]"] = None,
+        require_submit: bool = True,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        prior_turns: Optional[list[dict[str, Any]]] = None,
     ) -> PlannerOutput:
         span = self._telemetry.start_span(self._trace)
         self._telemetry.emit(
             "llm.request",
             span,
-            payload={"model": getattr(self._wrapped, "_model", "unknown"), "prompt_hash": _sha256(prompt)},
+            payload={"model": _model_of(self._wrapped), "prompt_hash": _sha256(prompt)},
             metadata={"tool_count": len(tools), "max_turns": max_turns},
         )
         start = time.monotonic()
         try:
-            output = self._wrapped.run_session(prompt, tools, max_turns=max_turns, session_callback=session_callback)
+            output = self._wrapped.run_session(
+                prompt,
+                tools,
+                max_turns=max_turns,
+                session_callback=session_callback,
+                require_submit=require_submit,
+                cancel_check=cancel_check,
+                prior_turns=prior_turns,
+            )
             self._telemetry.emit(
                 "llm.response",
                 span,
                 payload={
-                    "model": getattr(self._wrapped, "_model", "unknown"),
+                    "model": _model_of(self._wrapped),
                     "latency_ms": int((time.monotonic() - start) * 1000),
                     "success": True,
                     "token_usage": {},
@@ -145,7 +173,7 @@ class TelemetryPlannerRuntimeWrapper(PlannerRuntimePort):
             self._telemetry.emit(
                 "llm.error",
                 span,
-                payload={"model": getattr(self._wrapped, "_model", "unknown"), "success": False},
+                payload={"model": _model_of(self._wrapped), "success": False},
                 metadata={"error_type": type(exc).__name__, "message": str(exc)},
             )
             raise

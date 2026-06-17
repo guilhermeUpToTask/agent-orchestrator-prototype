@@ -3,7 +3,10 @@ import { NavLink } from 'react-router-dom';
 import {
   Activity, Check, ChevronRight, Compass, LayoutDashboard, Play, Target,
 } from 'lucide-react';
-import { usePlan, useStartDiscovery, useGoals } from '../lib/queries';
+import {
+  usePlan, useStartDiscovery, useGoals, useRunArchitecture, useRunPhaseReview,
+  useResumeDispatch, useRetryAllFailed,
+} from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { relTime, useNow } from '../lib/time';
 import styles from './LifecycleRail.module.css';
@@ -33,10 +36,35 @@ export function LifecycleRail() {
   const decisions = usePlannerStore((s) => s.decisions);
   const events = usePlannerStore((s) => s.events);
   const isThinking = usePlannerStore((s) => s.ui.isThinking);
+  const activeRun = usePlannerStore((s) => s.activeRun);
+  const completedRuns = usePlannerStore((s) => s.completedRuns);
   const startDiscovery = useStartDiscovery();
+  const runArchitecture = useRunArchitecture();
+  const runPhaseReview = useRunPhaseReview();
+  const resumeDispatch = useResumeDispatch();
+  const retryAllFailed = useRetryAllFailed();
   const now = useNow(1000);
 
+  // Retryable (failed or canceled) tasks across all goals — drives the global
+  // "Retry all failed" action. Also offered when a goal itself has failed.
+  const failedTaskCount = goals.reduce(
+    (sum, g) =>
+      sum + g.tasks.filter((t) => t.status === 'failed' || t.status === 'canceled').length,
+    0,
+  );
+  const anyGoalFailed = goals.some((g) => g.status === 'failed');
+  const showRetryAll = failedTaskCount > 0 || anyGoalFailed;
+
   const status = plan?.status;
+
+  // Divergence: the active phase declares goals that have no aggregate yet —
+  // e.g. a dispatch whose branch creation failed. Surfaces the recovery action
+  // (the reconciler also self-heals this on its slow cadence, but the operator
+  // shouldn't have to wait or guess).
+  const activePhase = plan?.phases.find((p) => p.status === 'active');
+  const missingGoals = activePhase
+    ? activePhase.goal_names.filter((n) => !goals.some((g) => g.name === n))
+    : [];
 
   // ── Build the step list ───────────────────────────────────────────────────
   const steps: Step[] = [];
@@ -66,18 +94,32 @@ export function LifecycleRail() {
 
   // ── What goes in the cursor slot: gate, CTA, or live session ─────────────
   const briefReady = status === 'discovery' && plan?.brief != null;
+
+  // The architecture/phase-review gates only make sense once the autonomous
+  // planner SESSION has COMPLETED — approving before that 409'd ("no completed
+  // session"). A streamed decision means the run is in progress, NOT ready;
+  // gating on it caused the premature-approve dangle. Completion is the only
+  // unlock (driven by plan.architecture_completed + the status-sync poll).
+  const architectureReady = completedRuns.includes('architecture');
+  const phaseReviewReady = completedRuns.includes('phase_review');
+
+  const needsArchitectureDraft =
+    status === 'architecture' && !architectureReady && activeRun !== 'architecture';
+  const needsPhaseReviewRun =
+    status === 'phase_review' && !phaseReviewReady && activeRun !== 'phase_review';
+
   const gate =
     briefReady
       ? { title: 'Brief ready for approval', body: 'Review the project brief and approve it to start architecture drafting.' }
-      : status === 'architecture'
+      : status === 'architecture' && architectureReady
         ? {
             title: 'Architecture approval',
             body: decisions.length > 0
               ? `${decisions.length} decision${decisions.length === 1 ? '' : 's'} proposed. Review and approve to dispatch the first phase.`
-              : 'Approve the drafted architecture to dispatch the first phase to workers.',
+              : 'Architecture drafted. Review and approve to dispatch the first phase to workers.',
           }
-        : status === 'phase_review'
-          ? { title: 'Phase review', body: 'The phase has completed. Approve the next phase or mark the project done.' }
+        : status === 'phase_review' && phaseReviewReady
+          ? { title: 'Phase review', body: 'The phase review is complete. Approve the next phase or mark the project done.' }
           : null;
 
   const gateGoals = goals.filter(
@@ -144,12 +186,96 @@ export function LifecycleRail() {
           </div>
         )}
 
+        {/* Architecture not yet drafted: the missing step that dead-ended at
+            approve-architecture. Run it here; decisions then stream in. */}
+        {needsArchitectureDraft && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>Architecture not drafted yet</div>
+            <p className={styles.cardBody}>
+              Run the architecture planner — it drafts the phase plan and the
+              decisions you'll approve to dispatch the first phase.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => runArchitecture.mutate()}
+              disabled={runArchitecture.isPending}
+            >
+              Draft architecture
+            </button>
+          </div>
+        )}
+
+        {/* Phase review not yet run: same pattern as architecture. */}
+        {needsPhaseReviewRun && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>Phase review not run yet</div>
+            <p className={styles.cardBody}>
+              Run the phase review — the planner records lessons and proposes the
+              next phase for your approval.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => runPhaseReview.mutate()}
+              disabled={runPhaseReview.isPending}
+            >
+              Run phase review
+            </button>
+          </div>
+        )}
+
+        {/* Recovery: active-phase goals that never got dispatched (e.g. a goal
+            whose branch creation failed). Re-dispatch the missing ones. */}
+        {status === 'phase_active' && missingGoals.length > 0 && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>
+              {missingGoals.length} goal{missingGoals.length > 1 ? 's' : ''} not dispatched
+            </div>
+            <p className={styles.cardBody}>
+              This phase expects {missingGoals.join(', ')}, which never got created.
+              Re-dispatch the missing goals — already-dispatched goals are untouched.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => resumeDispatch.mutate()}
+              disabled={resumeDispatch.isPending}
+            >
+              {resumeDispatch.isPending ? 'Dispatching…' : 'Resume dispatch'}
+            </button>
+          </div>
+        )}
+
+        {/* Recovery: failed/canceled tasks anywhere — bulk requeue across goals */}
+        {showRetryAll && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>
+              {failedTaskCount > 0
+                ? `${failedTaskCount} failed task${failedTaskCount > 1 ? 's' : ''}`
+                : 'Failed goal(s)'}
+            </div>
+            <p className={styles.cardBody}>
+              Requeue every failed or canceled task across all goals and reopen failed goals.
+              Already-succeeded tasks are untouched.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => retryAllFailed.mutate()}
+              disabled={retryAllFailed.isPending}
+            >
+              {retryAllFailed.isPending ? 'Requeuing…' : 'Retry all failed'}
+            </button>
+          </div>
+        )}
+
         {/* Live session: streamed progress, never a bare spinner */}
-        {(isThinking || (status === 'architecture' && !gateGoals.length && lastProgress)) && (
+        {(isThinking || activeRun !== null || (status === 'architecture' && !gateGoals.length && lastProgress)) && (
           <div className={styles.sessionCard} aria-live="polite">
             <div className={styles.cardTitle}>
               <span className={`${styles.runDot} breathe`} aria-hidden />
-              Planner working
+              {activeRun === 'architecture'
+                ? 'Drafting architecture…'
+                : activeRun === 'phase_review'
+                  ? 'Running phase review…'
+                  : 'Planner working'}
             </div>
             {lastProgress && (
               <pre className={styles.progressLine}>

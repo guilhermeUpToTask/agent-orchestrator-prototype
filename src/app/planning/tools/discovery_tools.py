@@ -76,4 +76,5 @@ def build_submit_project_brief_tool(
             "required": ["brief_json"],
         },
         handler=submit_brief_handler,
+        terminal=True,
     )
