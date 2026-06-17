@@ -2,7 +2,31 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Check, Copy } from 'lucide-react';
 import { usePlannerStore, type DomainEvent } from '../store/plannerStore';
 import { absTime, relTime, useNow } from '../lib/time';
+import { tokens } from '../styles/tokens';
 import styles from './Activity.module.css';
+
+type EventKind = 'ok' | 'fail' | 'neutral';
+
+/** Classify an event for color: success / failure / neutral. */
+function eventKind(e: DomainEvent): EventKind {
+  const t = e.type;
+  const status = String((e.payload as Record<string, unknown>).status ?? '');
+  if (
+    t.endsWith('_failed') || t === 'task.unassignable' || t === 'goal.dispatch_failed'
+    || status === 'failed' || status === 'canceled'
+  ) return 'fail';
+  if (
+    t === 'task.completed' || t === 'goal.merged' || t === 'goal.finalized'
+    || t.endsWith('_completed') || status === 'succeeded' || status === 'merged'
+  ) return 'ok';
+  return 'neutral';
+}
+
+const KIND_COLOR: Record<EventKind, string> = {
+  ok: tokens.green,
+  fail: tokens.red,
+  neutral: tokens.textMuted,
+};
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -23,6 +47,7 @@ const formatLine = (e: DomainEvent): string =>
  */
 export function ActivityView() {
   const events = usePlannerStore((s) => s.events);
+  const selectNode = usePlannerStore((s) => s.selectNode);
   const now = useNow(1000);
 
   const [text, setText] = useState('');
@@ -132,11 +157,28 @@ export function ActivityView() {
               No events received this session. Events stream in live as the system works.
             </p>
           )}
-          {filtered.map((e) => (
-            <div key={e.id} className={styles.line}>
+          {filtered.map((e) => {
+            const taskId = e.payload.task_id as string | undefined;
+            return (
+            <div key={e.id} className={styles.line} style={{ borderLeft: `2px solid ${KIND_COLOR[eventKind(e)]}`, paddingLeft: 6 }}>
               <span className={styles.time} title={absTime(e.at)}>{relTime(e.at, now)}</span>
-              <span className={styles.type}>{e.type}</span>
-              <span className={styles.payload}>{compact(e.payload)}</span>
+              <span className={styles.type} style={{ color: KIND_COLOR[eventKind(e)] }}>{e.type}</span>
+              <span className={styles.payload}>
+                {taskId && (
+                  <button
+                    onClick={() => selectNode(taskId)}
+                    title="Open this task"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                      color: tokens.accent, fontFamily: 'inherit', fontSize: 'inherit',
+                      textDecoration: 'underline', marginRight: 8,
+                    }}
+                  >
+                    {taskId}
+                  </button>
+                )}
+                {compact(taskId ? omit(e.payload, 'task_id') : e.payload)}
+              </span>
               <button
                 className={`${styles.copyBtn} ${copiedId === e.id ? styles.copied : ''}`}
                 onClick={() => copyOne(e)}
@@ -146,7 +188,8 @@ export function ActivityView() {
                 {copiedId === e.id ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {unseen > 0 && (
@@ -157,6 +200,11 @@ export function ActivityView() {
       </div>
     </div>
   );
+}
+
+function omit(payload: Record<string, unknown>, key: string): Record<string, unknown> {
+  const { [key]: _drop, ...rest } = payload;
+  return rest;
 }
 
 function compact(payload: Record<string, unknown>): string {

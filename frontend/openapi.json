@@ -2512,6 +2512,14 @@
             "type": "array",
             "title": "Depends On"
           },
+          "blocked_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocked By",
+            "default": []
+          },
           "tasks": {
             "items": {
               "$ref": "#/components/schemas/GoalTaskResponse"

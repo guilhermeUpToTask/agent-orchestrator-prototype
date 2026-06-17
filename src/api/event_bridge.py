@@ -53,6 +53,11 @@ def map_domain_event_to_sse(event_type: str, payload: dict) -> tuple[str, dict] 
     """Translate one domain event into (sse_type, sse_payload), or None to drop."""
     if event_type in _INTERNAL_EVENTS:
         return None
+    # Reconciler re-kicks of still-pending tasks (no state change) — internal
+    # liveness, not operator-facing. Genuine reconciler actions (reclaim →
+    # task.requeued, fail → task.failed) are untagged and flow through.
+    if payload.get("republish"):
+        return None
     status = _TASK_STATUS_BY_EVENT.get(event_type)
     if status is not None:
         return (

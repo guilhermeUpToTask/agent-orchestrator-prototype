@@ -26,6 +26,7 @@ from src.api.dependencies import (
     UnblockGoalsUseCaseDep,
 )
 from src.api.schemas.common import ErrorResponse
+from src.domain.aggregates.goal import GoalStatus
 from src.api.schemas.goals import (
     GoalFinalizeResponse,
     GoalHistoryEntryResponse,
@@ -40,8 +41,16 @@ router = APIRouter(prefix="/goals", tags=["goals"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _goal_to_response(goal, task_lookup: dict | None = None) -> GoalResponse:
+def _goal_to_response(goal, task_lookup: dict | None = None, merged_names: set | None = None) -> GoalResponse:
     task_lookup = task_lookup or {}
+    merged_names = merged_names or set()
+    # Unmet prerequisites: only meaningful while the goal is still queued
+    # (PENDING). Once it starts/merges it is no longer "blocked".
+    blocked_by = (
+        [d for d in goal.depends_on if d not in merged_names]
+        if goal.status == GoalStatus.PENDING
+        else []
+    )
 
     def _task_response(t) -> GoalTaskResponse:
         full = task_lookup.get(t.task_id)
@@ -68,6 +77,7 @@ def _goal_to_response(goal, task_lookup: dict | None = None) -> GoalResponse:
         status=goal.status.value,
         feature_tag=goal.feature_tag,
         depends_on=goal.depends_on,
+        blocked_by=blocked_by,
         tasks=tasks,
         history=history,
         pr_number=goal.pr_number,
@@ -88,7 +98,9 @@ def _goal_to_response(goal, task_lookup: dict | None = None) -> GoalResponse:
 )
 def list_goals(repo: GoalRepoDep, task_repo: TaskRepoDep) -> list[GoalResponse]:
     task_lookup = {t.task_id: t for t in task_repo.list_all()}
-    return [_goal_to_response(g, task_lookup) for g in repo.list_all()]
+    all_goals = repo.list_all()
+    merged_names = {g.name for g in all_goals if g.status == GoalStatus.MERGED}
+    return [_goal_to_response(g, task_lookup, merged_names) for g in all_goals]
 
 
 @router.get(
@@ -105,7 +117,8 @@ def list_goals(repo: GoalRepoDep, task_repo: TaskRepoDep) -> list[GoalResponse]:
 )
 def get_goal(goal_id: str, repo: GoalRepoDep) -> GoalResponse:
     goal = repo.load(goal_id)  # raises KeyError → 404 via global handler
-    return _goal_to_response(goal)
+    merged_names = {g.name for g in repo.list_all() if g.status == GoalStatus.MERGED}
+    return _goal_to_response(goal, merged_names=merged_names)
 
 
 @router.get(

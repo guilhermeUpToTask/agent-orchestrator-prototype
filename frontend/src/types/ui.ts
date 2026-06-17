@@ -39,6 +39,9 @@ export interface TaskNodeData {
   goalId: string;
   goalName: string;
   agent: AgentProps | null;
+  // Unmet dependency task_ids — non-empty means this CREATED task is blocked
+  // (waiting on siblings), not merely idle in the queue.
+  blockedBy: string[];
   selected?: boolean;
   // React Flow v12 node data must satisfy Record<string, unknown>
   [key: string]: unknown;

@@ -96,11 +96,16 @@ class TaskReconciler(ControlLoop):
     # ------------------------------------------------------------------
 
     def _republish(self, task: TaskAggregate, event_type: str) -> None:
-        """Re-emit task.created or task.requeued without modifying state."""
+        """Re-emit task.created or task.requeued without modifying state.
+
+        Tagged ``republish`` so the SSE bridge can drop it: this is an internal
+        re-kick for the task manager, not a real state change, and must not spam
+        the operator's activity feed every reconcile pass.
+        """
         self._events.publish(DomainEvent(
             type=event_type,
             producer="reconciler",
-            payload={"task_id": task.task_id},
+            payload={"task_id": task.task_id, "republish": True},
         ))
         log.info("reconciler.republished_pending",
                  task_id=task.task_id, event_type=event_type)

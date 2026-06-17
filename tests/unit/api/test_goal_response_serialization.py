@@ -30,3 +30,22 @@ def test_goal_with_datetime_history_serializes():
     assert len(response.history) == len(goal.history)
     # The datetime timestamp is preserved (serialized to ISO-8601 in the HTTP body).
     assert isinstance(response.history[0].timestamp, datetime)
+
+
+def test_blocked_by_lists_unmerged_prereqs():
+    goal = GoalAggregate.create(
+        name="b", description="d", task_summaries=[], depends_on=["a"],
+    )  # PENDING, depends on "a"
+    # "a" is not in the merged set → b is blocked by a.
+    resp = _goal_to_response(goal, merged_names=set())
+    assert resp.blocked_by == ["a"]
+    # Once "a" is merged, b is no longer blocked.
+    resp2 = _goal_to_response(goal, merged_names={"a"})
+    assert resp2.blocked_by == []
+
+
+def test_blocked_by_empty_once_goal_started():
+    goal = GoalAggregate.create(name="b", description="d", task_summaries=[], depends_on=["a"])
+    goal.start()  # RUNNING — no longer "blocked" regardless of prereqs
+    resp = _goal_to_response(goal, merged_names=set())
+    assert resp.blocked_by == []

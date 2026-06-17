@@ -28,6 +28,9 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
   const isRunning = status === 'in_progress' || status === 'assigned';
   const isSucceeded = status === 'succeeded' || status === 'merged';
   const isFailed = status === 'failed' || status === 'canceled';
+  // Blocked = CREATED but waiting on unfinished sibling deps (vs simply queued).
+  const blockedBy: string[] = (data.blockedBy as string[]) ?? [];
+  const isBlocked = status === 'created' && blockedBy.length > 0;
   // Stuck in queue because no active agent matches the required capability.
   const unassignableReason =
     !isRunning && !isSucceeded && !isFailed ? data.task?.unassignable_reason : null;
@@ -147,6 +150,17 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
               overflow: 'hidden',
             }}>
               ✗ {data.task?.last_error ? data.task.last_error : status}
+            </div>
+          )}
+
+          {isBlocked && (
+            <div style={{
+              padding: '3px 7px', borderRadius: 5,
+              background: '#1c2030', border: `1px solid ${tokens.borderMuted}`,
+              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textSecond,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              ⏳ waiting on {blockedBy.join(', ')}
             </div>
           )}
 

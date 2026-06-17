@@ -23,6 +23,11 @@ export function GoalGroupNode({ data }: NodeProps) {
   ).length;
   const canRetry = failedCount > 0 || goal.status === 'failed';
 
+  // Blocked = queued (PENDING) with unmerged prerequisite goals. It intentionally
+  // does not start until those merge — show that rather than a bare "pending".
+  const blockedBy: string[] = goal.blocked_by ?? [];
+  const isBlocked = blockedBy.length > 0;
+
   // PR review gates take visual priority: goals blocked on a human PR
   // decision are highlighted purple; merged goals settle to green.
   const gateColor =
@@ -37,9 +42,10 @@ export function GoalGroupNode({ data }: NodeProps) {
     <div style={{
       width: '100%', height: '100%',
       background: `${color}08`,
-      border: `1.5px ${solid ? 'solid' : 'dashed'} ${borderColor}`,
+      border: `1.5px ${isBlocked ? 'dashed' : solid ? 'solid' : 'dashed'} ${borderColor}`,
       borderRadius: tokens.r12,
       boxShadow: gateColor ? `0 0 18px ${gateColor}33` : inActivePhase ? `0 0 18px ${color}22` : 'none',
+      opacity: isBlocked ? 0.6 : 1,  // dimmed: queued, waiting on prerequisites
     }}>
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
@@ -101,7 +107,16 @@ export function GoalGroupNode({ data }: NodeProps) {
         )}
       </div>
 
-      {goal.tasks.length === 0 && (
+      {isBlocked && (
+        <div style={{
+          padding: '6px 12px', fontSize: 9, fontFamily: tokens.fontMono,
+          color: tokens.yellow, display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          🔒 waiting on {blockedBy.join(', ')}
+        </div>
+      )}
+
+      {goal.tasks.length === 0 && !isBlocked && (
         <div style={{
           padding: '10px 12px', fontSize: 9, fontFamily: tokens.fontMono,
           color: tokens.textMuted,
