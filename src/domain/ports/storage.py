@@ -4,6 +4,7 @@ src/domain/ports/storage.py — Auxiliary storage ports.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any, Optional
 
 from src.domain.value_objects.execution import AgentExecutionResult
 
@@ -17,6 +18,14 @@ class TaskLogsPort(ABC):
     @abstractmethod
     def save_logs(self, task_id: str, result: AgentExecutionResult) -> None:
         """Persist stdout, stderr, and metadata from an agent execution."""
+        ...
+
+    @abstractmethod
+    def read_logs(self, task_id: str) -> Optional[dict[str, Any]]:
+        """Return persisted logs for a task, or None if none exist.
+
+        Shape: {stdout, stderr, exit_code, success, elapsed_seconds, modified_files}.
+        """
         ...
 
 

@@ -63,6 +63,32 @@ class FilesystemTaskLogsAdapter(TaskLogsPort):
         except OSError as exc:
             log.warning("logs.save_failed", task_id=task_id, log_dir=str(log_dir), error=str(exc))
 
+    def read_logs(self, task_id: str):  # -> Optional[dict]
+        import src.infra.logs_and_tests as _m
+
+        base = self._logs_base or _m.LOG_BASE or _default_log_base()
+        log_dir = base / task_id
+        if not log_dir.exists():
+            return None
+        try:
+            meta = {}
+            meta_path = log_dir / "metadata.json"
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            stdout = (log_dir / "stdout.txt")
+            stderr = (log_dir / "stderr.txt")
+            return {
+                "stdout": stdout.read_text(encoding="utf-8") if stdout.exists() else "",
+                "stderr": stderr.read_text(encoding="utf-8") if stderr.exists() else "",
+                "exit_code": meta.get("exit_code"),
+                "success": meta.get("success"),
+                "elapsed_seconds": meta.get("elapsed_seconds"),
+                "modified_files": meta.get("modified_files", []),
+            }
+        except OSError as exc:
+            log.warning("logs.read_failed", task_id=task_id, log_dir=str(log_dir), error=str(exc))
+            return None
+
 
 class SubprocessTestRunnerAdapter(TestRunnerPort):
     """

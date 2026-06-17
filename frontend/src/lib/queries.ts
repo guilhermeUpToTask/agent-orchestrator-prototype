@@ -24,6 +24,7 @@ import {
   resumeDispatch,
   retryGoalFailed,
   retryAllFailed,
+  getTaskLogs,
   fetchAgents,
   fetchArchitectureStatus,
   fetchGoals,
@@ -58,6 +59,7 @@ export const keys = {
   planHistory: ['plan', 'history'] as const,
   goals: ['goals'] as const,
   agents: ['agents'] as const,
+  taskLogs: (taskId: string) => ['task-logs', taskId] as const,
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────────
@@ -72,6 +74,15 @@ export function usePlanHistory() {
 
 export function useGoals() {
   return useQuery({ queryKey: keys.goals, queryFn: fetchGoals });
+}
+
+/** Persisted console logs for a finished task. Enabled only when a task is selected. */
+export function useTaskLogs(taskId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.taskLogs(taskId ?? ''),
+    queryFn: () => getTaskLogs(taskId as string),
+    enabled: enabled && !!taskId,
+  });
 }
 
 // Module-level so the function reference is stable — React Query only
@@ -492,9 +503,10 @@ export function useSSEBridge() {
                 ),
               })),
             );
-            // Drop the live-progress buffer once the task reaches a terminal state.
+            // On terminal status, refresh the persisted logs (the live buffer is
+            // kept so the operator can still read the tail until they navigate away).
             if (['succeeded', 'failed', 'canceled', 'merged'].includes(status)) {
-              usePlannerStore.getState().clearTaskProgress(task_id);
+              qc.invalidateQueries({ queryKey: keys.taskLogs(task_id) });
             }
             qc.invalidateQueries({ queryKey: keys.goals });
             break;

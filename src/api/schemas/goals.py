@@ -24,6 +24,10 @@ class GoalTaskResponse(BaseModel):
     unassignable_reason: Optional[str] = None
     # The failure reason from the last execution attempt (git error, test fail…).
     last_error: Optional[str] = None
+    # Outcome of a successful run (from TaskResult) — what the agent produced.
+    commit_sha: Optional[str] = None
+    branch: Optional[str] = None
+    modified_files: list[str] = []
 
 
 class GoalHistoryEntryResponse(BaseModel):

@@ -66,6 +66,9 @@ def _goal_to_response(goal, task_lookup: dict | None = None, merged_names: set |
             retry_count=full.retry_policy.attempt if full else 0,
             unassignable_reason=full.unassignable_reason if full else None,
             last_error=full.last_error if full else None,
+            commit_sha=full.result.commit_sha if full and full.result else None,
+            branch=full.result.branch if full and full.result else None,
+            modified_files=(full.result.modified_files if full and full.result else []),
         )
 
     tasks = [_task_response(t) for t in goal.tasks.values()]

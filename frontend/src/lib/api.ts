@@ -139,6 +139,29 @@ export const retryGoalFailed = (goalId: string): Promise<GoalRetryResponse> =>
 export const retryAllFailed = (): Promise<GoalRetryResponse> =>
   post('/api/goals/retry-failed');
 
+// ─── Task console logs (persisted) ────────────────────────────────────────────
+
+export interface TaskLogs {
+  task_id: string;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  success: boolean | null;
+  elapsed_seconds: number | null;
+  modified_files: string[];
+}
+
+/** Fetch persisted agent console output for a finished task (404 → null). */
+export const getTaskLogs = async (taskId: string): Promise<TaskLogs | null> => {
+  try {
+    return await get<TaskLogs>(`/api/tasks/${taskId}/logs`);
+  } catch (err) {
+    // get() throws Error("GET … → 404: …") when no logs exist yet.
+    if (err instanceof Error && err.message.includes('→ 404')) return null;
+    throw err;
+  }
+};
+
 // ─── Autonomous planner runs (202; progress + completion stream over SSE) ─────
 
 /**

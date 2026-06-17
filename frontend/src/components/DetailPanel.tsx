@@ -2,7 +2,7 @@ import React from 'react';
 import { X, GitPullRequest, ExternalLink, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
 import { tokens, STATUS_META, AGENT_COLORS, GOAL_STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import { useAgents, useGoals, useSendChatMessage } from '../lib/queries';
+import { useAgents, useGoals, useSendChatMessage, useTaskLogs } from '../lib/queries';
 import type { GoalAggregate } from '../types/ui';
 
 function Label({ children }: { children: React.ReactNode }) {
@@ -46,6 +46,10 @@ export function DetailPanel() {
 
   const goal = goals.find((g) => g.tasks.some((t) => t.task_id === selectedNodeId));
   const task = goal?.tasks.find((t) => t.task_id === selectedNodeId);
+
+  // Persisted console logs — fetched once the task is in a terminal state.
+  const isTerminalTask = !!task && ['succeeded', 'merged', 'failed', 'canceled'].includes(task.status);
+  const { data: taskLogs } = useTaskLogs(selectedNodeId, detailPanelOpen && isTerminalTask);
 
   if (!detailPanelOpen || !task) return null;
 
@@ -165,6 +169,38 @@ export function DetailPanel() {
               whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflow: 'auto',
             }}>
               {task.last_error}
+            </div>
+          </Field>
+        )}
+
+        {(status === 'succeeded' || status === 'merged') && (task.commit_sha || (task.modified_files?.length ?? 0) > 0) && (
+          <Field label="Outcome">
+            <div style={{
+              fontSize: 11, color: tokens.green, fontFamily: tokens.fontMono,
+              background: tokens.greenDim, border: `1px solid ${tokens.green}33`,
+              borderRadius: 6, padding: '6px 8px', lineHeight: 1.5,
+            }}>
+              {task.commit_sha && <div>✓ commit {task.commit_sha.slice(0, 10)}</div>}
+              {(task.modified_files?.length ?? 0) > 0 && (
+                <div style={{ color: tokens.textSecond, marginTop: 3 }}>
+                  {task.modified_files!.length} file(s): {task.modified_files!.slice(0, 6).join(', ')}
+                </div>
+              )}
+            </div>
+          </Field>
+        )}
+
+        {/* Persisted console log (after completion) */}
+        {isTerminalTask && taskLogs && (taskLogs.stdout || taskLogs.stderr) && (
+          <Field label="Console log">
+            <div style={{
+              fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textSecond,
+              background: '#0a0c12', border: `1px solid ${tokens.borderMuted}`,
+              borderRadius: 6, padding: '6px 8px', lineHeight: 1.45,
+              maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}>
+              {taskLogs.stdout}
+              {taskLogs.stderr && `\n--- stderr ---\n${taskLogs.stderr}`}
             </div>
           </Field>
         )}
