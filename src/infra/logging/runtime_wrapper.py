@@ -13,10 +13,13 @@ Key features:
 """
 from __future__ import annotations
 
+import os
 import select
 import subprocess
 import time
 from typing import Callable, Iterator, Optional
+
+import structlog
 
 from src.domain import AgentExecutionResult, AgentProps, ExecutionContext
 from src.domain import AgentRuntimePort, SessionHandle
@@ -28,6 +31,8 @@ from .log_events import (
     build_stderr_event,
     build_stdout_event,
 )
+
+log = structlog.get_logger(__name__)
 
 
 def _as_text(data: "bytes | str | None") -> str:
@@ -279,6 +284,144 @@ class LoggingRuntimeWrapper(AgentRuntimePort):
         return result
 
     def _execute_with_streaming(
+        self,
+        cmd: list[str],
+        cwd: str,
+        env: dict[str, str],
+        timeout_seconds: int,
+        progress_cb: Optional[Callable[[str], None]] = None,
+    ) -> AgentExecutionResult:
+        """Execute the agent and stream its output line-by-line.
+
+        Prefers a PTY so the child sees a terminal and line-flushes (CLIs
+        block-buffer when stdout is a pipe, which suppresses live output). Falls
+        back to the pipe implementation when no PTY can be allocated (PTY
+        exhaustion or non-Unix).
+        """
+        try:
+            return self._execute_via_pty(cmd, cwd, env, timeout_seconds, progress_cb)
+        except (OSError, NotImplementedError) as exc:
+            log.warning(
+                "runtime_wrapper.pty_unavailable_falling_back",
+                agent=self._agent_name,
+                error=str(exc),
+            )
+            return self._execute_via_pipe(cmd, cwd, env, timeout_seconds, progress_cb)
+
+    def _execute_via_pty(
+        self,
+        cmd: list[str],
+        cwd: str,
+        env: dict[str, str],
+        timeout_seconds: int,
+        progress_cb: Optional[Callable[[str], None]] = None,
+    ) -> AgentExecutionResult:
+        """Run *cmd* under pseudo-terminals so the child line-flushes its output.
+
+        Two PTYs keep stdout/stderr separate (preserving AgentExecutionResult
+        semantics). Output is read in chunks and split into lines, each emitted
+        to the LiveLogger and progress_cb as it arrives.
+        """
+        import pty
+
+        start_time = time.monotonic()
+        m_out = s_out = m_err = s_err = -1
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        buffers: dict[int, str] = {}
+
+        def _emit(fd: int, chunk: str, *, final: bool = False) -> None:
+            # Per-fd partial-line buffer; emit only on newline, flush at EOF.
+            buffers[fd] += chunk
+            lines = buffers[fd].split("\n")
+            buffers[fd] = "" if final else lines.pop()
+            for raw in lines:
+                line = raw.rstrip("\r")
+                if not line and final:
+                    continue
+                if fd == m_out:
+                    stdout_lines.append(line)
+                    self._logger.log_event(build_stdout_event(self._agent_name, line))
+                else:
+                    stderr_lines.append(line)
+                    self._logger.log_event(build_stderr_event(self._agent_name, line))
+                if progress_cb is not None:
+                    progress_cb(line)
+
+        try:
+            # openpty raises OSError on exhaustion / NotImplementedError off-Unix;
+            # either propagates to the caller's fallback after the finally cleans up.
+            m_out, s_out = pty.openpty()
+            m_err, s_err = pty.openpty()
+            buffers = {m_out: "", m_err: ""}
+
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                env=env,
+                stdout=s_out,
+                stderr=s_err,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+            )
+            # Close the slave ends in the parent so EOF is seen when the child exits.
+            os.close(s_out)
+            s_out = -1
+            os.close(s_err)
+            s_err = -1
+
+            open_fds = [m_out, m_err]
+            while open_fds:
+                ready, _, _ = select.select(open_fds, [], [], 0.1)
+                for fd in ready:
+                    try:
+                        data = os.read(fd, 4096)
+                    except OSError:
+                        data = b""  # EIO on Linux when the slave closes → EOF
+                    if data:
+                        _emit(fd, data.decode(errors="replace"))
+                    else:
+                        _emit(fd, "", final=True)
+                        open_fds.remove(fd)
+
+                if proc.poll() is not None and not ready:
+                    break  # process gone and nothing buffered to drain
+
+                if time.monotonic() - start_time > timeout_seconds:
+                    proc.kill()
+                    proc.wait()
+                    raise subprocess.TimeoutExpired(cmd, timeout_seconds)
+
+            # Flush any trailing partial line left if the loop broke early.
+            for fd in list(buffers):
+                if buffers[fd]:
+                    _emit(fd, "", final=True)
+
+            exit_code = proc.wait(timeout=5)
+            return AgentExecutionResult(
+                success=exit_code == 0,
+                exit_code=exit_code,
+                stdout="\n".join(stdout_lines),
+                stderr="\n".join(stderr_lines),
+                elapsed_seconds=time.monotonic() - start_time,
+            )
+        except subprocess.TimeoutExpired:
+            return AgentExecutionResult(
+                success=False,
+                exit_code=-1,
+                stdout="\n".join(stdout_lines),
+                stderr=f"TIMEOUT after {timeout_seconds}s\n" + "\n".join(stderr_lines),
+                elapsed_seconds=time.monotonic() - start_time,
+            )
+        finally:
+            for fd in (m_out, m_err, s_out, s_err):
+                if fd != -1:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+
+    def _execute_via_pipe(
         self,
         cmd: list[str],
         cwd: str,
