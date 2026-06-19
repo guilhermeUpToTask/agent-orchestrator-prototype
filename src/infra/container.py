@@ -126,6 +126,49 @@ class AppContainer:
         registry.ensure_defaults(DEFAULT_CAPABILITIES)
         return registry
 
+    # ------------------------------------------------------------------
+    # Infrastructure: SQLite config store (global — not project-scoped)
+    # ------------------------------------------------------------------
+
+    @cached_property
+    def _config_db(self):
+        from src.infra.db.bootstrap import config_db
+
+        return config_db(self._ctx.machine.orchestrator_home)
+
+    @cached_property
+    def config_store(self):
+        from src.infra.db.config_store import SqliteConfigStore
+
+        _, session_factory = self._config_db
+        return SqliteConfigStore(session_factory)
+
+    @cached_property
+    def secret_store(self):
+        from src.infra.db.secret_store import SqliteSecretStore, load_master_key
+
+        _, session_factory = self._config_db
+        return SqliteSecretStore(session_factory, load_master_key())
+
+    @cached_property
+    def active_project(self):
+        from src.infra.db.active_project import SqliteActiveProject
+
+        _, session_factory = self._config_db
+        return SqliteActiveProject(session_factory)
+
+    @cached_property
+    def project_service(self):
+        from src.app.services.project_service import ProjectService
+
+        return ProjectService(self.config_store, self.secret_store, self.active_project)
+
+    @cached_property
+    def registry_service(self):
+        from src.app.services.registry_service import RegistryService
+
+        return RegistryService(self.config_store, self.secret_store)
+
     @cached_property
     def project_plan_repo(self):
         if self._ctx.machine.mode == "dry-run":

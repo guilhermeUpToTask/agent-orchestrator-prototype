@@ -31,7 +31,7 @@ from typing import Callable, TypeVar, cast
 import click
 import structlog
 
-from src.domain.errors import DomainError
+from src.domain.errors import BaseAppException, DomainError
 from src.infra.settings.models import ConfigurationError
 
 
@@ -93,8 +93,10 @@ def catch_domain_errors(fn: F) -> F:
         except KeyError as exc:
             die(f"Not found: {exc.args[0] if exc.args else exc}")
 
-        # Add ConfigurationError to the clean catch block
-        except (ValueError, DomainError, ConfigurationError) as exc:
+        # Add ConfigurationError to the clean catch block. BaseAppException
+        # covers the unified taxonomy (domain + app errors); DomainError is a
+        # subclass but is listed for clarity.
+        except (ValueError, BaseAppException, DomainError, ConfigurationError) as exc:
             die(str(exc))
 
         except Exception as exc:
