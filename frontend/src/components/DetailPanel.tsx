@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, GitPullRequest, ExternalLink, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
 import { tokens, STATUS_META, AGENT_COLORS, GOAL_STATUS_META, type StatusKey } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
@@ -39,6 +39,15 @@ export function DetailPanel() {
   const detailPanelOpen = usePlannerStore((s) => s.ui.detailPanelOpen);
   const selectNode = usePlannerStore((s) => s.selectNode);
   const progress = usePlannerStore((s) => (selectedNodeId ? s.taskProgress[selectedNodeId] : undefined));
+
+  // Auto-scroll the live-output terminal to the tail as new lines stream in,
+  // but only while the operator is pinned to the bottom (don't fight a scroll-up).
+  const liveRef = useRef<HTMLDivElement>(null);
+  const livePinnedRef = useRef(true);
+  useEffect(() => {
+    const el = liveRef.current;
+    if (el && livePinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [progress?.length]);
 
   const { data: goals = [] } = useGoals();
   const { data: agentRegistry = [] } = useAgents();
@@ -135,15 +144,24 @@ export function DetailPanel() {
           </div>
         </Field>
 
-        {progress && progress.length > 0 && (
+        {(status === 'in_progress' || status === 'assigned' || (progress && progress.length > 0)) && (
           <Field label="Live output">
-            <div style={{
-              fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textSecond,
-              background: '#0a0c12', border: `1px solid ${tokens.borderMuted}`,
-              borderRadius: 6, padding: '6px 8px', lineHeight: 1.45,
-              maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            }}>
-              {progress.slice(-100).join('\n')}
+            <div
+              ref={liveRef}
+              onScroll={() => {
+                const el = liveRef.current;
+                if (el) livePinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+              }}
+              style={{
+                fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textSecond,
+                background: '#0a0c12', border: `1px solid ${tokens.borderMuted}`,
+                borderRadius: 6, padding: '6px 8px', lineHeight: 1.45,
+                maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            >
+              {progress && progress.length > 0
+                ? progress.slice(-100).join('\n')
+                : <span style={{ color: tokens.textMuted }}>▍ waiting for agent output…</span>}
             </div>
           </Field>
         )}

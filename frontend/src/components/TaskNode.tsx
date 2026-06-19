@@ -72,6 +72,20 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
           <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color: meta.color, letterSpacing: '0.1em', fontWeight: 600 }}>
             {meta.label}
           </span>
+          {isRunning && (progress?.length ?? 0) > 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              fontSize: 8, fontFamily: tokens.fontMono, color: tokens.yellow,
+              padding: '1px 5px', borderRadius: 3,
+              background: tokens.yellow + '18', border: `1px solid ${tokens.yellow}33`,
+            }}>
+              <span style={{
+                width: 4, height: 4, borderRadius: '50%', background: tokens.yellow,
+                animation: 'pulse 1.2s ease-in-out infinite',
+              }} />
+              live
+            </span>
+          )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <span style={{
               fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
