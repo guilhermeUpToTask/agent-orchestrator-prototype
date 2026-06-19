@@ -18,11 +18,14 @@ from pathlib import Path
 from typing import Mapping
 
 import structlog
+import yaml
 
 from src.app.services.project_service import ProjectService, slugify
 from src.app.services.registry_service import RegistryService
+from src.domain.aggregates.task import TaskAggregate
 from src.domain.errors import BaseAppException
 from src.domain.repositories.config_store import ConfigStorePort
+from src.domain.repositories.task_repository import TaskRepositoryPort
 from src.domain.value_objects.config import ProviderKind
 
 log = structlog.get_logger(__name__)
@@ -153,6 +156,50 @@ def _import_agents(
                 report.agents_created.append(agent_id)
             except BaseAppException:
                 report.skipped.append(f"agent:{agent_id}")
+
+
+def import_tasks(
+    *,
+    orchestrator_home: Path,
+    task_store: TaskRepositoryPort,
+    config_store: ConfigStorePort | None = None,
+) -> list[str]:
+    """
+    Stage B migration: import per-project ``tasks/*.yaml`` files into the SQLite
+    task store. Idempotent (skip-if-exists by task_id). Returns imported ids.
+
+    A task is stamped with its owning project's id only when that project exists
+    in the config store (the FK backstop); otherwise it is imported unscoped
+    (``project_id=None``) so a partial migration never crashes on a missing
+    parent. Run the config import first to get tasks grouped under projects.
+    """
+    imported: list[str] = []
+    projects_dir = orchestrator_home / "projects"
+    if not projects_dir.is_dir():
+        return imported
+    for project_dir in sorted(p for p in projects_dir.iterdir() if p.is_dir()):
+        pid = slugify(project_dir.name)
+        project_known = config_store is not None and config_store.get_project(pid) is not None
+        tasks_dir = project_dir / "tasks"
+        if not tasks_dir.is_dir():
+            continue
+        for path in sorted(tasks_dir.glob("*.yaml")):
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except (yaml.YAMLError, OSError):
+                log.warning("importer.unreadable_task", path=str(path))
+                continue
+            if not data:
+                continue
+            task = TaskAggregate.model_validate(data)
+            if project_known and task.project_id is None:
+                task.project_id = pid
+            elif not project_known:
+                task.project_id = None  # avoid FK violation on unknown project
+            if task_store.get(task.task_id) is None:
+                task_store.save(task)
+                imported.append(task.task_id)
+    return imported
 
 
 def _read_json(path: Path) -> dict:

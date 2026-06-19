@@ -49,6 +49,9 @@ class MachineSettings:
     # Sessions that exhaust the budget auto-finalize whatever they have proposed
     # rather than failing, so this is a soft cap, not a hard wall.
     planner_max_turns: int = 25
+    # Task-state backend cutover flag: "file" (YAML, default) or "sqlite".
+    # Both implement TaskRepositoryPort; this selects which the container wires.
+    task_store_backend: str = "file"
 
     def to_persistable_dict(self) -> dict:
         """Return only the keys safe to write to config.json."""
