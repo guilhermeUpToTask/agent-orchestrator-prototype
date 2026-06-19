@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "generate:api": "python ../scripts/export_openapi.py openapi.json && openapi-ts"
+    "generate:api": "python ../backend/scripts/export_openapi.py openapi.json && openapi-ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

@@ -2,8 +2,8 @@
 
 ## 🚀 Build & Run Commands
 
-### Backend (Python)
-- **Install**: `uv pip install -e .[dev]` (or `pip install -e .[dev]`)
+### Backend (Python) — all commands run from `backend/`
+- **Install**: `cd backend && uv pip install -e .[dev]` (or `pip install -e .[dev]`)
 - **Run API**: `python -m src.infra.cli.main system api --port 8000`
 - **Run Full System (Dry-Run)**: `AGENT_MODE=dry-run python -m src.infra.cli.main system start`
 - **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed)
@@ -12,6 +12,7 @@
 - **Test All**: `pytest`
 - **Test Unit**: `pytest tests/unit`
 - **Test Integration**: `pytest tests/integration`
+- **DB migrations**: `alembic upgrade head` (config DB lives under `ORCHESTRATOR_HOME`)
 
 ### Frontend (TypeScript / React / Vite)
 - **Install**: `npm install`
@@ -61,14 +62,16 @@ The backend follows a strict **Hexagonal / Clean Architecture**.
 
 ```text
 agent-orchestrator/
-├── src/
-│   ├── domain/        # Entities, Value Objects, Aggregates, Ports (Interfaces)
-│   ├── app/           # Use Cases, Handlers, Services (Orchestration)
-│   ├── infra/         # Adapters (Redis, FS, Git, GitHub, Runtimes, CLI)
-│   └── api/           # FastAPI Routers, DTOs (Schemas), SSE Streaming
-├── tests/             # Unit and Integration test split
-├── scripts/           # OpenAPI export and other tooling
-├── pyproject.toml     # Python dependencies & Ruff/Mypy config
+├── backend/                # Python backend (all backend commands run here)
+│   ├── src/
+│   │   ├── domain/         # Entities, Value Objects, Aggregates, Ports (Interfaces)
+│   │   ├── app/            # Use Cases, Handlers, Services (Orchestration)
+│   │   ├── infra/          # Adapters (Redis, SQLite/SQLAlchemy, FS, Git, GitHub, CLI)
+│   │   └── api/            # FastAPI Routers, DTOs (Schemas), SSE Streaming
+│   ├── tests/              # Unit and Integration test split
+│   ├── alembic/            # SQLAlchemy migrations (+ alembic.ini)
+│   ├── scripts/            # OpenAPI export and other tooling
+│   └── pyproject.toml      # Python dependencies & Ruff/Mypy config
 └── frontend/
     ├── src/
     │   ├── components/    # React components (PlanCanvas, ChatPanel, Toolbar)

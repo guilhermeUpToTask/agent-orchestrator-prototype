@@ -238,7 +238,9 @@ class TestCISeparation:
     def test_orchestrator_ci_file_is_separate(self):
         """The orchestrator's own .github/workflows/ci.yml must exist and test itself."""
         from pathlib import Path
-        ci_path = Path(__file__).parents[3] / ".github" / "workflows" / "ci.yml"
+        # Repo root is the parent of backend/ (this file lives at
+        # backend/tests/unit/infra/); .github/ stays at the repo level.
+        ci_path = Path(__file__).parents[4] / ".github" / "workflows" / "ci.yml"
         assert ci_path.exists(), "Orchestrator CI file missing"
         text = ci_path.read_text()
         assert "Orchestrator CI" in text

@@ -119,7 +119,10 @@ class RedisEventAdapter(EventPort):
                 block=block_ms,
                 count=10,  # read up to 10 messages across all streams per call
             )
-            for stream_key, messages in results or []:
+            # redis-py's sync client types xreadgroup as Awaitable[T] | T (incl.
+            # str), so mypy can't see this as iterable pairs — same Awaitable-union
+            # fallout the module override documents.
+            for stream_key, messages in results or []:  # type: ignore[assignment, misc]
                 yield from self._decode_messages(stream_key, messages, group)
 
             # Periodically claim messages stuck pending on other consumers in
