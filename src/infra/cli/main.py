@@ -12,6 +12,7 @@ from src.infra.cli.tasks.commands   import tasks_group
 from src.infra.cli.agents.commands  import agents_group
 from src.infra.cli.capabilities.commands import capabilities_group
 from src.infra.cli.project.commands import project_group
+from src.infra.cli.config.commands  import config_group
 from src.infra.cli.goals.commands   import goals_group
 from src.infra.cli.spec.commands    import spec_group
 from src.infra.cli.plan.commands    import plan_group
@@ -53,6 +54,7 @@ cli.add_command(tasks_group)
 cli.add_command(agents_group)
 cli.add_command(capabilities_group)
 cli.add_command(project_group)
+cli.add_command(config_group)
 cli.add_command(goals_group)
 cli.add_command(spec_group)
 cli.add_command(plan_group)
