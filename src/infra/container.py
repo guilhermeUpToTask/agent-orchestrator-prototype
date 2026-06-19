@@ -178,6 +178,28 @@ class AppContainer:
 
         return RegistryService(self.config_store, self.secret_store)
 
+    # ------------------------------------------------------------------
+    # Git forge (PR window) — GitHub primary, local-git fallback
+    # ------------------------------------------------------------------
+
+    @cached_property
+    def git_forge(self):
+        from src.infra.forge.local_git import LocalGitForge
+
+        ctx = self._ctx
+        local = LocalGitForge(str(self.paths.project_home / "repo"))
+        if ctx.github_fully_configured():
+            from src.infra.forge.fallback import FallbackForge
+            from src.infra.forge.github import GitHubForge
+
+            github = GitHubForge(
+                ctx.secrets.github_token,
+                ctx.project.github_owner,   # type: ignore[arg-type]
+                ctx.project.github_repo,    # type: ignore[arg-type]
+            )
+            return FallbackForge(primary=github, fallback=local)
+        return local
+
     @cached_property
     def project_plan_repo(self):
         if self._ctx.machine.mode == "dry-run":
