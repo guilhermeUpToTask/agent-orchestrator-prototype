@@ -4,6 +4,7 @@ import { TopBar } from './components/TopBar';
 import { LifecycleRail } from './components/LifecycleRail';
 import { GatePanel } from './components/GatePanel';
 import { ChatPanel } from './components/ChatPanel';
+import { ConsoleDock } from './components/ConsoleDock';
 import { Toaster } from './components/Toaster';
 import { Overview } from './views/Overview';
 import { GoalsView, GoalDetail } from './views/Goals';
@@ -77,6 +78,7 @@ export default function App() {
                 <Route path="*" element={<Overview />} />
               </Routes>
             </div>
+            <ConsoleDock />
           </main>
           <ChatPanel />
         </div>

@@ -335,7 +335,7 @@ export type SSEEvent =
   | { type: 'plan.status_changed'; payload: { status: string } }
   | { type: 'goal.dispatched'; payload: { goal_id: string } }
   | { type: 'goal.dispatch_failed'; payload: { goal_name: string; error: string } }
-  | { type: 'task.status_changed'; payload: { task_id: string; status: string } }
+  | { type: 'task.status_changed'; payload: { task_id: string; status: string; reason?: string } }
   | {
       type: 'task.unassignable';
       payload: { task_id: string; required_capability: string; reason: string };

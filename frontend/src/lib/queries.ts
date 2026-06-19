@@ -493,13 +493,22 @@ export function useSSEBridge() {
             break;
 
           case 'task.status_changed': {
-            const { task_id, status } = event.payload;
+            const { task_id, status, reason } = event.payload;
             // Patch the cache in place for instant feedback, then revalidate.
+            // On failure, sticky the reason into last_error so the node badge /
+            // DetailPanel show *why* immediately, before the goals refetch lands
+            // (mirrors the task.unassignable sticky-reason pattern below).
             qc.setQueryData<GoalAggregate[]>(keys.goals, (goals) =>
               goals?.map((g) => ({
                 ...g,
                 tasks: g.tasks.map((t) =>
-                  t.task_id === task_id ? { ...t, status: status as TaskStatus } : t,
+                  t.task_id === task_id
+                    ? {
+                        ...t,
+                        status: status as TaskStatus,
+                        ...(status === 'failed' && reason ? { last_error: reason } : {}),
+                      }
+                    : t,
                 ),
               })),
             );
@@ -507,6 +516,9 @@ export function useSSEBridge() {
             // kept so the operator can still read the tail until they navigate away).
             if (['succeeded', 'failed', 'canceled', 'merged'].includes(status)) {
               qc.invalidateQueries({ queryKey: keys.taskLogs(task_id) });
+            }
+            if (status === 'failed') {
+              toast.error(`Task "${task_id}" failed`, reason ?? undefined);
             }
             qc.invalidateQueries({ queryKey: keys.goals });
             break;

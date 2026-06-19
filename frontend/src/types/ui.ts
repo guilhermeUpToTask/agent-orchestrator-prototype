@@ -84,4 +84,6 @@ export interface PlannerUIState {
   layoutDirection: 'LR' | 'TB';
   /** Approval gate panel (brief / architecture / phase review) */
   gateOpen: boolean;
+  /** Live agent-output console dock (bottom of the canvas) is expanded */
+  consoleOpen: boolean;
 }

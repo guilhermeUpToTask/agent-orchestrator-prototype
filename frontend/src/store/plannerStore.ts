@@ -106,6 +106,8 @@ interface PlannerState {
   setLayoutDirection: (dir: 'LR' | 'TB') => void;
   toggleChatPanel: () => void;
   setGateOpen: (open: boolean) => void;
+  toggleConsole: () => void;
+  setConsoleOpen: (open: boolean) => void;
 }
 
 export const usePlannerStore = create<PlannerState>()(
@@ -127,6 +129,7 @@ export const usePlannerStore = create<PlannerState>()(
       isThinking: false,
       layoutDirection: 'LR',
       gateOpen: false,
+      consoleOpen: false,
     },
 
     addMessage: (msg) => {
@@ -225,6 +228,14 @@ export const usePlannerStore = create<PlannerState>()(
 
     setGateOpen: (open) => {
       set((s) => { s.ui.gateOpen = open; });
+    },
+
+    toggleConsole: () => {
+      set((s) => { s.ui.consoleOpen = !s.ui.consoleOpen; });
+    },
+
+    setConsoleOpen: (open) => {
+      set((s) => { s.ui.consoleOpen = open; });
     },
   })),
 );
