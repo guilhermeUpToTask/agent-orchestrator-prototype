@@ -219,6 +219,12 @@ class SettingsService:
 
         planner_max_turns = stored.get("planner_max_turns") or MACHINE_DEFAULTS["planner_max_turns"]
 
+        task_store_backend = (
+            _env("TASK_STORE_BACKEND")
+            or stored.get("task_store_backend")
+            or MACHINE_DEFAULTS["task_store_backend"]
+        )
+
         return MachineSettings(
             mode=mode,
             redis_url=redis_url,
@@ -226,6 +232,7 @@ class SettingsService:
             orchestrator_home=orchestrator_home,
             project_name=project_name,
             planner_max_turns=int(planner_max_turns),
+            task_store_backend=task_store_backend,
         )
 
     def _load_project(self, machine: MachineSettings) -> ProjectSettings:

@@ -16,6 +16,7 @@ MACHINE_DEFAULTS: dict = {
     "orchestrator_home": Path.home() / ".orchestrator",
     "project_name": None,
     "planner_max_turns": 25,
+    "task_store_backend": "file",
 }
 
 # Keys persisted by the wizard in config.json — subset of MachineSettings.

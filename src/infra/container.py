@@ -101,6 +101,15 @@ class AppContainer:
 
     @cached_property
     def task_repo(self):
+        # Cutover flag: file-based YAML (default) or SQLite. Both implement
+        # TaskRepositoryPort, so callers (task manager, reconciler) are unchanged.
+        if self._ctx.machine.task_store_backend == "sqlite":
+            from src.infra.db.task_store import SqliteTaskStore
+
+            _, session_factory = self._config_db
+            log.info("container.task_repo_backend", backend="sqlite")
+            return SqliteTaskStore(session_factory)
+
         from src.infra.fs.task_repository import YamlTaskRepository
 
         return YamlTaskRepository(self.paths.tasks_dir)

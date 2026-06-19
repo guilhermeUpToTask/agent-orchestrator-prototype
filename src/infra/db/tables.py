@@ -214,3 +214,39 @@ class ActiveProjectTable(Base):
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# Task state (Stage B) — the full aggregate is stored as JSON in ``data``;
+# scalar columns are projections for querying (reconciler) and CAS.
+# ---------------------------------------------------------------------------
+
+class TaskTable(Base):
+    __tablename__ = "tasks"
+
+    task_id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Nullable + FK: NULL skips the FK check (back-compat with project-less
+    # tasks); a set project_id gives delete_project its cascade backstop.
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    state_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class TaskTransitionTable(Base):
+    """Append-only audit of task transitions (one row per recorded history entry)."""
+
+    __tablename__ = "task_transitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    actor: Mapped[str] = mapped_column(String, nullable=False, default="")
+    detail: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    state_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)

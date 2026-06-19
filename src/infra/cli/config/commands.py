@@ -221,6 +221,24 @@ def import_files():
          f"skipped: {len(report.skipped)}")
 
 
+@config_group.command("import-tasks")
+@catch_domain_errors
+def import_tasks_cmd():
+    """Import per-project tasks/*.yaml into the SQLite task store (Stage B)."""
+    from src.infra.container import AppContainer
+    from src.infra.db.importer import import_tasks
+    from src.infra.db.task_store import SqliteTaskStore
+
+    app = AppContainer.from_env()
+    _, session_factory = app._config_db
+    imported = import_tasks(
+        orchestrator_home=app.ctx.machine.orchestrator_home,
+        task_store=SqliteTaskStore(session_factory),
+        config_store=app.config_store,
+    )
+    ok(f"Imported {len(imported)} task(s) into SQLite.")
+
+
 @config_group.command("export")
 @click.option("--format", "fmt", type=click.Choice(["yaml", "json"]), default="yaml")
 @catch_domain_errors
