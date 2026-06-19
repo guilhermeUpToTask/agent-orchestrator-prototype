@@ -148,4 +148,7 @@ class CliAgentRuntime(AgentRuntimePort, ABC):
         pass
 
     def stream_logs(self, handle: CliSessionHandle) -> Iterator[str]:
-        yield f"[{self.log_prefix}] no live log streaming — check stdout.txt after completion\n"
+        # The LoggingRuntimeWrapper streams real stdout/stderr line-by-line via
+        # a PTY in _capture_streamed_execution; this pre-pass line just marks the
+        # session start, so it must not claim streaming is unavailable.
+        yield f"[{self.log_prefix}] starting agent session…\n"
