@@ -39,6 +39,7 @@ from src.api.routers import (
     plan,
     project,
     providers,
+    prs,
     refinement,
     secrets,
     spec,
@@ -371,6 +372,7 @@ def create_app(container=None) -> FastAPI:
     app.include_router(providers.router,        prefix=_prefix)
     app.include_router(agent_definitions.router, prefix=_prefix)
     app.include_router(secrets.router,          prefix=_prefix)
+    app.include_router(prs.router,              prefix=_prefix)
 
     # ── Health ────────────────────────────────────────────────────────────────
     @app.get(

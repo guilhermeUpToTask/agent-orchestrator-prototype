@@ -202,6 +202,10 @@ def get_config_store(c=Depends(_get_container)):
     return c.config_store
 
 
+def get_git_forge(c=Depends(_get_container)):
+    return c.git_forge
+
+
 # ── Annotated shorthands (modern DI style) ────────────────────────────────────
 # Import these in route handlers for the cleanest signatures:
 #
@@ -248,3 +252,4 @@ ProjectServiceDep = Annotated[object, Depends(get_project_service)]
 RegistryServiceDep = Annotated[object, Depends(get_registry_service)]
 SecretStoreDep = Annotated[object, Depends(get_secret_store)]
 ConfigStoreDep = Annotated[object, Depends(get_config_store)]
+GitForgeDep = Annotated[object, Depends(get_git_forge)]

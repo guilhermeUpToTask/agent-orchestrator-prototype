@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, Settings as SettingsIcon } from 'lucide-react';
+import { RefreshCw, Settings as SettingsIcon, GitPullRequest } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlannerStore } from '../store/plannerStore';
@@ -80,6 +80,14 @@ export function TopBar() {
 
       <div className={styles.spacer} />
       <ProjectSwitcher />
+      <Link
+        to="/prs"
+        aria-label="Pull requests"
+        title="Pull requests"
+        style={{ display: 'inline-flex', alignItems: 'center', color: tokens.textMuted }}
+      >
+        <GitPullRequest size={15} aria-hidden />
+      </Link>
       <Link
         to="/settings"
         aria-label="Settings"
