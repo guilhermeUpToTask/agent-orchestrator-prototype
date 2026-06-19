@@ -35,6 +35,23 @@ def test_reconciler_republish_is_dropped():
     )
 
 
+def test_task_failed_forwards_reason():
+    # The failure reason rides along on task.status_changed so the UI can show
+    # *why* instantly instead of waiting for the goals refetch.
+    mapped = map_domain_event_to_sse(
+        "task.failed", {"task_id": "t-1", "agent_id": "a-1", "reason": "exit code 1"}
+    )
+    assert mapped == (
+        "task.status_changed",
+        {"task_id": "t-1", "status": "failed", "reason": "exit code 1"},
+    )
+
+
+def test_task_failed_without_reason_omits_key():
+    mapped = map_domain_event_to_sse("task.failed", {"task_id": "t-1"})
+    assert mapped == ("task.status_changed", {"task_id": "t-1", "status": "failed"})
+
+
 def test_task_progress_maps_with_lines():
     mapped = map_domain_event_to_sse(
         "task.progress", {"task_id": "t-1", "lines": ["building…", "done step 1"], "ts": 123.0}

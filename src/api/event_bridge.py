@@ -60,10 +60,13 @@ def map_domain_event_to_sse(event_type: str, payload: dict) -> tuple[str, dict] 
         return None
     status = _TASK_STATUS_BY_EVENT.get(event_type)
     if status is not None:
-        return (
-            "task.status_changed",
-            {"task_id": payload.get("task_id"), "status": status},
-        )
+        out = {"task_id": payload.get("task_id"), "status": status}
+        # task.failed carries the failure reason; forward it so the UI can
+        # show *why* instantly instead of waiting for the goals refetch.
+        reason = payload.get("reason")
+        if reason:
+            out["reason"] = reason
+        return ("task.status_changed", out)
     if event_type == "task.unassignable":
         return (
             "task.unassignable",
