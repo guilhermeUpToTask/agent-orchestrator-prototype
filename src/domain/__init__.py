@@ -216,6 +216,25 @@ from src.domain.repositories.project_plan_repository import ProjectPlanRepositor
 # SpecChanges (new field on DecisionEntry)
 from src.domain.ports.project_state import SpecChanges
 
+# Config layer — exception taxonomy, value objects, entities, ports, mapper
+from src.domain.errors import (
+    BaseAppException,
+    ConflictException,
+    DomainException,
+    ReferentialException,
+)
+from src.domain.value_objects.config import (
+    ProviderKind,
+    RegisteredModel,
+    SecretRef,
+)
+from src.domain.entities.agent_definition import AgentDefinition
+from src.domain.entities.model_provider import ModelProvider
+from src.domain.entities.project import Project
+from src.domain.repositories import ConfigStorePort, SecretStorePort
+from src.domain.ports import ActiveProjectPort
+from src.domain.services.agent_mapping import agent_definition_to_props
+
 # Names imported after the main __all__ block — exported here so the
 # re-exports above are an explicit public API rather than unused imports.
 __all__ += [
@@ -231,4 +250,13 @@ __all__ += [
     "PlannerSession", "PlannerSessionStatus", "SessionTurn",
     "PlannerRuntimePort", "PlannerRuntimeError", "PlannerOutput", "PlannerTool",
     "PlannerSessionRepositoryPort",
+    # config layer — exceptions
+    "BaseAppException", "ConflictException", "DomainException", "ReferentialException",
+    # config layer — value objects
+    "ProviderKind", "RegisteredModel", "SecretRef",
+    # config layer — entities
+    "AgentDefinition", "ModelProvider", "Project",
+    # config layer — ports + mapper
+    "ConfigStorePort", "SecretStorePort", "ActiveProjectPort",
+    "agent_definition_to_props",
 ]
