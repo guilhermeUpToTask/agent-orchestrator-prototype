@@ -22,6 +22,10 @@ jobs:
     name: tests
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: backend
+
     services:
       redis:
         image: redis:7-alpine
@@ -48,7 +52,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
 
       - name: Sync dependencies
         run: uv sync --all-extras --dev
@@ -75,6 +79,10 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
       - uses: actions/checkout@v4
 
@@ -90,7 +98,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
 
       - name: Sync dependencies
         run: uv sync --dev
@@ -112,6 +120,10 @@ jobs:
     name: build
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
       - uses: actions/checkout@v4
 
@@ -127,7 +139,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
 
       - name: Sync dependencies
         run: uv sync
