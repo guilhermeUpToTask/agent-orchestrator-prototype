@@ -10,6 +10,7 @@ import { Overview } from './views/Overview';
 import { GoalsView, GoalDetail } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { AgentsView } from './views/Agents';
+import { SettingsView } from './views/Settings';
 import { usePlannerStore, ts } from './store/plannerStore';
 import { useArchitectureStatusSync, usePlan, useSSEBridge } from './lib/queries';
 import { absTime } from './lib/time';
@@ -74,6 +75,7 @@ export default function App() {
                 <Route path="/goals" element={<GoalsView />} />
                 <Route path="/goals/:goalId" element={<GoalDetail />} />
                 <Route path="/agents" element={<AgentsView />} />
+                <Route path="/settings" element={<SettingsView />} />
                 <Route path="/activity" element={<ActivityView />} />
                 <Route path="*" element={<Overview />} />
               </Routes>

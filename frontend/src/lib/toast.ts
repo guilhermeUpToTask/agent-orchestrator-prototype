@@ -61,6 +61,11 @@ export function errorDetail(err: unknown): string {
   if (jsonStart !== -1) {
     try {
       const parsed = JSON.parse(message.slice(jsonStart));
+      // Control-plane envelope: { error: { code, message, request_id } }.
+      if (parsed?.error && typeof parsed.error.message === 'string') {
+        const rid = parsed.error.request_id ? ` (request ${parsed.error.request_id})` : '';
+        return `${parsed.error.message}${rid}`;
+      }
       if (parsed && typeof parsed.detail === 'string') return parsed.detail;
     } catch {
       // not JSON — fall through to the raw message

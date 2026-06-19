@@ -1,10 +1,13 @@
 import React from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Settings as SettingsIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlannerStore } from '../store/plannerStore';
 import { usePlan } from '../lib/queries';
 import { relTime, absTime, useNow } from '../lib/time';
 import { StatusBadge } from './StatusBadge';
+import { ProjectSwitcher } from './ProjectSwitcher';
+import { tokens } from '../styles/tokens';
 import styles from './TopBar.module.css';
 
 /**
@@ -76,6 +79,15 @@ export function TopBar() {
       </div>
 
       <div className={styles.spacer} />
+      <ProjectSwitcher />
+      <Link
+        to="/settings"
+        aria-label="Settings"
+        title="Settings"
+        style={{ display: 'inline-flex', alignItems: 'center', color: tokens.textMuted }}
+      >
+        <SettingsIcon size={15} aria-hidden />
+      </Link>
       <ConnectionIndicator />
     </header>
   );
