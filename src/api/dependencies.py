@@ -184,6 +184,24 @@ def get_settings_context(c=Depends(_get_container)):
     return c.ctx
 
 
+# ── Control plane (SQLite config store) ────────────────────────────────────────
+
+def get_project_service(c=Depends(_get_container)):
+    return c.project_service
+
+
+def get_registry_service(c=Depends(_get_container)):
+    return c.registry_service
+
+
+def get_secret_store(c=Depends(_get_container)):
+    return c.secret_store
+
+
+def get_config_store(c=Depends(_get_container)):
+    return c.config_store
+
+
 # ── Annotated shorthands (modern DI style) ────────────────────────────────────
 # Import these in route handlers for the cleanest signatures:
 #
@@ -225,3 +243,8 @@ ValidateAgainstSpecUseCaseDep = Annotated[object, Depends(get_validate_against_s
 
 ProjectResetUseCaseDep = Annotated[object, Depends(get_project_reset_usecase)]
 SettingsContextDep = Annotated[object, Depends(get_settings_context)]
+
+ProjectServiceDep = Annotated[object, Depends(get_project_service)]
+RegistryServiceDep = Annotated[object, Depends(get_registry_service)]
+SecretStoreDep = Annotated[object, Depends(get_secret_store)]
+ConfigStoreDep = Annotated[object, Depends(get_config_store)]

@@ -26,7 +26,24 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import set_container, set_container_provider
 from src.api.exceptions import register_exception_handlers
-from src.api.routers import agents, capabilities, discovery, events, goals, plan, project, refinement, spec, tasks
+from src.api.logging.config import configure_logging
+from src.api.middleware.request_logging import RequestLoggingMiddleware
+from src.api.routers import (
+    agent_definitions,
+    agents,
+    capabilities,
+    control_projects,
+    discovery,
+    events,
+    goals,
+    plan,
+    project,
+    providers,
+    refinement,
+    secrets,
+    spec,
+    tasks,
+)
 from src.api.schemas.common import HealthResponse
 from src.api.sse import publish_sse
 
@@ -310,15 +327,22 @@ def create_app(container=None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # ── Structured logging (JSON + secret masking + correlation id) ───────────
+    configure_logging()
+
     # ── Exception handlers ────────────────────────────────────────────────────
     register_exception_handlers(app)
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
+    # ── Middleware ─────────────────────────────────────────────────────────────
+    # Request logging (correlation id) is added before CORS so the id contextvar
+    # is set for the whole request, including the CORS-handled responses.
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
 
     # ── Dependency injection + planner SSE hook ───────────────────────────────
@@ -342,6 +366,11 @@ def create_app(container=None) -> FastAPI:
     app.include_router(spec.router,        prefix=_prefix)
     app.include_router(project.router,     prefix=_prefix)
     app.include_router(events.router,      prefix=_prefix)
+    # Control plane (SQLite config store)
+    app.include_router(control_projects.router, prefix=_prefix)
+    app.include_router(providers.router,        prefix=_prefix)
+    app.include_router(agent_definitions.router, prefix=_prefix)
+    app.include_router(secrets.router,          prefix=_prefix)
 
     # ── Health ────────────────────────────────────────────────────────────────
     @app.get(

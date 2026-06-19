@@ -8,6 +8,22 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    request_id: str
+
+
+class ErrorEnvelope(BaseModel):
+    """Consistent error body for the control-plane endpoints.
+
+    Stack traces are never exposed here; they are logged internally only. The
+    ``request_id`` lets an operator correlate a client error with server logs.
+    """
+
+    error: ErrorDetail
+
+
 class PlanConflictResponse(BaseModel):
     """409 body for plan lifecycle conflicts — tells the client exactly
     which transition was attempted and what the plan state actually is."""
