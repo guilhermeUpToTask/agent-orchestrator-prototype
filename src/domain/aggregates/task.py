@@ -44,6 +44,9 @@ class TaskAggregate(BaseModel):
 
     task_id: str
     feature_id: str
+    # Owning project. Optional for back-compat with pre-multi-project task
+    # records; populated once tasks are created within a project context.
+    project_id: Optional[str] = None
     title: str
     description: str
     agent_selector: AgentSelector

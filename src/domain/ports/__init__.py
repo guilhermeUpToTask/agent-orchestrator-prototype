@@ -7,6 +7,7 @@ from src.domain.ports.github    import GitHubPort, GitHubError, GitHubRateLimitE
 from src.domain.ports.runtime   import AgentRuntimePort, SessionHandle
 from src.domain.ports.storage   import TaskLogsPort, TestRunnerPort
 from src.domain.ports.telemetry import TelemetryEmitterPort
+from src.domain.ports.active_project import ActiveProjectPort
 
 __all__ = [
     "EventPort",
@@ -16,4 +17,5 @@ __all__ = [
     "AgentRuntimePort", "SessionHandle",
     "TaskLogsPort", "TestRunnerPort",
     "TelemetryEmitterPort",
+    "ActiveProjectPort",
 ]
