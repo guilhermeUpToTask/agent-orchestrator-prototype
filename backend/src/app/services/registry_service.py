@@ -13,8 +13,10 @@ import structlog
 from src.app.errors import ResourceNotFoundException, ValidationException
 from src.domain.entities.agent_definition import AgentDefinition
 from src.domain.entities.model_provider import ModelProvider
+from src.domain.repositories.agent_registry import AgentRegistryPort
 from src.domain.repositories.config_store import ConfigStorePort
 from src.domain.repositories.secret_store import SecretStorePort
+from src.domain.services.agent_mapping import agent_definition_to_props
 from src.domain.value_objects.capability import CapabilityTag
 from src.domain.value_objects.config import ProviderKind, RegisteredModel, SecretRef
 
@@ -26,9 +28,15 @@ class RegistryService:
         self,
         config_store: ConfigStorePort,
         secret_store: SecretStorePort,
+        agent_registry: AgentRegistryPort | None = None,
     ) -> None:
         self._config = config_store
         self._secrets = secret_store
+        # Optional: when provided, registering a definition also writes the
+        # derived runtime AgentProps into the registry the scheduler reads, so a
+        # config-registered agent becomes schedulable (liveness still requires a
+        # running worker to heartbeat it).
+        self._agent_registry = agent_registry
 
     # -- Providers ------------------------------------------------------------
     def register_provider(
@@ -114,6 +122,9 @@ class RegistryService:
             model_id=model_id,
         )
         saved = self._config.upsert_agent(definition)
+        if self._agent_registry is not None:
+            # Write-through to the runtime registry so the scheduler can see it.
+            self._agent_registry.register(agent_definition_to_props(saved, provider))
         log.info("agent.registered", agent_id=saved.id, provider_id=provider_id)
         return saved
 
@@ -131,4 +142,6 @@ class RegistryService:
     def delete_agent(self, agent_id: str) -> None:
         self.get_agent(agent_id)
         self._config.delete_agent(agent_id)
+        if self._agent_registry is not None:
+            self._agent_registry.deregister(agent_id)
         log.info("agent.deleted", agent_id=agent_id)

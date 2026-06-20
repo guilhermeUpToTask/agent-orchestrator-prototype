@@ -61,6 +61,13 @@ class TestProjectCrud:
         assert store.get_project("p1").name == "One"
         assert len(store.list_projects()) == 1
 
+    def test_duplicate_create_is_conflict(self, store) -> None:
+        store.create_project(Project(id="p1", name="One", repo_url="r"))
+        with pytest.raises(ConflictException) as ei:
+            store.create_project(Project(id="p1", name="Dup", repo_url="r"))
+        assert ei.value.code == "PROJECT_EXISTS"
+        assert len(store.list_projects()) == 1  # no duplicate row
+
     def test_update_cas_success(self, store) -> None:
         store.create_project(Project(id="p1", name="One", repo_url="r", state_version=0))
         loaded = store.get_project("p1")

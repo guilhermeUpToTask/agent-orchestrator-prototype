@@ -16,52 +16,35 @@ Leases remain in Redis (LeasePort); this store is task *state* only.
 """
 from __future__ import annotations
 
-import time
-from typing import Callable, TypeVar, cast
+from typing import cast
 
 import structlog
 from sqlalchemy import CursorResult, delete, select, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.errors import InfrastructureException
 from src.domain.aggregates.task import TaskAggregate
+from src.domain.errors import ReferentialException
 from src.domain.repositories.task_repository import TaskRepositoryPort
 from src.domain.value_objects.task import HistoryEntry
+from src.infra.db._session import run_in_session
 from src.infra.db.tables import TaskTable, TaskTransitionTable
 
 log = structlog.get_logger(__name__)
-
-_T = TypeVar("_T")
-_MAX_LOCK_RETRIES = 5
-_LOCK_BACKOFF_BASE = 0.05
-
-
-def _is_locked(exc: OperationalError) -> bool:
-    return "database is locked" in str(exc).lower()
 
 
 class SqliteTaskStore(TaskRepositoryPort):
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._sf = session_factory
 
-    def _run(self, fn: Callable[[Session], _T]) -> _T:
-        last: OperationalError | None = None
-        for attempt in range(_MAX_LOCK_RETRIES):
-            try:
-                with self._sf() as session:
-                    result = fn(session)
-                    session.commit()
-                    return result
-            except OperationalError as exc:
-                if not _is_locked(exc):
-                    raise
-                last = exc
-                time.sleep(_LOCK_BACKOFF_BASE * (2 ** attempt))
-                log.warning("task_store.locked_retry", attempt=attempt)
-        raise InfrastructureException(
-            "Task store stayed locked beyond retry budget", code="DB_LOCKED"
-        ) from last
+    def _run(self, fn):
+        try:
+            return run_in_session(self._sf, fn)
+        except IntegrityError as exc:
+            # A task pointing at a non-existent project trips the FK.
+            raise ReferentialException(
+                "Task references a missing project", code="TASK_PROJECT_MISSING"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Port implementation

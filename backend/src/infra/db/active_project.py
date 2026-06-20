@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.domain.ports.active_project import ActiveProjectPort
+from src.infra.db._session import run_in_session
 from src.infra.db.tables import ActiveProjectTable
 
 CLI_SESSION = "cli"
@@ -24,10 +25,10 @@ class SqliteActiveProject(ActiveProjectPort):
             return row.project_id if row else None
 
     def set_active(self, session_id: str, project_id: str) -> None:
-        with self._sf() as s:
+        def _op(s: Session) -> None:
             row = s.get(ActiveProjectTable, session_id)
             if row is not None:
                 row.project_id = project_id
             else:
                 s.add(ActiveProjectTable(session_id=session_id, project_id=project_id))
-            s.commit()
+        run_in_session(self._sf, _op)
