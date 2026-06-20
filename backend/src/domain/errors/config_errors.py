@@ -30,6 +30,7 @@ class ConflictException(DomainError):
         self,
         message: str,
         *,
+        code: str | None = None,
         expected_version: int | None = None,
         actual_version: int | None = None,
         context: dict[str, Any] | None = None,
@@ -41,7 +42,7 @@ class ConflictException(DomainError):
             ctx.setdefault("actual_version", actual_version)
         self.expected_version = expected_version
         self.actual_version = actual_version
-        super().__init__(message, context=ctx)
+        super().__init__(message, code=code, context=ctx)
 
 
 class ReferentialException(DomainError):

@@ -75,6 +75,52 @@ class AppContainer:
         return self._ctx
 
     @cached_property
+    def effective_ctx(self) -> SettingsContext:
+        """SettingsContext with SQLite-stored secrets overlaid on the env ones.
+
+        Stored provider keys + the active project's GitHub token become
+        authoritative for execution (runtime/planner/github/forge), with env as
+        the fallback. Defensive: with no master key — or on any resolution
+        failure — this returns the env-only context untouched and never touches
+        SQLite, so dry-run and env-only deployments are unaffected.
+        """
+        import dataclasses
+
+        from src.infra.db.secret_store import load_master_key
+
+        try:
+            load_master_key()  # env-only read; absent -> stay env-only, no DB
+        except Exception:
+            return self._ctx
+
+        try:
+            from src.infra.db.secret_resolver import resolve_effective_secrets
+
+            effective = resolve_effective_secrets(
+                self._ctx.secrets,
+                secret_store=self.secret_store,
+                config_store=self.config_store,
+                github_ref=self._active_github_secret_ref(),
+            )
+            return dataclasses.replace(self._ctx, secrets=effective)
+        except Exception as exc:  # never let secret resolution break the app
+            log.warning("container.effective_ctx_fallback", error=str(exc))
+            return self._ctx
+
+    def _active_github_secret_ref(self):
+        """The config-store project's GitHub secret ref for the running project."""
+        name = self._ctx.machine.project_name
+        if not name:
+            return None
+        from src.app.services.project_service import slugify
+
+        try:
+            project = self.config_store.get_project(slugify(name))
+        except Exception:
+            return None
+        return project.github_secret_ref if project else None
+
+    @cached_property
     def paths(self) -> ProjectPaths:
         return self._ctx.paths  # cached_property on SettingsContext
 
@@ -176,7 +222,11 @@ class AppContainer:
     def registry_service(self):
         from src.app.services.registry_service import RegistryService
 
-        return RegistryService(self.config_store, self.secret_store)
+        # The agent registry is project-scoped (registry.json under a project),
+        # but agent definitions are global and may be registered before any
+        # project exists. Only wire write-through when a project is active.
+        registry = self.agent_registry if self._ctx.machine.project_name else None
+        return RegistryService(self.config_store, self.secret_store, registry)
 
     # ------------------------------------------------------------------
     # Git forge (PR window) — GitHub primary, local-git fallback
@@ -186,7 +236,7 @@ class AppContainer:
     def git_forge(self):
         from src.infra.forge.local_git import LocalGitForge
 
-        ctx = self._ctx
+        ctx = self.effective_ctx
         local = LocalGitForge(str(self.paths.project_home / "repo"))
         if ctx.github_fully_configured():
             from src.infra.forge.fallback import FallbackForge
@@ -300,7 +350,7 @@ class AppContainer:
 
         from src.infra.github.client import GitHubClient
 
-        token = self._ctx.secrets.require_github_token()
+        token = self.effective_ctx.secrets.require_github_token()
         owner = self._ctx.project.github_owner or ""
         repo = self._ctx.project.github_repo or ""
 
@@ -323,7 +373,7 @@ class AppContainer:
     def runtime_factory(self) -> Callable:
         from src.infra.runtime.factory import build_runtime_factory
 
-        return build_runtime_factory(self._ctx)
+        return build_runtime_factory(self.effective_ctx)
 
     @cached_property
     def planner_runtime(self):
@@ -334,7 +384,7 @@ class AppContainer:
 
         from src.infra.runtime.planners.planner_factory import build_autonomous_planner
 
-        return build_autonomous_planner(self._ctx)
+        return build_autonomous_planner(self.effective_ctx)
 
     @cached_property
     def interactive_planner_runtime(self):
@@ -347,7 +397,7 @@ class AppContainer:
 
         from src.infra.runtime.planners.planner_factory import build_interactive_planner
 
-        return build_interactive_planner(self._ctx)
+        return build_interactive_planner(self.effective_ctx)
 
     def build_interactive_planner_runtime(
         self, io_handler: Callable[[str], str]
@@ -362,7 +412,7 @@ class AppContainer:
 
         from src.infra.runtime.planners.planner_factory import build_interactive_planner
 
-        runtime = build_interactive_planner(self._ctx)
+        runtime = build_interactive_planner(self.effective_ctx)
         # Inject the caller-controlled io_handler into the runtime.
         # Reaching into the adapter's internals is a known DI wart
         # (review §3.8) — tolerated until the runtime exposes a setter.

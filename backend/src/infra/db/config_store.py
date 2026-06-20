@@ -9,20 +9,20 @@ InfrastructureException.
 """
 from __future__ import annotations
 
-import time
-from typing import Callable, TypeVar, cast
+from typing import cast
 
 import structlog
 from sqlalchemy import CursorResult, delete, select, update
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.errors import InfrastructureException, ResourceNotFoundException
+from src.app.errors import ResourceNotFoundException
 from src.domain.entities.agent_definition import AgentDefinition
 from src.domain.entities.model_provider import ModelProvider
 from src.domain.entities.project import Project
 from src.domain.errors import ConflictException, ReferentialException
 from src.domain.repositories.config_store import ConfigStorePort
+from src.infra.db._session import run_in_session
 from src.infra.db.tables import (
     AgentDefinitionTable,
     ModelProviderTable,
@@ -31,49 +31,33 @@ from src.infra.db.tables import (
 
 log = structlog.get_logger(__name__)
 
-_T = TypeVar("_T")
-
-_MAX_LOCK_RETRIES = 5
-_LOCK_BACKOFF_BASE = 0.05  # seconds
-
-
-def _is_locked(exc: OperationalError) -> bool:
-    return "database is locked" in str(exc).lower()
-
 
 class SqliteConfigStore(ConfigStorePort):
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._sf = session_factory
 
-    def _run(self, fn: Callable[[Session], _T]) -> _T:
-        """Run ``fn`` in a transaction, retrying transient lock errors."""
-        last: OperationalError | None = None
-        for attempt in range(_MAX_LOCK_RETRIES):
-            try:
-                with self._sf() as session:
-                    result = fn(session)
-                    session.commit()
-                    return result
-            except OperationalError as exc:
-                if not _is_locked(exc):
-                    raise
-                last = exc
-                time.sleep(_LOCK_BACKOFF_BASE * (2 ** attempt))
-                log.warning("config_store.locked_retry", attempt=attempt)
-        raise InfrastructureException(
-            "Config store stayed locked beyond retry budget", code="DB_LOCKED"
-        ) from last
+    def _run(self, fn):
+        return run_in_session(self._sf, fn)
 
     # -- Projects -------------------------------------------------------------
     def create_project(self, project: Project) -> Project:
+        if self.get_project(project.id) is not None:
+            raise ConflictException(
+                f"Project '{project.id}' already exists",
+                code="PROJECT_EXISTS",
+                context={"project_id": project.id},
+            )
+
         def _op(s: Session) -> Project:
             s.add(ProjectTable.from_domain(project))
             return project
         try:
             return self._run(_op)
         except IntegrityError as exc:
-            raise ReferentialException(
-                f"Project '{project.id}' already exists or violates a constraint",
+            # Lost the create race (concurrent insert of the same id).
+            raise ConflictException(
+                f"Project '{project.id}' already exists",
+                code="PROJECT_EXISTS",
                 context={"project_id": project.id},
             ) from exc
 

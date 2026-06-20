@@ -107,6 +107,26 @@ class FakeActiveProject:
         self.active[session_id] = project_id
 
 
+class FakeAgentRegistry:
+    def __init__(self) -> None:
+        self.agents: dict = {}
+
+    def register(self, agent) -> None:
+        self.agents[agent.agent_id] = agent
+
+    def deregister(self, agent_id: str) -> None:
+        self.agents.pop(agent_id, None)
+
+    def list_agents(self):
+        return list(self.agents.values())
+
+    def get(self, agent_id: str):
+        return self.agents.get(agent_id)
+
+    def heartbeat(self, agent_id: str) -> bool:
+        return agent_id in self.agents
+
+
 @pytest.fixture
 def stores() -> tuple[FakeConfigStore, FakeSecretStore, FakeActiveProject]:
     return FakeConfigStore(), FakeSecretStore(), FakeActiveProject()
@@ -196,6 +216,30 @@ class TestRegistryService:
             capabilities=("code:backend",),
         )
         assert agent.id == "a1"
+
+    def test_register_agent_writes_through_to_registry(self, stores) -> None:
+        config, secrets, _ = stores
+        registry = FakeAgentRegistry()
+        svc = RegistryService(config, secrets, registry)
+        svc.register_provider(
+            provider_id="anthropic", kind=ProviderKind.ANTHROPIC, api_key="k",
+            base_url="https://proxy",
+        )
+        svc.add_model(provider_id="anthropic", model_id="claude-opus-4-8")
+        svc.register_agent(
+            agent_id="a1", name="Worker", runtime_type="claude",
+            provider_id="anthropic", model_id="claude-opus-4-8",
+            capabilities=("code:backend",),
+        )
+        # Derived AgentProps is now schedulable from the runtime registry.
+        props = registry.get("a1")
+        assert props is not None
+        assert props.runtime_type == "claude"
+        assert props.runtime_config["model"] == "claude-opus-4-8"
+        assert props.runtime_config["base_url"] == "https://proxy"
+        # And deregistration removes it.
+        svc.delete_agent("a1")
+        assert registry.get("a1") is None
 
     def test_register_agent_unknown_model_raises(self, stores) -> None:
         svc = self._svc(stores)

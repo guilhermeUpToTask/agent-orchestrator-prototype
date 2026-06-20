@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.app.errors import InfrastructureException, ResourceNotFoundException
 from src.domain.repositories.secret_store import SecretStorePort
 from src.domain.value_objects.config import SecretRef
+from src.infra.db._session import run_in_session
 from src.infra.db.tables import SecretTable
 
 log = structlog.get_logger(__name__)
@@ -63,14 +64,15 @@ class SqliteSecretStore(SecretStorePort):
         data_key = Fernet.generate_key()
         ciphertext = Fernet(data_key).encrypt(plaintext.encode()).decode()
         wrapped_key = self._master.encrypt(data_key).decode()
-        with self._sf() as s:
+
+        def _op(s: Session) -> None:
             existing = s.get(SecretTable, ref.uri)
             if existing is not None:
                 existing.ciphertext = ciphertext
                 existing.wrapped_key = wrapped_key
             else:
                 s.add(SecretTable(uri=ref.uri, ciphertext=ciphertext, wrapped_key=wrapped_key))
-            s.commit()
+        run_in_session(self._sf, _op)
         log.info("secret.stored", uri=ref.uri)
 
     def resolve(self, ref: SecretRef) -> SecretStr:
@@ -90,11 +92,19 @@ class SqliteSecretStore(SecretStorePort):
             ) from exc
         return SecretStr(plaintext)
 
+    def resolve_plaintext(self, ref: SecretRef) -> str:
+        """Internal infra helper: the single place plaintext is unwrapped.
+
+        Used by the effective-secrets overlay, which must hand plain API keys to
+        SDK clients. Confines ``.get_secret_value()`` to this module.
+        """
+        return self.resolve(ref).get_secret_value()
+
     def exists(self, ref: SecretRef) -> bool:
         with self._sf() as s:
             return s.get(SecretTable, ref.uri) is not None
 
     def delete(self, ref: SecretRef) -> None:
-        with self._sf() as s:
+        def _op(s: Session) -> None:
             s.execute(delete(SecretTable).where(SecretTable.uri == ref.uri))
-            s.commit()
+        run_in_session(self._sf, _op)
