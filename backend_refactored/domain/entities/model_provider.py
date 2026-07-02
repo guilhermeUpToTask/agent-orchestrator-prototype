@@ -7,13 +7,15 @@ class ModelProvider(BaseModel):
     id: str
     name: str
     base_url: str
-    api_key: str
+    # Reference (URI) into the secret store — NEVER the plaintext key. Resolution
+    # happens in infra at the single decryption point; keys never enter the domain.
+    api_key_ref: str
     models: list[IAModel]
 
-    def add_model(self, model: IAModel):
+    def add_model(self, model: IAModel) -> None:
         self.models.append(model)
 
-    def delete_model(self, model: IAModel):
+    def delete_model(self, model: IAModel) -> None:
         self.models.remove(model)
 
     def get_model(self, model_id: str) -> IAModel | None:

@@ -37,6 +37,22 @@ class TaskFailedEvent(DomainEvent):
     reason: str
 
 
+class TaskAbandoned(DomainEvent):
+    """Tolerant finalize closed an in-flight task because its iteration was
+    abandoned by a replan (terminal-skip, never requeued)."""
+
+    goal_id: str
+    task_id: str
+    reason: str
+
+
+class ReplanRequested(DomainEvent):
+    """A conversational re-plan was requested (from REVIEW or mid-RUNNING chat).
+    Pending work of the current iteration was skipped."""
+
+    from_phase: str
+
+
 class GoalCompleted(DomainEvent):
     goal_id: str
 

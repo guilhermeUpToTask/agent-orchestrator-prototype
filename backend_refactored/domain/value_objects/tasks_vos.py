@@ -1,26 +1,10 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import Literal
-
 
 from pydantic import BaseModel
 
-
-class Status(str, Enum):
-    """Lifecycle state shared by goals and tasks. str-based so comparisons and JSON
-    serialization are natural (task.status == Status.DONE works)."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    DONE = "done"
-    SKIPPED = "skipped"
-    FAILED = "failed"
-
-
-# States the navigation scan treats as finished. A FAILED node being terminal is
-# what prevents the infinite-loop: it is skipped, never re-selected forever.
-TERMINAL: frozenset[Status] = frozenset({Status.DONE, Status.SKIPPED, Status.FAILED})
+from domain.value_objects.lifecycle import FailureKind
 
 
 class TaskResult(BaseModel):
@@ -39,12 +23,27 @@ class TaskResult(BaseModel):
     output: str
     artifacts: dict[str, str] = {}
     failure_reason: str | None = None
+    failure_kind: FailureKind | None = None
     metadata: dict[str, str] = {}
 
     @classmethod
-    def success(cls, output: str, **kw: object) -> "TaskResult":
-        return cls(status="success", output=output, **kw)  # type: ignore[arg-type]
+    def success(
+        cls,
+        output: str,
+        artifacts: dict[str, str] | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> "TaskResult":
+        return cls(
+            status="success",
+            output=output,
+            artifacts=artifacts or {},
+            metadata=metadata or {},
+        )
 
     @classmethod
-    def failure(cls, reason: str, output: str = "") -> "TaskResult":
-        return cls(status="failure", output=output, failure_reason=reason)
+    def failure(
+        cls, reason: str, kind: FailureKind | None = None, output: str = ""
+    ) -> "TaskResult":
+        return cls(
+            status="failure", output=output, failure_reason=reason, failure_kind=kind
+        )

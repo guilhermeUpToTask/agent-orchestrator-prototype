@@ -5,7 +5,7 @@ from typing import Literal, Union
 
 from domain.entities.goal import Goal
 from domain.entities.task import Task
-from domain.value_objects.tasks_vos import Status, TERMINAL
+from domain.value_objects.lifecycle import Status, TERMINAL
 
 GoalFailed = Literal["GOAL_FAILED"]
 

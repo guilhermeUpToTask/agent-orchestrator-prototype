@@ -1,35 +1,81 @@
 """In-memory test doubles for the application layer. Let advance_plan be tested
 end-to-end with ZERO infrastructure (no SQLite, no pi, no network). The whole
 orchestration loop runs against these; production swaps them for real adapters
-behind the same ports."""
+behind the same ports — so the fakes' claim/lease/CAS semantics deliberately
+mirror what the real SQLite adapter must do."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
-from domain.aggregates.planner_orchestrator import Plan
+from domain.aggregates.planner_orchestrator import (
+    Plan,
+    WORKER_CLAIMABLE_PHASES,
+)
 from domain.entities.agent_spec import AgentSpec
+from domain.entities.capability import Capability
 from domain.entities.task import Task
 from domain.errors.agent_errors import AgentNotFoundError, NoDefaultAgentError
+from domain.errors.planning_errors import PlanNotFoundError
 from domain.errors.tasks_errors import StaleVersionError
 from domain.events.agent_events import AgentEvent
 from domain.events.base import DomainEvent
+from domain.value_objects.lifecycle import FailureKind
 from domain.value_objects.tasks_vos import TaskResult
 
-from application.ports import TaskFailed, UnitOfWork
+from application.ports import (
+    AgentEventSink,
+    Clock,
+    TaskFailed,
+    UnitOfWork,
+    WorkspaceHandle,
+)
 
 
-# ---- in-memory plan repository with version-CAS ----
+# ---- controllable clock for deterministic time/backoff/lease tests ----
+class FakeClock:
+    """A clock the test drives. advance() moves time forward so backoff gates and
+    lease expiries can be crossed deterministically without real sleeping."""
+
+    def __init__(self, start: datetime | None = None) -> None:
+        self._now = start or datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def now(self) -> datetime:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now = self._now + timedelta(seconds=seconds)
+
+
+@dataclass
+class _Claim:
+    worker_id: str
+    expires_at: datetime
+    lease_seconds: int
+
+
+# ---- in-memory plan repository with version-CAS + lease semantics ----
 class InMemoryPlanRepository:
-    def __init__(self) -> None:
+    """Mirrors the real adapter's contracts: detached aggregates (deep copy on
+    get/save), version-CAS, and a lease with REAL expiry — a plan claimed by a
+    live worker is not claimable by anyone (including re-claims); it becomes
+    claimable again only when released or when the lease expires (crash recovery).
+    The claim predicate is the driver model: only worker-claimable phases
+    (ARCHITECTURE / ENRICHING / RUNNING) are ever selected."""
+
+    def __init__(self, clock: Clock | None = None) -> None:
         self._store: dict[str, Plan] = {}
         self._requests: dict[str, str] = {}
-        self._claims: dict[str, str] = {}
+        self._claims: dict[str, _Claim] = {}
+        self._clock: Clock = clock or FakeClock()
 
     def add(self, plan: Plan) -> None:
         self._store[plan.id] = plan.model_copy(deep=True)
 
     def get(self, plan_id: str) -> Plan:
+        if plan_id not in self._store:
+            raise PlanNotFoundError(plan_id)
         return self._store[plan_id].model_copy(deep=True)
 
     def save(self, plan: Plan) -> None:
@@ -46,21 +92,34 @@ class InMemoryPlanRepository:
     def bind_request_id(self, request_id: str, plan_id: str) -> None:
         self._requests[request_id] = plan_id
 
-    # --- lease (simplified, in-memory) ---
+    # --- lease ---
     def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None:
+        now = self._clock.now()
         for plan in self._store.values():
-            if plan.phase.value in ("executing", "drafting", "breakdown", "enriching"):
-                claimed = self._claims.get(plan.id)
-                if claimed is None or claimed != worker_id:
-                    self._claims[plan.id] = worker_id
-                    return plan.model_copy(deep=True)
+            if plan.phase not in WORKER_CLAIMABLE_PHASES:
+                continue  # gates + conversational phases are invisible to workers
+            claim = self._claims.get(plan.id)
+            if claim is not None and claim.expires_at > now:
+                continue  # live lease (even our own): not claimable
+            self._claims[plan.id] = _Claim(
+                worker_id=worker_id,
+                expires_at=now + timedelta(seconds=lease_seconds),
+                lease_seconds=lease_seconds,
+            )
+            return plan.model_copy(deep=True)
         return None
 
     def heartbeat(self, plan_id: str, worker_id: str) -> None:
-        self._claims[plan_id] = worker_id
+        claim = self._claims.get(plan_id)
+        if claim is not None and claim.worker_id == worker_id:
+            claim.expires_at = self._clock.now() + timedelta(
+                seconds=claim.lease_seconds
+            )
 
     def release(self, plan_id: str, worker_id: str) -> None:
-        self._claims.pop(plan_id, None)
+        claim = self._claims.get(plan_id)
+        if claim is not None and claim.worker_id == worker_id:
+            self._claims.pop(plan_id, None)
 
 
 # ---- in-memory outbox ----
@@ -92,8 +151,8 @@ class InMemoryUnitOfWork:
     def __enter__(self) -> "InMemoryUnitOfWork":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if exc_type is None:
+    def __exit__(self, *exc: object) -> None:
+        if exc[0] is None:
             self.outbox._commit()  # state + events commit together
         else:
             self.outbox._rollback()  # rollback discards staged events
@@ -117,6 +176,27 @@ class InMemoryAgentRepository:
         if self._default is None:
             raise NoDefaultAgentError()
         return self._default
+
+
+# ---- in-memory capability catalog ----
+class InMemoryCapabilityRepository:
+    def __init__(self, capabilities: list[Capability] | None = None) -> None:
+        self._caps = {c.id: c for c in (capabilities or [])}
+
+    def get(self, capability_id: str) -> Capability:
+        return self._caps[capability_id]
+
+    def list(self) -> list[Capability]:
+        return list(self._caps.values())
+
+    def add(self, capability: Capability) -> None:
+        self._caps[capability.id] = capability
+
+    def update(self, capability: Capability) -> None:
+        self._caps[capability.id] = capability
+
+    def delete(self, capability_id: str) -> None:
+        self._caps.pop(capability_id, None)
 
 
 # ---- no-op workspace (git seam) ----
@@ -157,6 +237,7 @@ class DummyBehavior:
     output: str = "ok"
     fail_times: int = 0  # fail the first N attempts, then succeed
     fail_reason: str = "transient"
+    fail_kind: FailureKind = FailureKind.CONNECTION_ERROR  # retryable by default
     always_fail: bool = False
     emit_events: int = 0  # number of fake agent events to stream
     crash_after_success: bool = False  # simulate worker death AFTER agent returned
@@ -177,8 +258,8 @@ class DummyAgentRunner:
         spec: AgentSpec,
         *,
         idempotency_key: str,
-        event_sink,
-        workspace,
+        event_sink: AgentEventSink,
+        workspace: WorkspaceHandle,
     ) -> TaskResult:
         self.calls[task.id] = self.calls.get(task.id, 0) + 1
         b = self.script.get(task.id, DummyBehavior())
@@ -196,26 +277,23 @@ class DummyAgentRunner:
             )
 
         if b.always_fail:
-            raise TaskFailed(reason=b.fail_reason)
+            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
         if b.fail_times and task.attempt <= b.fail_times:
-            raise TaskFailed(reason=b.fail_reason)
+            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
 
         return TaskResult.success(b.output, metadata={"dummy": "true"})
 
 
-# ---- controllable clock for deterministic time/backoff tests ----
-from datetime import datetime, timedelta, timezone
-
-
-class FakeClock:
-    """A clock the test drives. advance() moves time forward so backoff gates
-    can be crossed deterministically without real sleeping."""
-
-    def __init__(self, start: datetime | None = None) -> None:
-        self._now = start or datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    def now(self) -> datetime:
-        return self._now
-
-    def advance(self, seconds: float) -> None:
-        self._now = self._now + timedelta(seconds=seconds)
+__all__ = [
+    "FakeClock",
+    "InMemoryPlanRepository",
+    "InMemoryOutbox",
+    "InMemoryUnitOfWork",
+    "InMemoryAgentRepository",
+    "InMemoryCapabilityRepository",
+    "NoOpWorkspace",
+    "CollectingEventSink",
+    "DummyBehavior",
+    "DummyAgentRunner",
+    "UnitOfWork",
+]

@@ -13,10 +13,12 @@ from domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from domain.entities.goal import Goal
 from domain.entities.task import Task
 from domain.entities.agent_spec import AgentSpec
-from domain.value_objects.tasks_vos import Status, TaskResult
+from domain.value_objects.lifecycle import FailureKind, Status
+from domain.value_objects.tasks_vos import TaskResult
 from domain.policies.retry_policies import RetryPolicy
 
 from application.use_cases.advance_plan import advance_plan
+from application.use_cases.control import finish_review
 from application.testing.fakes import (
     FakeClock,
     InMemoryPlanRepository,
@@ -60,7 +62,7 @@ def make_plan(tasks_per_goal=1, n_goals=1, retry_max=3):
     return Plan(
         id="p1",
         brief="b",
-        phase=PlanPhase.EXECUTING,
+        phase=PlanPhase.RUNNING,
         retry_policy=RetryPolicy(max_attempts=retry_max),
         goals=goals,
     )
@@ -80,6 +82,9 @@ def harness(plan, script=None):
 
 
 async def run_to_completion(plan, script=None, max_steps=50):
+    """Drive the plan through RUNNING. Execution now exhausts into the REVIEW gate
+    (paused); the human "finish" (finish_review) is what reaches DONE — modeled
+    here so tests keep asserting the full RUNNING -> REVIEW -> DONE path."""
     repo, outbox, uow, runner, agents, ws, sink, clock = harness(plan, script)
     signal = "continue"
     steps = 0
@@ -88,6 +93,9 @@ async def run_to_completion(plan, script=None, max_steps=50):
         if signal == "not_ready":
             clock.advance(120)  # model the worker waiting out the backoff gate
         steps += 1
+    if signal == "paused" and repo.get("p1").phase == PlanPhase.REVIEW:
+        finish_review("p1", uow)  # human closes the post-exec gate
+        signal = "done"
     return signal, repo, outbox, runner, ws, sink
 
 
@@ -146,7 +154,13 @@ def test_permanent_failure_halts_plan():
 
 
 def test_non_retryable_fails_immediately():
-    script = {"g0t0": DummyBehavior(always_fail=True, fail_reason="invalid_input")}
+    script = {
+        "g0t0": DummyBehavior(
+            always_fail=True,
+            fail_reason="key rejected",
+            fail_kind=FailureKind.AUTH_ERROR,
+        )
+    }
     plan = make_plan(retry_max=5)
     sig, repo, outbox, runner, ws, sink = asyncio.run(run_to_completion(plan, script))
     assert sig == "failed"

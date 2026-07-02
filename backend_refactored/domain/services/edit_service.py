@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from domain.entities.goal import Goal
 from domain.entities.task import Task
-from domain.services.lookups import find_goal
+from domain.services.lookups import find_goal, find_task
 from domain.errors.planning_errors import InvalidEditError
 from domain.errors.tasks_errors import GoalAlreadyRunningError
-from domain.value_objects.tasks_vos import Status, TERMINAL
+from domain.value_objects.lifecycle import Status, TERMINAL
 
 
 def _assert_editable(goal: Goal) -> None:
@@ -72,9 +72,5 @@ def edit_task_requirements(
     snapshot binding stays; execution re-validates)."""
     goal = find_goal(goals, goal_id)
     _assert_editable(goal)
-    # NOTE: duplicates lookups.find_task but raises InvalidEditError instead of
-    # TaskNotFoundError — see ../../DESIGN_NOTES.md (edit lookup error convention).
-    task = next((t for t in goal.tasks if t.id == task_id), None)
-    if task is None:
-        raise InvalidEditError(f"task '{task_id}' not found in goal '{goal_id}'")
+    task = find_task(goal, task_id)  # one lookup, one error: TaskNotFoundError
     task.required_capabilities = list(required_capabilities)

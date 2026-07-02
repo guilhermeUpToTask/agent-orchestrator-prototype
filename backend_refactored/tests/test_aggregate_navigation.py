@@ -1,7 +1,9 @@
 """Aggregate orchestration, navigation, edits, binding, factories — the behaviors
 that kill the reconciler and the FAILED-loop, plus error paths."""
 
-import sys, os, pytest
+import sys
+import os
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -27,7 +29,8 @@ from domain.errors.planning_errors import (
     EmptyPlanError,
     InvalidEditError,
 )
-from domain.value_objects.tasks_vos import Status, TaskResult
+from domain.value_objects.lifecycle import FailureKind, Status
+from domain.value_objects.tasks_vos import TaskResult
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -51,7 +54,7 @@ def goal(gid, pos, tasks, status=Status.PENDING, deps=None):
 
 
 def exec_plan(goals):
-    return Plan(id="p", brief="b", phase=PlanPhase.EXECUTING, goals=goals)
+    return Plan(id="p", brief="b", phase=PlanPhase.RUNNING, goals=goals)
 
 
 # ===== NAVIGATION: ordering =====
@@ -173,7 +176,7 @@ def test_retry_cycle_requeue_then_succeed():
     p = exec_plan([goal("g1", 0, [task(0)])])
     p.start_task("g1", "t0")  # attempts 1
     p.fail_task("g1", "t0", "transient")
-    assert p.retry_policy.should_retry(1, "transient")  # domain decides retry
+    assert p.retry_policy.should_retry(1, FailureKind.CONNECTION_ERROR)  # domain decides retry
     p.requeue_task("g1", "t0")
     p.start_task("g1", "t0")  # attempts 2
     p.complete_task("g1", "t0", TaskResult.success("ok"))
@@ -189,7 +192,7 @@ def test_retry_exhaustion_becomes_terminal():
     p.start_task("g1", "t0")
     p.start_task("g1", "t0")  # 3 attempts
     p.fail_task("g1", "t0", "transient")
-    assert rp.should_retry(3, "transient") is False  # exhausted -> stays FAILED
+    assert rp.should_retry(3, FailureKind.CONNECTION_ERROR) is False  # exhausted -> stays FAILED
 
 
 # ===== EDIT service =====
@@ -274,7 +277,8 @@ def test_bind_agents_records_fallbacks():
 # ===== FACTORIES =====
 def test_factory_create_and_birth_invariant():
     p = PlanFactory.create("build x")
-    assert p.phase == PlanPhase.DRAFTING and p.version == 0 and p.brief == "build x"
+    assert p.phase == PlanPhase.DISCOVERY and p.version == 0 and p.brief == "build x"
+    assert p.iteration == 1
     with pytest.raises(EmptyPlanError):
         PlanFactory.create("  ")
 

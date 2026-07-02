@@ -14,6 +14,7 @@ from domain.events.agent_events import AgentEvent
 from domain.events.base import DomainEvent
 from domain.policies.retry_policies import RetryPolicy
 from domain.repositories.planner_repo import PlanRepository
+from domain.value_objects.lifecycle import FailureKind
 from domain.value_objects.tasks_vos import TaskResult
 
 
@@ -26,11 +27,13 @@ class Clock(Protocol):
 
 
 class TaskFailed(Exception):
-    """Raised by an AgentRunner when a task run fails. Carries a `reason` the
-    domain RetryPolicy classifies (retryable vs terminal)."""
+    """Raised by an AgentRunner when a task run fails. Carries a human-readable
+    `reason` plus a typed `kind` (the shared failure taxonomy) that the domain
+    RetryPolicy classifies (retryable vs terminal)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, kind: FailureKind | None = None) -> None:
         self.reason = reason
+        self.kind = kind
         super().__init__(reason)
 
 
@@ -83,7 +86,7 @@ class Reasoner(Protocol):
     """The planning LLM (one-shot transforms). Stubbed minimally here; the LLM
     phases call these. Built out when the planning phases are implemented."""
 
-    async def draft_plan(self, brief: str, policy: RetryPolicy) -> dict: ...
+    async def draft_plan(self, brief: str, policy: RetryPolicy) -> dict[str, object]: ...
 
 
 @runtime_checkable
