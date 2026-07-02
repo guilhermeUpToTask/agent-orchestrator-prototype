@@ -2,7 +2,9 @@
 sequences, backoff wiring, max_steps safety, and skip handling. These are the
 states a real run actually reaches."""
 
-import sys, os, asyncio, pytest
+import sys
+import os
+import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -10,12 +12,14 @@ from domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from domain.entities.goal import Goal
 from domain.entities.task import Task
 from domain.entities.agent_spec import AgentSpec
-from domain.value_objects.tasks_vos import Status, TaskResult
+from domain.value_objects.lifecycle import Status
+from domain.value_objects.tasks_vos import TaskResult
 from domain.policies.retry_policies import RetryPolicy
 from datetime import datetime, timezone
 from domain.services.navigation import next_action
 
 from application.use_cases.advance_plan import advance_plan
+from application.use_cases.control import finish_review
 from application.use_cases.run_worker import drive_plan
 from application.testing.fakes import (
     FakeClock,
@@ -61,17 +65,21 @@ def harness(plan, script=None):
 
 
 async def drive(repo, uow, runner, agents, ws, sink, clock):
-    # model a worker that waits out backoff gates: advance clock on not_ready
-    sig = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
+    # model a worker that waits out backoff gates (advance clock on not_ready)
+    # and a human who finishes the post-exec REVIEW gate.
+    sig, _ = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
     while sig == "not_ready":
         clock.advance(300)
-        sig = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
+        sig, _ = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
+    if sig == "paused" and repo.get("p1").phase == PlanPhase.REVIEW:
+        finish_review("p1", uow)
+        sig = "done"
     return sig
 
 
 # ===== DEGENERATE PLANS =====
 def test_empty_plan_no_goals_completes_immediately():
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[])
     assert next_action([], _NOW) is None
     repo, uow, runner, agents, ws, sink, clock = harness(p)
     sig = asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
@@ -80,7 +88,7 @@ def test_empty_plan_no_goals_completes_immediately():
 
 def test_goal_with_no_tasks_closes_cleanly():
     g = Goal(id="g1", name="g1", position=0, description="", tasks=[])
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[g])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g])
     # next_action: goal has no tasks, no failed task -> (goal, None) to close
     go, second = next_action([g], _NOW)
     assert second is None
@@ -99,7 +107,7 @@ def test_mix_of_empty_and_populated_goals():
         description="",
         tasks=[Task(id="g2t0", name="t", position=0, description="", agent_id="a1")],
     )
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[g1, g2])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g1, g2])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
     sig = asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
     assert sig == "done"
@@ -122,12 +130,14 @@ def test_advance_already_failed_plan_returns_failed():
     assert sig == "failed"
 
 
-def test_non_executing_phase_pauses_or_continues():
-    # AWAITING_REVIEW with default pause_after={ENRICHING} -> not in pause set -> 'paused'?
-    p = Plan(id="p1", brief="b", phase=PlanPhase.AWAITING_REVIEW, goals=[])
-    repo, uow, runner, agents, ws, sink, clock = harness(p)
-    sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
-    assert sig in ("paused", "continue")  # AWAITING_REVIEW is not EXECUTING
+def test_gate_phases_always_pause():
+    # Gates pause UNCONDITIONALLY (the old conditional pause_after check was the
+    # verified gate-spin bug).
+    for phase in (PlanPhase.AWAITING_REVIEW, PlanPhase.REVIEW):
+        p = Plan(id="p1", brief="b", phase=phase, goals=[])
+        repo, uow, runner, agents, ws, sink, clock = harness(p)
+        sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+        assert sig == "paused"
 
 
 # ===== MULTI-FAILURE SEQUENCES =====
@@ -142,7 +152,7 @@ def test_two_different_tasks_each_retry_then_succeed():
             Task(id="t1", name="t1", position=1, description="", agent_id="a1"),
         ],
     )
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[g])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g])
     script = {"t0": DummyBehavior(fail_times=1), "t1": DummyBehavior(fail_times=1)}
     repo, uow, runner, agents, ws, sink, clock = harness(p, script)
     sig = asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
@@ -165,7 +175,7 @@ def test_first_task_succeeds_second_permanently_fails_halts():
     p = Plan(
         id="p1",
         brief="b",
-        phase=PlanPhase.EXECUTING,
+        phase=PlanPhase.RUNNING,
         retry_policy=RetryPolicy(max_attempts=2),
         goals=[g],
     )
@@ -206,7 +216,7 @@ def test_max_steps_prevents_runaway():
     p = Plan(
         id="p1",
         brief="b",
-        phase=PlanPhase.EXECUTING,
+        phase=PlanPhase.RUNNING,
         retry_policy=RetryPolicy(max_attempts=10**9),
         goals=[g],
     )
@@ -220,10 +230,10 @@ def test_max_steps_prevents_runaway():
     plan2.retry_policy = _RP(max_attempts=10**9, initial_backoff_seconds=0)
     # re-seed with zero-backoff policy
     repo._store["p1"].retry_policy = _RP(max_attempts=10**9, initial_backoff_seconds=0)
-    sig = asyncio.run(
+    sig, progressed = asyncio.run(
         drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1", max_steps=5)
     )
-    assert sig == "continue"  # stopped at cap, not terminal, didn't hang
+    assert sig == "continue" and progressed == 5  # stopped at cap, didn't hang
     assert runner.calls["t0"] == 5  # exactly max_steps attempts, then bailed
 
 
@@ -233,7 +243,7 @@ def test_skipped_tasks_are_passed_over():
     t0.status = Status.SKIPPED
     t1 = Task(id="t1", name="t1", position=1, description="", agent_id="a1")
     g = Goal(id="g1", name="g1", position=0, description="", tasks=[t0, t1])
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[g])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
     sig = asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
     assert sig == "done"
@@ -250,7 +260,7 @@ def test_check_before_act_does_not_emit_duplicate_taskstarted():
     g = Goal(
         id="g1", name="g1", position=0, description="", status=Status.RUNNING, tasks=[t]
     )
-    p = Plan(id="p1", brief="b", phase=PlanPhase.EXECUTING, goals=[g])
+    p = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
     asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
     types = uow.outbox.types()

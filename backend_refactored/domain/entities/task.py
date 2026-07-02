@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from domain.errors.tasks_errors import InvalidTransitionError
-from domain.value_objects.tasks_vos import Status, TaskResult, TERMINAL
+from domain.value_objects.lifecycle import FailureKind, Status, TERMINAL
+from domain.value_objects.tasks_vos import TaskResult
 
 
 class Task(BaseModel):
@@ -18,6 +19,9 @@ class Task(BaseModel):
     status: Status = Status.PENDING
     result: TaskResult | None = None
     attempt: int = 0
+    # Human-requested redos (reopen) tracked separately from failure attempts so
+    # backoff/retry math stays meaningful.
+    reopen_count: int = 0
     retry_not_before: datetime | None = None
 
     def _guard(self, allowed_from: set[Status], to: Status) -> None:
@@ -36,13 +40,14 @@ class Task(BaseModel):
         self.result = result
         self.status = Status.DONE
 
-    def fail(self, reason: str) -> None:
+    def fail(self, reason: str, kind: FailureKind | None = None) -> None:
         self._guard({Status.RUNNING, Status.PENDING}, Status.FAILED)
         self.status = Status.FAILED
         if self.result is None:
-            self.result = TaskResult.failure(reason)
+            self.result = TaskResult.failure(reason, kind)
         else:
             self.result.failure_reason = reason
+            self.result.failure_kind = kind
 
     def requeue(self, not_before: datetime | None = None) -> None:
         """Return to PENDING for retry. Result cleared; attempts preserved.
@@ -59,6 +64,23 @@ class Task(BaseModel):
         FAILED it does not trip the goal-failure signal."""
         self._guard({Status.PENDING}, Status.SKIPPED)
         self.status = Status.SKIPPED
+
+    def abandon(self) -> None:
+        """Terminal-skip an in-flight task whose iteration was abandoned by a
+        replan (tolerant finalize). Distinct from skip() so the normal skip guard
+        stays strict: only the abandon paths may close a RUNNING task."""
+        self._guard({Status.RUNNING, Status.PENDING}, Status.SKIPPED)
+        self.status = Status.SKIPPED
+
+    def reopen(self) -> None:
+        """Human-driven redo of a good result (DONE -> PENDING). Clears the result
+        so the scan re-selects the task; counted on reopen_count, NOT attempt, so
+        a redo never eats into the failure/retry budget."""
+        self._guard({Status.DONE}, Status.PENDING)
+        self.status = Status.PENDING
+        self.result = None
+        self.reopen_count += 1
+        self.retry_not_before = None
 
     @property
     def is_terminal(self) -> bool:

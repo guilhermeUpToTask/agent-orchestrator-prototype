@@ -1,5 +1,17 @@
 # Design Notes — open decisions
 
+> **RESOLVED (2026-07-02, Phase-0 domain freeze):** every entry below was decided by
+> adopting its **recommended option** — #1 AWAITING_REVIEW/REVIEW are the gates
+> (`pause_after` removed); #2 typed `FailureKind` on `TaskResult`, wired to
+> `RetryPolicy.non_retryable_kinds` with the shared taxonomy (token_limit/auth_error
+> terminal); #3 `Task.reopen()`/`Goal.reopen()` via `Plan.reopen_task()`, tracked on
+> `reopen_count`; #4 single result slot (history in events); #5 capability-id contract
+> enforced at the edit boundary (`UnknownCapabilityError`); #6 `Status` moved to
+> `value_objects/lifecycle.py`; #7 no generic Entity base; #8 edits reuse
+> `lookups.find_task` (`TaskNotFoundError`); #9 `TaskResult.success()` tightened;
+> #10 errors stay grouped by topic (README wording fixed). The entries are kept below
+> as the decision record.
+
 These are the domain-layer questions that are **real design choices**, not settled facts
 (settled explanations live in each package's `README.md`). Each entry states the concern,
 where it lives, the current state, the options with trade-offs, and a recommendation. None

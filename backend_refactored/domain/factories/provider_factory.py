@@ -19,8 +19,10 @@ class ModelFactory:
 
 class ProviderFactory:
     @staticmethod
-    def create(name: str, base_url: str, api_key: str) -> ModelProvider:
-        return ModelProvider(id=new_id(), name=name, base_url=base_url, api_key=api_key, models=[])
+    def create(name: str, base_url: str, api_key_ref: str) -> ModelProvider:
+        return ModelProvider(
+            id=new_id(), name=name, base_url=base_url, api_key_ref=api_key_ref, models=[]
+        )
 
     @staticmethod
     def reconstruct(data: dict[str, Any]) -> ModelProvider:

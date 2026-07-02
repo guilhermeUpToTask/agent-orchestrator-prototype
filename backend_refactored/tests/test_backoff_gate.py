@@ -2,7 +2,9 @@
 the property that distinguishes it from an in-memory sleep: it SURVIVES across
 worker handoff (crash recovery)."""
 
-import sys, os, asyncio
+import sys
+import os
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -11,12 +13,11 @@ from domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from domain.entities.goal import Goal
 from domain.entities.task import Task
 from domain.entities.agent_spec import AgentSpec
-from domain.value_objects.tasks_vos import Status
+from domain.value_objects.lifecycle import Status
 from domain.policies.retry_policies import RetryPolicy
 from domain.services.navigation import next_action, NOT_READY
 
 from application.use_cases.advance_plan import advance_plan
-from application.use_cases.run_worker import drive_plan, worker_tick
 from application.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryOutbox,
@@ -54,7 +55,7 @@ def one_task_plan(retry_max=3, initial_backoff=10.0):
     return Plan(
         id="p1",
         brief="b",
-        phase=PlanPhase.EXECUTING,
+        phase=PlanPhase.RUNNING,
         retry_policy=RetryPolicy(
             max_attempts=retry_max,
             initial_backoff_seconds=initial_backoff,

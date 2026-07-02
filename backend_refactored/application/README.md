@@ -85,5 +85,6 @@ use cases get it from the injected `Clock` port. Real adapter is
 
 ## Reasoner (stub)
 `Reasoner` in ports.py is a forward declaration for the planning phases
-(DRAFTING/BREAKDOWN/ENRICHING) — not yet wired into `advance_plan` (those phases
-currently just pause/continue). Build it when implementing the planning phases.
+(DISCOVERY/ARCHITECTURE/ENRICHING/REPLANNING) — not yet wired into `advance_plan`
+(those phases currently just pause). Build it when implementing the planning
+phases (roadmap 2.5): the PlanningHandler seam is where it lands.

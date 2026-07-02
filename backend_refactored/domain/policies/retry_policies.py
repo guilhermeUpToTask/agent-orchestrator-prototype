@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from domain.value_objects.lifecycle import FailureKind
+
 
 class RetryPolicy(BaseModel):
     """Domain rule for retry/terminal decisions.
@@ -14,12 +16,14 @@ class RetryPolicy(BaseModel):
     initial_backoff_seconds: float = 2.0
     backoff_multiplier: float = 2.0
     max_backoff_seconds: float = 60.0
-    # Exact-match against free-form reasons is brittle; see ../../DESIGN_NOTES.md
-    # (typed FailureKind for retry classification).
-    non_retryable_reasons: list[str] = ["invalid_input"]
+    # Typed classification (shared failure taxonomy): a token-limit or auth failure
+    # will fail identically on every retry, so it is terminal immediately.
+    non_retryable_kinds: frozenset[FailureKind] = frozenset(
+        {FailureKind.TOKEN_LIMIT, FailureKind.AUTH_ERROR}
+    )
 
-    def should_retry(self, attempts: int, failure_reason: str | None) -> bool:
-        if failure_reason is not None and failure_reason in self.non_retryable_reasons:
+    def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:
+        if kind is not None and kind in self.non_retryable_kinds:
             return False
         return attempts < self.max_attempts
 

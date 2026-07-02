@@ -32,7 +32,7 @@ It has only `start` / `complete` / `fail` — no retry or stop, on purpose:
 - Retry/backoff is a *task* concern (`RetryPolicy` + `task.requeue` + `retry_not_before`);
   a goal never "retries" — re-running a goal means requeuing its tasks.
 - "Stop" is not goal-level: failing a goal halts the whole plan (`Plan.fail_goal`), and
-  pausing is a worker-loop concern (`Plan.should_pause`).
+  pausing is a worker-loop concern (the gate phases always pause).
 
 `depends_on` is the DAG seam (unused in a straight chain).
 

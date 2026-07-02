@@ -31,9 +31,10 @@ from application.ports import (
 
 # Phase groups -> which handler owns them.
 _PLANNING_PHASES = frozenset({
-    PlanPhase.DRAFTING, PlanPhase.BREAKDOWN, PlanPhase.ENRICHING,
+    PlanPhase.DISCOVERY, PlanPhase.ARCHITECTURE,
+    PlanPhase.ENRICHING, PlanPhase.REPLANNING,
 })
-_GATE_PHASES = frozenset({PlanPhase.AWAITING_REVIEW})
+_GATE_PHASES = frozenset({PlanPhase.AWAITING_REVIEW, PlanPhase.REVIEW})
 _TERMINAL_PHASES = frozenset({PlanPhase.DONE, PlanPhase.FAILED})
 
 
@@ -61,7 +62,7 @@ class PlanDispatcher:
         if phase in _TERMINAL_PHASES:
             return Signal.DONE if phase == PlanPhase.DONE else Signal.FAILED
 
-        if phase == PlanPhase.EXECUTING:
+        if phase == PlanPhase.RUNNING:
             return await self._execution.handle(plan_id, plan, uow)
 
         if phase in _GATE_PHASES:
@@ -69,8 +70,7 @@ class PlanDispatcher:
 
         if phase in _PLANNING_PHASES:
             if self._planning is None:
-                # Seam not yet wired (pre-Phase-2.5): behave as the old code did —
-                # pause if this phase is a pause point, else continue.
+                # Seam not yet wired (pre-Phase-2.5): pause rather than spin.
                 return await self._gate.handle(plan_id, plan, uow)
             return await self._planning.handle(plan_id, plan, uow)
 

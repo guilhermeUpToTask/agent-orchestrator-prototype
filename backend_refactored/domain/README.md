@@ -21,22 +21,25 @@ most important design rule:
 
 ```
 domain/
-├── value_objects/tasks_vos.py   Status enum + TERMINAL set; TaskResult (typed output
-│                                + idempotency record)
+├── value_objects/
+│   ├── lifecycle.py             Status enum + TERMINAL set; FailureKind (the shared
+│   │                            failure taxonomy)
+│   └── tasks_vos.py             TaskResult (typed output + idempotency record)
 ├── policies/retry_policies.py   RetryPolicy: should_retry() + backoff_for() — the
 │                                retry/terminal/backoff DECISION (not the mechanism)
 ├── entities/
-│   ├── task_handler.py          Task — guarded self-transitions + retry_not_before gate
-│   ├── goal_handler.py          Goal — guarded self-transitions, owns ordered tasks
+│   ├── task.py                  Task — guarded self-transitions + retry_not_before gate
+│   ├── goal.py                  Goal — guarded self-transitions, owns ordered tasks
 │   ├── agent_spec.py            AgentSpec (capabilities, model_role)
 │   ├── capability.py            Capability (own identity; grows tooling later)
-│   ├── ia_model.py / model_provider.py / project_definition.py  reference entities
-│   └── capability_matching.py   match_agent() — pure capability→agent matcher
+│   └── ia_model.py / model_provider.py / project_definition.py  reference entities
 ├── aggregates/
 │   └── planner_orchestrator.py  Plan — AGGREGATE ROOT (the only caller of entity
-│                                transitions; enforces all invariants)
+│                                transitions; enforces all invariants) + the
+│                                9-phase machine and the replan loop-back
 ├── services/
 │   ├── navigation.py            next_action(goals, now) — the derive-don't-store scan
+│   ├── capability_matching.py   match_agent() — pure capability→agent matcher
 │   ├── edit_service.py          structural edit rules (add/remove/reorder/requirements)
 │   └── lookups.py               shared find_goal / find_task (DRY for the above)
 ├── events/
@@ -89,9 +92,11 @@ use case turns the crank:
    - `(goal, None)` → `complete_goal()`.
    - `(goal, "GOAL_FAILED")` → `fail_goal()` (halts the plan).
    - `"NOT_READY"` → nothing runnable now; `release()` and re-check later.
-   - `None` → `mark_done()`.
+   - `None` → `enter_review()` (RUNNING → REVIEW; DONE only via the human
+     `finish_review()`).
 4. `save()` with the version CAS; on `StaleVersionError`, reload and retry.
-5. If `should_pause()` → `release()` and stop; else `heartbeat()` and loop.
+5. At a gate phase (AWAITING_REVIEW/REVIEW) → `release()` and stop (gates always
+   pause; they are also never worker-claimable); else `heartbeat()` and loop.
 
 There is **no cursor to advance** — step 2 recomputes the frontier every tick, so a
 crash+reload or a structural edit can never desync (see "derive, never store" above).
@@ -99,7 +104,8 @@ The lease (`claim_one_unit` / `heartbeat` / `release`) is what replaces the old
 reconciler: an expired lease makes a dead worker's plan reclaimable by another.
 
 ## Retry & backoff live here as DECISIONS
-`RetryPolicy.should_retry(attempts, reason)` decides retry-vs-terminal;
+`RetryPolicy.should_retry(attempts, kind)` decides retry-vs-terminal on the
+typed `FailureKind` taxonomy;
 `backoff_for(attempt)` computes the delay. The **mechanism** (waiting) is NOT here
 — backoff is expressed as the durable `task.retry_not_before` timestamp that the
 scan honors. The domain decides *whether* and *how long*; it never sleeps.

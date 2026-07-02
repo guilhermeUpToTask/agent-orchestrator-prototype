@@ -10,6 +10,11 @@ Within a plan, advancing is the `while signal == "continue"` loop — NO polling
 NO goal "trying to start". next_action pulls the next ready unit; an unready goal
 is simply never selected. That's the structural fix for the pending-goal noise.
 
+The claim predicate (in the repository) is the DRIVER MODEL: only ARCHITECTURE,
+ENRICHING and RUNNING are worker-claimable. Conversational phases (DISCOVERY,
+REPLANNING) and the human gates are invisible to workers — what isn't ready is
+never selected, so it never churns.
+
 This function is transport-agnostic: the real worker entrypoint wraps it with the
 actual sleep/claim cadence; tests drive it directly.
 """
@@ -36,19 +41,21 @@ async def drive_plan(
     clock: Clock,
     worker_id: str,
     max_steps: int = 10_000,
-) -> str:
-    """Advance one plan until it stops making progress. Returns the terminal
-    signal ('paused' | 'not_ready' | 'done' | 'failed'). Heartbeats each unit.
+) -> tuple[str, int]:
+    """Advance one plan until it stops making progress. Returns (terminal signal,
+    units advanced) — the signal is 'paused' | 'not_ready' | 'done' | 'failed';
+    the count is how many CONTINUE steps actually did work. Heartbeats each unit.
 
     'not_ready' means the plan has work but everything is backing off — the worker
     releases it and a later tick re-checks (the durable retry gate decides when)."""
     signal = "continue"
-    steps = 0
-    while signal == "continue" and steps < max_steps:
+    progressed = 0
+    while signal == "continue" and progressed < max_steps:
         signal = await advance_plan(plan_id, uow, runner, agents, workspace, event_sink, clock)
         uow.plans.heartbeat(plan_id, worker_id)   # renew lease while alive
-        steps += 1
-    return signal
+        if signal == "continue":
+            progressed += 1
+    return signal, progressed
 
 
 async def worker_tick(
@@ -61,15 +68,18 @@ async def worker_tick(
     worker_id: str,
     lease_seconds: int = 60,
 ) -> bool:
-    """One claim-and-drive cycle. Returns True if it did work, False if no plan
-    was available (caller sleeps then ticks again). The real worker entrypoint
-    loops this with asyncio.sleep on the False branch — that sleep is the ONLY
-    polling, and only between plans, never within one."""
+    """One claim-and-drive cycle. Returns True only if actual work ADVANCED —
+    not merely because a plan was claimed. A claim that immediately came back
+    'not_ready'/'paused' with zero steps returns False so the caller sleeps;
+    returning True there produced a hot claim→release CPU spin on any plan whose
+    work was entirely backing off (the verified worker-tick spin bug)."""
     plan = uow.plans.claim_one_unit(worker_id, lease_seconds)
     if plan is None:
         return False
     try:
-        await drive_plan(plan.id, uow, runner, agents, workspace, event_sink, clock, worker_id)
+        signal, progressed = await drive_plan(
+            plan.id, uow, runner, agents, workspace, event_sink, clock, worker_id
+        )
     finally:
         uow.plans.release(plan.id, worker_id)  # free on pause/done/fail/crash
-    return True
+    return progressed > 0 or signal in ("done", "failed")

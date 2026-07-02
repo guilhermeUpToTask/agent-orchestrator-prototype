@@ -1,13 +1,16 @@
 """Exhaustive state-transition tests — the guarantee against transition bugs."""
 
-import sys, os, pytest
+import sys
+import os
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from domain.entities.task import Task
 from domain.entities.goal import Goal
 from domain.errors.tasks_errors import InvalidTransitionError
-from domain.value_objects.tasks_vos import Status, TaskResult
+from domain.value_objects.lifecycle import Status
+from domain.value_objects.tasks_vos import TaskResult
 
 
 def mk_task(status=Status.PENDING):
@@ -96,3 +99,81 @@ def test_goal_illegal_transition_raises():
     g.complete()
     with pytest.raises(InvalidTransitionError):
         g.start()  # can't restart a DONE goal
+
+
+# ---- Task.reopen (human redo of a good result) ----
+def test_task_reopen_done_to_pending_clears_result_counts_separately():
+    t = mk_task()
+    t.start()
+    t.complete(TaskResult.success("ok"))
+    t.reopen()
+    assert t.status == Status.PENDING
+    assert t.result is None  # scan will re-select it
+    assert t.reopen_count == 1
+    assert t.attempt == 1  # redo does NOT eat into the failure/retry budget
+
+
+@pytest.mark.parametrize("status", [Status.PENDING, Status.RUNNING, Status.FAILED, Status.SKIPPED])
+def test_task_reopen_only_from_done(status):
+    t = mk_task(status)
+    with pytest.raises(InvalidTransitionError):
+        t.reopen()
+
+
+# ---- Task.abandon (tolerant finalize: iteration abandoned by a replan) ----
+def test_task_abandon_running_to_skipped():
+    t = mk_task()
+    t.start()
+    t.abandon()
+    assert t.status == Status.SKIPPED
+
+
+@pytest.mark.parametrize("status", [Status.DONE, Status.SKIPPED, Status.FAILED])
+def test_task_abandon_never_from_terminal(status):
+    t = mk_task(status)
+    with pytest.raises(InvalidTransitionError):
+        t.abandon()
+
+
+# ---- Goal.skip guards ----
+def mk_goal(tasks=None, status=Status.PENDING):
+    g = Goal(id="g", name="g", position=0, description="", tasks=tasks or [])
+    g.status = status
+    return g
+
+
+def test_goal_skip_from_pending():
+    g = mk_goal()
+    g.skip()
+    assert g.status == Status.SKIPPED
+
+
+def test_goal_skip_from_running_requires_all_tasks_terminal():
+    live = mk_task()
+    live.start()  # RUNNING task inside
+    g = mk_goal(tasks=[live], status=Status.RUNNING)
+    with pytest.raises(InvalidTransitionError):
+        g.skip()  # cannot skip a goal out from under a live task
+    live.abandon()
+    g.skip()  # all tasks terminal -> the finalize-abandon path may close it
+    assert g.status == Status.SKIPPED
+
+
+@pytest.mark.parametrize("status", [Status.DONE, Status.SKIPPED, Status.FAILED])
+def test_goal_skip_never_from_terminal(status):
+    g = mk_goal(status=status)
+    with pytest.raises(InvalidTransitionError):
+        g.skip()
+
+
+# ---- Goal.reopen ----
+def test_goal_reopen_done_to_running():
+    g = mk_goal(status=Status.DONE)
+    g.reopen()
+    assert g.status == Status.RUNNING
+
+
+def test_goal_reopen_only_from_done():
+    g = mk_goal(status=Status.PENDING)
+    with pytest.raises(InvalidTransitionError):
+        g.reopen()

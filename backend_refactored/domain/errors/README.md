@@ -1,6 +1,7 @@
 # Errors
 
-One exception per failure case, all subclassing `DomainError` (← `BaseAppException`).
+One exception per failure *case*, grouped into files by topic (e.g. goal and task
+errors share `tasks_errors.py`), all subclassing `DomainError` (← `BaseAppException`).
 Each carries a stable `code` (for programmatic handling / API mapping) and a
 log-safe `context` dict. Never put secrets in `context`.
 
@@ -23,6 +24,7 @@ log-safe `context` dict. Never put secrets in `context`.
 | `ReferencedEntityInUseError` | ENTITY_IN_USE | delete-guard: still referenced by something active |
 | **planning_errors.py** | | |
 | `EmptyPlanError` | EMPTY_PLAN | plan created without a brief (birth invariant) |
+| `PlanNotFoundError` | PLAN_NOT_FOUND | plan id not in the repository |
 | `InvalidEditError` | INVALID_EDIT | malformed structural edit |
 | `PlanAlreadyTerminalError` | PLAN_ALREADY_TERMINAL | mutation on a DONE/FAILED plan |
 

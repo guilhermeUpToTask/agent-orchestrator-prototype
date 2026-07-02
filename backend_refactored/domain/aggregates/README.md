@@ -18,13 +18,26 @@ be enforced in one place, and several do:
 If `Goal` owned task transitions, these cross-entity rules would leak or be duplicated.
 Keeping them at the root is the classic DDD rule: outside callers touch only the root.
 
+### The nine-phase machine
+`PlanPhase` = DISCOVERY, REPLANNING, ARCHITECTURE, ENRICHING, AWAITING_REVIEW,
+RUNNING, REVIEW, DONE, FAILED. The gates are *phases*, not a `pause_after` set
+(DESIGN_NOTES #1, resolved): a plan at AWAITING_REVIEW/REVIEW always pauses the
+worker and is unblocked only by a guarded human command (`approve()`,
+`finish_review()`, `begin_replanning()`). Only ARCHITECTURE / ENRICHING / RUNNING
+are worker-claimable (`WORKER_CLAIMABLE_PHASES` — the driver model).
+
+### The replan loop (append-only)
+`begin_replanning()` (from REVIEW or mid-RUNNING chat) skips the iteration's
+PENDING work; `commit_replanned_goals(new_goals)` finalize-abandons whatever
+remained non-terminal, appends the new goals after the existing positions, bumps
+`iteration`, and flows into ARCHITECTURE. Prior DONE goals are never touched —
+they are history and re-plan context. Late in-flight results are handled by the
+tolerant finalize in the application's ExecutionHandler.
+
 ### Advancing and pausing
 The aggregate never advances itself — the worker loop drives it (see the domain
-[`README`](../README.md#the-advancing-workflow-the-worker-loop)). `should_pause()` is a
-**cooperative** check the loop runs *between* task units, never mid-run: the domain never
-kills a live agent. The worker finishes the current task (reaches a terminal state),
-persists, then pauses by releasing the lease. Force-killing a running agent is an
-adapter/process concern, deliberately not modeled here.
-
-`pause_after` (the human-review gate) overlaps with the `AWAITING_REVIEW` phase — see
-[`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md).
+[`README`](../README.md#the-advancing-workflow-the-worker-loop)). Pausing is
+**cooperative**, checked by the loop *between* task units, never mid-run: the domain
+never kills a live agent. The worker finishes the current task (reaches a terminal
+state), persists, then pauses by releasing the lease. Force-killing a running agent
+is an adapter/process concern, deliberately not modeled here.

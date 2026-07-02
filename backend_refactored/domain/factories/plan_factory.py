@@ -27,7 +27,8 @@ class PlanFactory:
             id=new_id(),
             version=0,
             brief=brief.strip(),
-            phase=PlanPhase.DRAFTING,
+            phase=PlanPhase.DISCOVERY,
+            iteration=1,
             retry_policy=retry_policy or RetryPolicy(),
             goals=[],
         )
