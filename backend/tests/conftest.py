@@ -1,6 +1,9 @@
-# tests/conftest.py
-import sys
-from pathlib import Path
+"""Test bootstrap: make the repo root importable so `src.*` resolves without an
+editable install."""
 
-# Ensure src is importable from project root
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from __future__ import annotations
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

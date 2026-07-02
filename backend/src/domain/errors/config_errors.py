@@ -1,55 +1,64 @@
-"""
-src/domain/errors/config_errors.py — Persistence-boundary domain errors.
-
-These represent invariant violations surfaced by the config/state stores:
-
-  ConflictException     — optimistic-concurrency (state_version CAS) failure.
-  ReferentialException  — an entity is still referenced and cannot be removed,
-                          or references a non-existent parent (FK violation).
-
-Both are DomainError subclasses so the whole system speaks one exception
-language; the API layer maps them to 409 (and 409/422 respectively).
-"""
 from __future__ import annotations
-
-from typing import Any
 
 from src.domain.errors.base import DomainError
 
 
-class ConflictException(DomainError):
-    """
-    Raised when a compare-and-swap write fails because the stored
-    ``state_version`` no longer matches the expected version. The caller should
-    reload the aggregate and retry, or surface a 409 to the client.
-    """
+class ModelNotFoundError(DomainError):
+    code = "MODEL_NOT_FOUND"
 
-    code = "CONFLICT"
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str | None = None,
-        expected_version: int | None = None,
-        actual_version: int | None = None,
-        context: dict[str, Any] | None = None,
-    ) -> None:
-        ctx: dict[str, Any] = dict(context or {})
-        if expected_version is not None:
-            ctx.setdefault("expected_version", expected_version)
-        if actual_version is not None:
-            ctx.setdefault("actual_version", actual_version)
-        self.expected_version = expected_version
-        self.actual_version = actual_version
-        super().__init__(message, code=code, context=ctx)
+    def __init__(self, model_id: str) -> None:
+        self.model_id = model_id
+        super().__init__(
+            f"Model '{model_id}' not found.", context={"model_id": model_id}
+        )
 
 
-class ReferentialException(DomainError):
-    """
-    Raised when a referential-integrity constraint is violated — e.g. deleting a
-    provider that agents still reference, or creating an agent that points at a
-    missing provider.
-    """
+class ModelProviderNotFoundError(DomainError):
+    code = "PROVIDER_NOT_FOUND"
 
-    code = "REFERENTIAL_CONSTRAINT"
+    def __init__(self, provider_id: str) -> None:
+        self.provider_id = provider_id
+        super().__init__(
+            f"Model provider '{provider_id}' not found.",
+            context={"provider_id": provider_id},
+        )
+
+
+class CapabilityNotFoundError(DomainError):
+    code = "CAPABILITY_NOT_FOUND"
+
+    def __init__(self, capability_id: str) -> None:
+        self.capability_id = capability_id
+        super().__init__(
+            f"Capability '{capability_id}' not found.",
+            context={"capability_id": capability_id},
+        )
+
+
+class EntityAlreadyExistsError(DomainError):
+    """Create rejected because an entity with this id already exists."""
+
+    code = "ENTITY_ALREADY_EXISTS"
+
+    def __init__(self, entity: str, entity_id: str) -> None:
+        self.entity = entity
+        self.entity_id = entity_id
+        super().__init__(
+            f"{entity} '{entity_id}' already exists.",
+            context={"entity": entity, "entity_id": entity_id},
+        )
+
+
+class ReferencedEntityInUseError(DomainError):
+    """Delete-guard: refuse to delete reference data still in use by something active."""
+
+    code = "ENTITY_IN_USE"
+
+    def __init__(self, entity: str, entity_id: str, used_by: str) -> None:
+        self.entity = entity
+        self.entity_id = entity_id
+        self.used_by = used_by
+        super().__init__(
+            f"Cannot delete {entity} '{entity_id}': still referenced by {used_by}.",
+            context={"entity": entity, "entity_id": entity_id, "used_by": used_by},
+        )

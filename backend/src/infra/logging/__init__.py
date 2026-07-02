@@ -8,15 +8,7 @@ This module provides non-intrusive live logging capabilities:
   - Zero changes to existing runtime implementations
 
 Usage:
-    from src.infra.logging import LoggingRuntimeWrapper
-    from src.infra.runtime.factory import build_agent_runtime
-
-    # Wrap any runtime with logging
-    base_runtime = build_agent_runtime(agent_props)
-    logged_runtime = LoggingRuntimeWrapper(
-        base_runtime=base_runtime,
-        agent_name=agent_props.runtime_type,
-    )
+    from src.infra.logging import LiveLogger, get_logger
 """
 from __future__ import annotations
 
@@ -36,8 +28,6 @@ from .log_events import (
     build_agent_error_event,
     build_agent_output_event,
 )
-from .runtime_wrapper import LoggingRuntimeWrapper, LoggingSessionHandle
-
 __all__ = [
     # Logger
     "LiveLogger",
@@ -58,6 +48,4 @@ __all__ = [
     "build_agent_error_event",
     "build_agent_output_event",
     # Wrapper
-    "LoggingRuntimeWrapper",
-    "LoggingSessionHandle",
 ]
