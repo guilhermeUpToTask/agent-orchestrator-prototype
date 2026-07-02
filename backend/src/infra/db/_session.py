@@ -4,7 +4,7 @@ src/infra/db/_session.py — shared transactional runner with lock-retry.
 Single place the SQLite write policy lives: open a session, run the unit of
 work, commit (durable under synchronous=FULL), and retry the transient
 ``database is locked`` OperationalError with bounded backoff before surfacing
-InfrastructureException. Used by every SQLite adapter so config, task, secret,
+InfrastructureError. Used by every SQLite adapter so config, task, secret,
 and active-project writes share identical durability/contention behaviour.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ import structlog
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.errors import InfrastructureException
+from src.infra.errors import InfrastructureError
 
 log = structlog.get_logger(__name__)
 
@@ -45,6 +45,6 @@ def run_in_session(session_factory: sessionmaker[Session], fn: Callable[[Session
             last = exc
             time.sleep(LOCK_BACKOFF_BASE * (2 ** attempt))
             log.warning("db.locked_retry", attempt=attempt)
-    raise InfrastructureException(
+    raise InfrastructureError(
         "Database stayed locked beyond retry budget", code="DB_LOCKED"
     ) from last

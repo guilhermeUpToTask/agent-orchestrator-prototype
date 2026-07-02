@@ -1,33 +1,22 @@
-"""
-src/domain/entities/model_provider.py — ModelProvider entity.
-
-A ModelProvider is a GLOBAL entity (not scoped to any project): it names a
-provider account (Anthropic, OpenAI, …), points at its API key via a SecretRef,
-and lists the models it offers. Projects reference providers by id; they never
-own them.
-
-``state_version`` supports optimistic concurrency at the store boundary.
-"""
-from __future__ import annotations
-
 from pydantic import BaseModel
 
-from src.domain.value_objects.config import ProviderKind, RegisteredModel, SecretRef
+from src.domain.entities.ia_model import IAModel
 
 
 class ModelProvider(BaseModel):
     id: str
-    kind: ProviderKind
-    secret_ref: SecretRef
-    models: tuple[RegisteredModel, ...] = ()
-    base_url: str | None = None
-    default_model: str | None = None
-    state_version: int = 0
+    name: str
+    base_url: str
+    # Reference (URI) into the secret store — NEVER the plaintext key. Resolution
+    # happens in infra at the single decryption point; keys never enter the domain.
+    api_key_ref: str
+    models: list[IAModel]
 
-    def with_model(self, model: RegisteredModel) -> "ModelProvider":
-        """Return a copy with ``model`` added (replacing any same model_id)."""
-        kept = tuple(m for m in self.models if m.model_id != model.model_id)
-        return self.model_copy(update={"models": (*kept, model)})
+    def add_model(self, model: IAModel) -> None:
+        self.models.append(model)
 
-    def has_model(self, model_id: str) -> bool:
-        return any(m.model_id == model_id for m in self.models)
+    def delete_model(self, model: IAModel) -> None:
+        self.models.remove(model)
+
+    def get_model(self, model_id: str) -> IAModel | None:
+        return next((m for m in self.models if m.id == model_id), None)

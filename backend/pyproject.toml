@@ -46,6 +46,9 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=src --cov-report=term-missing"
+markers = [
+    "integration: exercises real adapters (SQLite, git, subprocess); deselect with -m 'not integration'",
+]
 
 [tool.ruff]
 line-length = 100
@@ -54,6 +57,27 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+# TRANSPLANT parking lot: files preserved from the old backend that still
+# reference deleted pre-refactor modules. Each is un-parked (adapted to the new
+# ports) in its named integration stage; this list must only SHRINK.
+exclude = [
+    "^src/api/server\\.py$",          # TRANSPLANT(stage-7)
+    "^src/api/exceptions\\.py$",      # TRANSPLANT(stage-7)
+    "^src/api/security\\.py$",        # TRANSPLANT(stage-7)
+    "^src/api/middleware/",           # TRANSPLANT(stage-7)
+    "^src/api/logging/",              # TRANSPLANT(stage-7)
+    "^src/infra/db/tables\\.py$",     # TRANSPLANT(stage-3)
+    "^src/infra/db/secret_store\\.py$",    # TRANSPLANT(stage-4)
+    "^src/infra/db/secret_resolver\\.py$", # TRANSPLANT(stage-4)
+    "^src/infra/git/",                # TRANSPLANT(stage-5)
+    "^src/infra/runtime/",            # TRANSPLANT(stage-5)
+    "^src/infra/settings/",           # TRANSPLANT(stage-7)
+    "^src/infra/logging/",            # TRANSPLANT(stage-7)
+    "^src/infra/redis_adapters/",     # TRANSPLANT(phase-3 seam, unused)
+    "^src/infra/cli/",                # TRANSPLANT(stage-8)
+    "^src/infra/project_paths\\.py$", # TRANSPLANT(stage-7)
+    "^src/infra/dependency_checker\\.py$", # TRANSPLANT(stage-8)
+]
 
 # Honest per-layer typing: src/domain and src/app are fully strict (the
 # layers that claim it); the adapter layers carry explicit relaxations
@@ -68,20 +92,3 @@ disallow_any_generics = false
 disallow_untyped_calls = false
 disallow_untyped_decorators = false
 warn_return_any = false
-
-# Routers receive DI deps typed as `object` (src/api/dependencies.py) —
-# typing those Annotated deps removes this block.
-[[tool.mypy.overrides]]
-module = ["src.api.routers.*"]
-disable_error_code = ["attr-defined", "arg-type"]
-
-# redis-py's sync client returns `Awaitable[T] | T` unions everywhere.
-[[tool.mypy.overrides]]
-module = ["src.infra.redis_adapters.*"]
-disable_error_code = ["union-attr", "arg-type", "index"]
-
-# Runtime adapters narrow SessionHandle to concrete handle types (LSP
-# variance) and call SDKs whose param types are stricter than our dicts.
-[[tool.mypy.overrides]]
-module = ["src.infra.runtime.*"]
-disable_error_code = ["override", "arg-type"]
