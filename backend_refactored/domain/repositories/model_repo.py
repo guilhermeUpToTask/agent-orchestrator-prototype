@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from domain.entities.ia_model import IAModel
+
+
+class ModelRepository(Protocol):
+    """User-managed at runtime. delete() guarded if referenced by an active agent."""
+
+    def get(self, model_id: str) -> IAModel: ...
+    def list(self) -> list[IAModel]: ...
+    def list_by_provider(self, provider_id: str) -> list[IAModel]: ...
+    def add(self, model: IAModel) -> None: ...
+    def update(self, model: IAModel) -> None: ...
+    def delete(self, model_id: str) -> None: ...  # guarded
