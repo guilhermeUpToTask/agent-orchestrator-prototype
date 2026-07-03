@@ -34,7 +34,7 @@ from pathlib import Path
 
 import structlog
 
-from src.app.ports import TaskFailed
+from src.app.ports import TaskFailed, WorkspaceHandle
 from src.domain.value_objects.lifecycle import FailureKind
 
 log = structlog.get_logger(__name__)
@@ -85,10 +85,12 @@ class GitBranchWorkspace:
     ) -> GitWorkspaceHandle:
         return await asyncio.to_thread(self._begin_sync, plan_id, task_id, attempt)
 
-    async def commit(self, handle: GitWorkspaceHandle) -> None:
+    async def commit(self, handle: WorkspaceHandle) -> None:
+        assert isinstance(handle, GitWorkspaceHandle)
         await asyncio.to_thread(self._commit_sync, handle)
 
-    async def discard(self, handle: GitWorkspaceHandle) -> None:
+    async def discard(self, handle: WorkspaceHandle) -> None:
+        assert isinstance(handle, GitWorkspaceHandle)
         await asyncio.to_thread(self._discard_sync, handle)
 
     # ---- sync internals (worker thread) ----
@@ -200,8 +202,8 @@ class LocalDirWorkspace:
     async def begin(self, plan_id: str, task_id: str, attempt: int) -> LocalDirHandle:
         return LocalDirHandle(path=str(self._root))
 
-    async def commit(self, handle: LocalDirHandle) -> None:
+    async def commit(self, handle: WorkspaceHandle) -> None:
         pass
 
-    async def discard(self, handle: LocalDirHandle) -> None:
+    async def discard(self, handle: WorkspaceHandle) -> None:
         pass

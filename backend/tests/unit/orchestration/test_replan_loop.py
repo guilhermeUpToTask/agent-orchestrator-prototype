@@ -249,3 +249,27 @@ def test_reopen_task_reopens_goal_and_scan_reselects():
     assert t.status == Status.PENDING and t.result is None and t.reopen_count == 1
     picked_goal, picked_task = next_action(plan.goals, FakeClock().now())
     assert picked_task.id == "t0"  # scan re-selects the reopened work
+
+
+# ===== set_iteration_goals (the planning phases' write path) =====
+def test_set_iteration_goals_replaces_pending_keeps_history():
+    history = goal("old", 0, [task("oldt", 0, Status.DONE)], Status.DONE)
+    draft = goal("draft", 1, [task("draftt", 0)])
+    plan = Plan(id="p1", brief="b", phase=PlanPhase.ARCHITECTURE,
+                goals=[history, draft])
+    plan.set_iteration_goals([Goal(id="n1", name="n1", position=0, description=""),
+                              Goal(id="n2", name="n2", position=1, description="")])
+    assert [g.id for g in plan.goals] == ["old", "n1", "n2"]  # draft replaced
+    assert [g.position for g in plan.goals] == [0, 1, 2]  # renumbered after history
+    assert plan.goals[0].status == Status.DONE  # history untouched
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [PlanPhase.AWAITING_REVIEW, PlanPhase.RUNNING, PlanPhase.REVIEW,
+     PlanPhase.REPLANNING, PlanPhase.DONE],
+)
+def test_set_iteration_goals_only_in_planning_phases(phase):
+    plan = Plan(id="p1", brief="b", phase=phase)
+    with pytest.raises((InvalidTransitionError, Exception)):
+        plan.set_iteration_goals([])
