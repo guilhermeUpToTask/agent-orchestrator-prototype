@@ -1,42 +1,21 @@
 """Worker-loop tests: the full claim->drive->release cycle, crash recovery via
 lease expiry + re-claim, the driver-model claim predicate, and the regression
-for the worker-tick spin (tick reports PROGRESS, not claiming)."""
+for the worker-tick spin. Parametrized over the in-memory fakes AND the real
+SQLite lease (claim_one_unit/heartbeat/release on actual rows) — the crash
+tests on sqlite are the truth-test for lease-based recovery."""
 
 import asyncio
 
-
 from datetime import timedelta
 
-from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
-from src.domain.entities.agent_spec import AgentSpec
 from src.domain.value_objects.lifecycle import Status
 
+from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.control import finish_review
 from src.app.use_cases.run_worker import drive_plan, worker_tick
-from src.app.testing.fakes import (
-    FakeClock,
-    InMemoryPlanRepository,
-    InMemoryOutbox,
-    InMemoryUnitOfWork,
-    InMemoryAgentRepository,
-    NoOpWorkspace,
-    CollectingEventSink,
-    DummyAgentRunner,
-)
-
-
-def agent():
-    return AgentSpec(
-        id="a1",
-        name="A",
-        role="agent",
-        model_role="agent",
-        instructions="",
-        default_retry=RetryPolicy(),
-    )
 
 
 def plan_with_chain():
@@ -60,108 +39,77 @@ def plan_with_chain():
     return Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g1, g2])
 
 
-def harness(plan, script=None):
-    clock = FakeClock()
-    repo = InMemoryPlanRepository(clock)
-    repo.add(plan)
-    uow = InMemoryUnitOfWork(repo, InMemoryOutbox())
-    runner = DummyAgentRunner(script or {})
-    agents = InMemoryAgentRepository([agent()], default_id="a1")
-    return (
-        repo,
-        uow,
-        runner,
-        agents,
-        NoOpWorkspace(),
-        CollectingEventSink(),
-        clock,
-    )
-
-
-def test_worker_tick_drives_plan_to_review_gate():
+def test_worker_tick_drives_plan_to_review_gate(env_factory):
     """Execution exhausts into REVIEW (the post-exec gate) — DONE only comes from
     the human finish."""
-    repo, uow, runner, agents, ws, sink, clock = harness(plan_with_chain())
-    did_work = asyncio.run(worker_tick(uow, runner, agents, ws, sink, clock, "w1"))
+    env = env_factory()
+    env.seed(plan_with_chain())
+    did_work = asyncio.run(worker_tick(*env.args, "w1"))
     assert did_work
-    final = repo.get("p1")
+    final = env.stored("p1")
     assert final.phase == PlanPhase.REVIEW
     assert all(t.status == Status.DONE for g in final.goals for t in g.tasks)
-    finish_review("p1", uow)
-    assert repo.get("p1").phase == PlanPhase.DONE
+    finish_review("p1", env.uow)
+    assert env.stored("p1").phase == PlanPhase.DONE
 
 
-def test_worker_tick_returns_false_when_nothing_to_claim():
-    repo = InMemoryPlanRepository()  # empty
-    uow = InMemoryUnitOfWork(repo, InMemoryOutbox())
-    did = asyncio.run(
-        worker_tick(
-            uow,
-            DummyAgentRunner(),
-            InMemoryAgentRepository([agent()], "a1"),
-            NoOpWorkspace(),
-            CollectingEventSink(),
-            FakeClock(),
-            "w1",
-        )
-    )
+def test_worker_tick_returns_false_when_nothing_to_claim(env_factory):
+    env = env_factory()  # empty store
+    did = asyncio.run(worker_tick(*env.args, "w1"))
     assert did is False
 
 
-def test_dependent_goal_runs_only_after_dependency_no_pending_noise():
+def test_dependent_goal_runs_only_after_dependency_no_pending_noise(env_factory):
     """The reconciler-killer at the loop level: g2 never executes before g1 is
     done, and there is no stuck/pending state to reconcile."""
-    repo, uow, runner, agents, ws, sink, clock = harness(plan_with_chain())
-    asyncio.run(drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1"))
+    env = env_factory()
+    env.seed(plan_with_chain())
+    asyncio.run(drive_plan("p1", *env.args, "w1"))
     # both ran, in order; g2's task only after g1 completed
-    assert runner.calls.get("g1t0") == 1
-    assert runner.calls.get("g2t0") == 1
-    final = repo.get("p1")
+    assert env.runner.calls.get("g1t0") == 1
+    assert env.runner.calls.get("g2t0") == 1
     # g2 was never left "pending and stuck" — it's cleanly DONE
-    assert final.goals[1].status == Status.DONE
+    assert env.stored("p1").goals[1].status == Status.DONE
 
 
-def test_crash_recovery_via_lease_expiry_and_reclaim():
+def test_crash_recovery_via_lease_expiry_and_reclaim(env_factory):
     """Worker w1 CLAIMS the plan, completes one task, then 'dies' without
     releasing. While w1's lease is live the plan is not claimable; once the lease
     expires, w2 reclaims and finishes purely from persisted state — no
     reconciler, just lease + re-claim."""
-    repo, uow, runner1, agents, ws, sink, clock = harness(plan_with_chain())
+    env = env_factory()
+    env.seed(plan_with_chain())
 
     async def w1_claims_then_dies():
-        from src.app.use_cases.advance_plan import advance_plan
-
-        claimed = uow.plans.claim_one_unit("w1", lease_seconds=60)
+        claimed = env.uow.plans.claim_one_unit("w1", lease_seconds=60)
         assert claimed is not None and claimed.id == "p1"
-        await advance_plan("p1", uow, runner1, agents, ws, sink, clock)
+        await advance_plan("p1", *env.args)
         # w1 crashes here: no release, lease left dangling
 
     asyncio.run(w1_claims_then_dies())
-    mid = repo.get("p1")
+    mid = env.stored("p1")
     assert mid.phase == PlanPhase.RUNNING
     assert mid.goals[0].tasks[0].status == Status.DONE
 
     # w1's lease is still live -> the plan is invisible to other workers
-    runner2 = DummyAgentRunner()
-    did = asyncio.run(worker_tick(uow, runner2, agents, ws, sink, clock, "w2"))
-    assert did is False and runner2.calls == {}
+    did = asyncio.run(worker_tick(*env.args, "w2"))
+    assert did is False and env.runner.calls.get("g2t0") is None
 
     # lease expires -> w2 reclaims and resumes from persisted state
-    clock.advance(61)
-    asyncio.run(worker_tick(uow, runner2, agents, ws, sink, clock, "w2"))
-    final = repo.get("p1")
+    env.clock.advance(61)
+    asyncio.run(worker_tick(*env.args, "w2"))
+    final = env.stored("p1")
     assert final.phase == PlanPhase.REVIEW  # execution exhausted -> post-exec gate
-    # w2 only ran the REMAINING task (g2t0), not the already-done one (g1t0)
-    assert "g1t0" not in runner2.calls
-    assert runner2.calls.get("g2t0") == 1
+    # w2 only ran the REMAINING task (g2t0) exactly once
+    assert env.runner.calls.get("g1t0") == 1  # still just w1's run
+    assert env.runner.calls.get("g2t0") == 1
 
 
-def test_claim_predicate_is_the_driver_model():
+def test_claim_predicate_is_the_driver_model(env_factory):
     """Only ARCHITECTURE / ENRICHING / RUNNING are worker-claimable. Conversational
     phases (DISCOVERY, REPLANNING) and the gates (AWAITING_REVIEW, REVIEW) are
     invisible to workers — what isn't ready is never selected, so it never churns."""
-    clock = FakeClock()
-    repo = InMemoryPlanRepository(clock)
+    env = env_factory()
     unclaimable = [
         PlanPhase.DISCOVERY,
         PlanPhase.REPLANNING,
@@ -171,46 +119,62 @@ def test_claim_predicate_is_the_driver_model():
         PlanPhase.FAILED,
     ]
     for i, phase in enumerate(unclaimable):
-        repo.add(Plan(id=f"u{i}", brief="b", phase=phase))
-    assert repo.claim_one_unit("w1", 60) is None
+        env.seed(Plan(id=f"u{i}", brief="b", phase=phase))
+    assert env.uow.plans.claim_one_unit("w1", 60) is None
 
     for i, phase in enumerate(
         [PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING, PlanPhase.RUNNING]
     ):
-        repo.add(Plan(id=f"c{i}", brief="b", phase=phase))
-    claimed_ids = {repo.claim_one_unit("w1", 60).id for _ in range(3)}
+        env.seed(Plan(id=f"c{i}", brief="b", phase=phase))
+    claimed_ids = {env.uow.plans.claim_one_unit("w1", 60).id for _ in range(3)}
     assert claimed_ids == {"c0", "c1", "c2"}
-    assert repo.claim_one_unit("w1", 60) is None  # all leases live now
+    assert env.uow.plans.claim_one_unit("w1", 60) is None  # all leases live now
 
 
-def test_worker_tick_reports_progress_not_claiming():
+def test_release_frees_the_claim(env_factory):
+    env = env_factory()
+    env.seed(Plan(id="p1", brief="b", phase=PlanPhase.RUNNING))
+    assert env.uow.plans.claim_one_unit("w1", 60).id == "p1"
+    assert env.uow.plans.claim_one_unit("w2", 60) is None  # held by w1
+    env.uow.plans.release("p1", "w2")  # someone else's release is a no-op
+    assert env.uow.plans.claim_one_unit("w2", 60) is None
+    env.uow.plans.release("p1", "w1")
+    assert env.uow.plans.claim_one_unit("w2", 60).id == "p1"  # freed
+
+
+def test_heartbeat_extends_only_own_lease(env_factory):
+    env = env_factory()
+    env.seed(Plan(id="p1", brief="b", phase=PlanPhase.RUNNING))
+    assert env.uow.plans.claim_one_unit("w1", lease_seconds=60) is not None
+
+    # w1 heartbeats at t+50 -> lease now runs to ~t+110
+    env.clock.advance(50)
+    env.uow.plans.heartbeat("p1", "w1")
+    env.clock.advance(59)  # t+109: past the ORIGINAL expiry, inside the renewed one
+    assert env.uow.plans.claim_one_unit("w2", 60) is None  # still held
+
+    # a stranger's heartbeat must NOT extend the lease
+    env.uow.plans.heartbeat("p1", "w2")
+    env.clock.advance(2)  # t+111: renewed lease expired
+    assert env.uow.plans.claim_one_unit("w2", 60) is not None
+
+
+def test_worker_tick_reports_progress_not_claiming(env_factory):
     """Regression for the hot claim->release spin: a claimable plan whose only
     work is backing off must yield tick == False (caller sleeps), even though a
     claim technically succeeded."""
+    env = env_factory()
     plan = plan_with_chain()
-    repo_clock = FakeClock()
-    repo = InMemoryPlanRepository(repo_clock)
     # gate the first task into the future -> scan says NOT_READY immediately
-    plan.goals[0].tasks[0].retry_not_before = repo_clock.now() + timedelta(seconds=300)
-    repo.add(plan)
-    uow = InMemoryUnitOfWork(repo, InMemoryOutbox())
-    runner = DummyAgentRunner()
-    agents = InMemoryAgentRepository([agent()], "a1")
+    plan.goals[0].tasks[0].retry_not_before = env.clock.now() + timedelta(seconds=300)
+    env.seed(plan)
 
-    did = asyncio.run(
-        worker_tick(
-            uow, runner, agents, NoOpWorkspace(), CollectingEventSink(), repo_clock, "w1"
-        )
-    )
+    did = asyncio.run(worker_tick(*env.args, "w1"))
     assert did is False  # claimed, but zero progress -> sleep, don't spin
-    assert runner.calls == {}  # nothing executed
+    assert env.runner.calls == {}  # nothing executed
 
     # once the gate expires the same tick DOES report progress
-    repo_clock.advance(301)
-    did = asyncio.run(
-        worker_tick(
-            uow, runner, agents, NoOpWorkspace(), CollectingEventSink(), repo_clock, "w1"
-        )
-    )
+    env.clock.advance(301)
+    did = asyncio.run(worker_tick(*env.args, "w1"))
     assert did is True
-    assert runner.calls.get("g1t0") == 1
+    assert env.runner.calls.get("g1t0") == 1
