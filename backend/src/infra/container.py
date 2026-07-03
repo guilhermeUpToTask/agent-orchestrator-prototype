@@ -27,7 +27,7 @@ from pathlib import Path
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.ports import AgentRunner, Clock
+from src.app.ports import AgentRunner, Clock, Reasoner
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
 from src.infra.db.reference_repos import (
@@ -48,7 +48,7 @@ from src.infra.runtime.cli_runner import (
     GeminiRunner,
     PiAgentRunner,
 )
-from src.infra.reasoner.stub_reasoner import StubReasoner
+from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.dummy_runner import DummyAgentRunner
 
 
@@ -157,6 +157,15 @@ class AppContainer:
 
     # --- Stage 6: the planning reasoner ---
     @cached_property
-    def reasoner(self) -> StubReasoner:
-        # deterministic stub; the OpenAI reasoner (roadmap 2.5) swaps in here
-        return StubReasoner()
+    def reasoner(self) -> Reasoner:
+        """Catalog-resolved: config key reasoner.mode selects stub (default,
+        no secrets needed) or llm (providers/models/secret-store resolution).
+        The secret store is passed as a thunk so stub mode never constructs it
+        (it fails closed on a missing ORCHESTRATOR_MASTER_KEY)."""
+        return build_reasoner(
+            self.config_store,
+            self.provider_repo,
+            self.model_repo,
+            lambda: self.secret_store,
+            self.capability_repo,
+        )

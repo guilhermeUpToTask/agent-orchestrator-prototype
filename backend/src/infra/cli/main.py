@@ -162,6 +162,152 @@ def config_list(scope: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# seed — idempotent demo/bootstrap data
+# ---------------------------------------------------------------------------
+
+# Each provider is just an OpenAI-compatible endpoint + which env var holds
+# its key by convention (ported from the old planner factory presets).
+# `local` has no default endpoint — it requires an explicit --base-url.
+_PROVIDER_PRESETS: dict[str, tuple[str, str]] = {
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "anthropic": ("https://api.anthropic.com/v1/", "ANTHROPIC_API_KEY"),
+    "gemini": (
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "GEMINI_API_KEY",
+    ),
+    "local": ("", "OPENAI_API_KEY"),
+}
+
+
+@cli.group()
+def seed() -> None:
+    """Idempotent bootstrap data (capabilities, default agent, reasoner)."""
+
+
+@seed.command("demo")
+@click.option(
+    "--provider",
+    "provider_name",
+    type=click.Choice(sorted(_PROVIDER_PRESETS)),
+    default=None,
+    help="LLM provider preset for the reasoner (omit with --stub).",
+)
+@click.option("--model", "model_name", default=None, help="Provider model string.")
+@click.option("--base-url", default=None, help="Override the preset base_url.")
+@click.option(
+    "--api-key-env",
+    default=None,
+    help="Env var holding the provider key (read ONCE here, stored encrypted).",
+)
+@click.option(
+    "--stub",
+    is_flag=True,
+    help="Deterministic stub reasoner: no provider, no key, no master key.",
+)
+@catch_domain_errors
+def seed_demo(
+    provider_name: str | None,
+    model_name: str | None,
+    base_url: str | None,
+    api_key_env: str | None,
+    stub: bool,
+) -> None:
+    """Seed capabilities + a default agent, and configure the reasoner.
+
+    Stub mode:  orchestrate seed demo --stub
+    LLM mode:   orchestrate seed demo --provider openrouter --model <name> \\
+                    [--api-key-env OPENROUTER_API_KEY] [--base-url URL]
+    """
+    import os
+
+    from src.domain.entities.capability import Capability
+    from src.domain.entities.agent_spec import AgentSpec
+    from src.domain.entities.ia_model import IAModel
+    from src.domain.entities.model_provider import ModelProvider
+    from src.domain.errors.config_errors import EntityAlreadyExistsError
+    from src.domain.policies.retry_policies import RetryPolicy
+    from src.infra.container import AppContainer
+    from src.infra.db.secret_ref import SecretRef
+
+    container = AppContainer.from_env()
+
+    def upsert(repo, entity) -> None:
+        try:
+            repo.add(entity)
+        except EntityAlreadyExistsError:
+            repo.update(entity)
+
+    capabilities = [
+        Capability(id="backend", name="Backend", description="server-side code"),
+        Capability(id="frontend", name="Frontend", description="UI code"),
+        Capability(id="testing", name="Testing", description="tests and QA"),
+    ]
+    for cap in capabilities:
+        upsert(container.capability_repo, cap)
+
+    upsert(
+        container.agent_repo,
+        AgentSpec(
+            id="dev-agent",
+            name="dev-agent",
+            role="implementer",
+            model_role="smart",
+            instructions="Implement the task exactly as described.",
+            capabilities=capabilities,
+            default_retry=RetryPolicy(),
+        ),
+    )
+    container.agent_repo.set_default("dev-agent")
+
+    config = container.config_store
+    scope = config.ORCHESTRATOR_SCOPE
+
+    if stub:
+        config.set(scope, "reasoner.mode", "stub")
+        ok("seeded capabilities + dev-agent; reasoner.mode = stub")
+        return
+
+    if not provider_name or not model_name:
+        raise click.UsageError("--provider and --model are required without --stub")
+    preset_url, preset_env = _PROVIDER_PRESETS[provider_name]
+    resolved_url = base_url or preset_url
+    if not resolved_url:
+        raise click.UsageError(f"provider '{provider_name}' requires --base-url")
+
+    key_env = api_key_env or preset_env
+    api_key = os.environ.get(key_env, "").strip()
+    if not api_key:
+        raise click.UsageError(
+            f"environment variable {key_env} is empty — export the provider "
+            "key there (it is read once and stored envelope-encrypted)."
+        )
+
+    key_ref = SecretRef.for_provider(provider_name)
+    container.secret_store.put(key_ref, api_key)
+
+    model_id = f"{provider_name}:{model_name}"
+    upsert(
+        container.provider_repo,
+        ModelProvider(
+            id=provider_name,
+            name=provider_name,
+            base_url=resolved_url,
+            api_key_ref=key_ref.uri,
+            models=[IAModel(id=model_id, provider_id=provider_name, name=model_name)],
+        ),
+    )
+
+    config.set(scope, "reasoner.mode", "llm")
+    config.set(scope, "reasoner.provider_id", provider_name)
+    config.set(scope, "reasoner.model_id", model_id)
+    ok(
+        f"seeded capabilities + dev-agent; reasoner.mode = llm "
+        f"(provider={provider_name}, model={model_name})"
+    )
+
+
+# ---------------------------------------------------------------------------
 # plan (read-only inspection; mutations go through the API)
 # ---------------------------------------------------------------------------
 
