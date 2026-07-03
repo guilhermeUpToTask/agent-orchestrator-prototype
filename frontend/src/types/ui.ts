@@ -1,89 +1,136 @@
 // src/types/ui.ts
-// UI-side types. All backend DTO shapes come from src/types/generated,
-// produced by `npm run generate:api` from the FastAPI OpenAPI schema —
-// never hand-write a type that mirrors a backend schema here.
+// UI-side types for the 9-phase orchestrator.
+//
+// DTO shapes with OpenAPI schemas come from src/types/generated (npm run
+// generate:api). The plan DETAIL endpoint returns the aggregate document
+// (untyped `object` in the schema), so its read model is declared here by
+// hand — keep it in sync with backend/src/domain (Plan/Goal/Task).
 
 import type {
-  AgentResponse,
-  GoalResponse,
-  GoalTaskResponse,
-  PlanBriefResponse,
-  PlanHistoryEntryResponse,
-  PlanPhaseResponse,
-  PlanResponse,
+  AgentSpec,
+  Capability,
+  ChatMessageResponse,
+  IaModel,
+  MessageResponse,
+  ModelProvider,
 } from './generated';
 
-// Backend enums, re-exported for convenience
 export type {
-  GoalStatus,
-  PhaseStatus,
-  ProjectPlanStatus,
-  TaskStatus,
-} from './generated';
+  AgentSpec,
+  Capability,
+  ChatMessageResponse,
+  IaModel,
+  MessageResponse,
+  ModelProvider,
+};
 
-// Legacy component-facing names mapped onto generated DTOs
-export type TaskSummary = GoalTaskResponse;
-export type GoalAggregate = GoalResponse;
-export type Phase = PlanPhaseResponse;
-export type ProjectBrief = PlanBriefResponse;
-export type ProjectPlan = PlanResponse;
-export type HistoryEntry = PlanHistoryEntryResponse;
+// ─── The 9-phase machine ────────────────────────────────────────────────────
 
-/** Agent read-model plus the UI-derived display color */
-export type AgentProps = AgentResponse & { color?: string };
+export type PlanPhase =
+  | 'discovery'
+  | 'replanning'
+  | 'architecture'
+  | 'enriching'
+  | 'awaiting_review'
+  | 'running'
+  | 'review'
+  | 'done'
+  | 'failed';
 
-// ─── React Flow node payload ───────────────────────────────────────────────────
+export type Status = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 
-export interface TaskNodeData {
-  task: TaskSummary;
-  goalId: string;
-  goalName: string;
-  agent: AgentProps | null;
-  // Unmet dependency task_ids — non-empty means this CREATED task is blocked
-  // (waiting on siblings), not merely idle in the queue.
-  blockedBy: string[];
-  selected?: boolean;
-  // React Flow v12 node data must satisfy Record<string, unknown>
+// ─── Plan aggregate read model (GET /api/plans/{id}) ────────────────────────
+
+export interface TaskResult {
+  status: 'success' | 'failure';
+  output: string;
+  artifacts: Record<string, string>;
+  failure_reason: string | null;
+  failure_kind: string | null;
+  metadata: Record<string, string>;
+}
+
+export interface Task {
+  id: string;
+  name: string;
+  position: number;
+  description: string;
+  required_capabilities: string[];
+  agent_id: string | null;
+  status: Status;
+  result: TaskResult | null;
+  attempt: number;
+  reopen_count: number;
+  retry_not_before: string | null;
+}
+
+export interface Goal {
+  id: string;
+  name: string;
+  position: number;
+  description: string;
+  status: Status;
+  tasks: Task[];
+  depends_on: string[];
+}
+
+export interface Plan {
+  id: string;
+  brief: string;
+  phase: PlanPhase;
+  iteration: number;
+  version: number;
+  goals: Goal[];
+}
+
+/** GET /api/plans — cheap listing off the promoted columns. */
+export interface PlanSummary {
+  id: string;
+  phase: PlanPhase;
+  iteration: number;
+  version: number;
+  claimed_by: string | null;
+  updated_at: string;
+}
+
+// ─── SSE event payloads (relay-fed; every payload carries event_id) ─────────
+
+export interface SSEPayload {
+  event_id: string;
+  plan_id: string;
   [key: string]: unknown;
 }
 
-// ─── Chat ──────────────────────────────────────────────────────────────────────
+// ─── Chat (server history + UI decoration) ─────────────────────────────────
 
-export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
+export type ChatRole = 'user' | 'assistant' | 'system';
 
-export interface ChatMessage {
+export interface UIChatMessage {
   id: string;
   role: ChatRole;
   text: string;
   ts: string;
-  nodeCtx?: string;
-  /** Planner tool name when role === 'tool' (e.g. propose_decision) */
-  toolName?: string;
+  committed?: boolean;
 }
 
-/**
- * What the chat panel is acting as, derived from ProjectPlanStatus.
- * Mirrors the backend prompt builders (discovery / architecture /
- * phase_review / tactical refinement).
- */
-export interface ChatMode {
-  key: 'discovery' | 'tactical' | 'awaiting-architecture' | 'awaiting-phase-review' | 'done';
-  label: string;
-  inputEnabled: boolean;
-  hint: string;
+// ─── React Flow node payloads ───────────────────────────────────────────────
+
+export interface TaskNodeData {
+  task: Task;
+  goalId: string;
+  goalName: string;
+  agent: AgentSpec | null;
+  selected?: boolean;
+  [key: string]: unknown;
 }
 
-// ─── UI state ──────────────────────────────────────────────────────────────────
+// ─── UI state ──────────────────────────────────────────────────────────────
 
 export interface PlannerUIState {
-  selectedNodeId: string | null;
-  selectedGoalId: string | null;
+  selectedTaskId: string | null;
   detailPanelOpen: boolean;
   chatPanelCollapsed: boolean;
-  isThinking: boolean;
   layoutDirection: 'LR' | 'TB';
-  /** Approval gate panel (brief / architecture / phase review) */
   gateOpen: boolean;
-  /** Live agent-output console dock (bottom of the canvas) is expanded */
   consoleOpen: boolean;
 }

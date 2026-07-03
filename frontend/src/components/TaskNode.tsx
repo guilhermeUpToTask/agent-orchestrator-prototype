@@ -1,8 +1,12 @@
 import React, { memo } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { TaskNodeData } from '../types/ui';
-import { tokens, STATUS_META, AGENT_COLORS, type StatusKey } from '../styles/tokens';
+import { tokens, STATUS, raw } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
+
+const KIND_COLOR = {
+  idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
+} as const;
 
 function PulsingDot({ color }: { color: string }) {
   return (
@@ -16,24 +20,18 @@ function PulsingDot({ color }: { color: string }) {
 }
 
 function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
-  const selectNode = usePlannerStore((s) => s.selectNode);
-  const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
-  const isSelected = selectedNodeId === id;
+  const selectTask = usePlannerStore((s) => s.selectTask);
+  const selectedTaskId = usePlannerStore((s) => s.ui.selectedTaskId);
+  const isSelected = selectedTaskId === id;
 
-  const status = (data.task?.status ?? 'created') as StatusKey;
-  const meta = STATUS_META[status] ?? STATUS_META.created;
-  const progress = usePlannerStore((s) => s.taskProgress[data.task?.task_id ?? '']);
-  const latestProgress = progress?.[progress.length - 1];
-  const agentColor = data.agent ? (AGENT_COLORS[data.agent.name] ?? tokens.textSecond) : tokens.textMuted;
-  const isRunning = status === 'in_progress' || status === 'assigned';
-  const isSucceeded = status === 'succeeded' || status === 'merged';
-  const isFailed = status === 'failed' || status === 'canceled';
-  // Blocked = CREATED but waiting on unfinished sibling deps (vs simply queued).
-  const blockedBy: string[] = (data.blockedBy as string[]) ?? [];
-  const isBlocked = status === 'created' && blockedBy.length > 0;
-  // Stuck in queue because no active agent matches the required capability.
-  const unassignableReason =
-    !isRunning && !isSucceeded && !isFailed ? data.task?.unassignable_reason : null;
+  const task = data.task;
+  const status = task?.status ?? 'pending';
+  const meta = STATUS[status] ?? STATUS.pending;
+  const color = KIND_COLOR[meta.kind];
+  const isRunning = status === 'running';
+  const isDone = status === 'done';
+  const isFailed = status === 'failed';
+  const isSkipped = status === 'skipped';
 
   return (
     <>
@@ -42,7 +40,7 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
         width: 8, height: 8, left: -4,
       }} />
 
-      <div onClick={() => selectNode(isSelected ? null : id)} style={{
+      <div onClick={() => selectTask(isSelected ? null : id)} style={{
         width: 240,
         background: isSelected ? '#141928' : tokens.cardBg,
         border: `1.5px solid ${isSelected ? tokens.accent : isRunning ? tokens.yellow + '44' : isFailed ? tokens.red + '33' : tokens.border}`,
@@ -53,39 +51,20 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
           : '0 4px 16px rgba(0,0,0,0.4)',
         transition: 'box-shadow 0.2s, border-color 0.2s',
         animation: 'fadein 0.18s ease both', overflow: 'hidden',
+        opacity: isSkipped ? 0.55 : 1,
       }}>
         {/* Status stripe */}
-        <div style={{
-          height: 3,
-          background: isSucceeded ? `linear-gradient(90deg, ${tokens.green}, transparent)`
-            : isRunning ? `linear-gradient(90deg, ${tokens.yellow}, transparent)`
-            : isFailed ? `linear-gradient(90deg, ${tokens.red}, transparent)`
-            : `linear-gradient(90deg, ${agentColor}66, transparent)`,
-        }} />
+        <div style={{ height: 3, background: `linear-gradient(90deg, ${color}, transparent)` }} />
 
         {/* Header */}
         <div style={{
           padding: '7px 10px 5px', borderBottom: `1px solid ${tokens.borderMuted}`,
-          display: 'flex', alignItems: 'center', gap: 6, background: meta.bg,
+          display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          <PulsingDot color={meta.dot} />
-          <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color: meta.color, letterSpacing: '0.1em', fontWeight: 600 }}>
-            {meta.label}
+          <PulsingDot color={color} />
+          <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color, letterSpacing: '0.1em', fontWeight: 600 }}>
+            {meta.label.toUpperCase()}
           </span>
-          {isRunning && (progress?.length ?? 0) > 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 3,
-              fontSize: 8, fontFamily: tokens.fontMono, color: tokens.yellow,
-              padding: '1px 5px', borderRadius: 3,
-              background: tokens.yellow + '18', border: `1px solid ${tokens.yellow}33`,
-            }}>
-              <span style={{
-                width: 4, height: 4, borderRadius: '50%', background: tokens.yellow,
-                animation: 'pulse 1.2s ease-in-out infinite',
-              }} />
-              live
-            </span>
-          )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <span style={{
               fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
@@ -94,8 +73,8 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
             {data.agent && (
               <span style={{
                 fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
-                borderRadius: 3, background: agentColor + '18',
-                border: `1px solid ${agentColor}33`, color: agentColor,
+                borderRadius: 3, background: tokens.accent + '18',
+                border: `1px solid ${tokens.accent}33`, color: tokens.accent,
               }}>{data.agent.name}</span>
             )}
           </div>
@@ -107,20 +86,27 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
             fontSize: 12, fontWeight: 600, color: tokens.textPrimary,
             lineHeight: 1.35, marginBottom: 6,
           }}>
-            {data.task?.title ?? id}
+            {task?.name ?? id}
           </div>
 
-          {/* Retry count */}
-          {(data.task?.retry_count ?? 0) > 0 && (
+          {(task?.attempt ?? 0) > 1 && (
             <div style={{
               fontSize: 9, fontFamily: tokens.fontMono,
               color: tokens.yellow, marginBottom: 4,
             }}>
-              ↺ retry {data.task.retry_count}
+              ↺ attempt {task.attempt}
             </div>
           )}
 
-          {/* Running dots */}
+          {task?.required_capabilities?.length > 0 && (
+            <div style={{
+              fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted,
+              marginBottom: 4,
+            }}>
+              caps: {task.required_capabilities.join(', ')}
+            </div>
+          )}
+
           {isRunning && (
             <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
               {[0, 1, 2].map((i) => (
@@ -133,24 +119,13 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
             </div>
           )}
 
-          {isRunning && latestProgress && (
-            <div style={{
-              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textSecond,
-              background: '#0d1018', border: `1px solid ${tokens.borderMuted}`,
-              borderRadius: 4, padding: '3px 6px', marginBottom: 4,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {latestProgress}
-            </div>
-          )}
-
-          {isSucceeded && (
+          {isDone && (
             <div style={{
               padding: '3px 7px', borderRadius: 5,
               background: tokens.greenDim, border: `1px solid ${tokens.green}33`,
               fontSize: 9, fontFamily: tokens.fontMono, color: tokens.green,
             }}>
-              ✓ {status === 'merged' ? 'merged to main' : 'succeeded'}
+              ✓ done
             </div>
           )}
 
@@ -163,29 +138,7 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
               display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
             }}>
-              ✗ {data.task?.last_error ? data.task.last_error : status}
-            </div>
-          )}
-
-          {isBlocked && (
-            <div style={{
-              padding: '3px 7px', borderRadius: 5,
-              background: '#1c2030', border: `1px solid ${tokens.borderMuted}`,
-              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textSecond,
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              ⏳ waiting on {blockedBy.join(', ')}
-            </div>
-          )}
-
-          {unassignableReason && (
-            <div style={{
-              padding: '3px 7px', borderRadius: 5,
-              background: tokens.yellow + '18', border: `1px solid ${tokens.yellow}44`,
-              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.yellow,
-              lineHeight: 1.3,
-            }}>
-              ⚠ {unassignableReason}
+              ✗ {task?.result?.failure_reason ?? 'failed'}
             </div>
           )}
         </div>
@@ -194,13 +147,14 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
         <div style={{
           padding: '3px 10px', borderTop: `1px solid ${tokens.borderMuted}`,
           fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
           {id}
         </div>
       </div>
 
       <Handle type="source" position={Position.Right} style={{
-        background: isSucceeded ? tokens.green : tokens.accentDim,
+        background: isDone ? tokens.green : tokens.accentDim,
         border: `1.5px solid ${isSelected ? tokens.accent : '#2a3050'}`,
         width: 8, height: 8, right: -4,
       }} />

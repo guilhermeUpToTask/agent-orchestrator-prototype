@@ -1,241 +1,159 @@
 /**
  * src/store/plannerStore.ts
  *
- * Local UI state ONLY. All server state (plan, goals, agents, history)
- * lives in React Query (src/lib/queries.ts) and is kept fresh by SSE
- * cache invalidation. This store holds what the server doesn't know:
- * selection, panel visibility, the chat transcript, the SSE connection
- * state, the rolling event buffer, and decision proposals captured from
- * the stream (no REST endpoint exposes them).
+ * Local UI state ONLY. All server state (plans, plan aggregate, chat,
+ * reference data) lives in React Query (src/lib/queries.ts) and is kept
+ * fresh by SSE cache invalidation. This store holds what the server
+ * doesn't: selection, panel visibility, the SSE connection state, the
+ * rolling event buffer (Activity) and the live agent log (ConsoleDock).
  */
 
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { nanoid } from 'nanoid';
 
-import type { ChatMessage, PlannerUIState } from '../types/ui';
-
-export function ts() {
-  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-}
-
-// ─── Live-stream domain types ───────────────────────────────────────────────
+import type { PlannerUIState, SSEPayload } from '../types/ui';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'down';
 
-export interface DomainEvent {
+export interface BufferedEvent {
   id: string;
   type: string;
   payload: Record<string, unknown>;
   at: number; // epoch ms, client receive time
 }
 
-export interface DecisionProposal {
+export interface AgentLogLine {
   id: string;
-  domain: string;
+  plan_id: string;
+  task_id: string;
+  attempt: number;
+  seq: number;
+  type: string;
+  text: string;
   at: number;
 }
-
-export interface PhaseGoal {
-  name: string;
-  description: string;
-}
-
-export interface PhaseProposal {
-  name: string;
-  goal_names: string[];
-  goals: PhaseGoal[];
-  at: number;
-}
-
-export type PlannerRunKind = 'architecture' | 'phase_review';
 
 const EVENT_BUFFER_MAX = 500;
-const TASK_PROGRESS_MAX = 200;  // per-task live log ring
+const AGENT_LOG_MAX = 400;
+const SEEN_IDS_MAX = 2000;
 
 interface PlannerState {
-  // Chat transcript (operator ↔ planner — system noise lives in `events`)
-  messages: ChatMessage[];
-
   // Rolling domain-event buffer (Activity view)
-  events: DomainEvent[];
+  events: BufferedEvent[];
+  // Live agent telemetry (ConsoleDock), from "agent.event"
+  agentLog: AgentLogLine[];
+  // event_id dedup ring (delivery is at-least-once)
+  seenEventIds: string[];
 
-  // Architecture decision proposals captured from SSE
-  decisions: DecisionProposal[];
-
-  // Architecture phase proposals (with per-goal descriptions) captured from SSE
-  phases: PhaseProposal[];
-
-  // Which autonomous planner run (architecture / phase_review) is in flight,
-  // and which kinds have completed this session. Drives the rail's
-  // "Draft architecture" / "Run phase review" affordances and gate gating,
-  // since these runs have no REST read-model — only SSE start/finish events.
-  activeRun: PlannerRunKind | null;
-  completedRuns: PlannerRunKind[];
-
-  // Live agent output per task (capped ring), streamed via task.progress SSE.
-  taskProgress: Record<string, string[]>;
-
-  // SSE connection
   connection: { state: ConnectionState; lastEventAt: number | null };
-
-  // UI
   ui: PlannerUIState;
 
-  // ── Chat ──────────────────────────────────────────────────────────────────
-  addMessage: (msg: Omit<ChatMessage, 'id'>) => void;
-  setThinking: (v: boolean) => void;
-
-  // ── Stream ────────────────────────────────────────────────────────────────
-  pushEvent: (type: string, payload: Record<string, unknown>) => void;
-  appendTaskProgress: (taskId: string, lines: string[]) => void;
-  clearTaskProgress: (taskId: string) => void;
+  /** Buffer an event; returns false when this event_id was already seen. */
+  pushEvent: (type: string, payload: SSEPayload) => boolean;
+  appendAgentLog: (payload: SSEPayload) => void;
   setConnectionState: (state: ConnectionState) => void;
-  addDecision: (d: Omit<DecisionProposal, 'at'>) => void;
-  clearDecisions: () => void;
-  addPhase: (p: Omit<PhaseProposal, 'at'>) => void;
-  clearPhases: () => void;
 
-  // ── Autonomous planner runs ─────────────────────────────────────────────────
-  setActiveRun: (kind: PlannerRunKind | null) => void;
-  markRunComplete: (kind: PlannerRunKind) => void;
-  resetRuns: () => void;
-
-  // ── Selection / panels ────────────────────────────────────────────────────
-  selectNode: (id: string | null) => void;
+  selectTask: (id: string | null) => void;
   setLayoutDirection: (dir: 'LR' | 'TB') => void;
   toggleChatPanel: () => void;
   setGateOpen: (open: boolean) => void;
   toggleConsole: () => void;
-  setConsoleOpen: (open: boolean) => void;
 }
 
 export const usePlannerStore = create<PlannerState>()(
-  immer((set) => ({
-    messages: [],
+  immer((set, get) => ({
     events: [],
-    decisions: [],
-    phases: [],
-    activeRun: null,
-    completedRuns: [],
-    taskProgress: {},
+    agentLog: [],
+    seenEventIds: [],
     connection: { state: 'connecting', lastEventAt: null },
 
     ui: {
-      selectedNodeId: null,
-      selectedGoalId: null,
+      selectedTaskId: null,
       detailPanelOpen: false,
       chatPanelCollapsed: false,
-      isThinking: false,
       layoutDirection: 'LR',
       gateOpen: false,
       consoleOpen: false,
     },
 
-    addMessage: (msg) => {
-      set((s) => { s.messages.push({ id: nanoid(), ...msg }); });
-    },
-
-    setThinking: (v) => {
-      set((s) => { s.ui.isThinking = v; });
-    },
-
     pushEvent: (type, payload) => {
+      const eventId = payload.event_id;
+      if (eventId && get().seenEventIds.includes(eventId)) {
+        set((s) => {
+          s.connection.lastEventAt = Date.now();
+        });
+        return false;
+      }
       set((s) => {
+        if (eventId) {
+          s.seenEventIds.push(eventId);
+          if (s.seenEventIds.length > SEEN_IDS_MAX) {
+            s.seenEventIds.splice(0, s.seenEventIds.length - SEEN_IDS_MAX);
+          }
+        }
         s.events.push({ id: nanoid(), type, payload, at: Date.now() });
         if (s.events.length > EVENT_BUFFER_MAX) {
           s.events.splice(0, s.events.length - EVENT_BUFFER_MAX);
         }
         s.connection.lastEventAt = Date.now();
       });
+      return true;
     },
 
-    appendTaskProgress: (taskId, lines) => {
-      if (!lines.length) return;
+    appendAgentLog: (payload) => {
       set((s) => {
-        const buf = s.taskProgress[taskId] ?? (s.taskProgress[taskId] = []);
-        buf.push(...lines);
-        if (buf.length > TASK_PROGRESS_MAX) {
-          buf.splice(0, buf.length - TASK_PROGRESS_MAX);
+        s.agentLog.push({
+          id: (payload.event_id as string) ?? nanoid(),
+          plan_id: payload.plan_id,
+          task_id: (payload.task_id as string) ?? '',
+          attempt: (payload.attempt as number) ?? 0,
+          seq: (payload.seq as number) ?? 0,
+          type: (payload.type as string) ?? 'step',
+          text: JSON.stringify(payload.payload ?? {}),
+          at: Date.now(),
+        });
+        if (s.agentLog.length > AGENT_LOG_MAX) {
+          s.agentLog.splice(0, s.agentLog.length - AGENT_LOG_MAX);
         }
       });
-    },
-
-    clearTaskProgress: (taskId) => {
-      set((s) => { delete s.taskProgress[taskId]; });
     },
 
     setConnectionState: (state) => {
-      set((s) => { s.connection.state = state; });
-    },
-
-    addDecision: (d) => {
       set((s) => {
-        if (!s.decisions.some((x) => x.id === d.id)) {
-          s.decisions.push({ ...d, at: Date.now() });
-        }
+        s.connection.state = state;
       });
     },
 
-    clearDecisions: () => {
-      set((s) => { s.decisions = []; });
-    },
-
-    addPhase: (p) => {
+    selectTask: (id) => {
       set((s) => {
-        const existing = s.phases.findIndex((x) => x.name === p.name);
-        if (existing >= 0) {
-          s.phases[existing] = { ...p, at: Date.now() };
-        } else {
-          s.phases.push({ ...p, at: Date.now() });
-        }
-      });
-    },
-
-    clearPhases: () => {
-      set((s) => { s.phases = []; });
-    },
-
-    setActiveRun: (kind) => {
-      set((s) => { s.activeRun = kind; });
-    },
-
-    markRunComplete: (kind) => {
-      set((s) => {
-        s.activeRun = null;
-        if (!s.completedRuns.includes(kind)) s.completedRuns.push(kind);
-      });
-    },
-
-    resetRuns: () => {
-      set((s) => { s.activeRun = null; s.completedRuns = []; });
-    },
-
-    selectNode: (id) => {
-      set((s) => {
-        s.ui.selectedNodeId = id;
+        s.ui.selectedTaskId = id;
         s.ui.detailPanelOpen = id !== null;
       });
     },
 
     setLayoutDirection: (dir) => {
-      set((s) => { s.ui.layoutDirection = dir; });
+      set((s) => {
+        s.ui.layoutDirection = dir;
+      });
     },
 
     toggleChatPanel: () => {
-      set((s) => { s.ui.chatPanelCollapsed = !s.ui.chatPanelCollapsed; });
+      set((s) => {
+        s.ui.chatPanelCollapsed = !s.ui.chatPanelCollapsed;
+      });
     },
 
     setGateOpen: (open) => {
-      set((s) => { s.ui.gateOpen = open; });
+      set((s) => {
+        s.ui.gateOpen = open;
+      });
     },
 
     toggleConsole: () => {
-      set((s) => { s.ui.consoleOpen = !s.ui.consoleOpen; });
-    },
-
-    setConsoleOpen: (open) => {
-      set((s) => { s.ui.consoleOpen = open; });
+      set((s) => {
+        s.ui.consoleOpen = !s.ui.consoleOpen;
+      });
     },
   })),
 );

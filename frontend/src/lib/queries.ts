@@ -1,9 +1,10 @@
 /**
  * src/lib/queries.ts
  *
- * React Query layer: all server state (plan, goals, agents, history) is
- * fetched and cached here. Zustand (plannerStore) holds only local UI
- * state — selection, layout direction, chat panel, chat transcript.
+ * React Query layer: all server state (plan list, plan aggregate, chat
+ * history, reference data) is fetched and cached here. Zustand
+ * (plannerStore) holds only local UI state — selection, panels, the SSE
+ * connection, the rolling event buffer and the live agent log.
  *
  * SSE events invalidate the relevant caches (useSSEBridge), so the UI
  * updates live without HTTP polling.
@@ -16,36 +17,34 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { nanoid } from 'nanoid';
 
 import {
-  approveArchitecture,
-  approveBrief,
-  approvePhase,
-  resumeDispatch,
-  retryGoalFailed,
-  retryAllFailed,
-  getTaskLogs,
-  fetchAgents,
-  fetchArchitectureStatus,
-  fetchGoals,
+  applyEdit,
+  approvePlan,
+  createPlan,
+  fetchChat,
   fetchPlan,
-  fetchPlanHistory,
-  runArchitecture,
-  runPhaseReview,
-  sendChatMessage,
-  startDiscovery,
+  finishReview,
+  listAgents,
+  listCapabilities,
+  listPlans,
+  replanFromReview,
+  replanMidRunning,
+  sendDiscoveryMessage,
+  sendReplanningMessage,
   subscribeToEvents,
+  type EditBody,
   type SSEEvent,
 } from './api';
 import { toast, errorDetail } from './toast';
-import { usePlannerStore, ts } from '../store/plannerStore';
-import { AGENT_COLORS } from '../styles/tokens';
-import type { AgentProps, GoalAggregate, ProjectPlan, ProjectPlanStatus, TaskStatus } from '../types/ui';
+import { usePlannerStore } from '../store/plannerStore';
+import type { MessageResponse, Plan, PlanPhase } from '../types/ui';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,        // SSE invalidation is the primary update path
+      staleTime: 30_000, // SSE invalidation is the primary update path
       refetchOnWindowFocus: true,
       retry: 1,
     },
@@ -55,385 +54,141 @@ export const queryClient = new QueryClient({
 // ─── Query keys ────────────────────────────────────────────────────────────────
 
 export const keys = {
-  plan: ['plan'] as const,
-  planHistory: ['plan', 'history'] as const,
-  goals: ['goals'] as const,
+  plans: ['plans'] as const,
+  plan: (id: string) => ['plan', id] as const,
+  chat: (id: string) => ['chat', id] as const,
   agents: ['agents'] as const,
-  taskLogs: (taskId: string) => ['task-logs', taskId] as const,
+  capabilities: ['capabilities'] as const,
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────────
 
-export function usePlan() {
-  return useQuery({ queryKey: keys.plan, queryFn: fetchPlan });
+export function usePlans() {
+  return useQuery({ queryKey: keys.plans, queryFn: listPlans });
 }
 
-export function usePlanHistory() {
-  return useQuery({ queryKey: keys.planHistory, queryFn: fetchPlanHistory });
-}
-
-export function useGoals() {
-  return useQuery({ queryKey: keys.goals, queryFn: fetchGoals });
-}
-
-/** Persisted console logs for a finished task. Enabled only when a task is selected. */
-export function useTaskLogs(taskId: string | null, enabled: boolean) {
+export function usePlan(planId: string | null) {
   return useQuery({
-    queryKey: keys.taskLogs(taskId ?? ''),
-    queryFn: () => getTaskLogs(taskId as string),
-    enabled: enabled && !!taskId,
+    queryKey: keys.plan(planId ?? ''),
+    queryFn: () => fetchPlan(planId as string),
+    enabled: !!planId,
   });
 }
 
-// Module-level so the function reference is stable — React Query only
-// re-runs select (and returns a new array) when the underlying data changes.
-const colorizeAgents = (agents: AgentProps[]): AgentProps[] =>
-  agents.map((a) => ({ ...a, color: AGENT_COLORS[a.name] ?? '#64748b' }));
+export function useChat(planId: string | null) {
+  return useQuery({
+    queryKey: keys.chat(planId ?? ''),
+    queryFn: () => fetchChat(planId as string),
+    enabled: !!planId,
+  });
+}
 
 export function useAgents() {
-  return useQuery({
-    queryKey: keys.agents,
-    queryFn: fetchAgents,
-    select: colorizeAgents,
-  });
+  return useQuery({ queryKey: keys.agents, queryFn: listAgents });
+}
+
+export function useCapabilities() {
+  return useQuery({ queryKey: keys.capabilities, queryFn: listCapabilities });
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────
 
-export function useApproveBrief() {
-  const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
-  return useMutation({
-    mutationFn: approveBrief,
-    onSuccess: (result) => {
-      addMessage({ role: 'system', text: `Brief approved → ${result.plan_status}`, ts: ts() });
-      // The backend auto-starts architecture drafting on approval; reflect it
-      // immediately so the rail shows "Drafting…" before the first status poll.
-      if (result.plan_status === 'architecture') setActiveRun('architecture');
-      qc.invalidateQueries({ queryKey: keys.plan });
-    },
-    onError: (err) => {
-      toast.error('Approve brief failed', errorDetail(err));
-    },
-  });
-}
-
-export function useApproveArchitecture() {
-  const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  return useMutation({
-    mutationFn: (decisionIds: string[]) => approveArchitecture(decisionIds),
-    onSuccess: (result) => {
-      const failed = result.goals_failed ?? [];
-      const failSuffix =
-        failed.length > 0 ? ` ${failed.length} failed to dispatch.` : '';
-      addMessage({
-        role: 'assistant',
-        text: `Architecture approved. ${result.decisions_applied} decisions applied. ${result.goals_dispatched.length} goals dispatched.${failSuffix}`,
-        ts: ts(),
-      });
-      if (failed.length > 0) {
-        toast.error(
-          `${failed.length} goal(s) failed to dispatch`,
-          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
-        );
-      }
-      qc.invalidateQueries({ queryKey: keys.plan });
-      qc.invalidateQueries({ queryKey: keys.goals });
-    },
-    onError: (err) => {
-      toast.error('Approve architecture failed', errorDetail(err));
-    },
-  });
-}
-
-export function useResumeDispatch() {
-  const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  return useMutation({
-    mutationFn: () => resumeDispatch(),
-    onSuccess: (result) => {
-      const failed = result.goals_failed ?? [];
-      const failSuffix =
-        failed.length > 0 ? ` ${failed.length} still failed.` : '';
-      addMessage({
-        role: 'assistant',
-        text: `Resumed dispatch. ${result.goals_dispatched.length} goals dispatched.${failSuffix}`,
-        ts: ts(),
-      });
-      if (failed.length > 0) {
-        toast.error(
-          `${failed.length} goal(s) still failed to dispatch`,
-          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
-        );
-      }
-      qc.invalidateQueries({ queryKey: keys.plan });
-      qc.invalidateQueries({ queryKey: keys.goals });
-    },
-    onError: (err) => {
-      toast.error('Resume dispatch failed', errorDetail(err));
-    },
-  });
-}
-
-export function useRetryGoalFailed() {
+export function useCreatePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (goalId: string) => retryGoalFailed(goalId),
-    onSuccess: (result) => {
-      toast.success(`Requeued ${result.requeued.length} failed task(s)`);
-      qc.invalidateQueries({ queryKey: keys.goals });
-    },
-    onError: (err) => toast.error('Retry failed', errorDetail(err)),
-  });
-}
-
-export function useRetryAllFailed() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => retryAllFailed(),
-    onSuccess: (result) => {
-      toast.success(
-        `Requeued ${result.requeued.length} failed task(s) across ${result.goals_touched.length} goal(s)`,
-      );
-      qc.invalidateQueries({ queryKey: keys.goals });
-    },
-    onError: (err) => toast.error('Retry all failed', errorDetail(err)),
-  });
-}
-
-export function useApprovePhase() {
-  const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  return useMutation({
-    mutationFn: (approveNext: boolean) => approvePhase(approveNext),
-    onSuccess: (result) => {
-      const failed = result.goals_failed ?? [];
-      const failSuffix =
-        failed.length > 0 ? ` ${failed.length} failed to dispatch.` : '';
-      addMessage({
-        role: 'assistant',
-        text: `Phase approved → ${result.plan_status}. ${result.goals_dispatched.length} new goals dispatched.${failSuffix}`,
-        ts: ts(),
-      });
-      if (failed.length > 0) {
-        toast.error(
-          `${failed.length} goal(s) failed to dispatch`,
-          failed.map((f) => `${f.goal_name}: ${f.error}`).join('\n'),
-        );
-      }
-      qc.invalidateQueries({ queryKey: keys.plan });
-      qc.invalidateQueries({ queryKey: keys.goals });
-    },
-    onError: (err) => {
-      toast.error('Approve phase failed', errorDetail(err));
-    },
-  });
-}
-
-export function useStartDiscovery() {
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  const setThinking = usePlannerStore((s) => s.setThinking);
-  return useMutation({
-    mutationFn: startDiscovery,
-    onMutate: () => setThinking(true),
-    onSettled: () => setThinking(false),
-    onSuccess: (result) => {
-      if (result.question) {
-        addMessage({ role: 'assistant', text: result.question, ts: ts() });
-      } else if (result.done) {
-        addMessage({ role: 'assistant', text: 'Discovery complete. Brief ready for approval.', ts: ts() });
-      }
-    },
-    onError: (err) => {
-      toast.error('Start discovery failed', errorDetail(err));
-    },
+    mutationFn: (brief: string) => createPlan(brief, nanoid()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plans }),
+    onError: (err) => toast.error('Create plan failed', errorDetail(err)),
   });
 }
 
 /**
- * Kick off the autonomous architecture planner (202). Decisions then stream
- * in over SSE and the rail surfaces the approval gate. This closes the loop
- * that previously dead-ended at approve-architecture's 409.
+ * One conversation turn, routed by the plan's phase (DISCOVERY vs
+ * REPLANNING — the only two chat-driven phases). The reply lands in the
+ * chat cache; a committed turn also advances the phase, so the plan cache
+ * refetches.
  */
-export function useRunArchitecture() {
-  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
-  return useMutation({
-    mutationFn: runArchitecture,
-    onMutate: () => setActiveRun('architecture'),
-    onError: (err) => {
-      setActiveRun(null);
-      toast.error('Could not start architecture drafting', errorDetail(err));
-    },
-  });
-}
-
-/**
- * Reload-resilient architecture readiness. Polls `/api/plan/architecture/status`
- * while the plan is in `architecture` and mirrors the backend session state into
- * the Zustand run-state, so `completedRuns`/`decisions` survive a page refresh
- * and a streamed decision never prematurely unlocks approval. Mount once in App.
- */
-export function useArchitectureStatusSync() {
-  const { data: plan } = usePlan();
-  const status = plan?.status;
-  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
-  const markRunComplete = usePlannerStore((s) => s.markRunComplete);
-  const addDecision = usePlannerStore((s) => s.addDecision);
-  const addPhase = usePlannerStore((s) => s.addPhase);
-  const decisions = usePlannerStore((s) => s.decisions);
-  const phases = usePlannerStore((s) => s.phases);
-  const completedRuns = usePlannerStore((s) => s.completedRuns);
-  const activeRun = usePlannerStore((s) => s.activeRun);
-
-  const { data } = useQuery({
-    queryKey: ['plan', 'architecture', 'status'],
-    queryFn: fetchArchitectureStatus,
-    enabled: status === 'architecture',
-    refetchInterval: (query) => {
-      const s = query.state.data?.state;
-      // Poll while drafting; stop once the run is terminal (completed/failed).
-      return status === 'architecture' && (s === undefined || s === 'running')
-        ? 2000
-        : false;
-    },
-  });
-
-  useEffect(() => {
-    if (status !== 'architecture' || !data) return;
-    if (data.state === 'running' && activeRun !== 'architecture') {
-      setActiveRun('architecture');
-    }
-    if (data.state === 'completed') {
-      if (!completedRuns.includes('architecture')) markRunComplete('architecture');
-      // Hydrate proposals after a reload (the SSE buffer is gone by then).
-      if (decisions.length === 0 && data.decisions.length > 0) {
-        data.decisions.forEach((d) => addDecision({ id: d.id, domain: d.domain }));
-      }
-      if (phases.length === 0 && data.phases.length > 0) {
-        data.phases.forEach((p) =>
-          addPhase({ name: p.name, goal_names: p.goal_names, goals: p.goals }),
-        );
-      }
-    }
-    if (data.state === 'failed' && activeRun === 'architecture') {
-      setActiveRun(null);
-    }
-  }, [
-    status, data, activeRun, completedRuns, decisions.length, phases.length,
-    setActiveRun, markRunComplete, addDecision, addPhase,
-  ]);
-}
-
-/** Kick off the autonomous phase-review planner (202; SSE-driven). */
-export function useRunPhaseReview() {
-  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
-  return useMutation({
-    mutationFn: runPhaseReview,
-    onMutate: () => setActiveRun('phase_review'),
-    onError: (err) => {
-      setActiveRun(null);
-      toast.error('Could not start phase review', errorDetail(err));
-    },
-  });
-}
-
-/**
- * Chat send routed by the current plan status (read from the plan cache).
- * Refinement responses invalidate the goals cache so the canvas reflects
- * any plan mutations the tactical planner made.
- */
-export function useSendChatMessage() {
+export function useSendMessage(planId: string) {
   const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  const setThinking = usePlannerStore((s) => s.setThinking);
-  const selectedNodeId = usePlannerStore((s) => s.ui.selectedNodeId);
-  const isThinking = usePlannerStore((s) => s.ui.isThinking);
-  const { data: goals } = useGoals();
-
-  return async (text: string) => {
-    if (!text.trim() || isThinking) return;
-    const now = ts();
-    const planStatus: ProjectPlanStatus =
-      qc.getQueryData<ProjectPlan>(keys.plan)?.status ?? 'discovery';
-    const focusedGoalId =
-      (selectedNodeId
-        ? goals?.find((g) => g.tasks.some((t) => t.task_id === selectedNodeId))?.goal_id
-        : null) ?? null;
-
-    addMessage({ role: 'user', text, ts: now, nodeCtx: selectedNodeId ?? undefined });
-    setThinking(true);
-
-    try {
-      const result = await sendChatMessage(text, planStatus, selectedNodeId, focusedGoalId);
-      switch (result.type) {
-        case 'refinement': {
-          const { data } = result;
-          if (data.succeeded) {
-            addMessage({
-              role: 'assistant',
-              text: data.actions_taken.length > 0
-                ? `Done. Changes made:\n${data.actions_taken.map((a) => `• ${a}`).join('\n')}`
-                : 'No changes needed — the request was informational.',
-              ts: now,
-            });
-            qc.invalidateQueries({ queryKey: keys.goals });
-          } else {
-            addMessage({
-              role: 'assistant',
-              text: `Could not complete: ${data.error ?? 'Unknown error'}`,
-              ts: now,
-            });
-          }
-          break;
-        }
-        case 'discovery': {
-          const { data } = result;
-          if (data.done) {
-            addMessage({
-              role: 'assistant',
-              text: 'Discovery complete. Brief is ready for your approval. Use "Approve Brief" in the toolbar.',
-              ts: now,
-            });
-          } else if (data.question) {
-            addMessage({ role: 'assistant', text: data.question, ts: now });
-          }
-          break;
-        }
-        case 'advisory':
-          addMessage({ role: 'assistant', text: result.text, ts: now });
-          break;
+  return useMutation({
+    mutationFn: async (message: string): Promise<MessageResponse> => {
+      const plan = qc.getQueryData<Plan>(keys.plan(planId));
+      const send =
+        plan?.phase === 'replanning' ? sendReplanningMessage : sendDiscoveryMessage;
+      return send(planId, message);
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: keys.chat(planId) });
+      if (result.committed) {
+        qc.invalidateQueries({ queryKey: keys.plan(planId) });
+        qc.invalidateQueries({ queryKey: keys.plans });
+        toast.success('Roadmap committed', `Plan moved to ${result.phase}`);
       }
-    } catch (err) {
-      toast.error('Error communicating with backend', errorDetail(err));
-    } finally {
-      setThinking(false);
-    }
-  };
+    },
+    onError: (err) => {
+      qc.invalidateQueries({ queryKey: keys.chat(planId) });
+      toast.error('Message failed', errorDetail(err));
+    },
+  });
+}
+
+function usePlanCommand(
+  planId: string,
+  fn: (planId: string) => Promise<void>,
+  label: string,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => fn(planId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+    },
+    onError: (err) => toast.error(`${label} failed`, errorDetail(err)),
+  });
+}
+
+export const useApprovePlan = (planId: string) =>
+  usePlanCommand(planId, approvePlan, 'Approve');
+export const useFinishReview = (planId: string) =>
+  usePlanCommand(planId, finishReview, 'Finish review');
+export const useReplanFromReview = (planId: string) =>
+  usePlanCommand(planId, replanFromReview, 'Replan');
+export const useReplanMidRunning = (planId: string) =>
+  usePlanCommand(planId, replanMidRunning, 'Replan');
+
+export function useApplyEdit(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (edit: EditBody) => applyEdit(planId, edit),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
+    onError: (err) => toast.error('Edit rejected', errorDetail(err)),
+  });
 }
 
 // ─── SSE → cache bridge ────────────────────────────────────────────────────────
 
+const TASK_EVENTS = new Set([
+  'TaskStarted',
+  'TaskCompleted',
+  'TaskRequeued',
+  'TaskFailedEvent',
+  'TaskAbandoned',
+  'GoalCompleted',
+  'GoalFailedEvent',
+]);
+
 /**
- * Subscribe to the backend event stream once. Every event lands in the
- * rolling event buffer (Activity view) and patches/invalidates the right
- * caches. The chat transcript receives only operator-relevant planner
- * output (proposals) — system noise no longer floods the conversation.
- * Connection lifecycle drives the top-bar indicator. Mount once in App.
+ * Subscribe to the backend event stream once (mount in the app shell).
+ * Every event lands in the rolling buffer (Activity view); plan-scoped
+ * events invalidate that plan's cache; agent.event feeds the console dock.
+ * Delivery is at-least-once — the store dedups on event_id.
  */
 export function useSSEBridge() {
   const qc = useQueryClient();
-  const addMessage = usePlannerStore((s) => s.addMessage);
   const pushEvent = usePlannerStore((s) => s.pushEvent);
+  const appendAgentLog = usePlannerStore((s) => s.appendAgentLog);
   const setConnectionState = usePlannerStore((s) => s.setConnectionState);
-  const addDecision = usePlannerStore((s) => s.addDecision);
-  const clearDecisions = usePlannerStore((s) => s.clearDecisions);
-  const addPhase = usePlannerStore((s) => s.addPhase);
-  const clearPhases = usePlannerStore((s) => s.clearPhases);
-  const markRunComplete = usePlannerStore((s) => s.markRunComplete);
-  const setActiveRun = usePlannerStore((s) => s.setActiveRun);
-  const resetRuns = usePlannerStore((s) => s.resetRuns);
 
   useEffect(() => {
     const unsubscribe = subscribeToEvents({
@@ -447,168 +202,66 @@ export function useSSEBridge() {
       },
       onEvent: (event: SSEEvent) => {
         setConnectionState('live');
-        pushEvent(event.type, (event as { payload?: Record<string, unknown> }).payload ?? {});
+        const { payload } = event;
+        const fresh = pushEvent(event.type, payload);
+        if (!fresh) return; // at-least-once delivery: already seen event_id
+
+        const planId = payload.plan_id;
 
         switch (event.type) {
-          case 'plan.status_changed': {
-            const status = event.payload.status as ProjectPlanStatus;
-            qc.setQueryData<ProjectPlan>(keys.plan, (plan) =>
-              plan ? { ...plan, status } : plan,
-            );
-            qc.invalidateQueries({ queryKey: keys.plan });
-            // Decisions and run flags belong to one phase pass — drop them
-            // once the phase activates or the project ends.
-            if (status === 'phase_active' || status === 'done') {
-              clearDecisions();
-              clearPhases();
-              resetRuns();
+          case 'agent.event':
+            appendAgentLog(payload);
+            break;
+
+          case 'PhaseAdvanced': {
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
+            const to = payload.to_phase as PlanPhase;
+            if (to === 'awaiting_review') {
+              toast.info('Plan ready for review', 'Approve it to start execution.');
+            } else if (to === 'review') {
+              toast.info('Execution finished', 'Finish the plan or replan the next phase.');
             }
             break;
           }
 
-          case 'plan.architecture_completed':
-            markRunComplete('architecture');
+          case 'PlanCompleted':
+            toast.success('Plan completed');
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
             break;
 
-          case 'plan.architecture_failed':
-            setActiveRun(null);
+          case 'PlanFailed':
+            toast.error('Plan failed', (payload.reason as string) ?? undefined);
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
+            break;
+
+          case 'ReplanRequested':
+            toast.info('Replan requested', 'Pending work was skipped; chat is open.');
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            break;
+
+          case 'TaskFailedEvent':
             toast.error(
-              'Architecture drafting failed',
-              (event.payload?.error as string) ??
-                'The planner run ended without producing decisions. Check the model supports tool use, then retry.',
+              'Task failed',
+              [payload.task_id, payload.reason].filter(Boolean).join(' — '),
             );
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
             break;
 
-          case 'plan.phase_review_completed':
-            markRunComplete('phase_review');
-            break;
-
-          case 'plan.phase_review_failed':
-            setActiveRun(null);
-            toast.error(
-              'Phase review failed',
-              (event.payload?.error as string) ??
-                'The phase-review run ended unexpectedly. You can retry it from the rail.',
+          case 'AgentFellBackToDefault':
+            toast.info(
+              'Task fell back to the default agent',
+              `No agent covers: ${(payload.required_capabilities as string[])?.join(', ')}`,
             );
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
             break;
-
-          case 'task.status_changed': {
-            const { task_id, status, reason } = event.payload;
-            // Patch the cache in place for instant feedback, then revalidate.
-            // On failure, sticky the reason into last_error so the node badge /
-            // DetailPanel show *why* immediately, before the goals refetch lands
-            // (mirrors the task.unassignable sticky-reason pattern below).
-            qc.setQueryData<GoalAggregate[]>(keys.goals, (goals) =>
-              goals?.map((g) => ({
-                ...g,
-                tasks: g.tasks.map((t) =>
-                  t.task_id === task_id
-                    ? {
-                        ...t,
-                        status: status as TaskStatus,
-                        ...(status === 'failed' && reason ? { last_error: reason } : {}),
-                      }
-                    : t,
-                ),
-              })),
-            );
-            // On terminal status, refresh the persisted logs (the live buffer is
-            // kept so the operator can still read the tail until they navigate away).
-            if (['succeeded', 'failed', 'canceled', 'merged'].includes(status)) {
-              qc.invalidateQueries({ queryKey: keys.taskLogs(task_id) });
-            }
-            if (status === 'failed') {
-              toast.error(`Task "${task_id}" failed`, reason ?? undefined);
-            }
-            qc.invalidateQueries({ queryKey: keys.goals });
-            break;
-          }
-
-          case 'task.progress': {
-            // Live agent output — pure UI state, no cache invalidation (too frequent).
-            usePlannerStore.getState().appendTaskProgress(event.payload.task_id, event.payload.lines);
-            break;
-          }
-
-          case 'task.unassignable': {
-            const { task_id, reason } = event.payload;
-            // Patch the sticky reason into the cache so the node badge shows it
-            // (and survives until a capable agent is registered), then notify once.
-            qc.setQueryData<GoalAggregate[]>(keys.goals, (goals) =>
-              goals?.map((g) => ({
-                ...g,
-                tasks: g.tasks.map((t) =>
-                  t.task_id === task_id ? { ...t, unassignable_reason: reason } : t,
-                ),
-              })),
-            );
-            toast.error(`Task "${task_id}" cannot be assigned`, reason);
-            break;
-          }
-
-          case 'goal.dispatched':
-          case 'goal.pr_opened':
-          case 'goal.pr_state_synced':
-          case 'goal.finalized':
-            qc.invalidateQueries({ queryKey: keys.goals });
-            break;
-
-          case 'goal.dispatch_failed':
-            toast.error(
-              `Goal "${event.payload.goal_name}" failed to dispatch`,
-              event.payload.error,
-            );
-            addMessage({
-              role: 'system',
-              text: `⚠ Goal "${event.payload.goal_name}" failed to dispatch: ${event.payload.error}`,
-              ts: ts(),
-            });
-            qc.invalidateQueries({ queryKey: keys.goals });
-            break;
-
-          case 'plan.refinement_action':
-            addMessage({ role: 'system', text: `↳ ${event.payload.action}`, ts: ts() });
-            break;
-
-          case 'plan.jit_progress':
-            // Streamed planner progress — rendered by the rail session card
-            // straight from the event buffer.
-            break;
-
-          case 'plan.decision_proposed':
-            addDecision({ id: event.payload.id, domain: event.payload.domain });
-            addMessage({
-              role: 'tool',
-              toolName: 'propose_decision',
-              text: `Decision proposed [${event.payload.domain}] — review it in the architecture gate.`,
-              ts: ts(),
-            });
-            break;
-
-          case 'plan.phase_proposed': {
-            const descriptions = event.payload.goal_descriptions ?? {};
-            addPhase({
-              name: event.payload.name,
-              goal_names: event.payload.goal_names,
-              goals: event.payload.goal_names.map((name) => ({
-                name,
-                description: descriptions[name] ?? '',
-              })),
-            });
-            addMessage({
-              role: 'tool',
-              toolName: 'propose_phases',
-              text: `Phase proposed: "${event.payload.name}" with goals: ${event.payload.goal_names.join(', ') || '(none)'}`,
-              ts: ts(),
-            });
-            break;
-          }
 
           default:
-            // Unknown event forwarded by the backend bridge — refetch
-            // conservatively rather than missing a state change.
-            qc.invalidateQueries({ queryKey: keys.plan });
-            qc.invalidateQueries({ queryKey: keys.goals });
+            if (TASK_EVENTS.has(event.type)) {
+              qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            }
             break;
         }
       },
