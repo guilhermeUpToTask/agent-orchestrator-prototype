@@ -199,6 +199,22 @@ class Plan(BaseModel):
                 # leave the goal RUNNING: its in-flight task finalizes tolerantly
         self.phase = PlanPhase.REPLANNING
 
+    def set_iteration_goals(self, new_goals: list[Goal]) -> None:
+        """The planning phases' write path (roadmap 2.5 driver): replace the
+        current iteration's non-terminal goals with the reasoner's new set —
+        DISCOVERY drafts them, ARCHITECTURE structures them, ENRICHING details
+        them. Terminal goals (prior-iteration history) are never touched; the
+        new set is renumbered to positions after them."""
+        self._guard_phase(
+            {PlanPhase.DISCOVERY, PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING},
+            self.phase,
+        )
+        kept = [g for g in self.goals if g.is_terminal]
+        base = max((g.position for g in kept), default=-1) + 1
+        for offset, goal in enumerate(new_goals):
+            goal.position = base + offset
+        self.goals = kept + list(new_goals)
+
     def commit_replanned_goals(self, new_goals: list[Goal]) -> None:
         """The conversational re-plan produced a new goal set: finalize-abandon
         whatever the prior iteration left non-terminal (closes the resurrection

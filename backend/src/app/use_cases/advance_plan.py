@@ -86,10 +86,14 @@ async def advance_plan(
     workspace: Workspace,
     event_sink: AgentEventSink,
     clock: Clock,
+    planning_handler: PhaseHandler | None = None,
 ) -> str:
     """Backwards-compatible entry point. Builds a dispatcher and delegates. Returns
     the Signal's string value (so existing callers comparing to "continue"/"done"/
-    etc. keep working)."""
-    dispatcher = PlanDispatcher(runner, agents, workspace, event_sink, clock)
+    etc. keep working). Pass `planning_handler` (the reasoner-driven
+    PlanningHandler) so ARCHITECTURE/ENRICHING advance instead of pausing."""
+    dispatcher = PlanDispatcher(
+        runner, agents, workspace, event_sink, clock, planning_handler
+    )
     signal = await dispatcher.advance(plan_id, uow)
     return signal.value

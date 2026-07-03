@@ -7,7 +7,7 @@ stage by stage as the real adapters land behind the new ports:
   Stage 3 — engine/session factory, SystemClock, SqliteUnitOfWork  [done]
   Stage 4 — reference-data repos, config store, secret store        [done]
   Stage 5 — workspace + agent-runner adapters, agent-event sink     [done]
-  Stage 6 — reasoner, PlanDispatcher, worker wiring
+  Stage 6 — reasoner (stub; real LLM is roadmap 2.5), worker wiring [done]
   Stage 7 — API dependency surface (SettingsService replaces the env read here)
 
 Runtime selection (composition-root config, richer settings land in Stage 7):
@@ -27,7 +27,7 @@ from pathlib import Path
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.ports import Clock
+from src.app.ports import AgentRunner, Clock
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
 from src.infra.db.reference_repos import (
@@ -47,6 +47,7 @@ from src.infra.runtime.cli_runner import (
     GeminiRunner,
     PiAgentRunner,
 )
+from src.infra.reasoner.stub_reasoner import StubReasoner
 from src.infra.runtime.dummy_runner import DummyAgentRunner
 
 
@@ -126,7 +127,7 @@ class AppContainer:
         return SqliteAgentEventSink(self.session_factory)
 
     @cached_property
-    def agent_runner(self) -> object:
+    def agent_runner(self) -> AgentRunner:
         """Selected by AGENT_MODE; the dummy IS the dry-run runtime (same
         FailureKind taxonomy as the real CLI runners)."""
         mode = os.environ.get("AGENT_MODE", "dry-run")
@@ -148,3 +149,9 @@ class AppContainer:
                 model=model or "gemini-2.5-pro",
             )
         raise ValueError(f"Unknown AGENT_MODE: {mode!r}")
+
+    # --- Stage 6: the planning reasoner ---
+    @cached_property
+    def reasoner(self) -> StubReasoner:
+        # deterministic stub; the OpenAI reasoner (roadmap 2.5) swaps in here
+        return StubReasoner()

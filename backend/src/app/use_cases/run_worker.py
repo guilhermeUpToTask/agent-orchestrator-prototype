@@ -20,6 +20,7 @@ actual sleep/claim cadence; tests drive it directly.
 """
 from __future__ import annotations
 
+from src.app.handlers.base import PhaseHandler
 from src.app.ports import (
     AgentEventSink,
     AgentRunner,
@@ -41,6 +42,7 @@ async def drive_plan(
     clock: Clock,
     worker_id: str,
     max_steps: int = 10_000,
+    planning_handler: PhaseHandler | None = None,
 ) -> tuple[str, int]:
     """Advance one plan until it stops making progress. Returns (terminal signal,
     units advanced) — the signal is 'paused' | 'not_ready' | 'done' | 'failed';
@@ -51,7 +53,10 @@ async def drive_plan(
     signal = "continue"
     progressed = 0
     while signal == "continue" and progressed < max_steps:
-        signal = await advance_plan(plan_id, uow, runner, agents, workspace, event_sink, clock)
+        signal = await advance_plan(
+            plan_id, uow, runner, agents, workspace, event_sink, clock,
+            planning_handler,
+        )
         uow.plans.heartbeat(plan_id, worker_id)   # renew lease while alive
         if signal == "continue":
             progressed += 1
@@ -67,6 +72,7 @@ async def worker_tick(
     clock: Clock,
     worker_id: str,
     lease_seconds: int = 60,
+    planning_handler: PhaseHandler | None = None,
 ) -> bool:
     """One claim-and-drive cycle. Returns True only if actual work ADVANCED —
     not merely because a plan was claimed. A claim that immediately came back
@@ -78,7 +84,8 @@ async def worker_tick(
         return False
     try:
         signal, progressed = await drive_plan(
-            plan.id, uow, runner, agents, workspace, event_sink, clock, worker_id
+            plan.id, uow, runner, agents, workspace, event_sink, clock, worker_id,
+            planning_handler=planning_handler,
         )
     finally:
         uow.plans.release(plan.id, worker_id)  # free on pause/done/fail/crash

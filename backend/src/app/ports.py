@@ -8,11 +8,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.agent_spec import AgentSpec
+from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.events.base import DomainEvent
-from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.repositories.planner_repo import PlanRepository
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
@@ -83,10 +84,17 @@ class AgentRunner(Protocol):
 
 @runtime_checkable
 class Reasoner(Protocol):
-    """The planning LLM (one-shot transforms). Stubbed minimally here; the LLM
-    phases call these. Built out when the planning phases are implemented."""
+    """The planning LLM (one-shot transforms per planning phase). Each method is
+    a pure content transform — it reads, never persists; the PlanningHandler /
+    conversation use cases own the transaction and the phase transition.
 
-    async def draft_plan(self, brief: str, policy: RetryPolicy) -> dict[str, object]: ...
+    DISCOVERY and REPLANNING are conversational (each user message is one call);
+    ARCHITECTURE and ENRICHING are autonomous worker steps."""
+
+    async def draft_goals(self, brief: str) -> list[Goal]: ...
+    async def structure_goals(self, plan: Plan) -> list[Goal]: ...
+    async def enrich_goals(self, plan: Plan) -> list[Goal]: ...
+    async def replan_goals(self, plan: Plan, message: str) -> list[Goal]: ...
 
 
 @runtime_checkable
@@ -101,10 +109,15 @@ class Outbox(Protocol):
 class UnitOfWork(Protocol):
     """Transaction boundary. Owns a PlanRepository and an Outbox; entering starts
     a transaction, exiting commits (or rolls back on exception). This is how
-    state + outbox become atomic."""
+    state + outbox become atomic.
 
-    plans: PlanRepository
-    outbox: Outbox
+    plans/outbox are read-only properties on the protocol so concrete
+    implementations' narrower attribute types remain assignable (covariance)."""
+
+    @property
+    def plans(self) -> PlanRepository: ...
+    @property
+    def outbox(self) -> Outbox: ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...
