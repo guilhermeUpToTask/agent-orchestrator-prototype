@@ -110,6 +110,25 @@ class AgentEventTable(Base):
 
 
 # ---------------------------------------------------------------------------
+# Plan chat (DISCOVERY / REPLANNING conversation history) — written on its own
+# short transactions, never inside the plan UnitOfWork: a lost display reply
+# must never lose plan state (and vice versa).
+# ---------------------------------------------------------------------------
+
+class PlanChatMessageTable(Base):
+    __tablename__ = "plan_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[str] = mapped_column(String, ForeignKey("plans.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # 'user' | 'assistant'
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    meta: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_utcnow_iso)
+
+    __table_args__ = (Index("ix_plan_chat_messages_plan", "plan_id", "id"),)
+
+
+# ---------------------------------------------------------------------------
 # Reference data (user-managed catalogs). AgentSpec embeds its capabilities and
 # ModelProvider embeds its models in the domain; here they normalize into join/
 # child tables so the integrity rules (delete-guard, cascade-down/guard-up)

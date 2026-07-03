@@ -26,6 +26,7 @@ from src.domain.value_objects.tasks_vos import TaskResult
 
 from src.app.ports import (
     AgentEventSink,
+    ChatMessage,
     Clock,
     TaskFailed,
     UnitOfWork,
@@ -156,6 +157,21 @@ class InMemoryUnitOfWork:
             self.outbox._commit()  # state + events commit together
         else:
             self.outbox._rollback()  # rollback discards staged events
+
+
+# ---- in-memory chat store (conversation history) ----
+class InMemoryChatStore:
+    """Mirrors SqliteChatRepository: per-plan append-only history, insertion
+    order preserved, messages returned as copies (detached)."""
+
+    def __init__(self) -> None:
+        self._messages: dict[str, list[ChatMessage]] = {}
+
+    def append(self, plan_id: str, message: ChatMessage) -> None:
+        self._messages.setdefault(plan_id, []).append(message.model_copy(deep=True))
+
+    def list(self, plan_id: str) -> list[ChatMessage]:
+        return [m.model_copy(deep=True) for m in self._messages.get(plan_id, [])]
 
 
 # ---- in-memory agent registry ----

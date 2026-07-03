@@ -7,10 +7,26 @@ phase transitions — the reasoner reads, never persists.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from datetime import datetime
+from typing import Literal, Protocol, runtime_checkable
+
+from pydantic import BaseModel, Field
 
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.goal import Goal
+
+ChatRole = Literal["user", "assistant"]
+
+
+class ChatMessage(BaseModel):
+    """One turn of a plan's DISCOVERY/REPLANNING conversation. Persisted by the
+    ChatStore (app port) outside the plan transaction — display history, never
+    plan state."""
+
+    role: ChatRole
+    content: str
+    created_at: datetime
+    meta: dict[str, str | bool | int] = Field(default_factory=dict)
 
 
 @runtime_checkable
