@@ -7,20 +7,23 @@
 - **DB migrations**: `python -m src.infra.cli.main db upgrade` (DB lives under `ORCHESTRATOR_HOME`, default `~/.orchestrator`)
 - **Run API**: `python -m src.infra.cli.main api start --port 8000`
 - **Run Worker (Dry-Run)**: `AGENT_MODE=dry-run python -m src.infra.cli.main worker start`
-- **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed) — commands: `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`
+- **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed) — commands: `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check src tests --fix`
 - **Type Check**: `mypy src` (zero errors, no excludes)
 - **Test All**: `pytest`
 - **Test Unit (fast)**: `pytest -m "not integration"`
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
+- **Test real-LLM smoke** (cost-gated, never in normal CI): `pytest -m llm` with `REASONER_SMOKE_API_KEY` (+ optional `REASONER_SMOKE_BASE_URL` / `REASONER_SMOKE_MODEL`)
 
 Environment: `ORCHESTRATOR_HOME` (state dir), `AGENT_MODE` (`dry-run` | `pi` | `claude` | `gemini`), `ORCHESTRATOR_MASTER_KEY` (Fernet key for the secret store), `PROJECT_REPO_DIR` (target repo for the git workspace), `ORCHESTRATOR_API_TOKEN` (control-plane auth; open when unset).
+
+**The reasoner resolves via the providers catalog, NOT env vars** — config keys (scope `orchestrator`): `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`, `reasoner.model_id`, `reasoner.temperature` (0.2), `reasoner.max_turns` (8). In `llm` mode `src/infra/reasoner/factory.py` fail-fasts (`REASONER_CONFIG_INVALID` → 422) and resolves the provider row (base_url + envelope-encrypted key) and model row; **stub mode never touches the secret store** (dry-run needs no master key). `orchestrate seed demo` seeds capabilities, the default agent, provider/model rows, and the config keys idempotently.
 
 ### Frontend (TypeScript / React / Vite)
 - **Install**: `npm install`
 - **Run Dev**: `npm run dev`
-- **Build**: `npm run build`
-- ⚠ The frontend still targets the pre-integration API and is being re-pointed at the new thin API (roadmap Phase 4).
+- **Build**: `npm run build` (tsc + vite)
+- **Regenerate API types**: `npm run generate:api` (backend/scripts/export_openapi.py + openapi-ts → `src/types/generated/`). The plan DETAIL read model (the aggregate document) is hand-declared in `src/types/ui.ts` — keep it in sync with the domain.
 
 ## 🏗️ Architectural Invariants (Backend)
 
@@ -43,10 +46,13 @@ The backend follows a strict **Hexagonal / Clean Architecture**.
 
 **The nine-phase machine** (`PlanPhase`):
 `DISCOVERY → ARCHITECTURE → ENRICHING → AWAITING_REVIEW → RUNNING → REVIEW → DONE`, with `REPLANNING` re-entering ARCHITECTURE and `FAILED` terminal.
-- **DISCOVERY / REPLANNING** — conversational (chat/API-driven via `conversation.py`); invisible to workers.
-- **ARCHITECTURE / ENRICHING** — autonomous reasoner steps (`PlanningHandler`; the `Reasoner` port — currently `StubReasoner`, real LLM per roadmap 2.5).
+- **DISCOVERY / REPLANNING** — conversational, MULTI-TURN with commit (`conversation.py`); invisible to workers. Each user message is one `reasoner.converse()` turn: a reply without goals keeps the conversation open (question turn, chat persisted); a reply WITH goals is the roadmap commit → ARCHITECTURE. User messages persist BEFORE the LLM call (they survive reasoner crashes). Chat history lives in `plan_chat_messages` (own short txns, never the plan UoW).
+- **ARCHITECTURE** — a deliberate **no-LLM passthrough** (`PlanningHandler._architect`): the conversation already committed the user-agreed roadmap, so autonomous re-structuring is redundant; the phase stays in the frozen enum (REPLANNING re-enters through it, free crash checkpoint) and the handler is the seam if a real structuring pass returns.
+- **ENRICHING** — the JIT step (`PlanningHandler._enrich`): ONE task-less goal per worker step; `reasoner.enrich_goal(plan, goal, capabilities)` breaks it into 1..N plain executable tasks; idempotent (a goal with tasks is never re-enriched), checkpointed goal-by-goal via `Signal.CONTINUE`; when no task-less goal remains, agents bind → AWAITING_REVIEW.
 - **AWAITING_REVIEW / REVIEW** — human gates; ALWAYS pause; unblocked only by `approve` / `finish` / `replan` commands.
 - **RUNNING** — the pull-scan execution loop (`ExecutionHandler`): two-transaction writes, check-before-act idempotency, durable backoff gate (`retry_not_before`), tolerant finalize for late results after a replan.
+
+**The Reasoner port is exactly two methods** (`src/domain/ports/reasoner_port.py`): `converse(plan, history, message, mode) -> ReasonerReply{message, goals|None}` and `enrich_goal(plan, goal, capabilities) -> list[Task]`. Implementations: `StubReasoner` (deterministic `ask:` / `goal:/task: [caps: …]` grammar — drives dry-run and tests) and `OpenAIReasoner` (`src/infra/reasoner/openai_reasoner.py`) on the runtime package `src/infra/reasoner/runtime/` — an async tool-calling agent loop (`run_tool_session`) with terminal submit tools (`submit_goals`, `submit_tasks`), `{accepted:false, errors}` self-correction, AsyncOpenAI client with transient/permanent retry classification and the empty-choices guard, and a plan→markdown context renderer. Handlers re-validate ALL tool args (never trust provider schema enforcement); history replays as plain text (never provider transcripts).
 
 **The replan loop (append-only)**: `request_replan` (mid-RUNNING chat or REVIEW) skips PENDING work → REPLANNING; `replanning_message` commits the new goal set — finalize-abandon closes leftovers, goals append after history, `iteration` increments. Prior DONE goals are never touched: they are history AND re-plan context.
 
@@ -70,12 +76,13 @@ Do not use `print()` or the stdlib `logging` module.
 ## 🔌 Frontend <-> Backend Communication
 - Mutations write outbox events in the state transaction; the **relay** (not the routers) publishes them to the `SSEBroker`. Routers never call the broker directly.
 - The frontend subscribes to `GET /api/events` and dedups on `event_id` (delivery is at-least-once).
-- Chat: `POST /api/plans/{id}/discovery/message` and `/replanning/message` drive the conversational phases.
+- Chat: `POST /api/plans/{id}/discovery/message` and `/replanning/message` drive the conversational phases — both return `200 MessageResponse{reply, committed, phase}`; `GET /api/plans/{id}/chat` serves the persisted history. The chat reply travels in the HTTP response body (SSE carries only domain events — no dual-publish).
+- Frontend routes: `/` (plan list + composer), `/plans/:id` (Overview / Goals canvas / Agents / Activity, with the chat panel and the two gate dialogs). SSE events are NAMED (`event: <type>`), so the client registers per-type listeners.
 
 ## 🧪 Testing Guidelines
 1. **The truth test**: `tests/unit/orchestration/` runs the orchestration suite through the parametrized `env_factory` fixture — in-memory fakes AND the real SQLite UnitOfWork (`tests/support.py`). Crash-recovery / outbox-rollback / backoff-survives-crash passing on real SQLite is the proof transactional atomicity is real. Keep fake and real adapter semantics identical (detached aggregates, CAS shape, lease expiry).
 2. **Unit tests**: domain invariants + use cases against `src/app/testing/fakes.py` (`InMemoryPlanRepository`, `DummyAgentRunner` scripted per task id, `FakeClock.advance()` for backoff/lease determinism).
-3. **Integration tests** (`tests/integration/`, marked `integration`): real SQLite (`tmp_path` DBs), real git repos for workspace tests, `TestClient` for the API, scripted fake CLIs for the runner taxonomy. `test_full_cycle.py` drives all nine phases + the replan loop.
+3. **Integration tests** (`tests/integration/`, marked `integration`): real SQLite (`tmp_path` DBs), real git repos for workspace tests, `TestClient` for the API, scripted fake CLIs for the runner taxonomy. `test_full_cycle.py` drives all nine phases + the replan loop on the stub; `test_full_cycle_llm.py` drives the same walk through `OpenAIReasoner` on a scripted `FakeLLMClient` (`tests/fakes_llm.py`). Reasoner-runtime unit tests live in `tests/unit/reasoner/`. The real-provider smoke (`test_reasoner_smoke.py`) is behind marker `llm` + `REASONER_SMOKE_API_KEY`.
 4. Always use `tmp_path` for file I/O and `monkeypatch` for env vars. No Redis anywhere (the claim path is the SQLite lease; Redis is roadmap Phase 3).
 
 ## 🧹 Code Style & Types
@@ -89,18 +96,22 @@ agent-orchestrator/
 ├── backend/
 │   ├── src/
 │   │   ├── domain/         # FROZEN core: Plan aggregate (9-phase machine), Goal/Task,
-│   │   │                   #   navigation scan, RetryPolicy/FailureKind, repo ports
-│   │   ├── app/            # Use cases + handlers (Execution/Gate/Planning), ports.py,
+│   │   │                   #   navigation scan, RetryPolicy/FailureKind, repo ports,
+│   │   │                   #   ports/ (Reasoner/AgentRunner/Workspace/EventSink/Clock)
+│   │   ├── app/            # Use cases + handlers (Execution/Gate/Planning), ports.py
+│   │   │                   #   (TaskFailed/Outbox/UnitOfWork/ChatStore + domain re-exports),
 │   │   │                   #   run_worker loop, conversation turns, testing/fakes.py
-│   │   ├── infra/          # SQLite (UoW/plan repo/outbox/reference/secrets), git
-│   │   │                   #   workspace, CLI agent runners + taxonomy, stub reasoner,
+│   │   ├── infra/          # SQLite (UoW/plan repo/outbox/chat/reference/secrets), git
+│   │   │                   #   workspace, CLI agent runners + taxonomy, reasoner/
+│   │   │                   #   (stub + OpenAIReasoner + runtime/ tool loop + factory),
 │   │   │                   #   worker entrypoint, container (composition root), CLI
 │   │   └── api/            # FastAPI: thin routers, ONE error map, SSE broker,
 │   │                       #   outbox relay, security, request logging
-│   ├── tests/              # support.py + unit/orchestration (dual-backend) + integration
-│   ├── alembic/            # fresh migration chain (0001_core, 0002_reference)
+│   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
+│   │                       #   + unit/reasoner + integration
+│   ├── alembic/            # migration chain (0001_core, 0002_reference, 0003_chat)
 │   └── docs/               # INTEGRATION_GUIDE.md (frozen contracts), DESIGN_NOTES.md,
 │                           #   adr-concurrency-lease.md
-├── frontend/               # React/Vite (re-pointing at the thin API is roadmap Phase 4)
-└── MASTER_ROADMAP_FINAL.md # the governing roadmap
+└── frontend/               # React/Vite on the thin API: plan list + /plans/:id shell,
+                            #   chat panel, gates, 9-phase rail, goals canvas, SSE bridge
 ```

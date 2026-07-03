@@ -1,20 +1,14 @@
 """AppContainer — the composition root (rebuilt during the integration).
 
-TRANSPLANT NOTE: the old container wired the pre-refactor domain (task manager /
-goal orchestrator / reconciler daemons) and was emptied with them. It grows back
-stage by stage as the real adapters land behind the new ports:
-
-  Stage 3 — engine/session factory, SystemClock, SqliteUnitOfWork  [done]
-  Stage 4 — reference-data repos, config store, secret store        [done]
-  Stage 5 — workspace + agent-runner adapters, agent-event sink     [done]
-  Stage 6 — reasoner (stub; real LLM is roadmap 2.5), worker wiring [done]
-  Stage 7 — API dependency surface (SettingsService replaces the env read here)
-
-Runtime selection (composition-root config, richer settings land in Stage 7):
+Runtime selection (composition-root config):
   AGENT_MODE            dry-run (default) | pi | claude | gemini
   AGENT_MODEL           model id for the selected runtime
   PROJECT_REPO_DIR      target repo for the git-branching workspace
                         (defaults to <orchestrator_home>/workspace-repo)
+
+The REASONER is not env-selected: `reasoner` builds via the factory from the
+SQLite config keys (reasoner.mode stub|llm) + the providers catalog + the
+envelope-encrypted secret store — see src/infra/reasoner/factory.py.
 
 Environment is read ONLY here (the composition root) — never deep in the code.
 """
