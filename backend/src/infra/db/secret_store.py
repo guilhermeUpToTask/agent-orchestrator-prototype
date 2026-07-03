@@ -1,5 +1,5 @@
 """
-src/infra/db/secret_store.py — SQLite implementation of SecretStorePort.
+src/infra/db/secret_store.py — the SQLite secret store (envelope encryption).
 
 Envelope encryption: each secret gets its own random Fernet *data key*; the
 plaintext is encrypted with the data key, and the data key is wrapped
@@ -20,11 +20,10 @@ from pydantic import SecretStr
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.errors import InfrastructureException, ResourceNotFoundException
-from src.domain.repositories.secret_store import SecretStorePort
-from src.domain.value_objects.config import SecretRef
 from src.infra.db._session import run_in_session
+from src.infra.db.secret_ref import SecretRef
 from src.infra.db.tables import SecretTable
+from src.infra.errors import InfrastructureError, SecretNotFoundError
 
 log = structlog.get_logger(__name__)
 
@@ -40,7 +39,7 @@ def load_master_key() -> bytes:
     """
     raw = os.environ.get(MASTER_KEY_ENV, "").strip()
     if not raw:
-        raise InfrastructureException(
+        raise InfrastructureError(
             f"{MASTER_KEY_ENV} is not set. Generate one with "
             "`python -c \"from cryptography.fernet import Fernet; "
             "print(Fernet.generate_key().decode())\"` and export it.",
@@ -49,13 +48,13 @@ def load_master_key() -> bytes:
     try:
         Fernet(raw.encode())  # validate shape
     except (ValueError, TypeError) as exc:
-        raise InfrastructureException(
+        raise InfrastructureError(
             f"{MASTER_KEY_ENV} is not a valid Fernet key", code="MASTER_KEY_INVALID"
         ) from exc
     return raw.encode()
 
 
-class SqliteSecretStore(SecretStorePort):
+class SqliteSecretStore:
     def __init__(self, session_factory: sessionmaker[Session], master_key: bytes) -> None:
         self._sf = session_factory
         self._master = Fernet(master_key)
@@ -79,14 +78,12 @@ class SqliteSecretStore(SecretStorePort):
         with self._sf() as s:
             row = s.get(SecretTable, ref.uri)
         if row is None:
-            raise ResourceNotFoundException(
-                f"Secret '{ref.uri}' not found", code="SECRET_NOT_FOUND"
-            )
+            raise SecretNotFoundError(f"Secret '{ref.uri}' not found")
         try:
             data_key = self._master.decrypt(row.wrapped_key.encode())
             plaintext = Fernet(data_key).decrypt(row.ciphertext.encode()).decode()
         except InvalidToken as exc:
-            raise InfrastructureException(
+            raise InfrastructureError(
                 f"Secret '{ref.uri}' could not be decrypted (wrong master key?)",
                 code="SECRET_DECRYPT_FAILED",
             ) from exc

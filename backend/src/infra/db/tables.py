@@ -110,6 +110,84 @@ class AgentEventTable(Base):
 
 
 # ---------------------------------------------------------------------------
+# Reference data (user-managed catalogs). AgentSpec embeds its capabilities and
+# ModelProvider embeds its models in the domain; here they normalize into join/
+# child tables so the integrity rules (delete-guard, cascade-down/guard-up)
+# are enforced by the schema.
+# ---------------------------------------------------------------------------
+
+class CapabilityTable(Base):
+    __tablename__ = "capabilities"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tools: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+
+
+class AgentTable(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    model_role: Mapped[str] = mapped_column(String, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    default_retry: Mapped[str] = mapped_column(Text, nullable=False)  # RetryPolicy JSON
+    is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class AgentCapabilityTable(Base):
+    __tablename__ = "agent_capabilities"
+
+    agent_id: Mapped[str] = mapped_column(
+        String, ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True
+    )
+    capability_id: Mapped[str] = mapped_column(
+        String, ForeignKey("capabilities.id", ondelete="RESTRICT"), primary_key=True
+    )
+
+
+class ProviderTable(Base):
+    __tablename__ = "providers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    base_url: Mapped[str] = mapped_column(String, nullable=False)
+    # secret URI into the secrets table — NEVER a plaintext key
+    api_key_ref: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ModelTable(Base):
+    __tablename__ = "models"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    provider_id: Mapped[str] = mapped_column(
+        String, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ProjectTable(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    repo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ConfigTable(Base):
+    """Two-tier config: scope 'orchestrator' for machine settings, a project id
+    for per-project settings."""
+
+    __tablename__ = "config"
+
+    scope: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# ---------------------------------------------------------------------------
 # Secrets (envelope encryption) — carried over from the old backend; stores the
 # ciphertext + wrapped data key only, never plaintext.
 # ---------------------------------------------------------------------------

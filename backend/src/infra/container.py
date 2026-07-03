@@ -5,7 +5,7 @@ goal orchestrator / reconciler daemons) and was emptied with them. It grows back
 stage by stage as the real adapters land behind the new ports:
 
   Stage 3 — engine/session factory, SystemClock, SqliteUnitOfWork  [done]
-  Stage 4 — reference-data repos (agents/capabilities/providers/models), secrets
+  Stage 4 — reference-data repos, config store, secret store        [done]
   Stage 5 — workspace + agent-runner adapters, agent-event sink
   Stage 6 — reasoner, PlanDispatcher, worker wiring
   Stage 7 — API dependency surface (SettingsService replaces the env read here)
@@ -24,6 +24,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.app.ports import Clock
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
+from src.infra.db.reference_repos import (
+    SqliteAgentRepository,
+    SqliteCapabilityRepository,
+    SqliteConfigStore,
+    SqliteModelProviderRepository,
+    SqliteModelRepository,
+    SqliteProjectRepository,
+)
+from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 
 
@@ -57,3 +66,33 @@ class AppContainer:
     def new_unit_of_work(self) -> SqliteUnitOfWork:
         """One UoW per worker/request — the instance is not thread-safe."""
         return SqliteUnitOfWork(self.session_factory, self.clock)
+
+    # --- Stage 4: reference data, config, secrets ---
+    @cached_property
+    def agent_repo(self) -> SqliteAgentRepository:
+        return SqliteAgentRepository(self.session_factory)
+
+    @cached_property
+    def capability_repo(self) -> SqliteCapabilityRepository:
+        return SqliteCapabilityRepository(self.session_factory)
+
+    @cached_property
+    def provider_repo(self) -> SqliteModelProviderRepository:
+        return SqliteModelProviderRepository(self.session_factory)
+
+    @cached_property
+    def model_repo(self) -> SqliteModelRepository:
+        return SqliteModelRepository(self.session_factory)
+
+    @cached_property
+    def project_repo(self) -> SqliteProjectRepository:
+        return SqliteProjectRepository(self.session_factory)
+
+    @cached_property
+    def config_store(self) -> SqliteConfigStore:
+        return SqliteConfigStore(self.session_factory)
+
+    @cached_property
+    def secret_store(self) -> SqliteSecretStore:
+        # fail-closed: a missing/invalid ORCHESTRATOR_MASTER_KEY raises here
+        return SqliteSecretStore(self.session_factory, load_master_key())
