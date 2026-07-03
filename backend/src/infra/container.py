@@ -6,9 +6,15 @@ stage by stage as the real adapters land behind the new ports:
 
   Stage 3 — engine/session factory, SystemClock, SqliteUnitOfWork  [done]
   Stage 4 — reference-data repos, config store, secret store        [done]
-  Stage 5 — workspace + agent-runner adapters, agent-event sink
+  Stage 5 — workspace + agent-runner adapters, agent-event sink     [done]
   Stage 6 — reasoner, PlanDispatcher, worker wiring
   Stage 7 — API dependency surface (SettingsService replaces the env read here)
+
+Runtime selection (composition-root config, richer settings land in Stage 7):
+  AGENT_MODE            dry-run (default) | pi | claude | gemini
+  AGENT_MODEL           model id for the selected runtime
+  PROJECT_REPO_DIR      target repo for the git-branching workspace
+                        (defaults to <orchestrator_home>/workspace-repo)
 
 Environment is read ONLY here (the composition root) — never deep in the code.
 """
@@ -32,8 +38,16 @@ from src.infra.db.reference_repos import (
     SqliteModelRepository,
     SqliteProjectRepository,
 )
+from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
+from src.infra.git.workspace import GitBranchWorkspace
+from src.infra.runtime.cli_runner import (
+    ClaudeCodeRunner,
+    GeminiRunner,
+    PiAgentRunner,
+)
+from src.infra.runtime.dummy_runner import DummyAgentRunner
 
 
 class AppContainer:
@@ -96,3 +110,41 @@ class AppContainer:
     def secret_store(self) -> SqliteSecretStore:
         # fail-closed: a missing/invalid ORCHESTRATOR_MASTER_KEY raises here
         return SqliteSecretStore(self.session_factory, load_master_key())
+
+    # --- Stage 5: execution adapters ---
+    @cached_property
+    def workspace(self) -> GitBranchWorkspace:
+        repo_dir = Path(
+            os.environ.get(
+                "PROJECT_REPO_DIR", str(self.orchestrator_home / "workspace-repo")
+            )
+        )
+        return GitBranchWorkspace(repo_dir)
+
+    @cached_property
+    def agent_event_sink(self) -> SqliteAgentEventSink:
+        return SqliteAgentEventSink(self.session_factory)
+
+    @cached_property
+    def agent_runner(self) -> object:
+        """Selected by AGENT_MODE; the dummy IS the dry-run runtime (same
+        FailureKind taxonomy as the real CLI runners)."""
+        mode = os.environ.get("AGENT_MODE", "dry-run")
+        if mode == "dry-run":
+            return DummyAgentRunner()
+        model = os.environ.get("AGENT_MODEL", "")
+        if mode == "pi":
+            return PiAgentRunner(
+                api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                model=model or "claude-sonnet-4-5",
+            )
+        if mode == "claude":
+            return ClaudeCodeRunner(
+                api_key=os.environ.get("ANTHROPIC_API_KEY", ""), model=model or None
+            )
+        if mode == "gemini":
+            return GeminiRunner(
+                api_key=os.environ.get("GEMINI_API_KEY", ""),
+                model=model or "gemini-2.5-pro",
+            )
+        raise ValueError(f"Unknown AGENT_MODE: {mode!r}")
