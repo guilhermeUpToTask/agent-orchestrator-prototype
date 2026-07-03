@@ -13,7 +13,7 @@ import os
 
 from fastapi import Header
 
-from src.app.errors import UnauthorizedException
+from src.infra.errors import UnauthorizedError
 
 API_TOKEN_ENV = "ORCHESTRATOR_API_TOKEN"
 
@@ -29,6 +29,6 @@ def require_api_token(
     if not provided and authorization and authorization.startswith("Bearer "):
         provided = authorization[len("Bearer "):].strip()
     if provided != expected:
-        raise UnauthorizedException(
+        raise UnauthorizedError(
             "Missing or invalid API token", code="INVALID_API_TOKEN"
         )

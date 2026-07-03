@@ -193,3 +193,25 @@ class SqlitePlanRepository:
                 _RELEASE_SQL, {"plan_id": plan_id, "worker_id": worker_id}
             ),
         )
+
+    # --- read-side extras (not part of the PlanRepository port) ---
+    def list_summaries(self) -> list[dict[str, object]]:
+        """Cheap listing off the promoted columns — no document parsing."""
+        with self._session_factory() as session:
+            rows = session.execute(
+                text(
+                    "SELECT id, phase, iteration, version, claimed_by, updated_at"
+                    " FROM plans ORDER BY updated_at DESC"
+                )
+            ).all()
+        return [
+            {
+                "id": r[0],
+                "phase": r[1],
+                "iteration": r[2],
+                "version": r[3],
+                "claimed_by": r[4],
+                "updated_at": r[5],
+            }
+            for r in rows
+        ]

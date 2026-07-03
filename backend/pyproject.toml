@@ -61,11 +61,6 @@ strict = true
 # reference deleted pre-refactor modules. Each is un-parked (adapted to the new
 # ports) in its named integration stage; this list must only SHRINK.
 exclude = [
-    "^src/api/server\\.py$",          # TRANSPLANT(stage-7)
-    "^src/api/exceptions\\.py$",      # TRANSPLANT(stage-7)
-    "^src/api/security\\.py$",        # TRANSPLANT(stage-7)
-    "^src/api/middleware/",           # TRANSPLANT(stage-7)
-    "^src/api/logging/",              # TRANSPLANT(stage-7)
     "^src/infra/settings/",           # TRANSPLANT(stage-7)
     "^src/infra/logging/",            # TRANSPLANT(stage-7)
     "^src/infra/redis_adapters/",     # TRANSPLANT(phase-3 seam, unused)
