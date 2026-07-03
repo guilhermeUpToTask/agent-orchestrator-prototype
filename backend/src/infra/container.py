@@ -39,6 +39,7 @@ from src.infra.db.reference_repos import (
     SqliteProjectRepository,
 )
 from src.infra.db.agent_event_sink import SqliteAgentEventSink
+from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.git.workspace import GitBranchWorkspace
@@ -125,6 +126,10 @@ class AppContainer:
     @cached_property
     def agent_event_sink(self) -> SqliteAgentEventSink:
         return SqliteAgentEventSink(self.session_factory)
+
+    @cached_property
+    def chat_store(self) -> SqliteChatRepository:
+        return SqliteChatRepository(self.session_factory)
 
     @cached_property
     def agent_runner(self) -> AgentRunner:

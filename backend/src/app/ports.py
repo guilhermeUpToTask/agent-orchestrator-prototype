@@ -21,12 +21,15 @@ from src.domain.ports import (
     Workspace,
     WorkspaceHandle,
 )
+from src.domain.ports.reasoner_port import ChatMessage
 from src.domain.repositories.planner_repo import PlanRepository
 from src.domain.value_objects.lifecycle import FailureKind
 
 __all__ = [
     "AgentEventSink",
     "AgentRunner",
+    "ChatMessage",
+    "ChatStore",
     "Clock",
     "Outbox",
     "Reasoner",
@@ -46,6 +49,17 @@ class TaskFailed(Exception):
         self.reason = reason
         self.kind = kind
         super().__init__(reason)
+
+
+@runtime_checkable
+class ChatStore(Protocol):
+    """Per-plan conversation history (DISCOVERY / REPLANNING). Writes run
+    OUTSIDE the plan UnitOfWork on their own short transactions: a lost display
+    reply never loses plan state, and a state rollback never erases what the
+    user actually said."""
+
+    def append(self, plan_id: str, message: ChatMessage) -> None: ...
+    def list(self, plan_id: str) -> list[ChatMessage]: ...
 
 
 @runtime_checkable
