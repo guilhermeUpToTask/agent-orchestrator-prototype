@@ -19,3 +19,9 @@ class SecretNotFoundError(InfrastructureError):
     """No secret stored under the requested URI."""
 
     code = "SECRET_NOT_FOUND"
+
+
+class UnauthorizedError(BaseAppException):
+    """Request lacked valid credentials (control-plane token)."""
+
+    code = "UNAUTHORIZED"
