@@ -29,6 +29,67 @@ Late in-flight results are handled by the TOLERANT FINALIZE in
 `ExecutionHandler` (late failure terminal-skips, never requeues; late success
 completes as history unless the task was already closed).
 
+**ARCHITECTURE is a no-LLM passthrough** (`PlanningHandler._architect`): the
+discovery/replanning conversation commits the user-agreed roadmap itself, so an
+autonomous re-structuring pass would be redundant — and risks mangling a goal
+set the user just signed off. The phase stays in the frozen enum (REPLANNING
+re-enters through it; free crash checkpoint); the handler validates + advances
+to ENRICHING and is the seam if a real structuring pass returns.
+
+**ENRICHING is the JIT step** (`PlanningHandler._enrich`): ONE task-less goal
+per `handle()` — `reasoner.enrich_goal(plan, goal, capabilities)` outside the
+txn, then re-read/re-guard/re-find-by-id (a goal that already has tasks is
+NEVER re-enriched — the idempotency guard for crashes and lease races), commit
+via `set_iteration_goals`, `Signal.CONTINUE`. Goals the user populated in chat
+are skipped entirely. No task-less goal left ⇒ `bind_agents` → AWAITING_REVIEW.
+
+## Reasoner (the planning LLM)
+
+The domain port (`src/domain/ports/reasoner_port.py`) is exactly two methods:
+
+```python
+converse(plan, history, message, mode) -> ReasonerReply  # message + goals|None
+enrich_goal(plan, goal, capabilities) -> list[Task]
+```
+
+`converse` is MULTI-TURN WITH COMMIT: goals=None keeps the conversation open
+(the reply is a question — chat rows persist with `meta.committed=false`); a
+goal list is the roadmap commit. The conversation use cases persist the USER
+message BEFORE the LLM call (it survives reasoner crashes), call the reasoner
+outside any txn, and re-guard the phase before writing.
+
+Implementations behind the same port:
+
+* `StubReasoner` — deterministic. `ask: <text>` in a message ⇒ reply without
+  commit; otherwise the `goal:/task: [caps: a,b]` grammar ⇒ commit (goals may
+  be committed task-less — the JIT populates them). Dry-run/tests run on this.
+* `OpenAIReasoner` on `src/infra/reasoner/runtime/` — the tool-calling agent
+  loop (`run_tool_session`): terminal submit tools (`submit_goals`,
+  `submit_tasks`), `{accepted:false, errors}` self-correction, AsyncOpenAI
+  with transient/permanent retry classification + the in-band empty-choices
+  guard, plan→markdown context renderer (results truncated ~800 chars, history
+  capped at 30 messages, terminal goals as one-liners). Handlers RE-VALIDATE
+  every tool argument; unknown capability ids are rejected twice then filtered
+  with a warning. History replays as plain text, never provider transcripts.
+
+Selection is catalog-driven (`src/infra/reasoner/factory.py`), config scope
+`orchestrator`: `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`,
+`reasoner.model_id`, `reasoner.temperature`, `reasoner.max_turns`. `llm` mode
+fail-fasts with `REASONER_CONFIG_INVALID` (HTTP 422); the API key resolves
+through the provider row's `api_key_ref` into the envelope-encrypted secret
+store. STUB MODE NEVER CONSTRUCTS THE SECRET STORE (dry-run needs no master
+key). `orchestrate seed demo [--stub | --provider … --model … --api-key-env …]`
+idempotently seeds capabilities, the default agent, provider/model rows and
+the config keys.
+
+## Chat persistence
+
+`plan_chat_messages` (migration 0003): append-only per-plan history, written
+on its OWN short transactions (`SqliteChatRepository`) — never inside the plan
+UoW. A lost display reply never loses plan state; a state rollback never
+erases what the user said. The `ChatStore` port lives in `src/app/ports.py`;
+the in-memory mirror is `InMemoryChatStore`.
+
 ## PlanRepository (SQLite) — the exact shapes
 
 Aggregate = ONE JSON document in `plans.data`; promoted columns only for SQL
@@ -114,16 +175,21 @@ tails `agent_events` by cursor → `"agent.event"`.
 | Route | Use case |
 |---|---|
 | POST /api/plans (Idempotency-Key) | create_plan |
-| POST /api/plans/{id}/discovery/message | conversation.discovery_message |
+| POST /api/plans/{id}/discovery/message → 200 MessageResponse | conversation.discovery_message |
+| POST /api/plans/{id}/replanning/message → 200 MessageResponse | conversation.replanning_message |
+| GET /api/plans/{id}/chat | ChatStore.list (404 via PLAN_NOT_FOUND) |
 | POST /api/plans/{id}/edits | apply_edit (incl. RebindTaskAgent) |
 | POST /api/plans/{id}/approve | control.resume_from_review |
 | POST /api/plans/{id}/review/finish | control.finish_review |
 | POST /api/plans/{id}/review/replan | control.review_replan |
 | POST /api/plans/{id}/replan | request_replan (mid-RUNNING) |
-| POST /api/plans/{id}/replanning/message | conversation.replanning_message |
 | /api/agents, /capabilities, /providers, /models, /projects | reference repos |
 | /api/config/{scope}[/{key}] | SqliteConfigStore (two-tier) |
-| GET /api/events | SSE stream (relay-fed) |
+| GET /api/events | SSE stream (relay-fed, NAMED events) |
+
+`MessageResponse` = `{reply, committed, phase}` — committed=false is a question
+turn (phase unchanged), committed=true is the roadmap commit. The chat reply
+travels in the HTTP response body; SSE carries only the domain events.
 
 Error mapping lives in ONE table: `src/api/exceptions.py::_STATUS_BY_CODE`.
 
@@ -134,16 +200,24 @@ REAL SQLite UnitOfWork via the parametrized `env_factory` fixture
 (`tests/unit/orchestration/conftest.py` + `tests/support.py`). The tests that
 prove atomicity is real, not simulated: crash-recovery-via-lease-expiry,
 outbox-rollback, backoff-gate-survives-crash. `tests/integration/
-test_full_cycle.py` drives all nine phases + one replan loop on the real
-stack. The manual check: `orchestrate db upgrade`, register + default an
-agent, `orchestrate api start` + `orchestrate worker start` (AGENT_MODE=
-dry-run), drive a plan DISCOVERY→DONE over HTTP.
+test_full_cycle.py` drives all nine phases + one replan loop on the stub;
+`test_full_cycle_llm.py` drives the same walk through OpenAIReasoner on a
+scripted FakeLLMClient (`tests/fakes_llm.py`); `tests/unit/reasoner/` covers
+the agent loop, retry classification, context renderer and OpenAIReasoner
+behaviors. The cost-gated real-provider smoke is `pytest -m llm` with
+`REASONER_SMOKE_API_KEY` (+ `_BASE_URL`, `_MODEL`) — never in normal CI.
+
+The manual check: `orchestrate db upgrade && orchestrate seed demo --stub`,
+`orchestrate api start` + `orchestrate worker start` (AGENT_MODE=dry-run),
+then drive a plan DISCOVERY→DONE (+ one replan loop) in the UI or over HTTP —
+an `ask:` message keeps the conversation open, a `goal:/task:` message commits.
 
 ## Deferred (cleanly shelved — the seams)
 
 GitHub PR output (workspace port), project spec, decision gate, Redis claim
-path (roadmap Phase 3 — the SQLite lease is the current transport), real
-OpenAI reasoner (StubReasoner behind the same port), pi NDJSON streaming
-(pi_protocol.py), mutation guards PLAN_BUSY/TASK_RUNNING (status codes already
-reserved in the API map), env provisioner. Deleted-but-recoverable via git
-history: Redis adapters, LiveLogger, SettingsService, the old PR/forge stack.
+path (roadmap Phase 3 — the SQLite lease is the current transport), a real
+autonomous ARCHITECTURE structuring pass (the handler passthrough is the
+seam), pi NDJSON streaming (pi_protocol.py), mutation guards
+PLAN_BUSY/TASK_RUNNING (status codes already reserved in the API map), env
+provisioner. Deleted-but-recoverable via git history: Redis adapters,
+LiveLogger, SettingsService, the old PR/forge stack.
