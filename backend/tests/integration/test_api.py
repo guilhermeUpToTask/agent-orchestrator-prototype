@@ -57,10 +57,36 @@ def test_plan_lifecycle_over_http(client):
     assert fetched.json()["phase"] == "discovery"
     assert client.get("/api/plans").status_code == 200
 
-    # discovery turn -> ARCHITECTURE
+    # multi-turn discovery: an ask-turn replies without committing
+    ask = client.post(
+        f"/api/plans/{plan_id}/discovery/message",
+        json={"message": "ask: which database should we use?"},
+    )
+    assert ask.status_code == 200
+    assert ask.json() == {
+        "reply": "which database should we use?",
+        "committed": False,
+        "phase": "discovery",
+    }
+    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "discovery"
+
+    # the commit turn -> ARCHITECTURE
     turn = client.post(f"/api/plans/{plan_id}/discovery/message", json={"message": ""})
-    assert turn.status_code == 204
+    assert turn.status_code == 200
+    body = turn.json()
+    assert body["committed"] is True
+    assert body["phase"] == "architecture"
     assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "architecture"
+
+    # chat history: user/assistant alternation, insertion order, commit meta
+    history = client.get(f"/api/plans/{plan_id}/chat").json()
+    assert [(m["role"], m["meta"].get("committed")) for m in history] == [
+        ("user", None),
+        ("assistant", False),
+        ("user", None),
+        ("assistant", True),
+    ]
+    assert client.get("/api/plans/ghost/chat").status_code == 404
 
 
 def test_error_mapping_table(client):
