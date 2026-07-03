@@ -2,32 +2,34 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
-  useApproveArchitecture, useApproveBrief, useApprovePhase, usePlan,
-  useRunArchitecture, useStartDiscovery,
+  useApprovePlan,
+  useFinishReview,
+  usePlan,
+  useReplanFromReview,
 } from '../lib/queries';
-import { toast } from '../lib/toast';
-import { relTime, useNow } from '../lib/time';
+import type { Plan } from '../types/ui';
 import styles from './GatePanel.module.css';
 
 /**
- * Approvals are the highest-stakes interactions in the product, so they
- * get a dedicated surface, not a toolbar button:
- *  - the operator SEES what they are approving (brief / decisions / phase),
- *  - every action states its consequence,
- *  - firing requires two explicit steps (no accidental clicks),
- *  - "Mark project done" is visually demoted below "Approve next phase".
+ * The two human gates of the 9-phase machine get a dedicated surface:
+ *   AWAITING_REVIEW — the pre-execution gate: review the enriched roadmap,
+ *                     approve to start execution.
+ *   REVIEW          — the post-execution gate: finish the plan, or replan
+ *                     the next phase (chat re-opens).
+ * Every action states its consequence and requires a two-step confirm.
  */
-export function GatePanel() {
+export function GatePanel({ planId }: { planId: string }) {
   const gateOpen = usePlannerStore((s) => s.ui.gateOpen);
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
-  const { data: plan } = usePlan();
+  const { data: plan } = usePlan(planId);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Esc closes; focus moves into the dialog on open.
   useEffect(() => {
     if (!gateOpen) return;
     panelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setGateOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setGateOpen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [gateOpen, setGateOpen]);
@@ -54,12 +56,15 @@ export function GatePanel() {
           </button>
         </header>
 
-        {plan.status === 'discovery' && <BriefGate onDone={close} />}
-        {plan.status === 'architecture' && <ArchitectureGate onDone={close} />}
-        {plan.status === 'phase_review' && <PhaseGate onDone={close} />}
-        {!['discovery', 'architecture', 'phase_review'].includes(plan.status) && (
+        {plan.phase === 'awaiting_review' && (
+          <PreExecutionGate plan={plan} planId={planId} onDone={close} />
+        )}
+        {plan.phase === 'review' && (
+          <PostExecutionGate plan={plan} planId={planId} onDone={close} />
+        )}
+        {!['awaiting_review', 'review'].includes(plan.phase) && (
           <p className={styles.body}>
-            Nothing is waiting on you — the plan is in “{plan.status}”.
+            Nothing is waiting on you — the plan is in “{plan.phase}”.
           </p>
         )}
       </div>
@@ -75,7 +80,6 @@ function ConfirmAction({
   label: string;
   consequence: string;
   pending?: boolean;
-  /** Quieter styling for the less-likely choice (e.g. "Mark project done") */
   demoted?: boolean;
   onConfirm: () => void;
 }) {
@@ -106,245 +110,105 @@ function ConfirmAction({
   );
 }
 
-/* ── Brief gate: read the brief, then approve it ─────────────────────────── */
+/* ── Roadmap summary shared by both gates ─────────────────────────────────── */
 
-function BriefGate({ onDone }: { onDone: () => void }) {
-  const { data: plan } = usePlan();
-  const approve = useApproveBrief();
-  const restart = useStartDiscovery();
-  const brief = plan?.brief;
-
+function RoadmapDoc({ plan }: { plan: Plan }) {
+  const liveGoals = plan.goals.filter(
+    (g) => !['done', 'failed', 'skipped'].includes(g.status),
+  );
+  const shown = liveGoals.length > 0 ? liveGoals : plan.goals;
   return (
-    <div className={styles.content}>
-      <h2 className={styles.title}>Approve project brief</h2>
-
-      {brief ? (
-        <div className={styles.doc}>
-          <Doc label="Vision">{brief.vision}</Doc>
-          {brief.constraints?.length > 0 && (
-            <Doc label="Constraints">
+    <div className={styles.doc}>
+      {shown
+        .slice()
+        .sort((a, b) => a.position - b.position)
+        .map((g) => (
+          <section key={g.id} className={styles.docSection}>
+            <div className="label">
+              {g.name} · {g.status}
+            </div>
+            <div className={styles.docBody}>
               <ul className={styles.docList}>
-                {brief.constraints.map((c, i) => <li key={i}>{c}</li>)}
+                {g.tasks
+                  .slice()
+                  .sort((a, b) => a.position - b.position)
+                  .map((t) => (
+                    <li key={t.id}>
+                      {t.name}
+                      {t.agent_id ? ` — ${t.agent_id}` : ''}
+                      {t.required_capabilities.length > 0
+                        ? ` [${t.required_capabilities.join(', ')}]`
+                        : ''}
+                    </li>
+                  ))}
               </ul>
-            </Doc>
-          )}
-          <Doc label="Phase 1 exit criteria">{brief.phase_1_exit_criteria}</Doc>
-          {brief.open_questions?.length > 0 && (
-            <Doc label="Open questions">
-              <ul className={styles.docList}>
-                {brief.open_questions.map((q, i) => <li key={i}>{q}</li>)}
-              </ul>
-            </Doc>
-          )}
-        </div>
-      ) : (
-        <p className={styles.body}>
-          No brief has been drafted yet. Finish the discovery session first.
-        </p>
-      )}
-
-      {brief && (
-        <>
-          <ConfirmAction
-            label="Approve brief"
-            consequence="Locks the brief and starts architecture drafting."
-            pending={approve.isPending}
-            onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
-          />
-          <ConfirmAction
-            label="Discard & restart discovery"
-            consequence="Throws away this brief and starts a fresh discovery interview. The current brief is replaced once the new one is drafted."
-            pending={restart.isPending}
-            demoted
-            onConfirm={() => {
-              restart.mutate(undefined, {
-                onSuccess: () => {
-                  toast.info(
-                    'Discovery restarted',
-                    'Answer the planner’s questions in the chat to draft a new brief.',
-                  );
-                  onDone();
-                },
-              });
-            }}
-          />
-        </>
-      )}
+            </div>
+          </section>
+        ))}
     </div>
   );
 }
 
-/* ── Architecture gate: see the decisions you're applying ────────────────── */
+/* ── AWAITING_REVIEW: the pre-execution gate ──────────────────────────────── */
 
-function ArchitectureGate({ onDone }: { onDone: () => void }) {
-  const { data: plan } = usePlan();
-  const decisions = usePlannerStore((s) => s.decisions);
-  const phases = usePlannerStore((s) => s.phases);
-  const completedRuns = usePlannerStore((s) => s.completedRuns);
-  const activeRun = usePlannerStore((s) => s.activeRun);
-  const approve = useApproveArchitecture();
-  const runArchitecture = useRunArchitecture();
-  const now = useNow(5000);
-
-  // Approval requires a COMPLETED architecture session, not just a streamed
-  // decision — otherwise approve-architecture 409s ("no completed session").
-  const ready = completedRuns.includes('architecture');
-  if (!ready) {
-    const drafting = activeRun === 'architecture';
-    return (
-      <div className={styles.content}>
-        <h2 className={styles.title}>Approve architecture</h2>
-        <p className={styles.body}>
-          {drafting
-            ? 'The planner is still drafting the architecture. The approval opens automatically once it finishes — this usually takes a minute or two.'
-            : 'The architecture has not been drafted yet. Run the planner to produce the roadmap you’ll approve.'}
-        </p>
-        {!drafting && (
-          <ConfirmAction
-            label="Draft architecture"
-            consequence="Runs the architecture planner to produce decisions and the phase plan."
-            pending={runArchitecture.isPending}
-            onConfirm={() => runArchitecture.mutate(undefined, { onSuccess: onDone })}
-          />
-        )}
-      </div>
-    );
-  }
-
-  // Default: every proposed decision selected. Unchecking excludes it.
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(decisions.map((d) => d.id)));
-  useEffect(() => {
-    setSelected(new Set(decisions.map((d) => d.id)));
-  }, [decisions]);
-
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-
-  const all = decisions.length > 0 && selected.size === decisions.length;
-  const ids = all ? [] : [...selected]; // backend treats [] as "approve all"
-
+function PreExecutionGate({
+  plan, planId, onDone,
+}: {
+  plan: Plan;
+  planId: string;
+  onDone: () => void;
+}) {
+  const approve = useApprovePlan(planId);
   return (
     <div className={styles.content}>
-      <h2 className={styles.title}>Approve architecture</h2>
-
-      {plan?.architecture_summary && (
-        <div className={styles.doc}>
-          <Doc label="Architecture summary">{plan.architecture_summary}</Doc>
-        </div>
-      )}
-
-      {decisions.length > 0 ? (
-        <fieldset className={styles.decisions}>
-          <legend className="label">Proposed decisions — uncheck to exclude</legend>
-          {decisions.map((d) => (
-            <label key={d.id} className={styles.decisionRow}>
-              <input
-                type="checkbox"
-                checked={selected.has(d.id)}
-                onChange={() => toggle(d.id)}
-              />
-              <span className={styles.decisionDomain}>[{d.domain}]</span>
-              <span className={styles.decisionId}>{d.id}</span>
-              <span className={styles.decisionTime}>{relTime(d.at, now)}</span>
-            </label>
-          ))}
-        </fieldset>
-      ) : (
-        <p className={styles.body}>
-          No decision proposals were captured in this session (the page may have
-          loaded after they streamed). Approving applies <strong>all</strong> proposed
-          decisions on the backend.
-        </p>
-      )}
-
-      {phases.length > 0 && (
-        <fieldset className={styles.decisions}>
-          <legend className="label">Proposed phases &amp; goals — dispatched on approval</legend>
-          {[...phases]
-            .sort((a, b) => a.at - b.at)
-            .map((p) => (
-              <div key={p.name} className={styles.phaseRow}>
-                <span className={styles.phaseName}>{p.name}</span>
-                {p.goals.length > 0 ? (
-                  <ul className={styles.phaseGoals}>
-                    {p.goals.map((g) => (
-                      <li key={g.name}>
-                        <span className={styles.decisionId}>{g.name}</span>
-                        {g.description && <span className={styles.body}> — {g.description}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <span className={styles.body}> (no goals)</span>
-                )}
-              </div>
-            ))}
-        </fieldset>
-      )}
-
+      <h2 className={styles.title}>Approve the roadmap (iteration {plan.iteration})</h2>
+      <p className={styles.body}>
+        Enrichment is done: every goal below carries executable tasks with bound
+        agents. Approving starts autonomous execution.
+      </p>
+      <RoadmapDoc plan={plan} />
       <ConfirmAction
-        label={all || decisions.length === 0
-          ? 'Approve architecture'
-          : `Approve ${selected.size} of ${decisions.length} decisions`}
-        consequence="Applies the selected decisions and dispatches the first phase's goals to workers."
+        label="Approve & start execution"
+        consequence="Workers begin executing the tasks above, goal by goal."
         pending={approve.isPending}
-        onConfirm={() => approve.mutate(ids, { onSuccess: onDone })}
+        onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
       />
     </div>
   );
 }
 
-/* ── Phase review gate: continue vs finish, clearly separated ────────────── */
+/* ── REVIEW: the post-execution gate ──────────────────────────────────────── */
 
-function PhaseGate({ onDone }: { onDone: () => void }) {
-  const { data: plan } = usePlan();
-  const approve = useApprovePhase();
-
-  const current = plan?.phases.find((p) => p.index === plan.current_phase_index);
-  const next = plan?.phases.find((p) => p.index === (plan.current_phase_index ?? 0) + 1);
-
+function PostExecutionGate({
+  plan, planId, onDone,
+}: {
+  plan: Plan;
+  planId: string;
+  onDone: () => void;
+}) {
+  const finish = useFinishReview(planId);
+  const replan = useReplanFromReview(planId);
   return (
     <div className={styles.content}>
-      <h2 className={styles.title}>Phase review</h2>
-
-      {current && (
-        <div className={styles.doc}>
-          <Doc label={`Completed — Phase ${current.index}: ${current.name}`}>
-            {current.goal}
-          </Doc>
-          {current.exit_criteria && <Doc label="Exit criteria">{current.exit_criteria}</Doc>}
-          {current.lessons && <Doc label="Lessons">{current.lessons}</Doc>}
-        </div>
-      )}
-
+      <h2 className={styles.title}>Review the results (iteration {plan.iteration})</h2>
+      <p className={styles.body}>
+        Execution has exhausted the roadmap. Finish the plan, or open a replan
+        conversation to plan the next iteration on top of these results.
+      </p>
+      <RoadmapDoc plan={plan} />
       <ConfirmAction
-        label={next ? `Approve next phase (Phase ${next.index}: ${next.name})` : 'Approve next phase'}
-        consequence={next
-          ? `Dispatches ${next.goal_names.length || 'the next phase\u2019s'} goals to workers.`
-          : 'Releases the next phase to workers.'}
-        pending={approve.isPending}
-        onConfirm={() => approve.mutate(true, { onSuccess: onDone })}
+        label="Finish plan"
+        consequence="Marks the plan DONE. No further work will run."
+        pending={finish.isPending}
+        onConfirm={() => finish.mutate(undefined, { onSuccess: onDone })}
       />
       <ConfirmAction
-        label="Mark project done"
-        consequence="Ends the project here — no further phases will run."
-        pending={approve.isPending}
+        label="Replan next iteration"
+        consequence="Opens the replanning chat. Completed goals stay as history; a new goal set is planned with the reasoner."
+        pending={replan.isPending}
         demoted
-        onConfirm={() => approve.mutate(false, { onSuccess: onDone })}
+        onConfirm={() => replan.mutate(undefined, { onSuccess: onDone })}
       />
     </div>
-  );
-}
-
-function Doc({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section className={styles.docSection}>
-      <div className="label">{label}</div>
-      <div className={styles.docBody}>{children}</div>
-    </section>
   );
 }

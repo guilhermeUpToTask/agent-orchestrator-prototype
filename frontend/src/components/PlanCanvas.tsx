@@ -7,35 +7,36 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  addEdge,
   type NodeTypes,
   type Node,
-  type Connection,
   SelectionMode,
   Panel,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { tokens, STATUS_META, type StatusKey } from '../styles/tokens';
+import { tokens, STATUS, raw } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-import { useAgents, useGoals, usePlan } from '../lib/queries';
+import { useAgents, usePlan } from '../lib/queries';
 import { TaskNode } from './TaskNode';
 import { GoalGroupNode } from './GoalGroupNode';
 import { PhaseTimeline } from './PhaseTimeline';
 import { buildFlowFromGoals, GOAL_COLORS } from '../lib/layout';
-import type { TaskNodeData } from '../types/ui';
+import type { Plan, TaskNodeData } from '../types/ui';
 
-// Register custom node types
 const nodeTypes: NodeTypes = {
   taskNode: TaskNode as React.ComponentType<any>,
   goalGroup: GoalGroupNode as React.ComponentType<any>,
 };
 
+const KIND_COLOR = {
+  idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
+} as const;
+
 // ─── Goal group legend ─────────────────────────────────────────────────────────
 
-function GoalLegend() {
-  const { data: goals = [] } = useGoals();
-
+function GoalLegend({ plan }: { plan: Plan | undefined }) {
+  const goals = plan?.goals ?? [];
+  if (goals.length === 0) return null;
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 5,
@@ -48,8 +49,8 @@ function GoalLegend() {
       <div style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em', marginBottom: 2 }}>
         GOALS
       </div>
-      {goals.map((g, i) => (
-        <div key={g.goal_id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {goals.slice().sort((a, b) => a.position - b.position).map((g, i) => (
+        <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             width: 6, height: 6, borderRadius: '50%',
             background: GOAL_COLORS[i % GOAL_COLORS.length],
@@ -59,7 +60,7 @@ function GoalLegend() {
           </span>
           <span style={{
             fontSize: 8, fontFamily: tokens.fontMono,
-            color: g.status === 'running' ? tokens.yellow : g.status === 'merged' ? tokens.green : tokens.textMuted,
+            color: KIND_COLOR[(STATUS[g.status] ?? STATUS.pending).kind],
             marginLeft: 2,
           }}>
             [{g.status}]
@@ -70,12 +71,10 @@ function GoalLegend() {
   );
 }
 
-// ─── Vision strip ──────────────────────────────────────────────────────────────
+// ─── Brief strip ───────────────────────────────────────────────────────────────
 
-function VisionStrip() {
-  const { data: plan } = usePlan();
+function BriefStrip({ plan }: { plan: Plan | undefined }) {
   if (!plan) return null;
-
   return (
     <div style={{
       maxWidth: 360,
@@ -86,7 +85,7 @@ function VisionStrip() {
       backdropFilter: 'blur(8px)',
     }}>
       <div style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em', marginBottom: 3 }}>
-        VISION · v{plan.state_version}
+        BRIEF · v{plan.version} · iter {plan.iteration}
       </div>
       <div style={{
         fontSize: 10, color: tokens.textSecond, lineHeight: 1.5,
@@ -95,7 +94,7 @@ function VisionStrip() {
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       }}>
-        {plan.vision}
+        {plan.brief}
       </div>
     </div>
   );
@@ -103,48 +102,40 @@ function VisionStrip() {
 
 // ─── Main canvas ───────────────────────────────────────────────────────────────
 
-export function PlanCanvas() {
-  const selectNode = usePlannerStore((s) => s.selectNode);
+export function PlanCanvas({ planId }: { planId: string }) {
+  const selectTask = usePlannerStore((s) => s.selectTask);
   const ui = usePlannerStore((s) => s.ui);
 
   // NOTE: no `= []` defaults here — a fresh array per render would change
   // the useMemo deps every render and loop setNodes/setEdges forever while
   // the queries are still loading. Normalize inside the memo instead.
-  const { data: goals } = useGoals();
+  const { data: plan } = usePlan(planId);
   const { data: agents } = useAgents();
-  const { data: plan } = usePlan();
 
-  // Server state → flow graph. Recomputed when goals/agents/plan/layout change.
   const layout = useMemo(
-    () => buildFlowFromGoals(goals ?? [], agents ?? [], ui.layoutDirection, plan ?? null),
-    [goals, agents, plan, ui.layoutDirection],
+    () => buildFlowFromGoals(plan?.goals ?? [], agents ?? [], ui.layoutDirection),
+    [plan, agents, ui.layoutDirection],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layout.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layout.edges);
 
-  // Re-sync local flow state whenever the derived layout changes
   useEffect(() => {
     setNodes(layout.nodes);
     setEdges(layout.edges);
   }, [layout, setNodes, setEdges]);
 
-  const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge({ ...connection, type: 'smoothstep' }, eds)),
-    [setEdges],
-  );
-
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.type === 'goalGroup') return; // groups frame tasks; not selectable
-      selectNode(ui.selectedNodeId === node.id ? null : node.id);
+      selectTask(ui.selectedTaskId === node.id ? null : node.id);
     },
-    [selectNode, ui.selectedNodeId],
+    [selectTask, ui.selectedTaskId],
   );
 
   const onPaneClick = useCallback(() => {
-    selectNode(null);
-  }, [selectNode]);
+    selectTask(null);
+  }, [selectTask]);
 
   return (
     <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0 }}>
@@ -153,7 +144,6 @@ export function PlanCanvas() {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
@@ -176,36 +166,30 @@ export function PlanCanvas() {
           color="#1c2030"
         />
 
-        <Controls
-          style={{ bottom: 20, left: 20 }}
-          showInteractive={false}
-        />
+        <Controls style={{ bottom: 20, left: 20 }} showInteractive={false} />
 
         <MiniMap
           style={{ bottom: 20, right: ui.detailPanelOpen ? 336 : 20 }}
           nodeColor={(n) => {
             if (n.type === 'goalGroup') return '#1c2030';
             const data = (n as Node<TaskNodeData>).data;
-            const meta = STATUS_META[data?.task?.status as StatusKey];
-            return meta?.dot ?? tokens.border;
+            const meta = STATUS[data?.task?.status ?? 'pending'];
+            return meta ? KIND_COLOR[meta.kind] : tokens.border;
           }}
           maskColor="rgba(11,13,18,0.7)"
           nodeStrokeWidth={0}
         />
 
-        {/* Top-left: goal legend */}
         <Panel position="top-left">
-          <GoalLegend />
+          <GoalLegend plan={plan} />
         </Panel>
 
-        {/* Top-center: phase timeline */}
         <Panel position="top-center">
-          <PhaseTimeline />
+          {plan && <PhaseTimeline phase={plan.phase} iteration={plan.iteration} />}
         </Panel>
 
-        {/* Bottom-right: vision */}
         <Panel position="bottom-right" style={{ right: ui.detailPanelOpen ? 336 : 20 }}>
-          <VisionStrip />
+          <BriefStrip plan={plan} />
         </Panel>
       </ReactFlow>
     </div>

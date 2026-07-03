@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { LifecycleRail } from './components/LifecycleRail';
 import { GatePanel } from './components/GatePanel';
@@ -7,38 +7,16 @@ import { ChatPanel } from './components/ChatPanel';
 import { ConsoleDock } from './components/ConsoleDock';
 import { Toaster } from './components/Toaster';
 import { Overview } from './views/Overview';
-import { GoalsView, GoalDetail } from './views/Goals';
+import { GoalsView } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { AgentsView } from './views/Agents';
 import { SettingsView } from './views/Settings';
-import { PullRequestsView } from './views/PullRequests';
-import { usePlannerStore, ts } from './store/plannerStore';
-import { useArchitectureStatusSync, usePlan, useSSEBridge } from './lib/queries';
+import { PlansView } from './views/Plans';
+import { usePlannerStore } from './store/plannerStore';
+import { useSSEBridge } from './lib/queries';
 import { absTime } from './lib/time';
 import './styles/global.css';
 import styles from './App.module.css';
-
-/** One intro line when the backend first answers — history lives in Activity. */
-function useChatHydration() {
-  const addMessage = usePlannerStore((s) => s.addMessage);
-  const { data: plan } = usePlan();
-  const hydrated = useRef(false);
-
-  useEffect(() => {
-    if (hydrated.current || !plan) return;
-    hydrated.current = true;
-    addMessage({
-      role: 'assistant',
-      text:
-        plan.status === 'phase_active'
-          ? 'Connected. Chat is wired to the tactical planner — type a refinement request.'
-          : plan.status === 'discovery'
-            ? 'Connected. Start a discovery session from the lifecycle rail on the left — then answer the planner’s questions here to build the project brief.'
-            : 'Connected. Approvals live in the gate card on the left rail.',
-      ts: ts(),
-    });
-  }, [plan, addMessage]);
-}
 
 /**
  * While the stream is not live, the main view is marked stale instead of
@@ -55,38 +33,68 @@ function StaleNotice() {
   );
 }
 
-export default function App() {
+/** One plan's shell: rail + view + chat + gate, all scoped by the route param. */
+function PlanShell() {
+  const { planId = '' } = useParams();
   const connState = usePlannerStore((s) => s.connection.state);
 
+  return (
+    <div className={styles.body}>
+      <LifecycleRail />
+      <main className={`${styles.main} ${connState === 'down' || connState === 'reconnecting' ? styles.stale : ''}`}>
+        <StaleNotice />
+        <div className={styles.viewScroll}>
+          <Routes>
+            <Route path="/" element={<Overview />} />
+            <Route path="/goals" element={<GoalsView />} />
+            <Route path="/agents" element={<AgentsView />} />
+            <Route path="/activity" element={<ActivityView />} />
+            <Route path="*" element={<Overview />} />
+          </Routes>
+        </div>
+        <ConsoleDock />
+      </main>
+      <ChatPanel />
+      <GatePanel planId={planId} />
+    </div>
+  );
+}
+
+export default function App() {
   useSSEBridge();
-  useArchitectureStatusSync();
-  useChatHydration();
 
   return (
     <BrowserRouter>
       <div className={styles.shell}>
         <TopBar />
-        <div className={styles.body}>
-          <LifecycleRail />
-          <main className={`${styles.main} ${connState === 'down' || connState === 'reconnecting' ? styles.stale : ''}`}>
-            <StaleNotice />
-            <div className={styles.viewScroll}>
-              <Routes>
-                <Route path="/" element={<Overview />} />
-                <Route path="/goals" element={<GoalsView />} />
-                <Route path="/goals/:goalId" element={<GoalDetail />} />
-                <Route path="/agents" element={<AgentsView />} />
-                <Route path="/settings" element={<SettingsView />} />
-                <Route path="/prs" element={<PullRequestsView />} />
-                <Route path="/activity" element={<ActivityView />} />
-                <Route path="*" element={<Overview />} />
-              </Routes>
-            </div>
-            <ConsoleDock />
-          </main>
-          <ChatPanel />
-        </div>
-        <GatePanel />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <div className={styles.body}>
+                <main className={styles.main}>
+                  <div className={styles.viewScroll}>
+                    <PlansView />
+                  </div>
+                </main>
+              </div>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <div className={styles.body}>
+                <main className={styles.main}>
+                  <div className={styles.viewScroll}>
+                    <SettingsView />
+                  </div>
+                </main>
+              </div>
+            }
+          />
+          <Route path="/plans/:planId/*" element={<PlanShell />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
         <Toaster />
       </div>
     </BrowserRouter>

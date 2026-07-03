@@ -1,369 +1,168 @@
 /**
  * src/lib/api.ts
  *
- * All HTTP calls to the AIPOM backend.
- * Routes chat messages by plan status — no direct Anthropic calls from the browser.
+ * All HTTP + SSE against the thin orchestrator API. Plan-scoped endpoints
+ * (the 9-phase lifecycle), the two chat endpoints (DISCOVERY / REPLANNING),
+ * reference-data CRUD, two-tier config, and the /api/events stream.
+ *
+ * Errors carry the server's enveloped body text so the toast layer can
+ * surface code/message/request_id.
  */
 
 import type {
-  ProjectPlan,
-  GoalAggregate,
-  AgentProps,
-  HistoryEntry,
-  ProjectPlanStatus,
+  AgentSpec,
+  Capability,
+  ChatMessageResponse,
+  IaModel,
+  MessageResponse,
+  ModelProvider,
+  Plan,
+  PlanSummary,
+  SSEPayload,
 } from '../types/ui';
-import type {
-  ApproveArchitectureResponse,
-  ApproveBriefResponse,
-  ApprovePhaseResponse,
-  ResumeDispatchResponse,
-  SessionAccepted,
-  SessionStatusResponse,
-} from '../types/generated';
-
-export type {
-  ApproveArchitectureResponse,
-  ApproveBriefResponse,
-  ApprovePhaseResponse,
-  ResumeDispatchResponse,
-  SessionAccepted,
-  SessionStatusResponse,
-};
-
-/** Discovery turn as the chat layer consumes it (question or completion). */
-export interface DiscoveryTurn {
-  question: string | null;
-  done: boolean;
-  brief: Record<string, unknown> | null;
-}
-
-/** Refinement outcome as the chat layer consumes it. */
-export interface RefineResponse {
-  session_id: string;
-  actions_taken: string[];
-  succeeded: boolean;
-  error: string | null;
-}
-
-/**
- * Reload-resilient readiness of the autonomous architecture run.
- * `state === 'completed'` is the ONLY signal that unlocks approval — a
- * streamed decision alone does not, or approve-architecture 409s ("no
- * completed session").
- */
-export interface ArchitectureStatus {
-  state: 'none' | 'running' | 'completed' | 'failed';
-  session_id: string | null;
-  decisions: { id: string; domain: string; feature_tag?: string }[];
-  phases: { name: string; goal_names: string[]; goals: { name: string; description: string }[] }[];
-  error: string | null;
-}
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method,
+    headers: {
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`POST ${path} → ${res.status}: ${text}`);
+    throw new Error(`${method} ${path} → ${res.status}: ${text}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`GET ${path} → ${res.status}: ${text}`);
-  }
-  return res.json();
-}
+const get = <T>(path: string) => request<T>('GET', path);
+const post = <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+  request<T>('POST', path, body, headers);
 
-// ─── M1: Read ─────────────────────────────────────────────────────────────────
+// ─── Plans: lifecycle ─────────────────────────────────────────────────────────
 
-export const fetchPlan = (): Promise<ProjectPlan> =>
-  get('/api/plan');
+export const listPlans = (): Promise<PlanSummary[]> => get('/api/plans');
 
-export const fetchGoals = (): Promise<GoalAggregate[]> =>
-  get('/api/goals');
+export const fetchPlan = (planId: string): Promise<Plan> =>
+  get(`/api/plans/${encodeURIComponent(planId)}`);
 
-export const fetchAgents = (): Promise<AgentProps[]> =>
-  get('/api/agents');
+export const createPlan = (
+  brief: string,
+  idempotencyKey: string,
+): Promise<{ plan_id: string }> =>
+  post('/api/plans', { brief }, { 'Idempotency-Key': idempotencyKey });
 
-export const fetchPlanHistory = (): Promise<HistoryEntry[]> =>
-  get('/api/plan/history');
+/** Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING. */
+export const approvePlan = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/approve`);
 
-export const fetchGoalHistory = (goalId: string): Promise<HistoryEntry[]> =>
-  get(`/api/goals/${goalId}/history`);
+/** Human "finish" at the post-execution gate: REVIEW -> DONE. */
+export const finishReview = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/review/finish`);
 
-// ─── M2: Lifecycle approvals ──────────────────────────────────────────────────
+/** Human "replan next phase" at the post-execution gate: REVIEW -> REPLANNING. */
+export const replanFromReview = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/review/replan`);
 
-export const approveBrief = (): Promise<ApproveBriefResponse> =>
-  post('/api/plan/approve-brief');
+/** Mid-RUNNING replan: skip pending work -> REPLANNING. */
+export const replanMidRunning = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/replan`);
 
-export const approveArchitecture = (
-  decisionIds: string[],
-): Promise<ApproveArchitectureResponse> =>
-  post('/api/plan/approve-architecture', { decision_ids: decisionIds });
+// ─── Plans: conversation (multi-turn with commit) ─────────────────────────────
 
-export const approvePhase = (
-  approveNext = true,
-): Promise<ApprovePhaseResponse> =>
-  post('/api/plan/approve-phase', { approve_next: approveNext });
-
-/**
- * Recovery: re-dispatch active-phase goals that never got created (e.g. a goal
- * whose branch creation failed during approve-architecture). Idempotent.
- */
-export const resumeDispatch = (): Promise<ResumeDispatchResponse> =>
-  post('/api/plan/resume-dispatch');
-
-// ─── Bulk retry of failed tasks ───────────────────────────────────────────────
-
-export interface GoalRetryResponse {
-  requeued: string[];
-  goals_touched: string[];
-}
-
-/** Force-requeue every FAILED task belonging to a single goal. */
-export const retryGoalFailed = (goalId: string): Promise<GoalRetryResponse> =>
-  post(`/api/goals/${goalId}/retry-failed`);
-
-/** Force-requeue every FAILED task across all goals. */
-export const retryAllFailed = (): Promise<GoalRetryResponse> =>
-  post('/api/goals/retry-failed');
-
-// ─── Task console logs (persisted) ────────────────────────────────────────────
-
-export interface TaskLogs {
-  task_id: string;
-  stdout: string;
-  stderr: string;
-  exit_code: number | null;
-  success: boolean | null;
-  elapsed_seconds: number | null;
-  modified_files: string[];
-}
-
-/** Fetch persisted agent console output for a finished task (404 → null). */
-export const getTaskLogs = async (taskId: string): Promise<TaskLogs | null> => {
-  try {
-    return await get<TaskLogs>(`/api/tasks/${taskId}/logs`);
-  } catch (err) {
-    // get() throws Error("GET … → 404: …") when no logs exist yet.
-    if (err instanceof Error && err.message.includes('→ 404')) return null;
-    throw err;
-  }
-};
-
-// ─── Autonomous planner runs (202; progress + completion stream over SSE) ─────
-
-/**
- * Kick off the autonomous architecture planner. Returns immediately (202);
- * proposed decisions arrive as `plan.decision_proposed` SSE events and the
- * run ends with `plan.architecture_completed` / `plan.architecture_failed`.
- * This is the step that was missing over HTTP — without it the plan sat in
- * `architecture` forever and approve-architecture 409'd.
- */
-export const runArchitecture = (): Promise<SessionAccepted> =>
-  post('/api/plan/architecture/run');
-
-/** Kick off the autonomous phase-review planner (same 202 + SSE shape). */
-export const runPhaseReview = (): Promise<SessionAccepted> =>
-  post('/api/plan/phase-review/run');
-
-/** Reload-safe readiness of the architecture run (survives a page refresh). */
-export const fetchArchitectureStatus = (): Promise<ArchitectureStatus> =>
-  get('/api/plan/architecture/status');
-
-// ─── Long-running sessions (202 + poll; progress also streams over SSE) ──────
-
-const SESSION_POLL_INTERVAL_MS = 750;
-const SESSION_POLL_TIMEOUT_MS = 10 * 60 * 1000;
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function pollSession(
-  url: string,
-  until: (s: SessionStatusResponse) => boolean,
-): Promise<SessionStatusResponse> {
-  const deadline = Date.now() + SESSION_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const session = await get<SessionStatusResponse>(url);
-    if (until(session)) return session;
-    await sleep(SESSION_POLL_INTERVAL_MS);
-  }
-  throw new Error(`Session at ${url} did not settle within the poll timeout`);
-}
-
-const isSettled = (s: SessionStatusResponse) =>
-  s.status === 'waiting_input' || s.status === 'done' || s.status === 'failed';
-
-function toDiscoveryTurn(session: SessionStatusResponse): DiscoveryTurn {
-  if (session.status === 'failed') {
-    throw new Error(session.error ?? 'Discovery session failed');
-  }
-  return {
-    question: session.question ?? null,
-    done: session.status === 'done',
-    brief: (session.result?.brief as Record<string, unknown> | undefined) ?? null,
-  };
-}
-
-// The active discovery session, established by startDiscovery().
-let activeDiscoverySessionId: string | null = null;
-
-/** True while an interactive discovery session is running/awaiting answers. */
-export const hasActiveDiscoverySession = (): boolean =>
-  activeDiscoverySessionId !== null;
-
-// ─── M3: Chat routing by plan status ─────────────────────────────────────────
-
-/**
- * Route a chat message to the correct backend endpoint based on current plan status.
- *
- * PHASE_ACTIVE  → POST /api/plan/refine (202), result via GET /plan/sessions/{id}
- * DISCOVERY     → POST /api/plan/discovery/{id}/message (202), next turn via GET
- * PHASE_REVIEW  → returns advisory text — operator should use approval buttons
- * Others        → returns advisory text
- */
-export async function sendChatMessage(
+export const sendDiscoveryMessage = (
+  planId: string,
   message: string,
-  planStatus: ProjectPlanStatus,
-  focusedNodeId: string | null,
-  focusedGoalId: string | null,
-): Promise<{ type: 'refinement'; data: RefineResponse }
-         | { type: 'discovery'; data: DiscoveryTurn }
-         | { type: 'advisory'; text: string }> {
+): Promise<MessageResponse> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/discovery/message`, { message });
 
-  switch (planStatus) {
-    case 'phase_active': {
-      const accepted = await post<SessionAccepted>('/api/plan/refine', {
-        message,
-        focused_node_id: focusedNodeId,
-        focused_goal_id: focusedGoalId,
-      });
-      const session = await pollSession(
-        `/api/plan/sessions/${accepted.session_id}`,
-        (s) => s.status === 'done' || s.status === 'failed',
-      );
-      const outcome = session.result ?? {};
-      const data: RefineResponse = {
-        session_id: session.session_id,
-        actions_taken: (outcome.actions_taken as string[] | undefined) ?? [],
-        succeeded: session.status === 'done',
-        error: session.error ?? null,
-      };
-      return { type: 'refinement', data };
-    }
+export const sendReplanningMessage = (
+  planId: string,
+  message: string,
+): Promise<MessageResponse> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/replanning/message`, { message });
 
-    case 'discovery': {
-      if (!activeDiscoverySessionId) {
-        return {
-          type: 'advisory',
-          text: 'No discovery session is running. Use "Start Discovery" first.',
-        };
-      }
-      const base = `/api/plan/discovery/${activeDiscoverySessionId}`;
-      await post<SessionAccepted>(`${base}/message`, { message });
-      const session = await pollSession(base, isSettled);
-      if (session.status === 'done' || session.status === 'failed') {
-        activeDiscoverySessionId = null;
-      }
-      return { type: 'discovery', data: toDiscoveryTurn(session) };
-    }
+export const fetchChat = (planId: string): Promise<ChatMessageResponse[]> =>
+  get(`/api/plans/${encodeURIComponent(planId)}/chat`);
 
-    case 'architecture':
-      return {
-        type: 'advisory',
-        text: 'Architecture is being drafted by the planner. Once it completes, use "Approve Architecture" to select decisions and activate the phase.',
-      };
+// ─── Plans: structural edits ──────────────────────────────────────────────────
 
-    case 'phase_review':
-      return {
-        type: 'advisory',
-        text: 'The phase review is running. Once it completes, use "Approve Phase" to move to the next phase or mark the project done.',
-      };
-
-    case 'done':
-      return {
-        type: 'advisory',
-        text: 'The project is complete. All phases have been executed and merged.',
-      };
-
-    default:
-      return {
-        type: 'advisory',
-        text: `Plan is in "${planStatus}" state. No chat actions are available right now.`,
-      };
-  }
+export interface EditBody {
+  type:
+    | 'add_task'
+    | 'remove_task'
+    | 'reorder_tasks'
+    | 'edit_task_requirements'
+    | 'rebind_task_agent';
+  goal_id: string;
+  task_id?: string;
+  task?: { name: string; description?: string; required_capabilities?: string[] };
+  ordered_task_ids?: string[];
+  required_capabilities?: string[];
+  agent_id?: string;
 }
 
-// ─── M4: Discovery session start ──────────────────────────────────────────────
+export const applyEdit = (planId: string, edit: EditBody): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/edits`, edit);
 
-/**
- * Start the discovery session (202 + session id) and wait for the first
- * turn: either the first question or immediate completion with the brief.
- */
-export async function startDiscovery(): Promise<DiscoveryTurn> {
-  const accepted = await post<SessionAccepted>('/api/plan/discovery/start');
-  activeDiscoverySessionId = accepted.session_id;
-  try {
-    const session = await pollSession(
-      `/api/plan/discovery/${accepted.session_id}`,
-      isSettled,
-    );
-    if (session.status === 'done' || session.status === 'failed') {
-      activeDiscoverySessionId = null;
-    }
-    return toDiscoveryTurn(session);
-  } catch (err) {
-    activeDiscoverySessionId = null;
-    throw err;
-  }
+// ─── Reference data ───────────────────────────────────────────────────────────
+
+export const listAgents = (): Promise<AgentSpec[]> => get('/api/agents');
+export const listCapabilities = (): Promise<Capability[]> => get('/api/capabilities');
+export const listProviders = (): Promise<ModelProvider[]> => get('/api/providers');
+export const listModels = (): Promise<IaModel[]> => get('/api/models');
+
+// ─── Two-tier config ──────────────────────────────────────────────────────────
+
+export const getConfigScope = (scope: string): Promise<Record<string, string>> =>
+  get(`/api/config/${encodeURIComponent(scope)}`);
+
+export const setConfigKey = (
+  scope: string,
+  key: string,
+  value: string,
+): Promise<void> =>
+  request('PUT', `/api/config/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`, {
+    value,
+  });
+
+// ─── SSE subscription ─────────────────────────────────────────────────────────
+
+/** The outbox event vocabulary + the agent telemetry feed. */
+export const SSE_EVENT_TYPES = [
+  'PhaseAdvanced',
+  'TaskStarted',
+  'TaskCompleted',
+  'TaskRequeued',
+  'TaskFailedEvent',
+  'TaskAbandoned',
+  'ReplanRequested',
+  'GoalCompleted',
+  'GoalFailedEvent',
+  'PlanCompleted',
+  'PlanFailed',
+  'AgentFellBackToDefault',
+  'agent.event',
+] as const;
+
+export type SSEEventType = (typeof SSE_EVENT_TYPES)[number];
+
+export interface SSEEvent {
+  type: SSEEventType;
+  payload: SSEPayload;
 }
-
-// ─── M5: SSE subscription ─────────────────────────────────────────────────────
-
-export type SSEEvent =
-  | { type: 'plan.status_changed'; payload: { status: string } }
-  | { type: 'goal.dispatched'; payload: { goal_id: string } }
-  | { type: 'goal.dispatch_failed'; payload: { goal_name: string; error: string } }
-  | { type: 'task.status_changed'; payload: { task_id: string; status: string; reason?: string } }
-  | {
-      type: 'task.unassignable';
-      payload: { task_id: string; required_capability: string; reason: string };
-    }
-  | { type: 'task.progress'; payload: { task_id: string; lines: string[]; ts: number } }
-  | { type: 'plan.jit_progress'; payload: Record<string, unknown> }
-  | { type: 'plan.refinement_action'; payload: { action: string } }
-  // Planner tool calls forwarded through the planner event hook
-  | { type: 'plan.decision_proposed'; payload: { id: string; domain: string } }
-  | {
-      type: 'plan.phase_proposed';
-      payload: {
-        name: string;
-        goal_names: string[];
-        goal_descriptions?: Record<string, string>;
-      };
-    }
-  // Autonomous architecture / phase-review run lifecycle (202 + SSE)
-  | { type: 'plan.architecture_completed'; payload: { session_id: string } }
-  | { type: 'plan.architecture_failed'; payload: { session_id: string; error: string | null } }
-  | { type: 'plan.phase_review_completed'; payload: { session_id: string } }
-  | { type: 'plan.phase_review_failed'; payload: { session_id: string; error: string | null } }
-  // GitHub PR gate lifecycle
-  | { type: 'goal.pr_opened'; payload: { goal_id: string; pr_number: number | null } }
-  | { type: 'goal.pr_state_synced'; payload: { goal_id: string } }
-  | { type: 'goal.finalized'; payload: { goal_id: string } };
-// Note: the backend bridge may forward domain events outside this union
-// verbatim; consumers handle those in a default branch at runtime.
 
 export interface SubscribeCallbacks {
   onEvent: (event: SSEEvent) => void;
@@ -379,6 +178,11 @@ export interface SubscribeCallbacks {
 
 const RETRY_MS = 3000;
 
+/**
+ * The backend emits NAMED SSE events (`event: <type>`), so a listener is
+ * registered per known type — `onmessage` alone would never fire. Delivery is
+ * at-least-once: consumers dedup on payload.event_id.
+ */
 export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
   let es: EventSource | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -390,7 +194,6 @@ export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
 
     es.onopen = () => {
       if (hadError) {
-        // Events emitted while disconnected are gone — resync via refetch.
         hadError = false;
         cb.onReconnect?.();
       } else {
@@ -398,19 +201,19 @@ export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
       }
     };
 
-    es.onmessage = (e) => {
-      try {
-        const parsed = JSON.parse(e.data) as SSEEvent;
-        cb.onEvent(parsed);
-      } catch {
-        // ignore malformed events
-      }
-    };
+    for (const type of SSE_EVENT_TYPES) {
+      es.addEventListener(type, (e: MessageEvent) => {
+        try {
+          cb.onEvent({ type, payload: JSON.parse(e.data) as SSEPayload });
+        } catch {
+          // ignore malformed events
+        }
+      });
+    }
 
     es.onerror = () => {
       hadError = true;
       if (es?.readyState === EventSource.CLOSED) {
-        // Hard close — EventSource won't retry on its own. Recreate.
         cb.onDown?.();
         es?.close();
         if (!closed) retryTimer = setTimeout(connect, RETRY_MS);

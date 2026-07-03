@@ -1,145 +1,79 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useParams } from 'react-router-dom';
 import {
-  Activity, Check, ChevronRight, Compass, Cpu, LayoutDashboard, Play, Target,
+  Activity, Check, ChevronRight, Cpu, LayoutDashboard, Play, RefreshCw, Target,
 } from 'lucide-react';
-import {
-  usePlan, useStartDiscovery, useGoals, useRunArchitecture, useRunPhaseReview,
-  useResumeDispatch, useRetryAllFailed,
-} from '../lib/queries';
+import { usePlan, useReplanMidRunning } from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
-import { relTime, useNow } from '../lib/time';
+import { PLAN_PHASE } from '../styles/tokens';
+import type { PlanPhase } from '../types/ui';
 import styles from './LifecycleRail.module.css';
 
 type StepState = 'done' | 'active' | 'pending';
 
-interface Step {
-  key: string;
-  label: string;
-  sub?: string;
-  state: StepState;
-}
+/** The happy-path walk shown as the stepper. */
+const WALK: PlanPhase[] = [
+  'discovery',
+  'architecture',
+  'enriching',
+  'awaiting_review',
+  'running',
+  'review',
+  'done',
+];
 
 /**
  * The plan lifecycle is the top-level mental model, so it is the permanent
- * left rail: discovery → architecture → phases → done, rendered with the
- * status system (green above the cursor, blue/amber at it, gray below).
- * Under the cursor sits either the GATE CARD (amber — the only route into
- * approvals) or the live session card (blue — streamed progress, never a
- * bare spinner). The operator's standing question — "what is the system
- * doing, and what does it need from me?" — is answered here, always.
+ * left rail: the 9-phase walk with the cursor on the current phase. Under
+ * the cursor sits the GATE CARD when a human gate is waiting (amber — the
+ * only route into approvals) or the replan affordance mid-RUNNING. The
+ * operator's standing question — "what is the system doing, and what does
+ * it need from me?" — is answered here, always.
  */
 export function LifecycleRail() {
-  const { data: plan, isLoading } = usePlan();
-  const { data: goals = [] } = useGoals();
+  const { planId = '' } = useParams();
+  const { data: plan, isLoading } = usePlan(planId || null);
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
-  const decisions = usePlannerStore((s) => s.decisions);
-  const events = usePlannerStore((s) => s.events);
-  const isThinking = usePlannerStore((s) => s.ui.isThinking);
-  const activeRun = usePlannerStore((s) => s.activeRun);
-  const completedRuns = usePlannerStore((s) => s.completedRuns);
-  const startDiscovery = useStartDiscovery();
-  const runArchitecture = useRunArchitecture();
-  const runPhaseReview = useRunPhaseReview();
-  const resumeDispatch = useResumeDispatch();
-  const retryAllFailed = useRetryAllFailed();
-  const now = useNow(1000);
+  const replanMidRunning = useReplanMidRunning(planId);
 
-  // Retryable (failed or canceled) tasks across all goals — drives the global
-  // "Retry all failed" action. Also offered when a goal itself has failed.
-  const failedTaskCount = goals.reduce(
-    (sum, g) =>
-      sum + g.tasks.filter((t) => t.status === 'failed' || t.status === 'canceled').length,
-    0,
-  );
-  const anyGoalFailed = goals.some((g) => g.status === 'failed');
-  const showRetryAll = failedTaskCount > 0 || anyGoalFailed;
+  const phase = plan?.phase;
+  const cursor = phase
+    ? WALK.indexOf(phase === 'replanning' ? 'architecture' : phase)
+    : -1;
 
-  const status = plan?.status;
-
-  // Divergence: the active phase declares goals that have no aggregate yet —
-  // e.g. a dispatch whose branch creation failed. Surfaces the recovery action
-  // (the reconciler also self-heals this on its slow cadence, but the operator
-  // shouldn't have to wait or guess).
-  const activePhase = plan?.phases.find((p) => p.status === 'active');
-  const missingGoals = activePhase
-    ? activePhase.goal_names.filter((n) => !goals.some((g) => g.name === n))
-    : [];
-
-  // ── Build the step list ───────────────────────────────────────────────────
-  const steps: Step[] = [];
-  if (plan) {
-    const past = (s: string) => {
-      const order = ['discovery', 'architecture', 'phase_active', 'phase_review', 'done'];
-      return order.indexOf(plan.status) > order.indexOf(s);
-    };
-    steps.push({
-      key: 'discovery', label: 'Discovery',
-      state: status === 'discovery' ? 'active' : 'done',
-    });
-    steps.push({
-      key: 'architecture', label: 'Architecture',
-      state: status === 'architecture' ? 'active' : past('architecture') ? 'done' : 'pending',
-    });
-    for (const p of plan.phases) {
-      steps.push({
-        key: `phase-${p.index}`,
-        label: `Phase ${p.index} — ${p.name}`,
-        sub: p.goal_names.length ? `${p.goal_names.length} goals` : undefined,
-        state: p.status === 'completed' ? 'done' : p.status === 'active' ? 'active' : 'pending',
-      });
-    }
-    steps.push({ key: 'done', label: 'Done', state: status === 'done' ? 'done' : 'pending' });
-  }
-
-  // ── What goes in the cursor slot: gate, CTA, or live session ─────────────
-  const briefReady = status === 'discovery' && plan?.brief != null;
-
-  // The architecture/phase-review gates only make sense once the autonomous
-  // planner SESSION has COMPLETED — approving before that 409'd ("no completed
-  // session"). A streamed decision means the run is in progress, NOT ready;
-  // gating on it caused the premature-approve dangle. Completion is the only
-  // unlock (driven by plan.architecture_completed + the status-sync poll).
-  const architectureReady = completedRuns.includes('architecture');
-  const phaseReviewReady = completedRuns.includes('phase_review');
-
-  const needsArchitectureDraft =
-    status === 'architecture' && !architectureReady && activeRun !== 'architecture';
-  const needsPhaseReviewRun =
-    status === 'phase_review' && !phaseReviewReady && activeRun !== 'phase_review';
+  const steps = WALK.map((p, i): { key: string; label: string; state: StepState } => ({
+    key: p,
+    label: PLAN_PHASE[p].label,
+    state:
+      cursor < 0 ? 'pending'
+      : i < cursor ? 'done'
+      : i === cursor ? (phase === 'done' ? 'done' : 'active')
+      : 'pending',
+  }));
 
   const gate =
-    briefReady
-      ? { title: 'Brief ready for approval', body: 'Review the project brief and approve it to start architecture drafting.' }
-      : status === 'architecture' && architectureReady
+    phase === 'awaiting_review'
+      ? {
+          title: 'Roadmap ready for approval',
+          body: 'Enrichment finished and agents are bound. Review the tasks and approve to start execution.',
+        }
+      : phase === 'review'
         ? {
-            title: 'Architecture approval',
-            body: decisions.length > 0
-              ? `${decisions.length} decision${decisions.length === 1 ? '' : 's'} proposed. Review and approve to dispatch the first phase.`
-              : 'Architecture drafted. Review and approve to dispatch the first phase to workers.',
+            title: 'Execution finished — review',
+            body: 'Every goal is settled. Finish the plan, or replan the next iteration on top of these results.',
           }
-        : status === 'phase_review' && phaseReviewReady
-          ? { title: 'Phase review', body: 'The phase review is complete. Approve the next phase or mark the project done.' }
-          : null;
+        : null;
 
-  const gateGoals = goals.filter(
-    (g) => g.status === 'ready_for_review' || g.status === 'awaiting_pr_approval',
-  );
-
-  const lastProgress = [...events].reverse().find((e) => e.type === 'plan.jit_progress');
+  const chatting = phase === 'discovery' || phase === 'replanning';
+  const base = `/plans/${encodeURIComponent(planId)}`;
 
   return (
     <nav className={styles.rail} aria-label="Plan lifecycle and navigation">
       <div className={styles.nav}>
-        <RailLink to="/" icon={<LayoutDashboard size={14} aria-hidden />} label="Overview" end />
-        <RailLink
-          to="/goals"
-          icon={<Target size={14} aria-hidden />}
-          label="Goals"
-          badge={gateGoals.length > 0 ? gateGoals.length : undefined}
-        />
-        <RailLink to="/agents" icon={<Cpu size={14} aria-hidden />} label="Agents" />
-        <RailLink to="/activity" icon={<Activity size={14} aria-hidden />} label="Activity" />
+        <RailLink to={base} icon={<LayoutDashboard size={14} aria-hidden />} label="Overview" end />
+        <RailLink to={`${base}/goals`} icon={<Target size={14} aria-hidden />} label="Goals" />
+        <RailLink to={`${base}/agents`} icon={<Cpu size={14} aria-hidden />} label="Agents" />
+        <RailLink to={`${base}/activity`} icon={<Activity size={14} aria-hidden />} label="Activity" />
       </div>
 
       <div className={styles.sectionLabel + ' label'}>Lifecycle</div>
@@ -160,7 +94,9 @@ export function LifecycleRail() {
             </span>
             <span className={styles.stepLabel}>
               {s.label}
-              {s.sub && <span className={styles.stepSub}>{s.sub}</span>}
+              {s.key === 'architecture' && phase === 'replanning' && (
+                <span className={styles.stepSub}>replanning (chat)</span>
+              )}
             </span>
             <span className={styles.visuallyHidden}>
               {s.state === 'done' ? ' (completed)' : s.state === 'active' ? ' (current)' : ' (upcoming)'}
@@ -170,132 +106,58 @@ export function LifecycleRail() {
       </ol>
 
       <div className={styles.cursorSlot}>
-        {/* Pre-discovery empty state: the way in, not a blank void */}
-        {status === 'discovery' && !briefReady && !isThinking && (
-          <div className={styles.sessionCard}>
-            <div className={styles.cardTitle}>No brief yet</div>
-            <p className={styles.cardBody}>
-              Start a discovery session — the planner interviews you and drafts the project brief.
-            </p>
-            <button
-              className={styles.primaryBtn}
-              onClick={() => startDiscovery.mutate()}
-              disabled={startDiscovery.isPending}
-            >
-              Start discovery
-            </button>
-          </div>
-        )}
-
-        {/* Architecture not yet drafted: the missing step that dead-ended at
-            approve-architecture. Run it here; decisions then stream in. */}
-        {needsArchitectureDraft && (
-          <div className={styles.sessionCard}>
-            <div className={styles.cardTitle}>Architecture not drafted yet</div>
-            <p className={styles.cardBody}>
-              Run the architecture planner — it drafts the phase plan and the
-              decisions you'll approve to dispatch the first phase.
-            </p>
-            <button
-              className={styles.primaryBtn}
-              onClick={() => runArchitecture.mutate()}
-              disabled={runArchitecture.isPending}
-            >
-              Draft architecture
-            </button>
-          </div>
-        )}
-
-        {/* Phase review not yet run: same pattern as architecture. */}
-        {needsPhaseReviewRun && (
-          <div className={styles.sessionCard}>
-            <div className={styles.cardTitle}>Phase review not run yet</div>
-            <p className={styles.cardBody}>
-              Run the phase review — the planner records lessons and proposes the
-              next phase for your approval.
-            </p>
-            <button
-              className={styles.primaryBtn}
-              onClick={() => runPhaseReview.mutate()}
-              disabled={runPhaseReview.isPending}
-            >
-              Run phase review
-            </button>
-          </div>
-        )}
-
-        {/* Recovery: active-phase goals that never got dispatched (e.g. a goal
-            whose branch creation failed). Re-dispatch the missing ones. */}
-        {status === 'phase_active' && missingGoals.length > 0 && (
+        {chatting && (
           <div className={styles.sessionCard}>
             <div className={styles.cardTitle}>
-              {missingGoals.length} goal{missingGoals.length > 1 ? 's' : ''} not dispatched
+              {phase === 'discovery' ? 'Discovery conversation' : 'Replanning conversation'}
             </div>
             <p className={styles.cardBody}>
-              This phase expects {missingGoals.join(', ')}, which never got created.
-              Re-dispatch the missing goals — already-dispatched goals are untouched.
+              {phase === 'discovery'
+                ? 'Agree the goal roadmap with the reasoner in the chat panel. The plan advances when it commits the goals.'
+                : 'Plan the next iteration in the chat panel. Completed goals stay as history.'}
             </p>
-            <button
-              className={styles.primaryBtn}
-              onClick={() => resumeDispatch.mutate()}
-              disabled={resumeDispatch.isPending}
-            >
-              {resumeDispatch.isPending ? 'Dispatching…' : 'Resume dispatch'}
-            </button>
           </div>
         )}
 
-        {/* Recovery: failed/canceled tasks anywhere — bulk requeue across goals */}
-        {showRetryAll && (
-          <div className={styles.sessionCard}>
-            <div className={styles.cardTitle}>
-              {failedTaskCount > 0
-                ? `${failedTaskCount} failed task${failedTaskCount > 1 ? 's' : ''}`
-                : 'Failed goal(s)'}
-            </div>
-            <p className={styles.cardBody}>
-              Requeue every failed or canceled task across all goals and reopen failed goals.
-              Already-succeeded tasks are untouched.
-            </p>
-            <button
-              className={styles.primaryBtn}
-              onClick={() => retryAllFailed.mutate()}
-              disabled={retryAllFailed.isPending}
-            >
-              {retryAllFailed.isPending ? 'Requeuing…' : 'Retry all failed'}
-            </button>
-          </div>
-        )}
-
-        {/* Live session: streamed progress, never a bare spinner */}
-        {(isThinking || activeRun !== null || (status === 'architecture' && !gateGoals.length && lastProgress)) && (
+        {(phase === 'architecture' || phase === 'enriching') && (
           <div className={styles.sessionCard} aria-live="polite">
             <div className={styles.cardTitle}>
               <span className={`${styles.runDot} breathe`} aria-hidden />
-              {activeRun === 'architecture'
-                ? 'Drafting architecture…'
-                : activeRun === 'phase_review'
-                  ? 'Running phase review…'
-                  : 'Planner working'}
+              {phase === 'architecture' ? 'Structuring…' : 'Breaking goals into tasks…'}
             </div>
-            {lastProgress && (
-              <pre className={styles.progressLine}>
-                {summarizeProgress(lastProgress.payload)}
-              </pre>
-            )}
-            <div className={styles.cardMeta}>
-              last activity {relTime(lastProgress?.at ?? null, now)}
-            </div>
+            <p className={styles.cardBody}>
+              The worker is driving this phase autonomously. It pauses at the
+              review gate when the roadmap is executable.
+            </p>
           </div>
         )}
 
-        {/* The gate card — anything amber is your queue */}
+        {phase === 'running' && (
+          <div className={styles.sessionCard}>
+            <div className={styles.cardTitle}>
+              <span className={`${styles.runDot} breathe`} aria-hidden />
+              Executing
+            </div>
+            <p className={styles.cardBody}>
+              Agents are working the roadmap. You can request a replan — pending
+              work is skipped and the chat re-opens.
+            </p>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => replanMidRunning.mutate()}
+              disabled={replanMidRunning.isPending}
+            >
+              <RefreshCw size={12} aria-hidden /> Replan now
+            </button>
+          </div>
+        )}
+
         {gate && (
           <div className={styles.gateCard}>
             <div className={styles.gateTitle}>{gate.title}</div>
             <p className={styles.cardBody}>{gate.body}</p>
             <button className={styles.gateBtn} onClick={() => setGateOpen(true)}>
-              Review &amp; approve <ChevronRight size={13} aria-hidden />
+              Review &amp; decide <ChevronRight size={13} aria-hidden />
             </button>
           </div>
         )}
@@ -304,18 +166,10 @@ export function LifecycleRail() {
   );
 }
 
-function summarizeProgress(payload: Record<string, unknown>): string {
-  const text =
-    (payload.message as string) ??
-    (payload.step as string) ??
-    JSON.stringify(payload);
-  return text.length > 120 ? text.slice(0, 117) + '…' : text;
-}
-
 function RailLink({
-  to, icon, label, badge, end,
+  to, icon, label, end,
 }: {
-  to: string; icon: React.ReactNode; label: string; badge?: number; end?: boolean;
+  to: string; icon: React.ReactNode; label: string; end?: boolean;
 }) {
   return (
     <NavLink
@@ -325,11 +179,6 @@ function RailLink({
     >
       {icon}
       <span>{label}</span>
-      {badge !== undefined && (
-        <span className={styles.navBadge} title={`${badge} item${badge === 1 ? '' : 's'} waiting on you`}>
-          {badge}
-        </span>
-      )}
     </NavLink>
   );
 }

@@ -1,51 +1,36 @@
 import React from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-import { ExternalLink, RotateCw } from 'lucide-react';
-import { tokens, GOAL_STATUS_META } from '../styles/tokens';
+import { tokens, STATUS, raw } from '../styles/tokens';
 import type { GoalGroupData } from '../lib/layout';
-import { useRetryGoalFailed } from '../lib/queries';
+
+const KIND_COLOR = {
+  idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
+} as const;
 
 /**
- * Group node that visually contains a goal's task nodes.
- * Cross-goal dependency edges attach to this node's handles, so they are
- * rendered goal-to-goal — clearly distinct from within-goal task edges.
+ * Group node that visually contains a goal's task nodes. Goal-to-goal
+ * succession edges attach to this node's handles.
  */
 export function GoalGroupNode({ data }: NodeProps) {
-  const { goal, color, phaseIndex, inActivePhase } = data as GoalGroupData;
-  const statusMeta = GOAL_STATUS_META[goal.status] ?? { label: goal.status.toUpperCase(), color: tokens.textMuted };
+  const { goal, color } = data as GoalGroupData;
+  const meta = STATUS[goal.status] ?? STATUS.pending;
+  const statusColor = KIND_COLOR[meta.kind];
 
-  const retryFailed = useRetryGoalFailed();
-  // Retryable = terminal-but-unsuccessful (failed or canceled). A canceled task
-  // also fails its goal, so offer retry whenever the goal itself has failed too.
-  const failedCount = goal.tasks.filter(
-    (t) => t.status === 'failed' || t.status === 'canceled',
-  ).length;
-  const canRetry = failedCount > 0 || goal.status === 'failed';
+  const settled = goal.status === 'done';
+  const active = goal.status === 'running';
+  const closed = goal.status === 'skipped' || goal.status === 'failed';
 
-  // Blocked = queued (PENDING) with unmerged prerequisite goals. It intentionally
-  // does not start until those merge — show that rather than a bare "pending".
-  const blockedBy: string[] = goal.blocked_by ?? [];
-  const isBlocked = blockedBy.length > 0;
-
-  // PR review gates take visual priority: goals blocked on a human PR
-  // decision are highlighted purple; merged goals settle to green.
-  const gateColor =
-    goal.status === 'awaiting_pr_approval' ? tokens.purple
-    : goal.status === 'approved' ? tokens.accent
-    : goal.status === 'merged' || goal.status === 'completed' ? tokens.green
-    : null;
-  const borderColor = gateColor ?? (inActivePhase ? color : color + '55');
-  const solid = gateColor !== null || inActivePhase;
+  const borderColor = settled ? tokens.green : active ? color : color + '55';
 
   return (
     <div style={{
       width: '100%', height: '100%',
       background: `${color}08`,
-      border: `1.5px ${isBlocked ? 'dashed' : solid ? 'solid' : 'dashed'} ${borderColor}`,
+      border: `1.5px ${active || settled ? 'solid' : 'dashed'} ${borderColor}`,
       borderRadius: tokens.r12,
-      boxShadow: gateColor ? `0 0 18px ${gateColor}33` : inActivePhase ? `0 0 18px ${color}22` : 'none',
-      opacity: isBlocked ? 0.6 : 1,  // dimmed: queued, waiting on prerequisites
+      boxShadow: active ? `0 0 18px ${color}22` : 'none',
+      opacity: closed ? 0.55 : 1,
     }}>
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
@@ -63,65 +48,18 @@ export function GoalGroupNode({ data }: NodeProps) {
         }}>
           {goal.name}
         </span>
-        {phaseIndex >= 0 && (
-          <span style={{
-            fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px', borderRadius: 3,
-            background: inActivePhase ? `${color}22` : '#1c2030',
-            color: inActivePhase ? color : tokens.textMuted, flexShrink: 0,
-          }}>
-            P{phaseIndex}
-          </span>
-        )}
         <div style={{ flex: 1 }} />
-        {canRetry && (
-          <button
-            onClick={(e) => { e.stopPropagation(); retryFailed.mutate(goal.goal_id); }}
-            disabled={retryFailed.isPending}
-            title={failedCount > 0 ? `Retry ${failedCount} failed/canceled task(s)` : 'Retry this failed goal'}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0,
-              fontSize: 8, fontFamily: tokens.fontMono, cursor: 'pointer',
-              padding: '2px 6px', borderRadius: 4,
-              background: tokens.red + '1a', border: `1px solid ${tokens.red}44`,
-              color: tokens.red,
-            }}
-          >
-            <RotateCw size={9} />
-            retry{failedCount > 0 ? ` ${failedCount}` : ''}
-          </button>
-        )}
-        <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: statusMeta.color, flexShrink: 0 }}>
-          [{statusMeta.label}]
+        <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: statusColor, flexShrink: 0 }}>
+          [{meta.label.toUpperCase()}]
         </span>
-        {goal.pr_html_url && (
-          <a
-            href={goal.pr_html_url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            title="Open GitHub PR"
-            style={{ display: 'flex', alignItems: 'center', color: tokens.purple, flexShrink: 0 }}
-          >
-            <ExternalLink size={10} />
-          </a>
-        )}
       </div>
 
-      {isBlocked && (
-        <div style={{
-          padding: '6px 12px', fontSize: 9, fontFamily: tokens.fontMono,
-          color: tokens.yellow, display: 'flex', alignItems: 'center', gap: 4,
-        }}>
-          🔒 waiting on {blockedBy.join(', ')}
-        </div>
-      )}
-
-      {goal.tasks.length === 0 && !isBlocked && (
+      {goal.tasks.length === 0 && (
         <div style={{
           padding: '10px 12px', fontSize: 9, fontFamily: tokens.fontMono,
           color: tokens.textMuted,
         }}>
-          no tasks yet — planned
+          no tasks yet — the enriching phase populates this goal
         </div>
       )}
     </div>

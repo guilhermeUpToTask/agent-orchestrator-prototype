@@ -5,324 +5,81 @@ export type ClientOptions = {
 };
 
 /**
- * AgentRegisterRequest
+ * AgentBody
  */
-export type AgentRegisterRequest = {
-    /**
-     * Agent Id
-     */
-    agent_id: string;
+export type AgentBody = {
     /**
      * Name
      */
     name: string;
     /**
-     * Capabilities
+     * Role
      */
-    capabilities: Array<string>;
+    role: string;
     /**
-     * Version
+     * Model Role
      */
-    version: string;
+    model_role: string;
     /**
-     * Trust Level
+     * Instructions
      */
-    trust_level?: string;
+    instructions?: string;
     /**
-     * Active
+     * Capability Ids
      */
-    active?: boolean;
-    /**
-     * Max Concurrent Tasks
-     */
-    max_concurrent_tasks?: number;
-    /**
-     * Runtime Type
-     */
-    runtime_type: string;
+    capability_ids?: Array<string>;
+    default_retry?: RetryPolicy;
 };
 
 /**
- * AgentRegisterResponse
- */
-export type AgentRegisterResponse = {
-    /**
-     * Agent Id
-     */
-    agent_id: string;
-    /**
-     * Active
-     */
-    active: boolean;
-    /**
-     * Runtime Type
-     */
-    runtime_type: string;
-};
-
-/**
- * AgentResponse
+ * AgentSpec
  *
- * Full agent read-model.
+ * Definition of an agent: who it is, what it can do, how it retries.
+ *
+ * `role` is the agent's functional job in the orchestration (e.g. "test_writer",
+ * "implementer", "reviewer"). `model_role` is an indirection key into the
+ * provider/model catalog naming a model *tier* (e.g. "cheap", "smart",
+ * "long_context") resolved to a concrete IAModel at runtime — so swapping the
+ * model behind a tier does not require touching every agent that uses it.
  */
-export type AgentResponse = {
+export type AgentSpec = {
     /**
-     * Agent Id
+     * Id
      */
-    agent_id: string;
+    id: string;
     /**
      * Name
      */
     name: string;
     /**
+     * Role
+     */
+    role: string;
+    /**
+     * Model Role
+     */
+    model_role: string;
+    /**
+     * Instructions
+     */
+    instructions: string;
+    /**
      * Capabilities
      */
-    capabilities: Array<string>;
-    /**
-     * Version
-     */
-    version: string;
-    /**
-     * Trust Level
-     */
-    trust_level: string;
-    /**
-     * Active
-     */
-    active: boolean;
-    /**
-     * Max Concurrent Tasks
-     */
-    max_concurrent_tasks: number;
-    /**
-     * Alive
-     */
-    alive?: boolean;
-    /**
-     * Last Heartbeat
-     */
-    last_heartbeat?: string | null;
+    capabilities?: Array<Capability>;
+    default_retry: RetryPolicy;
 };
 
 /**
- * ApproveArchitectureRequest
- */
-export type ApproveArchitectureRequest = {
-    /**
-     * Decision Ids
-     */
-    decision_ids: Array<string>;
-};
-
-/**
- * ApproveArchitectureResponse
- */
-export type ApproveArchitectureResponse = {
-    /**
-     * Decisions Applied
-     */
-    decisions_applied: number;
-    /**
-     * Goals Dispatched
-     */
-    goals_dispatched: Array<string>;
-    plan_status: ProjectPlanStatus;
-    /**
-     * Goals Failed
-     */
-    goals_failed?: Array<GoalDispatchFailureResponse>;
-};
-
-/**
- * ApproveBriefResponse
- */
-export type ApproveBriefResponse = {
-    plan_status: ProjectPlanStatus;
-    /**
-     * Vision
-     */
-    vision: string;
-};
-
-/**
- * ApprovePhaseRequest
- */
-export type ApprovePhaseRequest = {
-    /**
-     * Approve Next
-     */
-    approve_next?: boolean;
-};
-
-/**
- * ApprovePhaseResponse
- */
-export type ApprovePhaseResponse = {
-    /**
-     * Decisions Applied
-     */
-    decisions_applied: number;
-    /**
-     * Goals Dispatched
-     */
-    goals_dispatched: Array<string>;
-    plan_status: ProjectPlanStatus;
-    /**
-     * Goals Failed
-     */
-    goals_failed?: Array<GoalDispatchFailureResponse>;
-};
-
-/**
- * ArchitectureStatusResponse
+ * Capability
  *
- * Reload-resilient readiness of the autonomous architecture session.
- *
- * The approval gate is offered only when ``state == "completed"``; clients
- * hydrate proposed decisions/phases from here so a page refresh mid/after the
- * run keeps the correct state instead of relying on ephemeral SSE buffers.
+ * A named capability an agent can satisfy, bundling the tools it implies.
  */
-export type ArchitectureStatusResponse = {
+export type Capability = {
     /**
-     * State
+     * Id
      */
-    state: 'none' | 'running' | 'completed' | 'failed';
-    /**
-     * Session Id
-     */
-    session_id?: string | null;
-    /**
-     * Decisions
-     */
-    decisions?: Array<{
-        [key: string]: unknown;
-    }>;
-    /**
-     * Phases
-     */
-    phases?: Array<{
-        [key: string]: unknown;
-    }>;
-    /**
-     * Error
-     */
-    error?: string | null;
-};
-
-/**
- * CapabilityCreateRequest
- */
-export type CapabilityCreateRequest = {
-    /**
-     * Tag
-     *
-     * e.g. 'code:backend', 'test:write'
-     */
-    tag: string;
-};
-
-/**
- * CapabilityListResponse
- *
- * The full set of registered capability tags.
- */
-export type CapabilityListResponse = {
-    /**
-     * Tags
-     */
-    tags: Array<string>;
-};
-
-/**
- * DiscoveryMessageRequest
- */
-export type DiscoveryMessageRequest = {
-    /**
-     * Message
-     */
-    message: string;
-};
-
-/**
- * ErrorResponse
- */
-export type ErrorResponse = {
-    /**
-     * Detail
-     */
-    detail: string;
-};
-
-/**
- * GoalDispatchFailureResponse
- */
-export type GoalDispatchFailureResponse = {
-    /**
-     * Goal Name
-     */
-    goal_name: string;
-    /**
-     * Error
-     */
-    error: string;
-};
-
-/**
- * GoalFinalizeResponse
- */
-export type GoalFinalizeResponse = {
-    /**
-     * Goal Id
-     */
-    goal_id: string;
-    /**
-     * Pr Number
-     */
-    pr_number: number | null;
-    /**
-     * Pr Url
-     */
-    pr_url: string | null;
-    /**
-     * Goal Status
-     */
-    goal_status: string;
-};
-
-/**
- * GoalHistoryEntryResponse
- */
-export type GoalHistoryEntryResponse = {
-    /**
-     * Event
-     */
-    event: string;
-    /**
-     * Timestamp
-     */
-    timestamp?: string | null;
-    /**
-     * Actor
-     */
-    actor?: string | null;
-    /**
-     * Detail
-     */
-    detail?: {
-        [key: string]: unknown;
-    } | null;
-};
-
-/**
- * GoalResponse
- *
- * Full goal read-model.
- */
-export type GoalResponse = {
-    /**
-     * Goal Id
-     */
-    goal_id: string;
+    id: string;
     /**
      * Name
      */
@@ -331,116 +88,98 @@ export type GoalResponse = {
      * Description
      */
     description: string;
-    status: GoalStatus;
     /**
-     * Feature Tag
+     * Tools
      */
-    feature_tag?: string | null;
-    /**
-     * Depends On
-     */
-    depends_on: Array<string>;
-    /**
-     * Blocked By
-     */
-    blocked_by?: Array<string>;
-    /**
-     * Tasks
-     */
-    tasks: Array<GoalTaskResponse>;
-    /**
-     * History
-     */
-    history: Array<GoalHistoryEntryResponse>;
-    /**
-     * Pr Number
-     */
-    pr_number?: number | null;
-    /**
-     * Pr Status
-     */
-    pr_status?: string | null;
-    /**
-     * Pr Html Url
-     */
-    pr_html_url?: string | null;
-    /**
-     * Pr Checks Passed
-     */
-    pr_checks_passed?: boolean;
-    /**
-     * Pr Approved
-     */
-    pr_approved?: boolean;
+    tools?: Array<string>;
 };
 
 /**
- * GoalRetryResponse
+ * ChatMessageResponse
+ */
+export type ChatMessageResponse = {
+    /**
+     * Role
+     */
+    role: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Meta
+     */
+    meta: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * ConfigValue
+ */
+export type ConfigValue = {
+    /**
+     * Value
+     */
+    value: string;
+};
+
+/**
+ * CreatePlanRequest
+ */
+export type CreatePlanRequest = {
+    /**
+     * Brief
+     */
+    brief: string;
+};
+
+/**
+ * EditRequest
  *
- * Result of a bulk 'retry failed tasks' action.
+ * One structural edit. `type` selects the operation; the other fields are
+ * per-type (validated in _to_edit so a bad combination 422s, not 500s).
  */
-export type GoalRetryResponse = {
+export type EditRequest = {
     /**
-     * Requeued
+     * Type
      */
-    requeued: Array<string>;
+    type: 'add_task' | 'remove_task' | 'reorder_tasks' | 'edit_task_requirements' | 'rebind_task_agent';
     /**
-     * Goals Touched
+     * Goal Id
      */
-    goals_touched: Array<string>;
-};
-
-/**
- * GoalStatus
- */
-export type GoalStatus = 'pending' | 'running' | 'ready_for_review' | 'awaiting_pr_approval' | 'approved' | 'merged' | 'failed' | 'completed';
-
-/**
- * GoalTaskResponse
- */
-export type GoalTaskResponse = {
+    goal_id: string;
     /**
      * Task Id
      */
-    task_id: string;
+    task_id?: string | null;
+    task?: NewTaskBody | null;
     /**
-     * Title
+     * Ordered Task Ids
      */
-    title: string;
-    status: TaskStatus;
+    ordered_task_ids?: Array<string> | null;
     /**
-     * Depends On
+     * Required Capabilities
      */
-    depends_on: Array<string>;
+    required_capabilities?: Array<string> | null;
     /**
-     * Assigned Agent Id
+     * Agent Id
      */
-    assigned_agent_id?: string | null;
-    /**
-     * Retry Count
-     */
-    retry_count?: number;
-    /**
-     * Unassignable Reason
-     */
-    unassignable_reason?: string | null;
-    /**
-     * Last Error
-     */
-    last_error?: string | null;
-    /**
-     * Commit Sha
-     */
-    commit_sha?: string | null;
-    /**
-     * Branch
-     */
-    branch?: string | null;
-    /**
-     * Modified Files
-     */
-    modified_files?: Array<string>;
+    agent_id?: string | null;
 };
+
+/**
+ * FailureKind
+ *
+ * Typed classification of a task failure. Produced by the agent runner,
+ * consumed by RetryPolicy.should_retry — a checked classification, not string
+ * matching (DESIGN_NOTES #2).
+ */
+export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error';
 
 /**
  * HTTPValidationError
@@ -467,569 +206,217 @@ export type HealthResponse = {
 };
 
 /**
- * PhaseStatus
+ * IAModel
  */
-export type PhaseStatus = 'planned' | 'active' | 'completed';
-
-/**
- * PlanBriefResponse
- */
-export type PlanBriefResponse = {
+export type IaModel = {
     /**
-     * Vision
+     * Id
      */
-    vision: string;
+    id: string;
     /**
-     * Constraints
+     * Provider Id
      */
-    constraints: Array<string>;
+    provider_id: string;
     /**
-     * Phase 1 Exit Criteria
+     * Name
      */
-    phase_1_exit_criteria: string;
-    /**
-     * Open Questions
-     */
-    open_questions: Array<string>;
+    name: string;
 };
 
 /**
- * PlanConflictResponse
+ * MessageRequest
+ */
+export type MessageRequest = {
+    /**
+     * Message
+     */
+    message: string;
+};
+
+/**
+ * MessageResponse
  *
- * 409 body for plan lifecycle conflicts — tells the client exactly
- * which transition was attempted and what the plan state actually is.
+ * One conversation turn: the assistant reply, whether the roadmap was
+ * committed, and the (possibly advanced) phase.
  */
-export type PlanConflictResponse = {
+export type MessageResponse = {
     /**
-     * Detail
+     * Reply
      */
-    detail: string;
+    reply: string;
     /**
-     * Action
+     * Committed
      */
-    action: string;
+    committed: boolean;
     /**
-     * Current Status
+     * Phase
      */
-    current_status: string;
-    /**
-     * Expected Status
-     */
-    expected_status: Array<string>;
+    phase: string;
 };
 
 /**
- * PlanHistoryEntryResponse
+ * ModelBody
  */
-export type PlanHistoryEntryResponse = {
+export type ModelBody = {
     /**
-     * Event
+     * Name
      */
-    event: string;
-    /**
-     * Timestamp
-     */
-    timestamp?: string | null;
-    /**
-     * Actor
-     */
-    actor?: string | null;
-    /**
-     * Detail
-     */
-    detail?: {
-        [key: string]: unknown;
-    } | null;
+    name: string;
 };
 
 /**
- * PlanPhaseResponse
+ * ModelProvider
  */
-export type PlanPhaseResponse = {
+export type ModelProvider = {
     /**
-     * Index
+     * Id
      */
-    index: number;
+    id: string;
     /**
      * Name
      */
     name: string;
     /**
-     * Goal
+     * Base Url
      */
-    goal: string;
+    base_url: string;
     /**
-     * Goal Names
+     * Api Key Ref
      */
-    goal_names: Array<string>;
-    status: PhaseStatus;
+    api_key_ref: string;
     /**
-     * Exit Criteria
+     * Models
      */
-    exit_criteria: string;
-    /**
-     * Lessons
-     */
-    lessons: string;
+    models: Array<IaModel>;
 };
 
 /**
- * PlanResponse
- *
- * Full plan read-model.
+ * NewTaskBody
  */
-export type PlanResponse = {
+export type NewTaskBody = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Description
+     */
+    description?: string;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+};
+
+/**
+ * PlanCreatedResponse
+ */
+export type PlanCreatedResponse = {
     /**
      * Plan Id
      */
-    plan_id: string | null;
-    status: ProjectPlanStatus;
-    /**
-     * Vision
-     */
-    vision: string;
-    /**
-     * Architecture Summary
-     */
-    architecture_summary?: string | null;
-    /**
-     * Current Phase Index
-     */
-    current_phase_index: number;
-    /**
-     * State Version
-     */
-    state_version: number;
-    /**
-     * Phases
-     */
-    phases: Array<PlanPhaseResponse>;
-    brief: PlanBriefResponse | null;
-    /**
-     * History
-     */
-    history: Array<PlanHistoryEntryResponse>;
+    plan_id: string;
 };
 
 /**
- * ProjectContextResponse
+ * ProjectBody
  */
-export type ProjectContextResponse = {
+export type ProjectBody = {
     /**
-     * Project Name
+     * Name
      */
-    project_name: string;
+    name: string;
     /**
-     * Mode
+     * Repo Url
      */
-    mode: string;
+    repo_url?: string | null;
 };
 
 /**
- * ProjectPlanStatus
+ * ProjectDefinition
  */
-export type ProjectPlanStatus = 'discovery' | 'architecture' | 'phase_active' | 'phase_review' | 'done';
-
-/**
- * ProjectResetRequest
- */
-export type ProjectResetRequest = {
+export type ProjectDefinition = {
     /**
-     * Keep Agents
+     * Id
      */
-    keep_agents?: boolean;
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Repo Url
+     */
+    repo_url: string | null;
 };
 
 /**
- * ProjectResetResponse
+ * ProviderCreateBody
  */
-export type ProjectResetResponse = {
+export type ProviderCreateBody = {
     /**
-     * Tasks Deleted
+     * Name
      */
-    tasks_deleted: number;
+    name: string;
     /**
-     * Leases Released
+     * Base Url
      */
-    leases_released: number;
+    base_url: string;
     /**
-     * Branches Deleted
+     * Api Key
      */
-    branches_deleted: number;
-    /**
-     * Agents Removed
-     */
-    agents_removed: number;
-    /**
-     * Had Errors
-     */
-    had_errors: boolean;
-    /**
-     * Errors
-     */
-    errors: Array<string>;
+    api_key: string;
 };
 
 /**
- * ProposeSpecChangeRequest
+ * ProviderUpdateBody
  */
-export type ProposeSpecChangeRequest = {
+export type ProviderUpdateBody = {
     /**
-     * New Version
+     * Name
      */
-    new_version?: string | null;
+    name: string;
     /**
-     * New Objective Desc
+     * Base Url
      */
-    new_objective_desc?: string | null;
+    base_url: string;
     /**
-     * New Objective Domain
+     * Api Key
      */
-    new_objective_domain?: string | null;
-    /**
-     * Add Forbidden
-     */
-    add_forbidden?: Array<string>;
-    /**
-     * Remove Forbidden
-     */
-    remove_forbidden?: Array<string>;
-    /**
-     * Add Required
-     */
-    add_required?: Array<string>;
-    /**
-     * Remove Required
-     */
-    remove_required?: Array<string>;
-    /**
-     * Add Directory
-     */
-    add_directory?: {
-        [key: string]: string;
-    } | null;
-    /**
-     * Remove Directory
-     */
-    remove_directory?: string | null;
-    /**
-     * Rationale
-     */
-    rationale?: string;
+    api_key?: string | null;
 };
 
 /**
- * ProposeSpecChangeResponse
- */
-export type ProposeSpecChangeResponse = {
-    /**
-     * Accepted
-     */
-    accepted: boolean;
-    /**
-     * Proposal Path
-     */
-    proposal_path: string | null;
-    /**
-     * Rejection Reason
-     */
-    rejection_reason?: string | null;
-};
-
-/**
- * RefineRequest
- */
-export type RefineRequest = {
-    /**
-     * Message
-     */
-    message: string;
-    /**
-     * Focused Node Id
-     */
-    focused_node_id?: string | null;
-    /**
-     * Focused Goal Id
-     */
-    focused_goal_id?: string | null;
-};
-
-/**
- * ResumeDispatchResponse
- */
-export type ResumeDispatchResponse = {
-    /**
-     * Goals Dispatched
-     */
-    goals_dispatched: Array<string>;
-    plan_status: ProjectPlanStatus;
-    /**
-     * Goals Failed
-     */
-    goals_failed?: Array<GoalDispatchFailureResponse>;
-};
-
-/**
- * SessionAccepted
+ * RetryPolicy
  *
- * Returned with 202 when a long-running session is started.
- */
-export type SessionAccepted = {
-    /**
-     * Session Id
-     */
-    session_id: string;
-    /**
-     * Status
-     */
-    status: 'running' | 'waiting_input' | 'done' | 'failed';
-};
-
-/**
- * SessionStatusResponse
+ * Domain rule for retry/terminal decisions.
  *
- * Current state of a long-running session.
+ * Owns the *decision* (should we retry? how long to back off?); the adapter
+ * owns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so
+ * it is configurable and survives crashes. This is also what makes
+ * "retries exhausted -> terminal FAILED" a domain rule rather than adapter magic.
  */
-export type SessionStatusResponse = {
+export type RetryPolicy = {
     /**
-     * Session Id
+     * Max Attempts
      */
-    session_id: string;
+    max_attempts?: number;
     /**
-     * Kind
+     * Initial Backoff Seconds
      */
-    kind: 'discovery' | 'refine';
+    initial_backoff_seconds?: number;
     /**
-     * Status
+     * Backoff Multiplier
      */
-    status: 'running' | 'waiting_input' | 'done' | 'failed';
+    backoff_multiplier?: number;
     /**
-     * Question
+     * Max Backoff Seconds
      */
-    question?: string | null;
+    max_backoff_seconds?: number;
     /**
-     * Result
+     * Non Retryable Kinds
      */
-    result?: {
-        [key: string]: unknown;
-    } | null;
-    /**
-     * Error
-     */
-    error?: string | null;
-};
-
-/**
- * SpecResponse
- *
- * Flattened read-only view of the active ProjectSpec.
- */
-export type SpecResponse = {
-    /**
-     * Project Name
-     */
-    project_name: string;
-    /**
-     * Version
-     */
-    version: string;
-    /**
-     * Objective Description
-     */
-    objective_description: string;
-    /**
-     * Objective Domain
-     */
-    objective_domain: string;
-    /**
-     * Forbidden Patterns
-     */
-    forbidden_patterns: Array<string>;
-};
-
-/**
- * TaskAssignResponse
- */
-export type TaskAssignResponse = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Outcome
-     */
-    outcome: string;
-};
-
-/**
- * TaskDeleteResponse
- */
-export type TaskDeleteResponse = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Previous Status
-     */
-    previous_status: string;
-};
-
-/**
- * TaskFailHandlingResponse
- */
-export type TaskFailHandlingResponse = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Outcome
-     */
-    outcome: string;
-};
-
-/**
- * TaskLogsResponse
- *
- * Persisted agent console output for a finished task.
- */
-export type TaskLogsResponse = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Stdout
-     */
-    stdout: string;
-    /**
-     * Stderr
-     */
-    stderr: string;
-    /**
-     * Exit Code
-     */
-    exit_code?: number | null;
-    /**
-     * Success
-     */
-    success?: boolean | null;
-    /**
-     * Elapsed Seconds
-     */
-    elapsed_seconds?: number | null;
-    /**
-     * Modified Files
-     */
-    modified_files?: Array<string>;
-};
-
-/**
- * TaskPruneRequest
- */
-export type TaskPruneRequest = {
-    /**
-     * Filter Statuses
-     *
-     * List of task statuses to target. When omitted, ALL tasks are pruned.
-     */
-    filter_statuses?: Array<string> | null;
-};
-
-/**
- * TaskPruneResponse
- */
-export type TaskPruneResponse = {
-    /**
-     * Deleted
-     */
-    deleted: Array<string>;
-    /**
-     * Count
-     */
-    count: number;
-};
-
-/**
- * TaskRetryRequest
- */
-export type TaskRetryRequest = {
-    /**
-     * Actor
-     */
-    actor?: string;
-};
-
-/**
- * TaskRetryResponse
- */
-export type TaskRetryResponse = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Previous Status
-     */
-    previous_status: string;
-};
-
-/**
- * TaskStatus
- */
-export type TaskStatus = 'created' | 'assigned' | 'in_progress' | 'succeeded' | 'failed' | 'canceled' | 'requeued' | 'merged';
-
-/**
- * TaskUnblockResponse
- */
-export type TaskUnblockResponse = {
-    /**
-     * Completed Task Id
-     */
-    completed_task_id: string;
-    /**
-     * Unblocked
-     */
-    unblocked: Array<string>;
-    /**
-     * Skipped
-     */
-    skipped: Array<string>;
-    /**
-     * Count
-     */
-    count: number;
-};
-
-/**
- * ValidateSpecRequest
- */
-export type ValidateSpecRequest = {
-    /**
-     * Artifact
-     *
-     * The artifact text to validate (e.g. a task description, file path, or dependency declaration).
-     */
-    artifact: string;
-};
-
-/**
- * ValidateSpecResponse
- */
-export type ValidateSpecResponse = {
-    /**
-     * Passed
-     */
-    passed: boolean;
-    /**
-     * Violations
-     */
-    violations: Array<string>;
-    /**
-     * Warnings
-     */
-    warnings: Array<string>;
+    non_retryable_kinds?: Array<FailureKind>;
 };
 
 /**
@@ -1060,771 +447,16 @@ export type ValidationError = {
     };
 };
 
-export type PlanGetPlanData = {
+export type PlansListPlansData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/plan';
+    url: '/api/plans';
 };
 
-export type PlanGetPlanResponses = {
+export type PlansListPlansResponses = {
     /**
-     * Successful Response
-     */
-    200: PlanResponse;
-};
-
-export type PlanGetPlanResponse = PlanGetPlanResponses[keyof PlanGetPlanResponses];
-
-export type PlanGetPlanHistoryData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/history';
-};
-
-export type PlanGetPlanHistoryErrors = {
-    /**
-     * No plan exists yet.
-     */
-    404: ErrorResponse;
-};
-
-export type PlanGetPlanHistoryError = PlanGetPlanHistoryErrors[keyof PlanGetPlanHistoryErrors];
-
-export type PlanGetPlanHistoryResponses = {
-    /**
-     * Response Plan-Get Plan History
-     *
-     * Successful Response
-     */
-    200: Array<PlanHistoryEntryResponse>;
-};
-
-export type PlanGetPlanHistoryResponse = PlanGetPlanHistoryResponses[keyof PlanGetPlanHistoryResponses];
-
-export type PlanApproveBriefData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/approve-brief';
-};
-
-export type PlanApproveBriefErrors = {
-    /**
-     * Plan is not in `discovery` status. The body reports the current vs expected status.
-     */
-    409: PlanConflictResponse;
-};
-
-export type PlanApproveBriefError = PlanApproveBriefErrors[keyof PlanApproveBriefErrors];
-
-export type PlanApproveBriefResponses = {
-    /**
-     * Successful Response
-     */
-    200: ApproveBriefResponse;
-};
-
-export type PlanApproveBriefResponse = PlanApproveBriefResponses[keyof PlanApproveBriefResponses];
-
-export type PlanRunArchitectureData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/architecture/run';
-};
-
-export type PlanRunArchitectureErrors = {
-    /**
-     * An architecture session is already in progress.
-     */
-    409: ErrorResponse;
-};
-
-export type PlanRunArchitectureError = PlanRunArchitectureErrors[keyof PlanRunArchitectureErrors];
-
-export type PlanRunArchitectureResponses = {
-    /**
-     * Successful Response
-     */
-    202: SessionAccepted;
-};
-
-export type PlanRunArchitectureResponse = PlanRunArchitectureResponses[keyof PlanRunArchitectureResponses];
-
-export type PlanArchitectureStatusData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/architecture/status';
-};
-
-export type PlanArchitectureStatusResponses = {
-    /**
-     * Successful Response
-     */
-    200: ArchitectureStatusResponse;
-};
-
-export type PlanArchitectureStatusResponse = PlanArchitectureStatusResponses[keyof PlanArchitectureStatusResponses];
-
-export type PlanCancelArchitectureData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/architecture/cancel';
-};
-
-export type PlanCancelArchitectureErrors = {
-    /**
-     * No architecture session is currently running.
-     */
-    404: ErrorResponse;
-};
-
-export type PlanCancelArchitectureError = PlanCancelArchitectureErrors[keyof PlanCancelArchitectureErrors];
-
-export type PlanCancelArchitectureResponses = {
-    /**
-     * Successful Response
-     */
-    200: SessionAccepted;
-};
-
-export type PlanCancelArchitectureResponse = PlanCancelArchitectureResponses[keyof PlanCancelArchitectureResponses];
-
-export type PlanRunPhaseReviewData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/phase-review/run';
-};
-
-export type PlanRunPhaseReviewErrors = {
-    /**
-     * A phase-review session is already in progress.
-     */
-    409: ErrorResponse;
-};
-
-export type PlanRunPhaseReviewError = PlanRunPhaseReviewErrors[keyof PlanRunPhaseReviewErrors];
-
-export type PlanRunPhaseReviewResponses = {
-    /**
-     * Successful Response
-     */
-    202: SessionAccepted;
-};
-
-export type PlanRunPhaseReviewResponse = PlanRunPhaseReviewResponses[keyof PlanRunPhaseReviewResponses];
-
-export type PlanApproveArchitectureData = {
-    body: ApproveArchitectureRequest;
-    path?: never;
-    query?: never;
-    url: '/api/plan/approve-architecture';
-};
-
-export type PlanApproveArchitectureErrors = {
-    /**
-     * Plan is not in `architecture` status (e.g. already in `phase_review`). The body reports the current vs expected status.
-     */
-    409: PlanConflictResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanApproveArchitectureError = PlanApproveArchitectureErrors[keyof PlanApproveArchitectureErrors];
-
-export type PlanApproveArchitectureResponses = {
-    /**
-     * Successful Response
-     */
-    200: ApproveArchitectureResponse;
-};
-
-export type PlanApproveArchitectureResponse = PlanApproveArchitectureResponses[keyof PlanApproveArchitectureResponses];
-
-export type PlanApprovePhaseData = {
-    body: ApprovePhaseRequest;
-    path?: never;
-    query?: never;
-    url: '/api/plan/approve-phase';
-};
-
-export type PlanApprovePhaseErrors = {
-    /**
-     * Plan is not in `phase_review` status. The body reports the current vs expected status.
-     */
-    409: PlanConflictResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanApprovePhaseError = PlanApprovePhaseErrors[keyof PlanApprovePhaseErrors];
-
-export type PlanApprovePhaseResponses = {
-    /**
-     * Successful Response
-     */
-    200: ApprovePhaseResponse;
-};
-
-export type PlanApprovePhaseResponse = PlanApprovePhaseResponses[keyof PlanApprovePhaseResponses];
-
-export type PlanResumeDispatchData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/resume-dispatch';
-};
-
-export type PlanResumeDispatchErrors = {
-    /**
-     * Plan is not in `phase_active` status. The body reports the current vs expected status.
-     */
-    409: PlanConflictResponse;
-};
-
-export type PlanResumeDispatchError = PlanResumeDispatchErrors[keyof PlanResumeDispatchErrors];
-
-export type PlanResumeDispatchResponses = {
-    /**
-     * Successful Response
-     */
-    200: ResumeDispatchResponse;
-};
-
-export type PlanResumeDispatchResponse = PlanResumeDispatchResponses[keyof PlanResumeDispatchResponses];
-
-export type PlanRefinePlanData = {
-    body: RefineRequest;
-    path?: never;
-    query?: never;
-    url: '/api/plan/refine';
-};
-
-export type PlanRefinePlanErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanRefinePlanError = PlanRefinePlanErrors[keyof PlanRefinePlanErrors];
-
-export type PlanRefinePlanResponses = {
-    /**
-     * Successful Response
-     */
-    202: SessionAccepted;
-};
-
-export type PlanRefinePlanResponse = PlanRefinePlanResponses[keyof PlanRefinePlanResponses];
-
-export type PlanGetSessionData = {
-    body?: never;
-    path: {
-        /**
-         * Session Id
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/api/plan/sessions/{session_id}';
-};
-
-export type PlanGetSessionErrors = {
-    /**
-     * Not Found
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanGetSessionError = PlanGetSessionErrors[keyof PlanGetSessionErrors];
-
-export type PlanGetSessionResponses = {
-    /**
-     * Successful Response
-     */
-    200: SessionStatusResponse;
-};
-
-export type PlanGetSessionResponse = PlanGetSessionResponses[keyof PlanGetSessionResponses];
-
-export type PlanStartDiscoveryData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/plan/discovery/start';
-};
-
-export type PlanStartDiscoveryErrors = {
-    /**
-     * A discovery session is already in progress.
-     */
-    409: ErrorResponse;
-};
-
-export type PlanStartDiscoveryError = PlanStartDiscoveryErrors[keyof PlanStartDiscoveryErrors];
-
-export type PlanStartDiscoveryResponses = {
-    /**
-     * Successful Response
-     */
-    202: SessionAccepted;
-};
-
-export type PlanStartDiscoveryResponse = PlanStartDiscoveryResponses[keyof PlanStartDiscoveryResponses];
-
-export type PlanSendDiscoveryMessageData = {
-    body: DiscoveryMessageRequest;
-    path: {
-        /**
-         * Session Id
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/api/plan/discovery/{session_id}/message';
-};
-
-export type PlanSendDiscoveryMessageErrors = {
-    /**
-     * Not Found
-     */
-    404: ErrorResponse;
-    /**
-     * The session is not waiting for input.
-     */
-    409: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanSendDiscoveryMessageError = PlanSendDiscoveryMessageErrors[keyof PlanSendDiscoveryMessageErrors];
-
-export type PlanSendDiscoveryMessageResponses = {
-    /**
-     * Successful Response
-     */
-    202: SessionAccepted;
-};
-
-export type PlanSendDiscoveryMessageResponse = PlanSendDiscoveryMessageResponses[keyof PlanSendDiscoveryMessageResponses];
-
-export type PlanGetDiscoverySessionData = {
-    body?: never;
-    path: {
-        /**
-         * Session Id
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/api/plan/discovery/{session_id}';
-};
-
-export type PlanGetDiscoverySessionErrors = {
-    /**
-     * Not Found
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlanGetDiscoverySessionError = PlanGetDiscoverySessionErrors[keyof PlanGetDiscoverySessionErrors];
-
-export type PlanGetDiscoverySessionResponses = {
-    /**
-     * Successful Response
-     */
-    200: SessionStatusResponse;
-};
-
-export type PlanGetDiscoverySessionResponse = PlanGetDiscoverySessionResponses[keyof PlanGetDiscoverySessionResponses];
-
-export type GoalsListGoalsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/goals';
-};
-
-export type GoalsListGoalsResponses = {
-    /**
-     * Response Goals-List Goals
-     *
-     * Successful Response
-     */
-    200: Array<GoalResponse>;
-};
-
-export type GoalsListGoalsResponse = GoalsListGoalsResponses[keyof GoalsListGoalsResponses];
-
-export type GoalsGetGoalData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}';
-};
-
-export type GoalsGetGoalErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsGetGoalError = GoalsGetGoalErrors[keyof GoalsGetGoalErrors];
-
-export type GoalsGetGoalResponses = {
-    /**
-     * Successful Response
-     */
-    200: GoalResponse;
-};
-
-export type GoalsGetGoalResponse = GoalsGetGoalResponses[keyof GoalsGetGoalResponses];
-
-export type GoalsGetGoalHistoryData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/history';
-};
-
-export type GoalsGetGoalHistoryErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsGetGoalHistoryError = GoalsGetGoalHistoryErrors[keyof GoalsGetGoalHistoryErrors];
-
-export type GoalsGetGoalHistoryResponses = {
-    /**
-     * Response Goals-Get Goal History
-     *
-     * Successful Response
-     */
-    200: Array<GoalHistoryEntryResponse>;
-};
-
-export type GoalsGetGoalHistoryResponse = GoalsGetGoalHistoryResponses[keyof GoalsGetGoalHistoryResponses];
-
-export type GoalsRetryAllFailedData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/goals/retry-failed';
-};
-
-export type GoalsRetryAllFailedResponses = {
-    /**
-     * Successful Response
-     */
-    200: GoalRetryResponse;
-};
-
-export type GoalsRetryAllFailedResponse = GoalsRetryAllFailedResponses[keyof GoalsRetryAllFailedResponses];
-
-export type GoalsRetryGoalFailedData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/retry-failed';
-};
-
-export type GoalsRetryGoalFailedErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsRetryGoalFailedError = GoalsRetryGoalFailedErrors[keyof GoalsRetryGoalFailedErrors];
-
-export type GoalsRetryGoalFailedResponses = {
-    /**
-     * Successful Response
-     */
-    200: GoalRetryResponse;
-};
-
-export type GoalsRetryGoalFailedResponse = GoalsRetryGoalFailedResponses[keyof GoalsRetryGoalFailedResponses];
-
-export type GoalsFinalizeGoalData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/finalize';
-};
-
-export type GoalsFinalizeGoalErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Goal is not in APPROVED or MERGED status, or already finalized.
-     */
-    409: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsFinalizeGoalError = GoalsFinalizeGoalErrors[keyof GoalsFinalizeGoalErrors];
-
-export type GoalsFinalizeGoalResponses = {
-    /**
-     * Successful Response
-     */
-    200: GoalFinalizeResponse;
-};
-
-export type GoalsFinalizeGoalResponse = GoalsFinalizeGoalResponses[keyof GoalsFinalizeGoalResponses];
-
-export type GoalsUnblockGoalsData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/unblock';
-};
-
-export type GoalsUnblockGoalsErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsUnblockGoalsError = GoalsUnblockGoalsErrors[keyof GoalsUnblockGoalsErrors];
-
-export type GoalsUnblockGoalsResponses = {
-    /**
-     * Response Goals-Unblock Goals
-     *
-     * Successful Response
-     */
-    200: {
-        [key: string]: unknown;
-    };
-};
-
-export type GoalsUnblockGoalsResponse = GoalsUnblockGoalsResponses[keyof GoalsUnblockGoalsResponses];
-
-export type GoalsCreateGoalPrData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/pr/create';
-};
-
-export type GoalsCreateGoalPrErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Goal is not in READY_FOR_REVIEW status.
-     */
-    409: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsCreateGoalPrError = GoalsCreateGoalPrErrors[keyof GoalsCreateGoalPrErrors];
-
-export type GoalsCreateGoalPrResponses = {
-    /**
-     * Response Goals-Create Goal Pr
-     *
-     * Successful Response
-     */
-    201: {
-        [key: string]: unknown;
-    };
-};
-
-export type GoalsCreateGoalPrResponse = GoalsCreateGoalPrResponses[keyof GoalsCreateGoalPrResponses];
-
-export type GoalsSyncGoalPrStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/pr/sync';
-};
-
-export type GoalsSyncGoalPrStatusErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsSyncGoalPrStatusError = GoalsSyncGoalPrStatusErrors[keyof GoalsSyncGoalPrStatusErrors];
-
-export type GoalsSyncGoalPrStatusResponses = {
-    /**
-     * Response Goals-Sync Goal Pr Status
-     *
-     * Successful Response
-     */
-    200: {
-        [key: string]: unknown;
-    };
-};
-
-export type GoalsSyncGoalPrStatusResponse = GoalsSyncGoalPrStatusResponses[keyof GoalsSyncGoalPrStatusResponses];
-
-export type GoalsAdvanceGoalFromPrData = {
-    body?: never;
-    path: {
-        /**
-         * Goal Id
-         */
-        goal_id: string;
-    };
-    query?: never;
-    url: '/api/goals/{goal_id}/pr/advance';
-};
-
-export type GoalsAdvanceGoalFromPrErrors = {
-    /**
-     * Goal not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GoalsAdvanceGoalFromPrError = GoalsAdvanceGoalFromPrErrors[keyof GoalsAdvanceGoalFromPrErrors];
-
-export type GoalsAdvanceGoalFromPrResponses = {
-    /**
-     * Response Goals-Advance Goal From Pr
-     *
-     * Successful Response
-     */
-    200: {
-        [key: string]: unknown;
-    };
-};
-
-export type GoalsAdvanceGoalFromPrResponse = GoalsAdvanceGoalFromPrResponses[keyof GoalsAdvanceGoalFromPrResponses];
-
-export type TasksPruneTasksData = {
-    body: TaskPruneRequest;
-    path?: never;
-    query?: never;
-    url: '/api/tasks';
-};
-
-export type TasksPruneTasksErrors = {
-    /**
-     * Unknown status value in filter_statuses.
-     */
-    422: ErrorResponse;
-};
-
-export type TasksPruneTasksError = TasksPruneTasksErrors[keyof TasksPruneTasksErrors];
-
-export type TasksPruneTasksResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskPruneResponse;
-};
-
-export type TasksPruneTasksResponse = TasksPruneTasksResponses[keyof TasksPruneTasksResponses];
-
-export type TasksListTasksData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/tasks';
-};
-
-export type TasksListTasksResponses = {
-    /**
-     * Response Tasks-List Tasks
+     * Response Plans-List Plans
      *
      * Successful Response
      */
@@ -1833,299 +465,551 @@ export type TasksListTasksResponses = {
     }>;
 };
 
-export type TasksListTasksResponse = TasksListTasksResponses[keyof TasksListTasksResponses];
+export type PlansListPlansResponse = PlansListPlansResponses[keyof PlansListPlansResponses];
 
-export type TasksGetTaskLogsData = {
-    body?: never;
-    path: {
+export type PlansCreateData = {
+    body: CreatePlanRequest;
+    headers?: {
         /**
-         * Task Id
+         * Idempotency-Key
          */
-        task_id: string;
+        'Idempotency-Key'?: string | null;
     };
-    query?: never;
-    url: '/api/tasks/{task_id}/logs';
-};
-
-export type TasksGetTaskLogsErrors = {
-    /**
-     * No logs for this task.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksGetTaskLogsError = TasksGetTaskLogsErrors[keyof TasksGetTaskLogsErrors];
-
-export type TasksGetTaskLogsResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskLogsResponse;
-};
-
-export type TasksGetTaskLogsResponse = TasksGetTaskLogsResponses[keyof TasksGetTaskLogsResponses];
-
-export type TasksRetryTaskData = {
-    body: TaskRetryRequest;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/tasks/{task_id}/retry';
-};
-
-export type TasksRetryTaskErrors = {
-    /**
-     * Task not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Task is in MERGED status and cannot be requeued.
-     */
-    409: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksRetryTaskError = TasksRetryTaskErrors[keyof TasksRetryTaskErrors];
-
-export type TasksRetryTaskResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskRetryResponse;
-};
-
-export type TasksRetryTaskResponse = TasksRetryTaskResponses[keyof TasksRetryTaskResponses];
-
-export type TasksDeleteTaskData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/tasks/{task_id}';
-};
-
-export type TasksDeleteTaskErrors = {
-    /**
-     * Task not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksDeleteTaskError = TasksDeleteTaskErrors[keyof TasksDeleteTaskErrors];
-
-export type TasksDeleteTaskResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskDeleteResponse;
-};
-
-export type TasksDeleteTaskResponse = TasksDeleteTaskResponses[keyof TasksDeleteTaskResponses];
-
-export type TasksAssignTaskData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/tasks/{task_id}/assign';
-};
-
-export type TasksAssignTaskErrors = {
-    /**
-     * Task not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksAssignTaskError = TasksAssignTaskErrors[keyof TasksAssignTaskErrors];
-
-export type TasksAssignTaskResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskAssignResponse;
-};
-
-export type TasksAssignTaskResponse = TasksAssignTaskResponses[keyof TasksAssignTaskResponses];
-
-export type TasksUnblockTasksData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/tasks/{task_id}/unblock';
-};
-
-export type TasksUnblockTasksErrors = {
-    /**
-     * Task not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksUnblockTasksError = TasksUnblockTasksErrors[keyof TasksUnblockTasksErrors];
-
-export type TasksUnblockTasksResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskUnblockResponse;
-};
-
-export type TasksUnblockTasksResponse = TasksUnblockTasksResponses[keyof TasksUnblockTasksResponses];
-
-export type TasksHandleTaskFailureData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/tasks/{task_id}/fail';
-};
-
-export type TasksHandleTaskFailureErrors = {
-    /**
-     * Task not found.
-     */
-    404: ErrorResponse;
-    /**
-     * Task state transition violated domain invariants.
-     */
-    409: ErrorResponse;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type TasksHandleTaskFailureError = TasksHandleTaskFailureErrors[keyof TasksHandleTaskFailureErrors];
-
-export type TasksHandleTaskFailureResponses = {
-    /**
-     * Successful Response
-     */
-    200: TaskFailHandlingResponse;
-};
-
-export type TasksHandleTaskFailureResponse = TasksHandleTaskFailureResponses[keyof TasksHandleTaskFailureResponses];
-
-export type AgentsListAgentsData = {
-    body?: never;
     path?: never;
     query?: never;
-    url: '/api/agents';
+    url: '/api/plans';
 };
 
-export type AgentsListAgentsResponses = {
+export type PlansCreateErrors = {
     /**
-     * Response Agents-List Agents
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansCreateError = PlansCreateErrors[keyof PlansCreateErrors];
+
+export type PlansCreateResponses = {
+    /**
+     * Successful Response
+     */
+    201: PlanCreatedResponse;
+};
+
+export type PlansCreateResponse = PlansCreateResponses[keyof PlansCreateResponses];
+
+export type PlansGetPlanData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}';
+};
+
+export type PlansGetPlanErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansGetPlanError = PlansGetPlanErrors[keyof PlansGetPlanErrors];
+
+export type PlansGetPlanResponses = {
+    /**
+     * Response Plans-Get Plan
      *
      * Successful Response
      */
-    200: Array<AgentResponse>;
+    200: {
+        [key: string]: unknown;
+    };
 };
 
-export type AgentsListAgentsResponse = AgentsListAgentsResponses[keyof AgentsListAgentsResponses];
+export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
 
-export type AgentsRegisterAgentData = {
-    body: AgentRegisterRequest;
-    path?: never;
-    query?: never;
-    url: '/api/agents';
-};
-
-export type AgentsRegisterAgentErrors = {
-    /**
-     * Invalid field values (e.g. unknown trust_level).
-     */
-    422: ErrorResponse;
-};
-
-export type AgentsRegisterAgentError = AgentsRegisterAgentErrors[keyof AgentsRegisterAgentErrors];
-
-export type AgentsRegisterAgentResponses = {
-    /**
-     * Successful Response
-     */
-    201: AgentRegisterResponse;
-};
-
-export type AgentsRegisterAgentResponse = AgentsRegisterAgentResponses[keyof AgentsRegisterAgentResponses];
-
-export type AgentsDeleteAgentData = {
-    body?: never;
+export type PlansEditPlanData = {
+    body: EditRequest;
     path: {
         /**
-         * Agent Id
+         * Plan Id
          */
-        agent_id: string;
+        plan_id: string;
     };
     query?: never;
-    url: '/api/agents/{agent_id}';
+    url: '/api/plans/{plan_id}/edits';
 };
 
-export type AgentsDeleteAgentErrors = {
-    /**
-     * No agent with that id is registered.
-     */
-    404: ErrorResponse;
+export type PlansEditPlanErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type AgentsDeleteAgentError = AgentsDeleteAgentErrors[keyof AgentsDeleteAgentErrors];
+export type PlansEditPlanError = PlansEditPlanErrors[keyof PlansEditPlanErrors];
 
-export type AgentsDeleteAgentResponses = {
+export type PlansEditPlanResponses = {
     /**
      * Successful Response
      */
     204: void;
 };
 
-export type AgentsDeleteAgentResponse = AgentsDeleteAgentResponses[keyof AgentsDeleteAgentResponses];
+export type PlansEditPlanResponse = PlansEditPlanResponses[keyof PlansEditPlanResponses];
 
-export type AgentsUpdateAgentData = {
-    body: AgentRegisterRequest;
+export type PlansApproveData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/approve';
+};
+
+export type PlansApproveErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansApproveError = PlansApproveErrors[keyof PlansApproveErrors];
+
+export type PlansApproveResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansApproveResponse = PlansApproveResponses[keyof PlansApproveResponses];
+
+export type PlansFinishData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/review/finish';
+};
+
+export type PlansFinishErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansFinishError = PlansFinishErrors[keyof PlansFinishErrors];
+
+export type PlansFinishResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansFinishResponse = PlansFinishResponses[keyof PlansFinishResponses];
+
+export type PlansReplanFromReviewData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/review/replan';
+};
+
+export type PlansReplanFromReviewErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReplanFromReviewError = PlansReplanFromReviewErrors[keyof PlansReplanFromReviewErrors];
+
+export type PlansReplanFromReviewResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansReplanFromReviewResponse = PlansReplanFromReviewResponses[keyof PlansReplanFromReviewResponses];
+
+export type PlansReplanMidRunningData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/replan';
+};
+
+export type PlansReplanMidRunningErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReplanMidRunningError = PlansReplanMidRunningErrors[keyof PlansReplanMidRunningErrors];
+
+export type PlansReplanMidRunningResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansReplanMidRunningResponse = PlansReplanMidRunningResponses[keyof PlansReplanMidRunningResponses];
+
+export type PlansDiscoveryData = {
+    body: MessageRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/discovery/message';
+};
+
+export type PlansDiscoveryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansDiscoveryError = PlansDiscoveryErrors[keyof PlansDiscoveryErrors];
+
+export type PlansDiscoveryResponses = {
+    /**
+     * Successful Response
+     */
+    200: MessageResponse;
+};
+
+export type PlansDiscoveryResponse = PlansDiscoveryResponses[keyof PlansDiscoveryResponses];
+
+export type PlansReplanningData = {
+    body: MessageRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/replanning/message';
+};
+
+export type PlansReplanningErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReplanningError = PlansReplanningErrors[keyof PlansReplanningErrors];
+
+export type PlansReplanningResponses = {
+    /**
+     * Successful Response
+     */
+    200: MessageResponse;
+};
+
+export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplanningResponses];
+
+export type PlansChatHistoryData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/chat';
+};
+
+export type PlansChatHistoryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansChatHistoryError = PlansChatHistoryErrors[keyof PlansChatHistoryErrors];
+
+export type PlansChatHistoryResponses = {
+    /**
+     * Response Plans-Chat History
+     *
+     * Successful Response
+     */
+    200: Array<ChatMessageResponse>;
+};
+
+export type PlansChatHistoryResponse = PlansChatHistoryResponses[keyof PlansChatHistoryResponses];
+
+export type ReferenceListCapabilitiesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/capabilities';
+};
+
+export type ReferenceListCapabilitiesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceListCapabilitiesError = ReferenceListCapabilitiesErrors[keyof ReferenceListCapabilitiesErrors];
+
+export type ReferenceListCapabilitiesResponses = {
+    /**
+     * Response Reference-List Capabilities
+     *
+     * Successful Response
+     */
+    200: Array<Capability>;
+};
+
+export type ReferenceListCapabilitiesResponse = ReferenceListCapabilitiesResponses[keyof ReferenceListCapabilitiesResponses];
+
+export type ReferenceCreateCapabilityData = {
+    body: Capability;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/capabilities';
+};
+
+export type ReferenceCreateCapabilityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCreateCapabilityError = ReferenceCreateCapabilityErrors[keyof ReferenceCreateCapabilityErrors];
+
+export type ReferenceCreateCapabilityResponses = {
+    /**
+     * Successful Response
+     */
+    201: Capability;
+};
+
+export type ReferenceCreateCapabilityResponse = ReferenceCreateCapabilityResponses[keyof ReferenceCreateCapabilityResponses];
+
+export type ReferenceDeleteCapabilityData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Capability Id
+         */
+        capability_id: string;
+    };
+    query?: never;
+    url: '/api/capabilities/{capability_id}';
+};
+
+export type ReferenceDeleteCapabilityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceDeleteCapabilityError = ReferenceDeleteCapabilityErrors[keyof ReferenceDeleteCapabilityErrors];
+
+export type ReferenceDeleteCapabilityResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceDeleteCapabilityResponse = ReferenceDeleteCapabilityResponses[keyof ReferenceDeleteCapabilityResponses];
+
+export type ReferenceUpdateCapabilityData = {
+    body: Capability;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Capability Id
+         */
+        capability_id: string;
+    };
+    query?: never;
+    url: '/api/capabilities/{capability_id}';
+};
+
+export type ReferenceUpdateCapabilityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceUpdateCapabilityError = ReferenceUpdateCapabilityErrors[keyof ReferenceUpdateCapabilityErrors];
+
+export type ReferenceUpdateCapabilityResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceUpdateCapabilityResponse = ReferenceUpdateCapabilityResponses[keyof ReferenceUpdateCapabilityResponses];
+
+export type ReferenceListAgentsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/agents';
+};
+
+export type ReferenceListAgentsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceListAgentsError = ReferenceListAgentsErrors[keyof ReferenceListAgentsErrors];
+
+export type ReferenceListAgentsResponses = {
+    /**
+     * Response Reference-List Agents
+     *
+     * Successful Response
+     */
+    200: Array<AgentSpec>;
+};
+
+export type ReferenceListAgentsResponse = ReferenceListAgentsResponses[keyof ReferenceListAgentsResponses];
+
+export type ReferenceCreateAgentData = {
+    body: AgentBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/agents';
+};
+
+export type ReferenceCreateAgentErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCreateAgentError = ReferenceCreateAgentErrors[keyof ReferenceCreateAgentErrors];
+
+export type ReferenceCreateAgentResponses = {
+    /**
+     * Successful Response
+     */
+    201: AgentSpec;
+};
+
+export type ReferenceCreateAgentResponse = ReferenceCreateAgentResponses[keyof ReferenceCreateAgentResponses];
+
+export type ReferenceDeleteAgentData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Agent Id
@@ -2136,244 +1020,665 @@ export type AgentsUpdateAgentData = {
     url: '/api/agents/{agent_id}';
 };
 
-export type AgentsUpdateAgentErrors = {
-    /**
-     * No agent with that id is registered.
-     */
-    404: ErrorResponse;
+export type ReferenceDeleteAgentErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type AgentsUpdateAgentError = AgentsUpdateAgentErrors[keyof AgentsUpdateAgentErrors];
+export type ReferenceDeleteAgentError = ReferenceDeleteAgentErrors[keyof ReferenceDeleteAgentErrors];
 
-export type AgentsUpdateAgentResponses = {
+export type ReferenceDeleteAgentResponses = {
     /**
      * Successful Response
      */
-    200: AgentResponse;
+    204: void;
 };
 
-export type AgentsUpdateAgentResponse = AgentsUpdateAgentResponses[keyof AgentsUpdateAgentResponses];
+export type ReferenceDeleteAgentResponse = ReferenceDeleteAgentResponses[keyof ReferenceDeleteAgentResponses];
 
-export type CapabilitiesListCapabilitiesData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/capabilities';
-};
-
-export type CapabilitiesListCapabilitiesResponses = {
-    /**
-     * Successful Response
-     */
-    200: CapabilityListResponse;
-};
-
-export type CapabilitiesListCapabilitiesResponse = CapabilitiesListCapabilitiesResponses[keyof CapabilitiesListCapabilitiesResponses];
-
-export type CapabilitiesCreateCapabilityData = {
-    body: CapabilityCreateRequest;
-    path?: never;
-    query?: never;
-    url: '/api/capabilities';
-};
-
-export type CapabilitiesCreateCapabilityErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type CapabilitiesCreateCapabilityError = CapabilitiesCreateCapabilityErrors[keyof CapabilitiesCreateCapabilityErrors];
-
-export type CapabilitiesCreateCapabilityResponses = {
-    /**
-     * Successful Response
-     */
-    201: CapabilityListResponse;
-};
-
-export type CapabilitiesCreateCapabilityResponse = CapabilitiesCreateCapabilityResponses[keyof CapabilitiesCreateCapabilityResponses];
-
-export type CapabilitiesDeleteCapabilityData = {
-    body?: never;
+export type ReferenceUpdateAgentData = {
+    body: AgentBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
-         * Tag
+         * Agent Id
          */
-        tag: string;
+        agent_id: string;
     };
     query?: never;
-    url: '/api/capabilities/{tag}';
+    url: '/api/agents/{agent_id}';
 };
 
-export type CapabilitiesDeleteCapabilityErrors = {
+export type ReferenceUpdateAgentErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type CapabilitiesDeleteCapabilityError = CapabilitiesDeleteCapabilityErrors[keyof CapabilitiesDeleteCapabilityErrors];
+export type ReferenceUpdateAgentError = ReferenceUpdateAgentErrors[keyof ReferenceUpdateAgentErrors];
 
-export type CapabilitiesDeleteCapabilityResponses = {
+export type ReferenceUpdateAgentResponses = {
     /**
      * Successful Response
      */
-    200: CapabilityListResponse;
+    204: void;
 };
 
-export type CapabilitiesDeleteCapabilityResponse = CapabilitiesDeleteCapabilityResponses[keyof CapabilitiesDeleteCapabilityResponses];
+export type ReferenceUpdateAgentResponse = ReferenceUpdateAgentResponses[keyof ReferenceUpdateAgentResponses];
 
-export type SpecGetSpecData = {
+export type ReferenceSetDefaultAgentData = {
     body?: never;
-    path?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
     query?: never;
-    url: '/api/spec';
+    url: '/api/agents/{agent_id}/default';
 };
 
-export type SpecGetSpecErrors = {
-    /**
-     * No spec file found. Run `orchestrate init` first.
-     */
-    404: ErrorResponse;
-};
-
-export type SpecGetSpecError = SpecGetSpecErrors[keyof SpecGetSpecErrors];
-
-export type SpecGetSpecResponses = {
-    /**
-     * Successful Response
-     */
-    200: SpecResponse;
-};
-
-export type SpecGetSpecResponse = SpecGetSpecResponses[keyof SpecGetSpecResponses];
-
-export type SpecProposeSpecChangeData = {
-    body: ProposeSpecChangeRequest;
-    path?: never;
-    query?: never;
-    url: '/api/spec/propose';
-};
-
-export type SpecProposeSpecChangeErrors = {
-    /**
-     * No active spec to base the proposal on.
-     */
-    404: ErrorResponse;
-    /**
-     * The proposed spec would fail validation.
-     */
-    422: ErrorResponse;
-};
-
-export type SpecProposeSpecChangeError = SpecProposeSpecChangeErrors[keyof SpecProposeSpecChangeErrors];
-
-export type SpecProposeSpecChangeResponses = {
-    /**
-     * Successful Response
-     */
-    202: ProposeSpecChangeResponse;
-};
-
-export type SpecProposeSpecChangeResponse = SpecProposeSpecChangeResponses[keyof SpecProposeSpecChangeResponses];
-
-export type SpecValidateAgainstSpecData = {
-    body: ValidateSpecRequest;
-    path?: never;
-    query?: never;
-    url: '/api/spec/validate';
-};
-
-export type SpecValidateAgainstSpecErrors = {
-    /**
-     * No active spec loaded.
-     */
-    404: ErrorResponse;
+export type ReferenceSetDefaultAgentErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type SpecValidateAgainstSpecError = SpecValidateAgainstSpecErrors[keyof SpecValidateAgainstSpecErrors];
+export type ReferenceSetDefaultAgentError = ReferenceSetDefaultAgentErrors[keyof ReferenceSetDefaultAgentErrors];
 
-export type SpecValidateAgainstSpecResponses = {
+export type ReferenceSetDefaultAgentResponses = {
     /**
      * Successful Response
      */
-    200: ValidateSpecResponse;
+    204: void;
 };
 
-export type SpecValidateAgainstSpecResponse = SpecValidateAgainstSpecResponses[keyof SpecValidateAgainstSpecResponses];
+export type ReferenceSetDefaultAgentResponse = ReferenceSetDefaultAgentResponses[keyof ReferenceSetDefaultAgentResponses];
 
-export type ProjectGetProjectContextData = {
+export type ReferenceListProvidersData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path?: never;
     query?: never;
-    url: '/api/project/context';
+    url: '/api/providers';
 };
 
-export type ProjectGetProjectContextErrors = {
-    /**
-     * No active project is configured.
-     */
-    400: ErrorResponse;
-};
-
-export type ProjectGetProjectContextError = ProjectGetProjectContextErrors[keyof ProjectGetProjectContextErrors];
-
-export type ProjectGetProjectContextResponses = {
-    /**
-     * Successful Response
-     */
-    200: ProjectContextResponse;
-};
-
-export type ProjectGetProjectContextResponse = ProjectGetProjectContextResponses[keyof ProjectGetProjectContextResponses];
-
-export type ProjectResetProjectData = {
-    body: ProjectResetRequest;
-    path?: never;
-    query?: never;
-    url: '/api/project/reset';
-};
-
-export type ProjectResetProjectErrors = {
-    /**
-     * Reset blocked by a domain invariant.
-     */
-    409: ErrorResponse;
+export type ReferenceListProvidersErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type ProjectResetProjectError = ProjectResetProjectErrors[keyof ProjectResetProjectErrors];
+export type ReferenceListProvidersError = ReferenceListProvidersErrors[keyof ReferenceListProvidersErrors];
 
-export type ProjectResetProjectResponses = {
+export type ReferenceListProvidersResponses = {
+    /**
+     * Response Reference-List Providers
+     *
+     * Successful Response
+     */
+    200: Array<ModelProvider>;
+};
+
+export type ReferenceListProvidersResponse = ReferenceListProvidersResponses[keyof ReferenceListProvidersResponses];
+
+export type ReferenceCreateProviderData = {
+    body: ProviderCreateBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/providers';
+};
+
+export type ReferenceCreateProviderErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCreateProviderError = ReferenceCreateProviderErrors[keyof ReferenceCreateProviderErrors];
+
+export type ReferenceCreateProviderResponses = {
     /**
      * Successful Response
      */
-    200: ProjectResetResponse;
+    201: ModelProvider;
 };
 
-export type ProjectResetProjectResponse = ProjectResetProjectResponses[keyof ProjectResetProjectResponses];
+export type ReferenceCreateProviderResponse = ReferenceCreateProviderResponses[keyof ReferenceCreateProviderResponses];
 
-export type EventsEventStreamData = {
+export type ReferenceDeleteProviderData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Provider Id
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/api/providers/{provider_id}';
+};
+
+export type ReferenceDeleteProviderErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceDeleteProviderError = ReferenceDeleteProviderErrors[keyof ReferenceDeleteProviderErrors];
+
+export type ReferenceDeleteProviderResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceDeleteProviderResponse = ReferenceDeleteProviderResponses[keyof ReferenceDeleteProviderResponses];
+
+export type ReferenceUpdateProviderData = {
+    body: ProviderUpdateBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Provider Id
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/api/providers/{provider_id}';
+};
+
+export type ReferenceUpdateProviderErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceUpdateProviderError = ReferenceUpdateProviderErrors[keyof ReferenceUpdateProviderErrors];
+
+export type ReferenceUpdateProviderResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceUpdateProviderResponse = ReferenceUpdateProviderResponses[keyof ReferenceUpdateProviderResponses];
+
+export type ReferenceListModelsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/models';
+};
+
+export type ReferenceListModelsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceListModelsError = ReferenceListModelsErrors[keyof ReferenceListModelsErrors];
+
+export type ReferenceListModelsResponses = {
+    /**
+     * Response Reference-List Models
+     *
+     * Successful Response
+     */
+    200: Array<IaModel>;
+};
+
+export type ReferenceListModelsResponse = ReferenceListModelsResponses[keyof ReferenceListModelsResponses];
+
+export type ReferenceCreateModelData = {
+    body: ModelBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Provider Id
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/api/providers/{provider_id}/models';
+};
+
+export type ReferenceCreateModelErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCreateModelError = ReferenceCreateModelErrors[keyof ReferenceCreateModelErrors];
+
+export type ReferenceCreateModelResponses = {
+    /**
+     * Successful Response
+     */
+    201: IaModel;
+};
+
+export type ReferenceCreateModelResponse = ReferenceCreateModelResponses[keyof ReferenceCreateModelResponses];
+
+export type ReferenceDeleteModelData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Model Id
+         */
+        model_id: string;
+    };
+    query?: never;
+    url: '/api/models/{model_id}';
+};
+
+export type ReferenceDeleteModelErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceDeleteModelError = ReferenceDeleteModelErrors[keyof ReferenceDeleteModelErrors];
+
+export type ReferenceDeleteModelResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceDeleteModelResponse = ReferenceDeleteModelResponses[keyof ReferenceDeleteModelResponses];
+
+export type ReferenceListProjectsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/projects';
+};
+
+export type ReferenceListProjectsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceListProjectsError = ReferenceListProjectsErrors[keyof ReferenceListProjectsErrors];
+
+export type ReferenceListProjectsResponses = {
+    /**
+     * Response Reference-List Projects
+     *
+     * Successful Response
+     */
+    200: Array<ProjectDefinition>;
+};
+
+export type ReferenceListProjectsResponse = ReferenceListProjectsResponses[keyof ReferenceListProjectsResponses];
+
+export type ReferenceCreateProjectData = {
+    body: ProjectBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/projects';
+};
+
+export type ReferenceCreateProjectErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCreateProjectError = ReferenceCreateProjectErrors[keyof ReferenceCreateProjectErrors];
+
+export type ReferenceCreateProjectResponses = {
+    /**
+     * Successful Response
+     */
+    201: ProjectDefinition;
+};
+
+export type ReferenceCreateProjectResponse = ReferenceCreateProjectResponses[keyof ReferenceCreateProjectResponses];
+
+export type ReferenceDeleteProjectData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}';
+};
+
+export type ReferenceDeleteProjectErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceDeleteProjectError = ReferenceDeleteProjectErrors[keyof ReferenceDeleteProjectErrors];
+
+export type ReferenceDeleteProjectResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceDeleteProjectResponse = ReferenceDeleteProjectResponses[keyof ReferenceDeleteProjectResponses];
+
+export type ReferenceUpdateProjectData = {
+    body: ProjectBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}';
+};
+
+export type ReferenceUpdateProjectErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceUpdateProjectError = ReferenceUpdateProjectErrors[keyof ReferenceUpdateProjectErrors];
+
+export type ReferenceUpdateProjectResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceUpdateProjectResponse = ReferenceUpdateProjectResponses[keyof ReferenceUpdateProjectResponses];
+
+export type ConfigGetScopeData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Scope
+         */
+        scope: string;
+    };
+    query?: never;
+    url: '/api/config/{scope}';
+};
+
+export type ConfigGetScopeErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConfigGetScopeError = ConfigGetScopeErrors[keyof ConfigGetScopeErrors];
+
+export type ConfigGetScopeResponses = {
+    /**
+     * Response Config-Get Scope
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type ConfigGetScopeResponse = ConfigGetScopeResponses[keyof ConfigGetScopeResponses];
+
+export type ConfigDeleteValueData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Scope
+         */
+        scope: string;
+        /**
+         * Key
+         */
+        key: string;
+    };
+    query?: never;
+    url: '/api/config/{scope}/{key}';
+};
+
+export type ConfigDeleteValueErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConfigDeleteValueError = ConfigDeleteValueErrors[keyof ConfigDeleteValueErrors];
+
+export type ConfigDeleteValueResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ConfigDeleteValueResponse = ConfigDeleteValueResponses[keyof ConfigDeleteValueResponses];
+
+export type ConfigSetValueData = {
+    body: ConfigValue;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Scope
+         */
+        scope: string;
+        /**
+         * Key
+         */
+        key: string;
+    };
+    query?: never;
+    url: '/api/config/{scope}/{key}';
+};
+
+export type ConfigSetValueErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConfigSetValueError = ConfigSetValueErrors[keyof ConfigSetValueErrors];
+
+export type ConfigSetValueResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ConfigSetValueResponse = ConfigSetValueResponses[keyof ConfigSetValueResponses];
+
+export type EventsStreamEventsData = {
     body?: never;
     path?: never;
     query?: never;
     url: '/api/events';
 };
 
-export type EventsEventStreamResponses = {
+export type EventsStreamEventsResponses = {
     /**
      * Successful Response
      */

@@ -1,12 +1,11 @@
 import React from 'react';
-import { RefreshCw, Settings as SettingsIcon, GitPullRequest } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { RefreshCw, Settings as SettingsIcon, List } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlannerStore } from '../store/plannerStore';
 import { usePlan } from '../lib/queries';
 import { relTime, absTime, useNow } from '../lib/time';
 import { StatusBadge } from './StatusBadge';
-import { ProjectSwitcher } from './ProjectSwitcher';
 import { tokens } from '../styles/tokens';
 import styles from './TopBar.module.css';
 
@@ -56,7 +55,8 @@ function ConnectionIndicator() {
 }
 
 export function TopBar() {
-  const { data: plan } = usePlan();
+  const { planId } = useParams();
+  const { data: plan } = usePlan(planId ?? null);
 
   return (
     <header className={styles.bar}>
@@ -68,25 +68,26 @@ export function TopBar() {
       <div className={styles.planIdentity}>
         {plan ? (
           <>
-            <span className={styles.planName} title={plan.vision}>
-              {plan.vision ? plan.vision : plan.plan_id}
+            <span className={styles.planName} title={plan.brief}>
+              {plan.brief.split('\n')[0].slice(0, 80) || plan.id}
             </span>
-            <StatusBadge domain="plan" value={plan.status} />
+            <StatusBadge domain="phase" value={plan.phase} />
           </>
-        ) : (
+        ) : planId ? (
           <span className="skeleton" style={{ width: 220, height: 16 }} />
+        ) : (
+          <span className={styles.planName}>Plans</span>
         )}
       </div>
 
       <div className={styles.spacer} />
-      <ProjectSwitcher />
       <Link
-        to="/prs"
-        aria-label="Pull requests"
-        title="Pull requests"
+        to="/"
+        aria-label="All plans"
+        title="All plans"
         style={{ display: 'inline-flex', alignItems: 'center', color: tokens.textMuted }}
       >
-        <GitPullRequest size={15} aria-hidden />
+        <List size={15} aria-hidden />
       </Link>
       <Link
         to="/settings"

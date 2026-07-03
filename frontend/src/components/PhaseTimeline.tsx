@@ -1,24 +1,30 @@
 import React from 'react';
-import { tokens } from '../styles/tokens';
-import { usePlan } from '../lib/queries';
-import type { Phase } from '../types/ui';
+import { tokens, PLAN_PHASE } from '../styles/tokens';
+import type { PlanPhase } from '../types/ui';
 
-const PHASE_DOT: Record<Phase['status'], { glyph: string; color: string }> = {
-  planned:   { glyph: '○', color: tokens.textMuted },
-  active:    { glyph: '◉', color: tokens.green },
-  completed: { glyph: '●', color: tokens.purple },
-};
+/** The happy-path walk; REPLANNING re-enters at architecture, FAILED is terminal. */
+const WALK: PlanPhase[] = [
+  'discovery',
+  'architecture',
+  'enriching',
+  'awaiting_review',
+  'running',
+  'review',
+  'done',
+];
 
 /**
- * Horizontal timeline of the project's phases. The active phase is
- * highlighted and its exit criteria are surfaced so the operator always
- * knows what "done" means for the current slice of work.
+ * Horizontal timeline of the 9-phase machine. The current phase is
+ * highlighted; phases before the cursor render as settled. REPLANNING and
+ * FAILED are shown as an annotation since they sit outside the happy path.
  */
-export function PhaseTimeline() {
-  const { data: plan } = usePlan();
-  if (!plan || plan.phases.length === 0) return null;
-
-  const active = plan.phases.find((p) => p.index === plan.current_phase_index);
+export function PhaseTimeline({
+  phase, iteration,
+}: {
+  phase: PlanPhase;
+  iteration: number;
+}) {
+  const cursor = WALK.indexOf(phase === 'replanning' ? 'architecture' : phase);
 
   return (
     <div style={{
@@ -28,48 +34,46 @@ export function PhaseTimeline() {
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',
-      maxWidth: 520,
+      maxWidth: 640,
     }}>
       <div style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em' }}>
-        PHASES · {plan.status.toUpperCase()}
+        PHASES · {PLAN_PHASE[phase].label.toUpperCase()} · ITERATION {iteration}
+        {phase === 'replanning' && ' · REPLANNING'}
+        {phase === 'failed' && ' · FAILED'}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'wrap' }}>
-        {plan.phases.map((p, i) => {
-          const dot = PHASE_DOT[p.status];
-          const isActive = p.index === plan.current_phase_index;
+        {WALK.map((p, i) => {
+          const isCurrent = p === phase || (phase === 'replanning' && p === 'architecture');
+          const isPast = cursor >= 0 && i < cursor;
+          const color = isCurrent
+            ? PLAN_PHASE[p].kind === 'gate' ? tokens.yellow : tokens.green
+            : isPast ? tokens.purple : tokens.textMuted;
           return (
-            <React.Fragment key={p.index}>
+            <React.Fragment key={p}>
               {i > 0 && (
                 <div style={{ width: 18, height: 1, background: tokens.border, margin: '0 4px' }} />
               )}
-              <div
-                title={`${p.goal}\nexit: ${p.exit_criteria || '—'}`}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '3px 8px', borderRadius: tokens.r6,
-                  background: isActive ? `${tokens.green}14` : 'transparent',
-                  border: `1px solid ${isActive ? tokens.green + '55' : 'transparent'}`,
-                }}
-              >
-                <span style={{ fontSize: 10, color: dot.color }}>{dot.glyph}</span>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '3px 8px', borderRadius: tokens.r6,
+                background: isCurrent ? `${color}14` : 'transparent',
+                border: `1px solid ${isCurrent ? color + '55' : 'transparent'}`,
+              }}>
+                <span style={{ fontSize: 10, color }}>
+                  {isPast ? '●' : isCurrent ? '◉' : '○'}
+                </span>
                 <span style={{
                   fontSize: 9, fontFamily: tokens.fontMono,
-                  color: isActive ? tokens.textPrimary : tokens.textSecond,
+                  color: isCurrent ? tokens.textPrimary : tokens.textSecond,
                 }}>
-                  P{p.index} {p.name}
+                  {PLAN_PHASE[p].label}
                 </span>
               </div>
             </React.Fragment>
           );
         })}
       </div>
-
-      {active && active.exit_criteria && (
-        <div style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted, lineHeight: 1.5 }}>
-          <span style={{ color: tokens.green }}>exit:</span> {active.exit_criteria}
-        </div>
-      )}
     </div>
   );
 }
