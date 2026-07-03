@@ -13,3 +13,9 @@ class InfrastructureError(BaseAppException):
     """An infrastructure operation failed (DB, filesystem, subprocess, network)."""
 
     code = "INFRASTRUCTURE_ERROR"
+
+
+class SecretNotFoundError(InfrastructureError):
+    """No secret stored under the requested URI."""
+
+    code = "SECRET_NOT_FOUND"
