@@ -57,17 +57,6 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# TRANSPLANT parking lot: files preserved from the old backend that still
-# reference deleted pre-refactor modules. Each is un-parked (adapted to the new
-# ports) in its named integration stage; this list must only SHRINK.
-exclude = [
-    "^src/infra/settings/",           # TRANSPLANT(stage-7)
-    "^src/infra/logging/",            # TRANSPLANT(stage-7)
-    "^src/infra/redis_adapters/",     # TRANSPLANT(phase-3 seam, unused)
-    "^src/infra/cli/",                # TRANSPLANT(stage-8)
-    "^src/infra/project_paths\\.py$", # TRANSPLANT(stage-7)
-    "^src/infra/dependency_checker\\.py$", # TRANSPLANT(stage-8)
-]
 
 # Honest per-layer typing: src/domain and src/app are fully strict (the
 # layers that claim it); the adapter layers carry explicit relaxations

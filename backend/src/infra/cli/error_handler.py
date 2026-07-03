@@ -1,106 +1,60 @@
 """
-src/infra/cli/error_handler.py — Centralised CLI error handling.
+src/infra/cli/error_handler.py — centralised CLI error handling.
 
 Policy:
-  - All user-facing errors print to stderr with a ✗ prefix
-  - All warnings print to stderr with a ⚠ prefix
-  - All successes print to stdout with a ✓ prefix
-  - sys.exit(1) is always called after a fatal error
-  - Domain errors (KeyError, ValueError, DomainError) are caught
-    at the command level and routed here
-  - Unexpected errors are logged via structlog and printed
-    with a generic message so the user always gets feedback
-
-Usage:
-    from src.infra.cli.error_handler import err, warn, ok, die, catch_domain_errors
-
-    @task_group.command("retry")
-    @click.argument("task_id")
-    @catch_domain_errors
-    def task_retry(task_id):
-        result = usecase.execute(task_id)
-        ok(f"Task {task_id} requeued")
+  - user-facing errors -> stderr with a ✗ prefix, exit(1)
+  - warnings -> stderr with ⚠; successes -> stdout with ✓
+  - typed errors (DomainError / BaseAppException) print their message + code
+  - unexpected errors are logged via structlog and printed generically so the
+    user always gets feedback, never a bare traceback
 """
 
 from __future__ import annotations
 
-import sys
 import functools
-from typing import Callable, TypeVar, cast
+import sys
+from typing import Callable, NoReturn, TypeVar, cast
 
 import click
 import structlog
 
-from src.domain.errors import BaseAppException, DomainError
-from src.infra.settings.models import ConfigurationError
-
+from src.domain.errors import BaseAppException
 
 log = structlog.get_logger(__name__)
 
 F = TypeVar("F", bound=Callable)
 
 
-# ---------------------------------------------------------------------------
-# Output helpers — single source of truth for CLI formatting
-# ---------------------------------------------------------------------------
-
-
 def ok(message: str) -> None:
-    """Print a success line to stdout."""
     click.echo(f"✓  {message}")
 
 
 def warn(message: str) -> None:
-    """Print a warning line to stderr."""
     click.echo(f"⚠  {message}", err=True)
 
 
 def err(message: str) -> None:
-    """Print an error line to stderr."""
     click.echo(f"✗  {message}", err=True)
 
 
-def die(message: str, code: int = 1) -> None:
-    """Print an error and exit with the given code."""
+def die(message: str) -> NoReturn:
     err(message)
-    sys.exit(code)
+    sys.exit(1)
 
 
-def info(message: str) -> None:
-    """Print a neutral info line to stdout."""
-    click.echo(f"   {message}")
-
-
-# ---------------------------------------------------------------------------
-# Decorator — catch domain errors at the command boundary
-# ---------------------------------------------------------------------------
 def catch_domain_errors(fn: F) -> F:
-    """
-    Decorator for Click command functions.
-    Catches the standard domain exception types and converts them to
-    consistent CLI error output + sys.exit(1).
-    """
+    """Route typed errors to stderr + exit(1); log the unexpected ones."""
 
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: object, **kwargs: object) -> object:
         try:
             return fn(*args, **kwargs)
-        except click.Abort:
-            click.echo()
-            raise
-        except click.exceptions.Exit:
-            raise
-        except KeyError as exc:
-            die(f"Not found: {exc.args[0] if exc.args else exc}")
-
-        # Add ConfigurationError to the clean catch block. BaseAppException
-        # covers the unified taxonomy (domain + app errors); DomainError is a
-        # subclass but is listed for clarity.
-        except (ValueError, BaseAppException, DomainError, ConfigurationError) as exc:
+        except BaseAppException as exc:
+            die(f"[{exc.code}] {exc.message}")
+        except (KeyError, ValueError) as exc:
             die(str(exc))
-
-        except Exception as exc:
-            log.exception("cli.unexpected_error", error=str(exc))
-            die(f"Unexpected error: {exc}")
+        except Exception as exc:  # noqa: BLE001 — the CLI's last-resort net
+            log.error("cli.unexpected_error", exc_info=exc)
+            die(f"Unexpected error: {type(exc).__name__}: {exc}")
 
     return cast(F, wrapper)

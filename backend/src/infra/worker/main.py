@@ -45,17 +45,24 @@ async def run_worker_forever(
         lease_seconds=lease_seconds,
     )
     while stop is None or not stop.is_set():
-        progressed = await worker_tick(
-            uow,
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
-            worker_id,
-            lease_seconds,
-            planning_handler=planning_handler,
-        )
+        try:
+            progressed = await worker_tick(
+                uow,
+                container.agent_runner,
+                container.agent_repo,
+                container.workspace,
+                container.agent_event_sink,
+                container.clock,
+                worker_id,
+                lease_seconds,
+                planning_handler=planning_handler,
+            )
+        except Exception:
+            # One poisoned plan must not kill the worker: the tick's finally
+            # already released the claim; log, back off a poll, keep serving
+            # the other plans. Retry churn is poll-cadence-bounded.
+            log.error("worker.tick_failed", worker_id=worker_id, exc_info=True)
+            progressed = False
         if not progressed:
             await asyncio.sleep(poll_seconds)
     log.info("worker.stopped", worker_id=worker_id)
