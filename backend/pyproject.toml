@@ -66,8 +66,6 @@ exclude = [
     "^src/api/security\\.py$",        # TRANSPLANT(stage-7)
     "^src/api/middleware/",           # TRANSPLANT(stage-7)
     "^src/api/logging/",              # TRANSPLANT(stage-7)
-    "^src/infra/git/",                # TRANSPLANT(stage-5)
-    "^src/infra/runtime/",            # TRANSPLANT(stage-5)
     "^src/infra/settings/",           # TRANSPLANT(stage-7)
     "^src/infra/logging/",            # TRANSPLANT(stage-7)
     "^src/infra/redis_adapters/",     # TRANSPLANT(phase-3 seam, unused)
