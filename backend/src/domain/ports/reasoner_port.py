@@ -1,5 +1,19 @@
 """The reasoner port: the planning LLM behind the phase machine.
 
+Two methods, matching the two places an LLM actually plans:
+
+  converse    — DISCOVERY / REPLANNING chat. Multi-turn: each user message is
+                one call; a reply without goals keeps the conversation open, a
+                reply WITH goals is the roadmap commit that moves the plan into
+                ARCHITECTURE (the caller owns the transaction + transition).
+  enrich_goal — the ENRICHING JIT step: break ONE goal into a small ordered set
+                of plain executable tasks (capability ids from the catalog).
+
+ARCHITECTURE deliberately has no method: discovery commits the user-agreed
+roadmap itself, so an autonomous re-structuring pass is redundant for the
+prototype — the phase is a no-LLM passthrough in the PlanningHandler (that
+handler is the seam if a real structuring pass returns).
+
 Adapters (StubReasoner, the OpenAI-compatible reasoner) implement it; the
 conversation use cases and the PlanningHandler own the transactions and the
 phase transitions — the reasoner reads, never persists.
@@ -8,14 +22,18 @@ phase transitions — the reasoner reads, never persists.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, Sequence, runtime_checkable
 
 from pydantic import BaseModel, Field
 
 from src.domain.aggregates.planner_orchestrator import Plan
+from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
+from src.domain.entities.task import Task
 
 ChatRole = Literal["user", "assistant"]
+
+ConversationMode = Literal["discovery", "replanning"]
 
 
 class ChatMessage(BaseModel):
@@ -29,16 +47,30 @@ class ChatMessage(BaseModel):
     meta: dict[str, str | bool | int] = Field(default_factory=dict)
 
 
+class ReasonerReply(BaseModel):
+    """One converse() turn. goals=None means "still conversing" (the message is
+    a question/reply to show the user); a goal list is the roadmap commit."""
+
+    message: str
+    goals: list[Goal] | None = None
+
+
 @runtime_checkable
 class Reasoner(Protocol):
-    """The planning LLM (one-shot transforms per planning phase). Each method is
-    a pure content transform — it reads, never persists; the PlanningHandler /
-    conversation use cases own the transaction and the phase transition.
+    """The planning LLM. Pure content transforms — it reads, never persists;
+    the callers own the transaction and the phase transition."""
 
-    DISCOVERY and REPLANNING are conversational (each user message is one call);
-    ARCHITECTURE and ENRICHING are autonomous worker steps."""
+    async def converse(
+        self,
+        plan: Plan,
+        history: Sequence[ChatMessage],
+        message: str,
+        mode: ConversationMode,
+    ) -> ReasonerReply: ...
 
-    async def draft_goals(self, brief: str) -> list[Goal]: ...
-    async def structure_goals(self, plan: Plan) -> list[Goal]: ...
-    async def enrich_goals(self, plan: Plan) -> list[Goal]: ...
-    async def replan_goals(self, plan: Plan, message: str) -> list[Goal]: ...
+    async def enrich_goal(
+        self,
+        plan: Plan,
+        goal: Goal,
+        capabilities: Sequence[Capability],
+    ) -> list[Task]: ...

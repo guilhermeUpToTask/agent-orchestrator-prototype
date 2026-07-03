@@ -37,7 +37,9 @@ async def run_worker_forever(
     from src.app.use_cases.run_worker import worker_tick
 
     uow = container.new_unit_of_work()
-    planning_handler = PlanningHandler(container.reasoner, container.agent_repo)
+    planning_handler = PlanningHandler(
+        container.reasoner, container.agent_repo, container.capability_repo
+    )
     log.info(
         "worker.started",
         worker_id=worker_id,

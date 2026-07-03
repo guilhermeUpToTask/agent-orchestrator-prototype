@@ -20,6 +20,8 @@ from src.app.testing.fakes import (
     DummyBehavior,
     FakeClock,
     InMemoryAgentRepository,
+    InMemoryCapabilityRepository,
+    InMemoryChatStore,
     NoOpWorkspace,
 )
 from src.app.use_cases.control import finish_review, resume_from_review, review_replan
@@ -43,6 +45,7 @@ task: scaffold the app
 task: add health endpoint
 goal: Persistence
 task: wire sqlite
+goal: Docs
 """
 
 REPLAN_MESSAGE = """goal: Hardening
@@ -60,9 +63,17 @@ class Stack:
         self.reasoner = StubReasoner()
         self.runner = DummyAgentRunner(script or {})
         self.agents = InMemoryAgentRepository([make_agent_spec()], "a1")
+        self.capabilities = InMemoryCapabilityRepository()
+        self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(self.reasoner, self.agents)
+        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities)
+
+    def say(self, plan_id, message, *, replanning=False):
+        fn = replanning_message if replanning else discovery_message
+        return asyncio.run(
+            fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock)
+        )
 
     def tick(self, worker_id="w1"):
         return asyncio.run(
@@ -100,18 +111,34 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     assert stack.plan(plan_id).phase == PlanPhase.DISCOVERY
     assert stack.tick() is False  # not claimable
 
-    asyncio.run(discovery_message(plan_id, "", stack.uow, stack.reasoner))
-    assert stack.plan(plan_id).phase == PlanPhase.ARCHITECTURE
+    # multi-turn: an ask-turn replies without committing (phase unchanged)
+    asked = stack.say(plan_id, "ask: monolith or services?")
+    assert (asked.reply, asked.committed) == ("monolith or services?", False)
+    assert stack.plan(plan_id).phase == PlanPhase.DISCOVERY
 
-    # worker drives ARCHITECTURE -> ENRICHING -> AWAITING_REVIEW, then stops
+    committed = stack.say(plan_id, "")
+    assert committed.committed is True
+    assert stack.plan(plan_id).phase == PlanPhase.ARCHITECTURE
+    assert len(stack.chat.list(plan_id)) == 4  # 2 user + 2 assistant turns
+
+    # worker drives ARCHITECTURE (passthrough) -> ENRICHING (JIT per goal)
+    # -> AWAITING_REVIEW, then stops
     stack.drain()
     plan = stack.plan(plan_id)
     assert plan.phase == PlanPhase.AWAITING_REVIEW
-    assert [g.name for g in plan.goals] == ["API skeleton", "Persistence"]
-    enriched = [t for g in plan.goals for t in g.tasks]
-    assert len(enriched) == 3
-    assert all(t.description.startswith("[enriched]") for t in enriched)
-    assert all(t.agent_id == "a1" for t in enriched)  # bound (default fallback)
+    assert [g.name for g in plan.goals] == ["API skeleton", "Persistence", "Docs"]
+    # grammar-specified tasks are untouched by enrichment...
+    grammar_tasks = [t for g in plan.goals[:2] for t in g.tasks]
+    assert [t.name for t in grammar_tasks] == [
+        "scaffold the app", "add health endpoint", "wire sqlite",
+    ]
+    assert all(t.description == "" for t in grammar_tasks)
+    # ...while the task-less goal was JIT-populated by the reasoner
+    (docs_task,) = plan.goals[2].tasks
+    assert docs_task.name == "implement: Docs"
+    assert docs_task.description.startswith("[enriched]")
+    all_tasks = grammar_tasks + [docs_task]
+    assert all(t.agent_id == "a1" for t in all_tasks)  # bound (default fallback)
 
     # human approves the pre-execution gate
     resume_from_review(plan_id, stack.uow)
@@ -125,15 +152,16 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     assert stack.plan(plan_id).phase == PlanPhase.REPLANNING
     assert stack.tick() is False  # conversational: still invisible to workers
 
-    asyncio.run(
-        replanning_message(plan_id, REPLAN_MESSAGE, stack.uow, stack.reasoner)
-    )
+    replan_turn = stack.say(plan_id, REPLAN_MESSAGE, replanning=True)
+    assert replan_turn.committed is True
     plan = stack.plan(plan_id)
     assert plan.phase == PlanPhase.ARCHITECTURE
     assert plan.iteration == 2
     # append-only: iteration-1 history untouched, new goal after it
-    assert [g.name for g in plan.goals] == ["API skeleton", "Persistence", "Hardening"]
-    assert [g.position for g in plan.goals] == [0, 1, 2]
+    assert [g.name for g in plan.goals] == [
+        "API skeleton", "Persistence", "Docs", "Hardening",
+    ]
+    assert [g.position for g in plan.goals] == [0, 1, 2, 3]
     assert plan.goals[0].status == Status.DONE and plan.goals[1].status == Status.DONE
 
     # iteration 2 runs the same pipeline to DONE
@@ -175,7 +203,7 @@ def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
     plan_id = create_plan("goal: G1\ntask: only task", "req-1", stack.uow)
     runner._plan_id = plan_id
     runner.script = {}  # default success behavior; the trigger is the point
-    asyncio.run(discovery_message(plan_id, "", stack.uow, stack.reasoner))
+    stack.say(plan_id, "")
     stack.drain()
     resume_from_review(plan_id, stack.uow)
 
@@ -188,9 +216,7 @@ def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
     assert task.status == Status.DONE
 
     # the conversational re-plan commits a fresh iteration and runs to DONE
-    asyncio.run(
-        replanning_message(plan_id, "goal: G2\ntask: redo", stack.uow, stack.reasoner)
-    )
+    stack.say(plan_id, "goal: G2\ntask: redo", replanning=True)
     assert stack.plan(plan_id).iteration == 2
     stack.drain()
     resume_from_review(plan_id, stack.uow)

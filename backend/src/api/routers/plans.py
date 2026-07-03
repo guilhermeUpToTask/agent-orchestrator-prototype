@@ -46,6 +46,22 @@ class MessageRequest(BaseModel):
     message: str
 
 
+class MessageResponse(BaseModel):
+    """One conversation turn: the assistant reply, whether the roadmap was
+    committed, and the (possibly advanced) phase."""
+
+    reply: str
+    committed: bool
+    phase: str
+
+
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    created_at: str
+    meta: dict[str, Any]
+
+
 class NewTaskBody(BaseModel):
     name: str
     description: str = ""
@@ -178,26 +194,63 @@ def replan_mid_running(
     request_replan(plan_id, container.new_unit_of_work())
 
 
-@router.post("/{plan_id}/discovery/message", status_code=204)
+@router.post("/{plan_id}/discovery/message", response_model=MessageResponse)
 async def discovery(
     plan_id: str,
     body: MessageRequest,
     container: AppContainer = Depends(get_container),
-) -> None:
-    """One DISCOVERY conversation turn (drafts goals -> ARCHITECTURE)."""
-    await discovery_message(
-        plan_id, body.message, container.new_unit_of_work(), container.reasoner
+) -> MessageResponse:
+    """One DISCOVERY conversation turn. Multi-turn: committed=false keeps the
+    conversation open; committed=true is the roadmap commit -> ARCHITECTURE."""
+    result = await discovery_message(
+        plan_id,
+        body.message,
+        container.new_unit_of_work(),
+        container.reasoner,
+        container.chat_store,
+        container.clock,
+    )
+    return MessageResponse(
+        reply=result.reply, committed=result.committed, phase=result.phase.value
     )
 
 
-@router.post("/{plan_id}/replanning/message", status_code=204)
+@router.post("/{plan_id}/replanning/message", response_model=MessageResponse)
 async def replanning(
     plan_id: str,
     body: MessageRequest,
     container: AppContainer = Depends(get_container),
-) -> None:
-    """One REPLANNING conversation turn (commits the new goal set ->
-    ARCHITECTURE; the iteration increments here)."""
-    await replanning_message(
-        plan_id, body.message, container.new_unit_of_work(), container.reasoner
+) -> MessageResponse:
+    """One REPLANNING conversation turn. committed=true commits the new goal
+    set -> ARCHITECTURE (the iteration increments here)."""
+    result = await replanning_message(
+        plan_id,
+        body.message,
+        container.new_unit_of_work(),
+        container.reasoner,
+        container.chat_store,
+        container.clock,
     )
+    return MessageResponse(
+        reply=result.reply, committed=result.committed, phase=result.phase.value
+    )
+
+
+@router.get("/{plan_id}/chat", response_model=list[ChatMessageResponse])
+def chat_history(
+    plan_id: str, container: AppContainer = Depends(get_container)
+) -> list[ChatMessageResponse]:
+    """The plan's DISCOVERY/REPLANNING conversation, in order. 404s for an
+    unknown plan (chat rows only exist for real plans)."""
+    uow = container.new_unit_of_work()
+    with uow:
+        uow.plans.get(plan_id)  # existence check -> PLAN_NOT_FOUND -> 404
+    return [
+        ChatMessageResponse(
+            role=m.role,
+            content=m.content,
+            created_at=m.created_at.isoformat(),
+            meta=dict(m.meta),
+        )
+        for m in container.chat_store.list(plan_id)
+    ]

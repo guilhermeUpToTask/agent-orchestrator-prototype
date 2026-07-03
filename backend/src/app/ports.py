@@ -21,7 +21,11 @@ from src.domain.ports import (
     Workspace,
     WorkspaceHandle,
 )
-from src.domain.ports.reasoner_port import ChatMessage
+from src.domain.ports.reasoner_port import (
+    ChatMessage,
+    ConversationMode,
+    ReasonerReply,
+)
 from src.domain.repositories.planner_repo import PlanRepository
 from src.domain.value_objects.lifecycle import FailureKind
 
@@ -31,8 +35,10 @@ __all__ = [
     "ChatMessage",
     "ChatStore",
     "Clock",
+    "ConversationMode",
     "Outbox",
     "Reasoner",
+    "ReasonerReply",
     "TaskFailed",
     "UnitOfWork",
     "Workspace",
