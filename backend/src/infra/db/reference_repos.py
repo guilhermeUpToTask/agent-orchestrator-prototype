@@ -173,6 +173,9 @@ class SqliteAgentRepository:
             instructions=row.instructions,
             capabilities=[_capability_from_row(c) for c in cap_rows],
             default_retry=RetryPolicy.model_validate_json(row.default_retry),
+            runtime_type=row.runtime_type,
+            provider_id=row.provider_id,
+            model_id=row.model_id,
         )
 
     def _write_capability_links(self, s: Session, agent: AgentSpec) -> None:
@@ -209,6 +212,9 @@ class SqliteAgentRepository:
                     model_role=agent.model_role,
                     instructions=agent.instructions,
                     default_retry=agent.default_retry.model_dump_json(),
+                    runtime_type=agent.runtime_type,
+                    provider_id=agent.provider_id,
+                    model_id=agent.model_id,
                 )
             )
             self._write_capability_links(s, agent)
@@ -225,6 +231,9 @@ class SqliteAgentRepository:
             row.model_role = agent.model_role
             row.instructions = agent.instructions
             row.default_retry = agent.default_retry.model_dump_json()
+            row.runtime_type = agent.runtime_type
+            row.provider_id = agent.provider_id
+            row.model_id = agent.model_id
             self._write_capability_links(s, agent)
 
         run_in_session(self._sf, _op)
@@ -250,6 +259,14 @@ class SqliteAgentRepository:
         if row is None:
             raise NoDefaultAgentError()
         return str(row[0])
+
+    def get_default_id(self) -> str | None:
+        """Non-raising read of the default-agent marker (API status reads)."""
+        with self._sf() as s:
+            row = s.execute(
+                text("SELECT id FROM agents WHERE is_default = 1 LIMIT 1")
+            ).one_or_none()
+        return None if row is None else str(row[0])
 
     def set_default(self, agent_id: str) -> None:
         """Repo-level default-agent marker (not part of AgentSpec)."""
@@ -281,7 +298,7 @@ def _model_from_row(row: ModelTable) -> IAModel:
 
 def _guard_model_in_use(s: Session, model_id: str) -> None:
     """Guard-up: a model referenced by config (the model_role tier mapping)
-    cannot be deleted."""
+    or bound to an agent's runtime cannot be deleted."""
     ref = s.execute(
         text("SELECT scope, key FROM config WHERE value = :mid LIMIT 1"),
         {"mid": model_id},
@@ -289,6 +306,14 @@ def _guard_model_in_use(s: Session, model_id: str) -> None:
     if ref is not None:
         raise ReferencedEntityInUseError(
             "Model", model_id, f"config '{ref[0]}/{ref[1]}'"
+        )
+    agent_ref = s.execute(
+        text("SELECT id FROM agents WHERE model_id = :mid LIMIT 1"),
+        {"mid": model_id},
+    ).one_or_none()
+    if agent_ref is not None:
+        raise ReferencedEntityInUseError(
+            "Model", model_id, f"agent '{agent_ref[0]}'"
         )
 
 
@@ -434,6 +459,14 @@ class SqliteModelProviderRepository:
             if row is None:
                 raise ModelProviderNotFoundError(provider_id)
             # guard UP before the cascade DOWN
+            agent_ref = s.execute(
+                text("SELECT id FROM agents WHERE provider_id = :pid LIMIT 1"),
+                {"pid": provider_id},
+            ).one_or_none()
+            if agent_ref is not None:
+                raise ReferencedEntityInUseError(
+                    "Provider", provider_id, f"agent '{agent_ref[0]}'"
+                )
             for model_row in s.query(ModelTable).filter(
                 ModelTable.provider_id == provider_id
             ):

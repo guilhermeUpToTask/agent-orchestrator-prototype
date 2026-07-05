@@ -128,7 +128,6 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
     from src.api.sse import get_broker
     from src.infra.container import AppContainer
 
-    monkeypatch.setenv("AGENT_MODE", "dry-run")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     app = create_app(container)

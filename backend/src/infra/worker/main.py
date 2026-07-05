@@ -17,6 +17,8 @@ import structlog
 
 from src.app.handlers.planning_handler import PlanningHandler
 from src.infra.container import AppContainer
+from src.infra.runtime.dependency_checker import check_dependencies
+from src.infra.runtime.factory import validate_agent_runner_mode
 
 log = structlog.get_logger(__name__)
 
@@ -40,9 +42,22 @@ async def run_worker_forever(
     planning_handler = PlanningHandler(
         container.reasoner, container.agent_repo, container.capability_repo
     )
+    runner_mode = validate_agent_runner_mode(container.config_store)
+    if runner_mode.mode == "real":
+        # Warn-only probes: dry-run needs no binaries, and a missing runtime
+        # surfaces per task as a classified TaskFailed anyway.
+        for dep in check_dependencies().failing():
+            log.warning(
+                "worker.dependency_missing",
+                name=dep.name,
+                binary=dep.binary,
+                message=dep.message,
+                install_hint=dep.install_hint,
+            )
     log.info(
         "worker.started",
         worker_id=worker_id,
+        agent_runner_mode=runner_mode.mode,
         poll_seconds=poll_seconds,
         lease_seconds=lease_seconds,
     )

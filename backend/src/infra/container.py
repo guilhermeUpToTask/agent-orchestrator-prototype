@@ -1,17 +1,22 @@
 """AppContainer — the composition root (rebuilt during the integration).
 
 Runtime selection (composition-root config):
-  AGENT_MODE            dry-run (default) | pi | claude | gemini
-  AGENT_MODEL           model id for the selected runtime
   PROJECT_REPO_DIR      target repo for the git-branching workspace
                         (defaults to <orchestrator_home>/workspace-repo)
 
-The REASONER is not env-selected: `reasoner` builds via the factory from the
-SQLite config keys (reasoner.mode stub|llm) + the providers catalog + the
-envelope-encrypted secret store — see src/infra/reasoner/factory.py.
+Neither the REASONER nor the AGENT RUNNER is env-selected — both resolve from
+SQLite:
+  reasoner       config key reasoner.mode (stub|llm) + the providers catalog +
+                 the envelope-encrypted secret store
+                 (src/infra/reasoner/factory.py).
+  agent_runner   config key agent_runner.mode (dry-run|real); in real mode
+                 each task resolves through the AGENT REGISTRY — the bound
+                 AgentSpec's runtime_type + provider/model catalog rows
+                 (src/infra/runtime/factory.py).
 
 Environment is read ONLY here (the composition root) — never deep in the code.
 """
+
 from __future__ import annotations
 
 import os
@@ -37,13 +42,8 @@ from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.git.workspace import GitBranchWorkspace
-from src.infra.runtime.cli_runner import (
-    ClaudeCodeRunner,
-    GeminiRunner,
-    PiAgentRunner,
-)
 from src.infra.reasoner.factory import build_reasoner
-from src.infra.runtime.dummy_runner import DummyAgentRunner
+from src.infra.runtime.factory import build_agent_runner
 
 
 class AppContainer:
@@ -55,9 +55,7 @@ class AppContainer:
 
     @classmethod
     def from_env(cls) -> "AppContainer":
-        home = Path(
-            os.environ.get("ORCHESTRATOR_HOME", str(Path.home() / ".orchestrator"))
-        )
+        home = Path(os.environ.get("ORCHESTRATOR_HOME", str(Path.home() / ".orchestrator")))
         return cls(orchestrator_home=home)
 
     # --- Stage 3: persistence core ---
@@ -111,9 +109,7 @@ class AppContainer:
     @cached_property
     def workspace(self) -> GitBranchWorkspace:
         repo_dir = Path(
-            os.environ.get(
-                "PROJECT_REPO_DIR", str(self.orchestrator_home / "workspace-repo")
-            )
+            os.environ.get("PROJECT_REPO_DIR", str(self.orchestrator_home / "workspace-repo"))
         )
         return GitBranchWorkspace(repo_dir)
 
@@ -127,27 +123,18 @@ class AppContainer:
 
     @cached_property
     def agent_runner(self) -> AgentRunner:
-        """Selected by AGENT_MODE; the dummy IS the dry-run runtime (same
-        FailureKind taxonomy as the real CLI runners)."""
-        mode = os.environ.get("AGENT_MODE", "dry-run")
-        if mode == "dry-run":
-            return DummyAgentRunner()
-        model = os.environ.get("AGENT_MODEL", "")
-        if mode == "pi":
-            return PiAgentRunner(
-                api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-                model=model or "claude-sonnet-4-5",
-            )
-        if mode == "claude":
-            return ClaudeCodeRunner(
-                api_key=os.environ.get("ANTHROPIC_API_KEY", ""), model=model or None
-            )
-        if mode == "gemini":
-            return GeminiRunner(
-                api_key=os.environ.get("GEMINI_API_KEY", ""),
-                model=model or "gemini-2.5-pro",
-            )
-        raise ValueError(f"Unknown AGENT_MODE: {mode!r}")
+        """Catalog-resolved: config key agent_runner.mode selects dry-run
+        (default, no secrets needed — the dummy IS the dry-run runtime, same
+        FailureKind taxonomy as the real CLI runners) or real (per-task
+        resolution through the agent registry's runtime_type + provider/model
+        rows). The secret store is passed as a thunk so dry-run never
+        constructs it (it fails closed on a missing ORCHESTRATOR_MASTER_KEY)."""
+        return build_agent_runner(
+            self.config_store,
+            self.provider_repo,
+            self.model_repo,
+            lambda: self.secret_store,
+        )
 
     # --- Stage 6: the planning reasoner ---
     @cached_property

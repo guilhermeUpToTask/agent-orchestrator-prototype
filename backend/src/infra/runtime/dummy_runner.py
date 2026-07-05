@@ -1,5 +1,5 @@
 """
-src/infra/runtime/dummy_runner.py — the AGENT_MODE=dry-run runtime.
+src/infra/runtime/dummy_runner.py — the agent_runner.mode=dry-run runtime.
 
 The scriptable DummyAgentRunner IS the dry-run runtime: it implements the same
 AgentRunner port and raises TaskFailed with the same shared FailureKind
