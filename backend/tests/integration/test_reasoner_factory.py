@@ -11,7 +11,7 @@ from src.infra.cli.main import cli
 from src.infra.container import AppContainer
 from src.infra.db.tables import Base
 from src.infra.errors import InfrastructureError
-from src.infra.reasoner.factory import build_reasoner
+from src.infra.reasoner.factory import build_reasoner, validate_reasoner_config
 from src.infra.reasoner.openai_reasoner import OpenAIReasoner
 from src.infra.reasoner.stub_reasoner import StubReasoner
 
@@ -64,6 +64,31 @@ def test_invalid_mode_rejected(container):
     with pytest.raises(InfrastructureError) as err:
         build(container)
     assert "stub" in str(err.value) and "llm" in str(err.value)
+
+
+def test_validate_reasoner_config_never_touches_secrets(container):
+    # same no-master-key container as the stub test: the validator must be
+    # callable without ever constructing the secret store
+    status = validate_reasoner_config(
+        container.config_store, container.provider_repo, container.model_repo
+    )
+    assert status.mode == "stub"
+    assert status.valid is True
+    assert status.detail is None
+
+
+def test_validate_reasoner_config_matches_build_reasoner_message(container):
+    scope = container.config_store.ORCHESTRATOR_SCOPE
+    container.config_store.set(scope, "reasoner.mode", "llm")
+
+    status = validate_reasoner_config(
+        container.config_store, container.provider_repo, container.model_repo
+    )
+    assert status.valid is False
+
+    with pytest.raises(InfrastructureError) as err:
+        build(container)
+    assert str(err.value) == status.detail
 
 
 def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):

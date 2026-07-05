@@ -169,7 +169,7 @@ class CliAgentRunner(ABC):
 
 
 # Backend -> the env var pi reads for that provider (pi's env-api-keys.ts).
-_PI_BACKEND_ENV_VAR: dict[str, str] = {
+PI_BACKEND_ENV_VAR: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
@@ -187,10 +187,10 @@ class PiAgentRunner(CliAgentRunner):
         extra_flags: list[str] | None = None,
         timeout_seconds: int = 600,
     ) -> None:
-        if backend not in _PI_BACKEND_ENV_VAR:
+        if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
                 f"Invalid pi backend '{backend}'. "
-                f"Valid: {', '.join(sorted(_PI_BACKEND_ENV_VAR))}"
+                f"Valid: {', '.join(sorted(PI_BACKEND_ENV_VAR))}"
             )
         if not api_key:
             raise ValueError(
@@ -210,7 +210,7 @@ class PiAgentRunner(CliAgentRunner):
         return ["pi", "--model", self._model, "-p", prompt, *self._extra_flags]
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, _PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
+        return {**os.environ, PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
 
 
 class ClaudeCodeRunner(CliAgentRunner):

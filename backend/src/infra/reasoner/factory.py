@@ -17,11 +17,23 @@ Config keys (scope 'orchestrator'):
   reasoner.model_id     models.id                       (llm mode, required)
   reasoner.temperature  float                           (default 0.2)
   reasoner.max_turns    int, converse budget            (default 8)
+
+`validate_reasoner_config` is the non-raising catalog check shared by
+`build_reasoner` and the API status endpoint. It covers catalog wiring only —
+secret existence/decryption is still checked at build time, because checking
+it here would require the master key (which dry-run does not have).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable
 
+from src.domain.entities.ia_model import IAModel
+from src.domain.entities.model_provider import ModelProvider
+from src.domain.errors.config_errors import (
+    ModelNotFoundError,
+    ModelProviderNotFoundError,
+)
 from src.domain.ports.reasoner_port import Reasoner
 from src.domain.repositories.capability_repo import CapabilityRepository
 from src.infra.db.reference_repos import (
@@ -45,6 +57,95 @@ def _invalid(message: str) -> InfrastructureError:
     return InfrastructureError(message, code=REASONER_CONFIG_INVALID)
 
 
+@dataclass(frozen=True)
+class ReasonerConfigStatus:
+    """Result of the catalog-wiring check — never raises, never touches
+    secrets. `detail` carries the exact REASONER_CONFIG_INVALID message."""
+
+    mode: str
+    valid: bool
+    detail: str | None = None
+    provider: ModelProvider | None = None
+    model: IAModel | None = None
+
+
+def validate_reasoner_config(
+    config_store: SqliteConfigStore,
+    provider_repo: SqliteModelProviderRepository,
+    model_repo: SqliteModelRepository,
+) -> ReasonerConfigStatus:
+    mode = (config_store.get(_SCOPE, "reasoner.mode") or "stub").strip().lower()
+    if mode == "stub":
+        return ReasonerConfigStatus(mode="stub", valid=True)
+    if mode != "llm":
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            detail=(
+                f"reasoner.mode is '{mode}' — valid values are 'stub' or 'llm'. "
+                "Fix it with: orchestrate config set reasoner.mode stub|llm"
+            ),
+        )
+
+    provider_id = (config_store.get(_SCOPE, "reasoner.provider_id") or "").strip()
+    if not provider_id:
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            detail=(
+                "reasoner.mode is 'llm' but reasoner.provider_id is not set. "
+                "Seed one with `orchestrate seed demo --provider ...` or set it "
+                "with `orchestrate config set reasoner.provider_id <id>`."
+            ),
+        )
+    model_id = (config_store.get(_SCOPE, "reasoner.model_id") or "").strip()
+    if not model_id:
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            detail=(
+                "reasoner.mode is 'llm' but reasoner.model_id is not set. "
+                "Set it with `orchestrate config set reasoner.model_id <id>`."
+            ),
+        )
+
+    try:
+        provider = provider_repo.get(provider_id)
+    except ModelProviderNotFoundError:
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            detail=(
+                f"reasoner.provider_id '{provider_id}' does not exist in the "
+                "providers catalog."
+            ),
+        )
+    try:
+        model = model_repo.get(model_id)
+    except ModelNotFoundError:
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            provider=provider,
+            detail=(
+                f"reasoner.model_id '{model_id}' does not exist in the models "
+                "catalog."
+            ),
+        )
+    if model.provider_id != provider.id:
+        return ReasonerConfigStatus(
+            mode=mode,
+            valid=False,
+            provider=provider,
+            model=model,
+            detail=(
+                f"model '{model_id}' belongs to provider '{model.provider_id}', "
+                f"not the configured provider '{provider_id}'."
+            ),
+        )
+    return ReasonerConfigStatus(mode=mode, valid=True, provider=provider, model=model)
+
+
 def build_reasoner(
     config_store: SqliteConfigStore,
     provider_repo: SqliteModelProviderRepository,
@@ -54,48 +155,15 @@ def build_reasoner(
 ) -> Reasoner:
     """`secret_store` is a thunk: stub mode must never construct it (it fails
     closed on a missing master key, which dry-run does not have)."""
-    mode = (config_store.get(_SCOPE, "reasoner.mode") or "stub").strip().lower()
-    if mode == "stub":
+    status = validate_reasoner_config(config_store, provider_repo, model_repo)
+    if not status.valid:
+        raise _invalid(status.detail or "reasoner config is invalid")
+    if status.mode == "stub":
         return StubReasoner()
-    if mode != "llm":
-        raise _invalid(
-            f"reasoner.mode is '{mode}' — valid values are 'stub' or 'llm'. "
-            "Fix it with: orchestrate config set reasoner.mode stub|llm"
-        )
 
-    provider_id = (config_store.get(_SCOPE, "reasoner.provider_id") or "").strip()
-    if not provider_id:
-        raise _invalid(
-            "reasoner.mode is 'llm' but reasoner.provider_id is not set. "
-            "Seed one with `orchestrate seed demo --provider ...` or set it "
-            "with `orchestrate config set reasoner.provider_id <id>`."
-        )
-    model_id = (config_store.get(_SCOPE, "reasoner.model_id") or "").strip()
-    if not model_id:
-        raise _invalid(
-            "reasoner.mode is 'llm' but reasoner.model_id is not set. "
-            "Set it with `orchestrate config set reasoner.model_id <id>`."
-        )
-
-    try:
-        provider = provider_repo.get(provider_id)
-    except Exception as exc:
-        raise _invalid(
-            f"reasoner.provider_id '{provider_id}' does not exist in the "
-            "providers catalog."
-        ) from exc
-    try:
-        model = model_repo.get(model_id)
-    except Exception as exc:
-        raise _invalid(
-            f"reasoner.model_id '{model_id}' does not exist in the models "
-            "catalog."
-        ) from exc
-    if model.provider_id != provider.id:
-        raise _invalid(
-            f"model '{model_id}' belongs to provider '{model.provider_id}', "
-            f"not the configured provider '{provider_id}'."
-        )
+    provider = status.provider
+    model = status.model
+    assert provider is not None and model is not None  # valid llm status carries both
 
     api_key = secret_store().resolve_plaintext(SecretRef(uri=provider.api_key_ref))
 

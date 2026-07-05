@@ -154,6 +154,13 @@ class AgentTable(Base):
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     default_retry: Mapped[str] = mapped_column(Text, nullable=False)  # RetryPolicy JSON
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # runtime resolution: which CLI runtime + catalog provider/model the agent
+    # runs on. Deliberately NOT FK-constrained (SQLite can't add FKs to an
+    # existing table): the dangling-ref net applies — the runner factory
+    # validates the wiring and /api/runner/status flags broken bindings.
+    runtime_type: Mapped[str] = mapped_column(String, nullable=False, default="pi")
+    provider_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class AgentCapabilityTable(Base):

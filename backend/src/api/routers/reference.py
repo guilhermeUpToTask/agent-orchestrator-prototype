@@ -25,6 +25,8 @@ from src.domain.factories.identity import new_id
 from src.domain.policies.retry_policies import RetryPolicy
 from src.infra.container import AppContainer
 from src.infra.db.secret_ref import SecretRef
+from src.infra.errors import InfrastructureError
+from src.infra.runtime.factory import AGENT_RUNNER_CONFIG_INVALID, RUNTIME_TYPES
 
 router = APIRouter(dependencies=[Depends(require_api_token)], tags=["reference"])
 
@@ -75,10 +77,33 @@ class AgentBody(BaseModel):
     instructions: str = ""
     capability_ids: list[str] = []
     default_retry: RetryPolicy = RetryPolicy()
+    runtime_type: str = "pi"  # pi | claude | gemini | dry-run
+    provider_id: str | None = None
+    model_id: str | None = None
 
 
 def _to_spec(agent_id: str, body: AgentBody, container: AppContainer) -> AgentSpec:
     capabilities = [container.capability_repo.get(cid) for cid in body.capability_ids]
+    # Referential write checks only: runtime_type must parse and any SUPPLIED
+    # provider/model ref must resolve coherently. An agent may stay unbound
+    # (create now, bind later) — /api/runner/status and the run-time TaskFailed
+    # flag incomplete bindings.
+    if body.runtime_type.strip().lower() not in RUNTIME_TYPES:
+        raise InfrastructureError(
+            f"runtime_type '{body.runtime_type}' — valid values are "
+            f"{', '.join(RUNTIME_TYPES)}.",
+            code=AGENT_RUNNER_CONFIG_INVALID,
+        )
+    if body.provider_id:
+        container.provider_repo.get(body.provider_id)  # typed 404 when ghost
+    if body.model_id:
+        model = container.model_repo.get(body.model_id)  # typed 404 when ghost
+        if body.provider_id and model.provider_id != body.provider_id:
+            raise InfrastructureError(
+                f"model '{body.model_id}' belongs to provider "
+                f"'{model.provider_id}', not '{body.provider_id}'.",
+                code=AGENT_RUNNER_CONFIG_INVALID,
+            )
     return AgentSpec(
         id=agent_id,
         name=body.name,
@@ -87,12 +112,26 @@ def _to_spec(agent_id: str, body: AgentBody, container: AppContainer) -> AgentSp
         instructions=body.instructions,
         capabilities=capabilities,
         default_retry=body.default_retry,
+        runtime_type=body.runtime_type,
+        provider_id=body.provider_id,
+        model_id=body.model_id,
     )
+
+
+class DefaultAgentResponse(BaseModel):
+    agent_id: str | None
 
 
 @router.get("/agents")
 def list_agents(container: AppContainer = Depends(get_container)) -> list[AgentSpec]:
     return container.agent_repo.list()
+
+
+@router.get("/agents/default")
+def get_default_agent(
+    container: AppContainer = Depends(get_container),
+) -> DefaultAgentResponse:
+    return DefaultAgentResponse(agent_id=container.agent_repo.get_default_id())
 
 
 @router.post("/agents", status_code=201)
@@ -207,6 +246,15 @@ def create_model(
     model = IAModel(id=new_id(), provider_id=provider_id, name=body.name)
     container.model_repo.add(model)
     return model
+
+
+@router.put("/models/{model_id}", status_code=204)
+def update_model(
+    model_id: str, body: ModelBody, container: AppContainer = Depends(get_container)
+) -> None:
+    """Rename only — a model's provider binding is immutable."""
+    model = container.model_repo.get(model_id)
+    container.model_repo.update(model.model_copy(update={"name": body.name}))
 
 
 @router.delete("/models/{model_id}", status_code=204)

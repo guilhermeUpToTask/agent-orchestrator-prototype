@@ -6,7 +6,7 @@
 - **Install**: `cd backend && uv pip install -e .[dev]` (or `pip install -e .[dev]`)
 - **DB migrations**: `python -m src.infra.cli.main db upgrade` (DB lives under `ORCHESTRATOR_HOME`, default `~/.orchestrator`)
 - **Run API**: `python -m src.infra.cli.main api start --port 8000`
-- **Run Worker (Dry-Run)**: `AGENT_MODE=dry-run python -m src.infra.cli.main worker start`
+- **Run Worker**: `python -m src.infra.cli.main worker start` (dry-run by default — the config key `agent_runner.mode` selects the runtime, NOT an env var)
 - **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed) — commands: `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check src tests --fix`
 - **Type Check**: `mypy src` (zero errors, no excludes)
@@ -15,9 +15,11 @@
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
 - **Test real-LLM smoke** (cost-gated, never in normal CI): `pytest -m llm` with `REASONER_SMOKE_API_KEY` (+ optional `REASONER_SMOKE_BASE_URL` / `REASONER_SMOKE_MODEL`)
 
-Environment: `ORCHESTRATOR_HOME` (state dir), `AGENT_MODE` (`dry-run` | `pi` | `claude` | `gemini`), `ORCHESTRATOR_MASTER_KEY` (Fernet key for the secret store), `PROJECT_REPO_DIR` (target repo for the git workspace), `ORCHESTRATOR_API_TOKEN` (control-plane auth; open when unset).
+Environment: `ORCHESTRATOR_HOME` (state dir), `ORCHESTRATOR_MASTER_KEY` (Fernet key for the secret store), `PROJECT_REPO_DIR` (target repo for the git workspace), `ORCHESTRATOR_API_TOKEN` (control-plane auth; open when unset). There is NO `AGENT_MODE` env var — runtime selection lives in SQLite.
 
 **The reasoner resolves via the providers catalog, NOT env vars** — config keys (scope `orchestrator`): `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`, `reasoner.model_id`, `reasoner.temperature` (0.2), `reasoner.max_turns` (8). In `llm` mode `src/infra/reasoner/factory.py` fail-fasts (`REASONER_CONFIG_INVALID` → 422) and resolves the provider row (base_url + envelope-encrypted key) and model row; **stub mode never touches the secret store** (dry-run needs no master key). `orchestrate seed demo` seeds capabilities, the default agent, provider/model rows, and the config keys idempotently.
+
+**The agent runner resolves via the AGENT REGISTRY + the providers catalog** (`src/infra/runtime/factory.py`) — the config key `agent_runner.mode` (`dry-run` default | `real`, plus `agent_runner.timeout_seconds` 600) picks the global mode; `dry-run` is the `DummyAgentRunner` and never touches the secret store. In `real` mode the `CatalogAgentRunner` resolves **per task, per run** from the bound `AgentSpec`: `runtime_type` (`pi` default | `claude` | `gemini` | `dry-run`) picks the CLI runtime, `provider_id`/`model_id` rows supply the envelope-encrypted key and model string (pi's backend derives from the provider id/name against `PI_BACKEND_ENV_VAR`). A broken binding raises `TaskFailed(AUTH_ERROR)` (terminal); write-time referential checks + `AGENT_RUNNER_CONFIG_INVALID` → 422; `GET /api/runner/status` reports mode/bindings/binary probes (`dependency_checker.py`) and the worker warns at boot in real mode. Providers/models bound to an agent are delete-guarded (409).
 
 ### Frontend (TypeScript / React / Vite)
 - **Install**: `npm install`
@@ -35,7 +37,7 @@ The backend follows a strict **Hexagonal / Clean Architecture**.
 2. **The `Plan` aggregate is the single authority** (`src/domain/aggregates/planner_orchestrator.py`):
    - It owns the goal/task tree and is the ONLY caller of `Goal`/`Task` transition methods. **NEVER** mutate goal/task fields from use cases — go through the aggregate's guarded transitions (`start_task`, `complete_task`, `enter_review`, `begin_replanning`, `commit_replanned_goals`, ...). Illegal transitions raise `InvalidTransitionError`.
    - **Navigation is derived, never stored**: `next_action(goals, now)` re-scans statuses every tick; there is no cursor to desync. `now` is always injected — the domain never reads a clock.
-   - 🔒 The domain is FROZEN (roadmap Phase 0). Additions require a deliberate un-freeze.
+   - 🔒 The domain is FROZEN (roadmap Phase 0). Additions require a deliberate un-freeze (one so far: `AgentSpec.runtime_type/provider_id/model_id`, 2026-07-05 — the agent registry owns runtime resolution).
 3. **Optimistic Concurrency (CAS)**: use cases call `plan.bump_version()` then `uow.plans.save(plan)`; the store rejects when `stored.version >= incoming.version` with `StaleVersionError` (worker-vs-edit race → API 409).
 4. **Transactional outbox**: state changes and their `DomainEvent`s are written in the SAME `with uow:` transaction (`uow.plans.save(...)` + `uow.outbox.add(event)`). Event payloads are minimal (IDs + tiny metadata). The API's **outbox relay** delivers rows to SSE at-least-once; consumers dedup on `event_id`. Side effects (agent runs, LLM calls) happen OUTSIDE transactions; finalize transactions re-read and re-guard.
 5. **The lease replaces the reconciler**: `claim_one_unit` / `heartbeat` / `release` on the plan row. Only ARCHITECTURE / ENRICHING / RUNNING are claimable (the driver model); a dead worker's lease expires and any worker reclaims from persisted state. The worker tick reports *progress*, not claiming (no-progress → sleep).
@@ -109,7 +111,8 @@ agent-orchestrator/
 │   │                       #   outbox relay, security, request logging
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
-│   ├── alembic/            # migration chain (0001_core, 0002_reference, 0003_chat)
+│   ├── alembic/            # migration chain (0001_core, 0002_reference, 0003_chat,
+│   │                       #   0004_agent_runtime)
 │   └── docs/               # INTEGRATION_GUIDE.md (frozen contracts), DESIGN_NOTES.md,
 │                           #   adr-concurrency-lease.md
 └── frontend/               # React/Vite on the thin API: plan list + /plans/:id shell,

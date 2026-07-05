@@ -99,7 +99,8 @@ def worker() -> None:
 )
 @catch_domain_errors
 def worker_start(worker_id: str, poll_seconds: float, lease_seconds: int) -> None:
-    """Run the claim-and-drive loop (AGENT_MODE selects the runtime)."""
+    """Run the claim-and-drive loop (config key agent_runner.mode selects
+    dry-run or real; each agent's runtime_type picks its CLI runtime)."""
     from src.infra.container import AppContainer
     from src.infra.worker.main import run_worker_forever
 
@@ -256,6 +257,8 @@ def seed_demo(
             instructions="Implement the task exactly as described.",
             capabilities=capabilities,
             default_retry=RetryPolicy(),
+            # seeded valid out of the box; the LLM branch below re-binds it
+            runtime_type="dry-run",
         ),
     )
     container.agent_repo.set_default("dev-agent")
@@ -301,9 +304,25 @@ def seed_demo(
     config.set(scope, "reasoner.mode", "llm")
     config.set(scope, "reasoner.provider_id", provider_name)
     config.set(scope, "reasoner.model_id", model_id)
+
+    # Bind the demo agent's runtime to the seeded provider/model: pi when the
+    # provider maps to a pi backend, otherwise stay on the dry-run dummy.
+    from src.infra.runtime.cli_runner import PI_BACKEND_ENV_VAR
+
+    runtime_type = "pi" if provider_name in PI_BACKEND_ENV_VAR else "dry-run"
+    agent = container.agent_repo.get("dev-agent")
+    container.agent_repo.update(
+        agent.model_copy(
+            update={
+                "runtime_type": runtime_type,
+                "provider_id": provider_name,
+                "model_id": model_id,
+            }
+        )
+    )
     ok(
-        f"seeded capabilities + dev-agent; reasoner.mode = llm "
-        f"(provider={provider_name}, model={model_name})"
+        f"seeded capabilities + dev-agent (runtime={runtime_type}); "
+        f"reasoner.mode = llm (provider={provider_name}, model={model_name})"
     )
 
 

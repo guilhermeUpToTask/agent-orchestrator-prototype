@@ -225,13 +225,13 @@ def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
     assert stack.plan(plan_id).phase == PlanPhase.DONE
 
 
-def test_run_worker_forever_starts_ticks_and_stops(tmp_path, monkeypatch):
+def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
     """The container-wired entrypoint: boots on an empty db, idles (sleeps, no
-    spin) and honors the stop event."""
+    spin) and honors the stop event. agent_runner.mode defaults to dry-run —
+    no env, no master key."""
     from src.infra.container import AppContainer
     from src.infra.worker.main import run_worker_forever
 
-    monkeypatch.setenv("AGENT_MODE", "dry-run")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
 
