@@ -35,7 +35,7 @@ export function ConsoleDock() {
   return (
     <div style={{
       borderTop: `1px solid ${tokens.border}`,
-      background: '#0d0f14',
+      background: 'var(--bg-0)',
       display: 'flex', flexDirection: 'column', flexShrink: 0,
       height: consoleOpen ? 200 : 30,
       transition: 'height 0.15s ease',

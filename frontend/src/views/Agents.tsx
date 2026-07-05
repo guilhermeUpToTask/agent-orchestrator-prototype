@@ -1,9 +1,9 @@
 import React from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Cpu, CircleDot } from 'lucide-react';
 import { useAgents, usePlan } from '../lib/queries';
-import { tokens } from '../styles/tokens';
 import type { Goal, Task } from '../types/ui';
+import styles from './Agents.module.css';
 
 /** The task an agent is currently executing in this plan, if any. */
 function currentTaskFor(agentId: string, goals: Goal[]): Task | null {
@@ -16,8 +16,8 @@ function currentTaskFor(agentId: string, goals: Goal[]): Task | null {
 }
 
 /**
- * The agent roster: every registered agent spec (id, role, capabilities)
- * and the task it is currently running in this plan.
+ * The agent roster for THIS plan: every registered agent spec and the task
+ * it is currently running here. Editing lives in Settings → Agents.
  */
 export function AgentsView() {
   const { planId = '' } = useParams();
@@ -26,61 +26,54 @@ export function AgentsView() {
   const goals = plan?.goals ?? [];
 
   return (
-    <div style={{ padding: 18, overflowY: 'auto', height: '100%' }}>
-      <h2 style={{
-        fontSize: 13, fontFamily: tokens.fontMono, color: tokens.textPrimary,
-        letterSpacing: '0.06em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8,
-      }}>
-        <Cpu size={15} aria-hidden /> AGENTS
-      </h2>
+    <div className={styles.page}>
+      <div className={styles.head}>
+        <h2 className={styles.title}>
+          <Cpu size={15} aria-hidden /> AGENTS
+        </h2>
+        <Link to="/settings/agents" className={styles.manageLink}>
+          Manage agents in Settings →
+        </Link>
+      </div>
 
       {agents.length === 0 && (
-        <p style={{ fontSize: 12, color: tokens.textMuted, fontFamily: tokens.fontMono }}>
-          No agents registered. Seed one with <code>orchestrate seed demo --stub</code>.
+        <p className={styles.empty}>
+          No agents registered. Add one in Settings → Agents, or seed with{' '}
+          <code>orchestrate seed demo --stub</code>.
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className={styles.list}>
         {agents.map((a) => {
           const task = currentTaskFor(a.id, goals);
           const running = task !== null;
-          const dot = running ? tokens.yellow : tokens.green;
           const capNames = (a.capabilities ?? []).map((c) => c.id ?? c.name);
 
           return (
-            <div key={a.id} style={{
-              background: tokens.cardBg, border: `1px solid ${tokens.border}`,
-              borderRadius: tokens.r12, padding: '12px 14px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CircleDot size={12} color={dot} aria-hidden />
-                <span style={{ fontSize: 13, fontWeight: 600, color: tokens.textPrimary }}>{a.name}</span>
-                <span style={{
-                  fontSize: 9, fontFamily: tokens.fontMono, color: dot,
-                  textTransform: 'uppercase', letterSpacing: '0.08em',
-                }}>{running ? 'running' : 'idle'}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted }}>
-                  {a.id}
+            <div key={a.id} className={styles.card}>
+              <div className={styles.cardHead}>
+                <CircleDot
+                  size={12}
+                  color={running ? 'var(--gate)' : 'var(--ok)'}
+                  aria-hidden
+                />
+                <span className={styles.name}>{a.name}</span>
+                <span
+                  className={`${styles.state} ${running ? styles.stateRunning : styles.stateIdle}`}
+                >
+                  {running ? 'running' : 'idle'}
                 </span>
+                <span className={styles.id}>{a.id}</span>
               </div>
 
-              <div style={{ fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted, marginTop: 5 }}>
+              <div className={styles.meta}>
                 {a.role} · {capNames.join(' · ') || 'no capabilities'}
               </div>
 
               {task ? (
-                <div style={{
-                  marginTop: 8,
-                  background: tokens.yellow + '12', border: `1px solid ${tokens.yellow}33`,
-                  borderRadius: 6, padding: '6px 8px',
-                  fontSize: 10, fontFamily: tokens.fontMono, color: tokens.yellow,
-                }}>
-                  ▸ {task.name}
-                </div>
+                <div className={styles.task}>▸ {task.name}</div>
               ) : (
-                <div style={{ marginTop: 8, fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textMuted }}>
-                  no task in flight
-                </div>
+                <div className={styles.noTask}>no task in flight</div>
               )}
             </div>
           );

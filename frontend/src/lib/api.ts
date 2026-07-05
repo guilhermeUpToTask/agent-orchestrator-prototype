@@ -10,18 +10,29 @@
  */
 
 import type {
+  AgentBody,
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  DefaultAgentResponse,
   IaModel,
   MessageResponse,
   ModelProvider,
   Plan,
   PlanSummary,
+  ProjectDefinition,
+  ProviderCreateBody,
+  ProviderUpdateBody,
+  ReasonerStatusResponse,
+  RunnerStatusResponse,
   SSEPayload,
 } from '../types/ui';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+
+// Control-plane auth (reference/config routers): open when the backend has no
+// ORCHESTRATOR_API_TOKEN; otherwise mirror it here as VITE_API_TOKEN.
+const API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +46,7 @@ async function request<T>(
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(API_TOKEN ? { 'X-API-Token': API_TOKEN } : {}),
       ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -50,6 +62,9 @@ async function request<T>(
 const get = <T>(path: string) => request<T>('GET', path);
 const post = <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
   request<T>('POST', path, body, headers);
+const put = <T>(path: string, body?: unknown) => request<T>('PUT', path, body);
+const del = <T>(path: string) => request<T>('DELETE', path);
+const enc = encodeURIComponent;
 
 // ─── Plans: lifecycle ─────────────────────────────────────────────────────────
 
@@ -117,26 +132,90 @@ export interface EditBody {
 export const applyEdit = (planId: string, edit: EditBody): Promise<void> =>
   post(`/api/plans/${encodeURIComponent(planId)}/edits`, edit);
 
-// ─── Reference data ───────────────────────────────────────────────────────────
+// ─── Reference data: reads ────────────────────────────────────────────────────
 
 export const listAgents = (): Promise<AgentSpec[]> => get('/api/agents');
 export const listCapabilities = (): Promise<Capability[]> => get('/api/capabilities');
 export const listProviders = (): Promise<ModelProvider[]> => get('/api/providers');
 export const listModels = (): Promise<IaModel[]> => get('/api/models');
+export const listProjects = (): Promise<ProjectDefinition[]> => get('/api/projects');
+export const getDefaultAgent = (): Promise<DefaultAgentResponse> =>
+  get('/api/agents/default');
 
-// ─── Two-tier config ──────────────────────────────────────────────────────────
+// ─── Reference data: capabilities ─────────────────────────────────────────────
+
+export const createCapability = (cap: Capability): Promise<Capability> =>
+  post('/api/capabilities', cap);
+export const updateCapability = (id: string, cap: Capability): Promise<void> =>
+  put(`/api/capabilities/${enc(id)}`, cap);
+export const deleteCapability = (id: string): Promise<void> =>
+  del(`/api/capabilities/${enc(id)}`);
+
+// ─── Reference data: agents ───────────────────────────────────────────────────
+
+export const createAgent = (body: AgentBody): Promise<AgentSpec> =>
+  post('/api/agents', body);
+export const updateAgent = (id: string, body: AgentBody): Promise<void> =>
+  put(`/api/agents/${enc(id)}`, body);
+export const deleteAgent = (id: string): Promise<void> => del(`/api/agents/${enc(id)}`);
+export const setDefaultAgent = (id: string): Promise<void> =>
+  post(`/api/agents/${enc(id)}/default`);
+
+// ─── Reference data: providers & models ───────────────────────────────────────
+// A provider API key travels ONCE in the create/update body; the backend
+// stores it envelope-encrypted and only ever returns the api_key_ref URI.
+
+export const createProvider = (body: ProviderCreateBody): Promise<ModelProvider> =>
+  post('/api/providers', body);
+export const updateProvider = (id: string, body: ProviderUpdateBody): Promise<void> =>
+  put(`/api/providers/${enc(id)}`, body);
+export const deleteProvider = (id: string): Promise<void> =>
+  del(`/api/providers/${enc(id)}`);
+
+export const createModel = (providerId: string, name: string): Promise<IaModel> =>
+  post(`/api/providers/${enc(providerId)}/models`, { name });
+export const renameModel = (modelId: string, name: string): Promise<void> =>
+  put(`/api/models/${enc(modelId)}`, { name });
+export const deleteModel = (modelId: string): Promise<void> =>
+  del(`/api/models/${enc(modelId)}`);
+
+// ─── Reference data: projects ─────────────────────────────────────────────────
+
+export const createProject = (body: {
+  name: string;
+  repo_url?: string | null;
+}): Promise<ProjectDefinition> => post('/api/projects', body);
+export const updateProject = (
+  id: string,
+  body: { name: string; repo_url?: string | null },
+): Promise<void> => put(`/api/projects/${enc(id)}`, body);
+export const deleteProject = (id: string): Promise<void> =>
+  del(`/api/projects/${enc(id)}`);
+
+// ─── Two-tier config + reasoner status ────────────────────────────────────────
 
 export const getConfigScope = (scope: string): Promise<Record<string, string>> =>
-  get(`/api/config/${encodeURIComponent(scope)}`);
+  get(`/api/config/${enc(scope)}`);
 
 export const setConfigKey = (
   scope: string,
   key: string,
   value: string,
-): Promise<void> =>
-  request('PUT', `/api/config/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`, {
-    value,
-  });
+): Promise<void> => put(`/api/config/${enc(scope)}/${enc(key)}`, { value });
+
+export const deleteConfigKey = (scope: string, key: string): Promise<void> =>
+  del(`/api/config/${enc(scope)}/${enc(key)}`);
+
+/** Live catalog-wiring check of the stored reasoner.* config (always 200). */
+export const getReasonerStatus = (): Promise<ReasonerStatusResponse> =>
+  get('/api/reasoner/status');
+
+/**
+ * Agent-runner status (always 200): global mode, per-agent runtime bindings
+ * against the catalog, and the CLI binary probes.
+ */
+export const getRunnerStatus = (): Promise<RunnerStatusResponse> =>
+  get('/api/runner/status');
 
 // ─── SSE subscription ─────────────────────────────────────────────────────────
 

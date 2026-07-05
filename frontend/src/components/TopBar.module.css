@@ -57,6 +57,15 @@
 
 .spacer { flex: 1; }
 
+.navIcon {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+}
+.navIcon:hover { color: var(--text-1); background: var(--bg-3); }
+
 /* ── Connection indicator ────────────────────────────────────────────────── */
 
 .conn {

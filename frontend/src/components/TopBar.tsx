@@ -1,13 +1,31 @@
-import React from 'react';
-import { RefreshCw, Settings as SettingsIcon, List } from 'lucide-react';
+import React, { useState } from 'react';
+import { Moon, RefreshCw, Settings as SettingsIcon, List, Sun } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlannerStore } from '../store/plannerStore';
 import { usePlan } from '../lib/queries';
 import { relTime, absTime, useNow } from '../lib/time';
+import { applyTheme, currentTheme, type Theme } from '../lib/theme';
 import { StatusBadge } from './StatusBadge';
-import { tokens } from '../styles/tokens';
 import styles from './TopBar.module.css';
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  const next: Theme = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      className={styles.navIcon}
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme`}
+      onClick={() => {
+        applyTheme(next);
+        setTheme(next);
+      }}
+    >
+      {theme === 'dark' ? <Sun size={15} aria-hidden /> : <Moon size={15} aria-hidden />}
+    </button>
+  );
+}
 
 /**
  * Persistent connection truth. A chat bubble that scrolls away is not a
@@ -81,22 +99,18 @@ export function TopBar() {
       </div>
 
       <div className={styles.spacer} />
-      <Link
-        to="/"
-        aria-label="All plans"
-        title="All plans"
-        style={{ display: 'inline-flex', alignItems: 'center', color: tokens.textMuted }}
-      >
+      <Link to="/" aria-label="All plans" title="All plans" className={styles.navIcon}>
         <List size={15} aria-hidden />
       </Link>
       <Link
         to="/settings"
         aria-label="Settings"
         title="Settings"
-        style={{ display: 'inline-flex', alignItems: 'center', color: tokens.textMuted }}
+        className={styles.navIcon}
       >
         <SettingsIcon size={15} aria-hidden />
       </Link>
+      <ThemeToggle />
       <ConnectionIndicator />
     </header>
   );

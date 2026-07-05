@@ -22,24 +22,56 @@ import { nanoid } from 'nanoid';
 import {
   applyEdit,
   approvePlan,
+  createAgent,
+  createCapability,
+  createModel,
   createPlan,
+  createProject,
+  createProvider,
+  deleteAgent,
+  deleteCapability,
+  deleteModel,
+  deleteProject,
+  deleteProvider,
   fetchChat,
   fetchPlan,
   finishReview,
+  getConfigScope,
+  getDefaultAgent,
+  getReasonerStatus,
+  getRunnerStatus,
   listAgents,
   listCapabilities,
+  listModels,
   listPlans,
+  listProjects,
+  listProviders,
+  renameModel,
   replanFromReview,
   replanMidRunning,
   sendDiscoveryMessage,
   sendReplanningMessage,
+  setConfigKey,
+  setDefaultAgent,
   subscribeToEvents,
+  updateAgent,
+  updateCapability,
+  updateProject,
+  updateProvider,
   type EditBody,
   type SSEEvent,
 } from './api';
 import { toast, errorDetail } from './toast';
 import { usePlannerStore } from '../store/plannerStore';
-import type { MessageResponse, Plan, PlanPhase } from '../types/ui';
+import type {
+  AgentBody,
+  Capability,
+  MessageResponse,
+  Plan,
+  PlanPhase,
+  ProviderCreateBody,
+  ProviderUpdateBody,
+} from '../types/ui';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,7 +90,14 @@ export const keys = {
   plan: (id: string) => ['plan', id] as const,
   chat: (id: string) => ['chat', id] as const,
   agents: ['agents'] as const,
+  defaultAgent: ['agents', 'default'] as const,
   capabilities: ['capabilities'] as const,
+  providers: ['providers'] as const,
+  models: ['models'] as const,
+  projects: ['projects'] as const,
+  config: (scope: string) => ['config', scope] as const,
+  reasonerStatus: ['reasoner-status'] as const,
+  runnerStatus: ['runner-status'] as const,
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────────
@@ -89,6 +128,34 @@ export function useAgents() {
 
 export function useCapabilities() {
   return useQuery({ queryKey: keys.capabilities, queryFn: listCapabilities });
+}
+
+export function useProviders() {
+  return useQuery({ queryKey: keys.providers, queryFn: listProviders });
+}
+
+export function useModels() {
+  return useQuery({ queryKey: keys.models, queryFn: listModels });
+}
+
+export function useProjects() {
+  return useQuery({ queryKey: keys.projects, queryFn: listProjects });
+}
+
+export function useDefaultAgent() {
+  return useQuery({ queryKey: keys.defaultAgent, queryFn: getDefaultAgent });
+}
+
+export function useConfigScope(scope: string) {
+  return useQuery({ queryKey: keys.config(scope), queryFn: () => getConfigScope(scope) });
+}
+
+export function useReasonerStatus() {
+  return useQuery({ queryKey: keys.reasonerStatus, queryFn: getReasonerStatus });
+}
+
+export function useRunnerStatus() {
+  return useQuery({ queryKey: keys.runnerStatus, queryFn: getRunnerStatus });
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────
@@ -163,6 +230,168 @@ export function useApplyEdit(planId: string) {
     mutationFn: (edit: EditBody) => applyEdit(planId, edit),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
     onError: (err) => toast.error('Edit rejected', errorDetail(err)),
+  });
+}
+
+// ─── Reference-data + config mutations ─────────────────────────────────────────
+
+/** Shared shape: invalidate the affected keys on success, toast on error. */
+function useRefMutation<TArgs, TResult>(
+  fn: (args: TArgs) => Promise<TResult>,
+  label: string,
+  invalidates: readonly (readonly string[])[],
+  onSuccessToast?: string,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      for (const key of invalidates) qc.invalidateQueries({ queryKey: key });
+      if (onSuccessToast) toast.success(onSuccessToast);
+    },
+    onError: (err) => toast.error(`${label} failed`, errorDetail(err)),
+  });
+}
+
+// Providers — deletes cascade models; both can rewire the reasoner status.
+export const useCreateProvider = () =>
+  useRefMutation(
+    (body: ProviderCreateBody) => createProvider(body),
+    'Create provider',
+    [keys.providers, keys.reasonerStatus, keys.runnerStatus],
+    'Provider created',
+  );
+export const useUpdateProvider = () =>
+  useRefMutation(
+    ({ id, body }: { id: string; body: ProviderUpdateBody }) =>
+      updateProvider(id, body),
+    'Update provider',
+    [keys.providers, keys.reasonerStatus, keys.runnerStatus],
+    'Provider saved',
+  );
+export const useDeleteProvider = () =>
+  useRefMutation(
+    (id: string) => deleteProvider(id),
+    'Delete provider',
+    [keys.providers, keys.models, keys.reasonerStatus, keys.runnerStatus],
+    'Provider deleted',
+  );
+
+// Models
+export const useCreateModel = () =>
+  useRefMutation(
+    ({ providerId, name }: { providerId: string; name: string }) =>
+      createModel(providerId, name),
+    'Add model',
+    [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
+    'Model added',
+  );
+export const useRenameModel = () =>
+  useRefMutation(
+    ({ modelId, name }: { modelId: string; name: string }) =>
+      renameModel(modelId, name),
+    'Rename model',
+    [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
+    'Model renamed',
+  );
+export const useDeleteModel = () =>
+  useRefMutation(
+    (modelId: string) => deleteModel(modelId),
+    'Delete model',
+    [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
+    'Model deleted',
+  );
+
+// Capabilities — agents embed capability objects, so refresh those too.
+export const useCreateCapability = () =>
+  useRefMutation(
+    (cap: Capability) => createCapability(cap),
+    'Create capability',
+    [keys.capabilities, keys.agents],
+    'Capability created',
+  );
+export const useUpdateCapability = () =>
+  useRefMutation(
+    ({ id, cap }: { id: string; cap: Capability }) => updateCapability(id, cap),
+    'Update capability',
+    [keys.capabilities, keys.agents],
+    'Capability saved',
+  );
+export const useDeleteCapability = () =>
+  useRefMutation(
+    (id: string) => deleteCapability(id),
+    'Delete capability',
+    [keys.capabilities, keys.agents],
+    'Capability deleted',
+  );
+
+// Agents
+export const useCreateAgent = () =>
+  useRefMutation(
+    (body: AgentBody) => createAgent(body),
+    'Create agent',
+    [keys.agents, keys.defaultAgent, keys.runnerStatus],
+    'Agent created',
+  );
+export const useUpdateAgent = () =>
+  useRefMutation(
+    ({ id, body }: { id: string; body: AgentBody }) => updateAgent(id, body),
+    'Update agent',
+    [keys.agents, keys.defaultAgent, keys.runnerStatus],
+    'Agent saved',
+  );
+export const useDeleteAgent = () =>
+  useRefMutation(
+    (id: string) => deleteAgent(id),
+    'Delete agent',
+    [keys.agents, keys.defaultAgent, keys.runnerStatus],
+    'Agent deleted',
+  );
+export const useSetDefaultAgent = () =>
+  useRefMutation(
+    (id: string) => setDefaultAgent(id),
+    'Set default agent',
+    [keys.agents, keys.defaultAgent, keys.runnerStatus],
+    'Default agent set',
+  );
+
+// Projects
+export const useCreateProject = () =>
+  useRefMutation(
+    (body: { name: string; repo_url?: string | null }) => createProject(body),
+    'Create project',
+    [keys.projects],
+    'Project created',
+  );
+export const useUpdateProject = () =>
+  useRefMutation(
+    ({ id, body }: { id: string; body: { name: string; repo_url?: string | null } }) =>
+      updateProject(id, body),
+    'Update project',
+    [keys.projects],
+    'Project saved',
+  );
+export const useDeleteProject = () =>
+  useRefMutation(
+    (id: string) => deleteProject(id),
+    'Delete project',
+    [keys.projects],
+    'Project deleted',
+  );
+
+// Config — a reasoner.* write immediately re-validates the status banner.
+export function useSetConfigKey(scope: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) =>
+      setConfigKey(scope, key, value),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.config(scope) });
+      qc.invalidateQueries({ queryKey: keys.reasonerStatus });
+      qc.invalidateQueries({ queryKey: keys.runnerStatus });
+      toast.success('Config saved', 'Restart the API/worker to apply.');
+    },
+    onError: (err) => toast.error('Config save failed', errorDetail(err)),
   });
 }
 

@@ -41,7 +41,7 @@ function GoalLegend({ plan }: { plan: Plan | undefined }) {
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 5,
       padding: '10px 12px',
-      background: tokens.panelBg + 'ee',
+      background: raw.bg1 + 'ee', // hex+alpha concat — must stay raw
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',
@@ -79,7 +79,7 @@ function BriefStrip({ plan }: { plan: Plan | undefined }) {
     <div style={{
       maxWidth: 360,
       padding: '8px 12px',
-      background: tokens.panelBg + 'ee',
+      background: raw.bg1 + 'ee', // hex+alpha concat — must stay raw
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',
@@ -155,7 +155,7 @@ export function PlanCanvas({ planId }: { planId: string }) {
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{
           type: 'smoothstep',
-          style: { strokeWidth: 1.5, stroke: tokens.border },
+          style: { strokeWidth: 1.5, stroke: raw.border0 },
         }}
         style={{ background: tokens.bg }}
       >
@@ -174,7 +174,7 @@ export function PlanCanvas({ planId }: { planId: string }) {
             if (n.type === 'goalGroup') return '#1c2030';
             const data = (n as Node<TaskNodeData>).data;
             const meta = STATUS[data?.task?.status ?? 'pending'];
-            return meta ? KIND_COLOR[meta.kind] : tokens.border;
+            return meta ? KIND_COLOR[meta.kind] : raw.border0;
           }}
           maskColor="rgba(11,13,18,0.7)"
           nodeStrokeWidth={0}

@@ -901,6 +901,71 @@
         }
       }
     },
+    "/api/agents/default": {
+      "get": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Get Default Agent",
+        "operationId": "reference-get_default_agent",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultAgentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}": {
       "put": {
         "tags": [
@@ -1549,6 +1614,82 @@
       }
     },
     "/api/models/{model_id}": {
+      "put": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Update Model",
+        "description": "Rename only \u2014 a model's provider binding is immutable.",
+        "operationId": "reference-update_model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "reference"
@@ -2135,6 +2276,136 @@
         }
       }
     },
+    "/api/reasoner/status": {
+      "get": {
+        "tags": [
+          "reasoner"
+        ],
+        "summary": "Reasoner Status",
+        "operationId": "reasoner-reasoner_status",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonerStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runner/status": {
+      "get": {
+        "tags": [
+          "runner"
+        ],
+        "summary": "Runner Status",
+        "operationId": "runner-runner_status",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
@@ -2217,6 +2488,33 @@
                 "token_limit"
               ]
             }
+          },
+          "runtime_type": {
+            "type": "string",
+            "title": "Runtime Type",
+            "default": "pi"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           }
         },
         "type": "object",
@@ -2259,6 +2557,33 @@
           },
           "default_retry": {
             "$ref": "#/components/schemas/RetryPolicy"
+          },
+          "runtime_type": {
+            "type": "string",
+            "title": "Runtime Type",
+            "default": "pi"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           }
         },
         "type": "object",
@@ -2271,7 +2596,7 @@
           "default_retry"
         ],
         "title": "AgentSpec",
-        "description": "Definition of an agent: who it is, what it can do, how it retries.\n\n`role` is the agent's functional job in the orchestration (e.g. \"test_writer\",\n\"implementer\", \"reviewer\"). `model_role` is an indirection key into the\nprovider/model catalog naming a model *tier* (e.g. \"cheap\", \"smart\",\n\"long_context\") resolved to a concrete IAModel at runtime \u2014 so swapping the\nmodel behind a tier does not require touching every agent that uses it."
+        "description": "Definition of an agent: who it is, what it can do, how it retries,\nand which runtime executes it.\n\n`role` is the agent's functional job in the orchestration (e.g. \"test_writer\",\n\"implementer\", \"reviewer\"). `model_role` is an indirection key into the\nprovider/model catalog naming a model *tier* (e.g. \"cheap\", \"smart\",\n\"long_context\") resolved to a concrete IAModel at runtime \u2014 so swapping the\nmodel behind a tier does not require touching every agent that uses it.\n\nRuntime resolution (deliberate Phase-0 un-freeze, 2026-07-05): the agent\nregistry is the authority on which runtime an agent resolves to \u2014\n`runtime_type` picks the CLI runtime (or the dry-run dummy), and\n`provider_id`/`model_id` point into the providers/models catalog for the\ncredentials and model string. Infra validates the wiring; the entity only\ncarries it."
       },
       "Capability": {
         "properties": {
@@ -2359,6 +2684,26 @@
           "brief"
         ],
         "title": "CreatePlanRequest"
+      },
+      "DefaultAgentResponse": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "title": "DefaultAgentResponse"
       },
       "EditRequest": {
         "properties": {
@@ -2744,6 +3089,79 @@
         ],
         "title": "ProviderUpdateBody"
       },
+      "ReasonerStatusResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "valid"
+        ],
+        "title": "ReasonerStatusResponse"
+      },
       "RetryPolicy": {
         "properties": {
           "max_attempts": {
@@ -2782,6 +3200,178 @@
         "type": "object",
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
+      },
+      "RunnerAgentStatus": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "agent_name": {
+            "type": "string",
+            "title": "Agent Name"
+          },
+          "runtime_type": {
+            "type": "string",
+            "title": "Runtime Type"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "agent_name",
+          "runtime_type",
+          "valid"
+        ],
+        "title": "RunnerAgentStatus"
+      },
+      "RunnerBinaryStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "binary": {
+            "type": "string",
+            "title": "Binary"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "install_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Hint"
+          },
+          "is_runtime": {
+            "type": "boolean",
+            "title": "Is Runtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "binary",
+          "ok",
+          "message",
+          "is_runtime"
+        ],
+        "title": "RunnerBinaryStatus"
+      },
+      "RunnerStatusResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "binaries": {
+            "items": {
+              "$ref": "#/components/schemas/RunnerBinaryStatus"
+            },
+            "type": "array",
+            "title": "Binaries"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/RunnerAgentStatus"
+            },
+            "type": "array",
+            "title": "Agents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "valid",
+          "binaries",
+          "agents"
+        ],
+        "title": "RunnerStatusResponse"
       },
       "ValidationError": {
         "properties": {

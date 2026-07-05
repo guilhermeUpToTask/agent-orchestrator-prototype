@@ -1,7 +1,7 @@
 import dagre from 'dagre';
 import type { Node, Edge } from '@xyflow/react';
 import type { AgentSpec, Goal, TaskNodeData } from '../types/ui';
-import { tokens } from '../styles/tokens';
+import { raw } from '../styles/tokens';
 
 const NODE_W = 240;
 const NODE_H = 130;
@@ -12,7 +12,8 @@ const GROUP_HEADER = 44;
 const EMPTY_GROUP_W = 280;
 const EMPTY_GROUP_H = 96;
 
-export const GOAL_COLORS = [tokens.accent, tokens.purple, tokens.cyan, tokens.green, tokens.orange];
+// React Flow edge/group colors can't resolve CSS vars — raw hex only here.
+export const GOAL_COLORS = [raw.run, raw.run, raw.run, raw.ok, raw.gate];
 
 export interface GoalGroupData {
   goal: Goal;
@@ -154,7 +155,7 @@ function makeTaskEdge(src: string, dst: string, active: boolean): Edge {
     type: 'smoothstep',
     animated: active,
     style: {
-      stroke: active ? tokens.accent : tokens.border,
+      stroke: active ? raw.run : raw.border0,
       strokeWidth: 1.5,
       strokeDasharray: active ? undefined : '5 4',
     },
@@ -170,7 +171,7 @@ function makeGoalEdge(src: string, dst: string, satisfied: boolean): Edge {
     type: 'smoothstep',
     animated: !satisfied,
     style: {
-      stroke: satisfied ? tokens.green : tokens.purple,
+      stroke: satisfied ? raw.ok : raw.run,
       strokeWidth: 2.5,
       strokeDasharray: satisfied ? undefined : '8 5',
     },

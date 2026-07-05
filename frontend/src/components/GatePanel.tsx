@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import React from 'react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
   useApprovePlan,
@@ -7,6 +6,7 @@ import {
   usePlan,
   useReplanFromReview,
 } from '../lib/queries';
+import { Dialog, ConfirmAction } from './ui';
 import type { Plan } from '../types/ui';
 import styles from './GatePanel.module.css';
 
@@ -22,91 +22,31 @@ export function GatePanel({ planId }: { planId: string }) {
   const gateOpen = usePlannerStore((s) => s.ui.gateOpen);
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
   const { data: plan } = usePlan(planId);
-  const panelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!gateOpen) return;
-    panelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setGateOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [gateOpen, setGateOpen]);
-
-  if (!gateOpen || !plan) return null;
+  if (!plan) return null;
 
   const close = () => setGateOpen(false);
 
   return (
-    <div className={styles.scrim} onClick={close}>
-      <div
-        ref={panelRef}
-        className={styles.panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Approval gate"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className={styles.header}>
-          <span className="label">Operator gate</span>
-          <button className={styles.close} onClick={close} aria-label="Close approval panel">
-            <X size={15} aria-hidden />
-          </button>
-        </header>
-
-        {plan.phase === 'awaiting_review' && (
-          <PreExecutionGate plan={plan} planId={planId} onDone={close} />
-        )}
-        {plan.phase === 'review' && (
-          <PostExecutionGate plan={plan} planId={planId} onDone={close} />
-        )}
-        {!['awaiting_review', 'review'].includes(plan.phase) && (
-          <p className={styles.body}>
-            Nothing is waiting on you — the plan is in “{plan.phase}”.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ── Two-step confirm: primary button → inline confirm with consequence ──── */
-
-function ConfirmAction({
-  label, consequence, pending, demoted, onConfirm,
-}: {
-  label: string;
-  consequence: string;
-  pending?: boolean;
-  demoted?: boolean;
-  onConfirm: () => void;
-}) {
-  const [arming, setArming] = useState(false);
-
-  if (!arming) {
-    return (
-      <button
-        className={demoted ? styles.demotedBtn : styles.armBtn}
-        onClick={() => setArming(true)}
-        disabled={pending}
-      >
-        {label}
-      </button>
-    );
-  }
-
-  return (
-    <div className={styles.confirmRow} role="group" aria-label={`Confirm: ${label}`}>
-      <span className={styles.consequence}>{consequence}</span>
-      <button className={styles.cancelBtn} onClick={() => setArming(false)} disabled={pending}>
-        Cancel
-      </button>
-      <button className={styles.confirmBtn} onClick={onConfirm} disabled={pending}>
-        {pending ? 'Working…' : `Confirm: ${label}`}
-      </button>
-    </div>
+    <Dialog
+      open={gateOpen}
+      onClose={close}
+      ariaLabel="Approval gate"
+      title="Operator gate"
+      width={640}
+    >
+      {plan.phase === 'awaiting_review' && (
+        <PreExecutionGate plan={plan} planId={planId} onDone={close} />
+      )}
+      {plan.phase === 'review' && (
+        <PostExecutionGate plan={plan} planId={planId} onDone={close} />
+      )}
+      {!['awaiting_review', 'review'].includes(plan.phase) && (
+        <p className={styles.body}>
+          Nothing is waiting on you — the plan is in “{plan.phase}”.
+        </p>
+      )}
+    </Dialog>
   );
 }
 

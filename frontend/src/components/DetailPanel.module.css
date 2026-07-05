@@ -1,0 +1,111 @@
+.panel {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-0);
+  padding: var(--sp-4);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.head > :first-child { margin-right: auto; }
+
+.close {
+  display: flex;
+  padding: 2px;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+}
+.close:hover { color: var(--text-1); background: var(--bg-3); }
+
+.name {
+  font-size: var(--fs-emph);
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+  margin: 0 0 4px;
+}
+
+.id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  margin-bottom: var(--sp-4);
+}
+
+.field { margin-bottom: var(--sp-4); }
+.fieldLabel { margin-bottom: 4px; }
+
+.text {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.muted {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.monoText {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+
+.tags {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  background: var(--run-bg);
+  border: 1px solid color-mix(in srgb, var(--run) 25%, transparent);
+  color: var(--run-text);
+}
+
+.backoff {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--gate-text);
+}
+
+.failure {
+  padding: 6px 9px;
+  border-radius: var(--r-2);
+  margin-bottom: 6px;
+  background: var(--fail-bg);
+  border: 1px solid color-mix(in srgb, var(--fail) 25%, transparent);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fail-text);
+  line-height: 1.5;
+}
+
+.output {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
