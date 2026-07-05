@@ -36,18 +36,18 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
   return (
     <>
       <Handle type="target" position={Position.Left} style={{
-        background: tokens.accentDim, border: `1.5px solid ${isSelected ? tokens.accent : '#2a3050'}`,
+        background: tokens.accentDim, border: `1.5px solid ${isSelected ? tokens.accent : 'var(--border-1)'}`,
         width: 8, height: 8, left: -4,
       }} />
 
       <div onClick={() => selectTask(isSelected ? null : id)} style={{
         width: 240,
-        background: isSelected ? '#141928' : tokens.cardBg,
-        border: `1.5px solid ${isSelected ? tokens.accent : isRunning ? tokens.yellow + '44' : isFailed ? tokens.red + '33' : tokens.border}`,
+        background: isSelected ? 'var(--run-bg)' : tokens.cardBg,
+        border: `1.5px solid ${isSelected ? tokens.accent : isRunning ? 'color-mix(in srgb, var(--gate) 27%, transparent)' : isFailed ? 'color-mix(in srgb, var(--fail) 20%, transparent)' : tokens.border}`,
         borderRadius: tokens.r12, cursor: 'pointer', userSelect: 'none',
         boxShadow: isSelected
           ? `0 0 0 1px ${tokens.accentGlow}, 0 8px 32px rgba(0,0,0,0.7)`
-          : isRunning ? `0 0 16px ${tokens.yellow}22, 0 4px 12px rgba(0,0,0,0.5)`
+          : isRunning ? '0 0 16px color-mix(in srgb, var(--gate) 13%, transparent), 0 4px 12px rgba(0,0,0,0.5)'
           : '0 4px 16px rgba(0,0,0,0.4)',
         transition: 'box-shadow 0.2s, border-color 0.2s',
         animation: 'fadein 0.18s ease both', overflow: 'hidden',
@@ -68,13 +68,15 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <span style={{
               fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
-              borderRadius: 3, background: '#1c2030', color: tokens.textMuted,
+              borderRadius: 3, background: 'var(--bg-3)', color: tokens.textMuted,
             }}>{data.goalName}</span>
             {data.agent && (
               <span style={{
                 fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
-                borderRadius: 3, background: tokens.accent + '18',
-                border: `1px solid ${tokens.accent}33`, color: tokens.accent,
+                borderRadius: 3,
+                background: 'color-mix(in srgb, var(--accent) 9%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
+                color: tokens.accent,
               }}>{data.agent.name}</span>
             )}
           </div>
@@ -155,7 +157,7 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
 
       <Handle type="source" position={Position.Right} style={{
         background: isDone ? tokens.green : tokens.accentDim,
-        border: `1.5px solid ${isSelected ? tokens.accent : '#2a3050'}`,
+        border: `1.5px solid ${isSelected ? tokens.accent : 'var(--border-1)'}`,
         width: 8, height: 8, right: -4,
       }} />
     </>

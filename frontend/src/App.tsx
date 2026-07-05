@@ -10,7 +10,7 @@ import { Overview } from './views/Overview';
 import { GoalsView } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { AgentsView } from './views/Agents';
-import { SettingsView } from './views/Settings';
+import { SettingsLayout } from './views/settings/SettingsLayout';
 import { PlansView } from './views/Plans';
 import { usePlannerStore } from './store/plannerStore';
 import { useSSEBridge } from './lib/queries';
@@ -81,13 +81,11 @@ export default function App() {
             }
           />
           <Route
-            path="/settings"
+            path="/settings/*"
             element={
               <div className={styles.body}>
                 <main className={styles.main}>
-                  <div className={styles.viewScroll}>
-                    <SettingsView />
-                  </div>
+                  <SettingsLayout />
                 </main>
               </div>
             }

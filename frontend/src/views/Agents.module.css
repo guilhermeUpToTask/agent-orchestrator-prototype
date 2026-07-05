@@ -1,0 +1,100 @@
+.page {
+  padding: var(--sp-5);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  letter-spacing: 0.06em;
+  color: var(--text-1);
+}
+
+.manageLink {
+  font-size: 12px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 720px;
+}
+
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.state {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.stateRunning { color: var(--gate-text); }
+.stateIdle { color: var(--ok-text); }
+
+.id {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  margin-top: var(--sp-1);
+}
+
+.task {
+  margin-top: var(--sp-2);
+  background: var(--gate-bg);
+  border: 1px solid color-mix(in srgb, var(--gate) 35%, transparent);
+  border-radius: var(--r-2);
+  padding: 6px var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gate-text);
+}
+
+.noTask {
+  margin-top: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.empty {
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}

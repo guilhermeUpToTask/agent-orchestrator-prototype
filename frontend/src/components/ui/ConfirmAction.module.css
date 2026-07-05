@@ -1,0 +1,67 @@
+.armBtn,
+.demotedBtn,
+.confirmBtn,
+.cancelBtn {
+  padding: 8px 14px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+
+/* tone: gate (amber — the operator's queue) */
+.armBtn.gate, .confirmBtn.gate { background: var(--gate); color: #1f1602; }
+.armBtn.gate:hover, .confirmBtn.gate:hover {
+  background: color-mix(in srgb, var(--gate) 85%, white);
+}
+
+/* tone: danger (red — removal) */
+.armBtn.danger, .confirmBtn.danger {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--fail) 55%, transparent);
+  color: var(--fail-text);
+}
+.armBtn.danger:hover, .confirmBtn.danger:hover { background: var(--fail-bg); }
+
+.armBtn { align-self: flex-start; }
+
+.demotedBtn {
+  background: transparent;
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+  align-self: flex-start;
+}
+.demotedBtn:hover { background: var(--bg-2); color: var(--text-1); }
+
+.confirmRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-3);
+  border-radius: var(--r-2);
+}
+.confirmRow.gate {
+  background: var(--gate-bg);
+  border: 1px solid color-mix(in srgb, var(--gate) 45%, transparent);
+}
+.confirmRow.danger {
+  background: var(--fail-bg);
+  border: 1px solid color-mix(in srgb, var(--fail) 45%, transparent);
+}
+
+.consequence {
+  flex: 1 1 200px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.confirmRow.gate .consequence { color: var(--gate-text); }
+.confirmRow.danger .consequence { color: var(--fail-text); }
+
+.confirmBtn:disabled, .armBtn:disabled { opacity: 0.55; }
+
+.cancelBtn {
+  background: transparent;
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+}
+.cancelBtn:hover { background: var(--bg-2); }

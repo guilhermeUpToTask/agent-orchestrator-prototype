@@ -1,0 +1,40 @@
+.field {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  font-family: var(--font-sans);
+  transition: border-color 120ms ease;
+}
+.field::placeholder { color: var(--text-3); }
+.field:hover:not(:disabled) { border-color: var(--border-1); }
+.field:focus { border-color: var(--accent); }
+.field:disabled { opacity: 0.55; }
+
+.mono { font-family: var(--font-mono); }
+
+.textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+.invalid, .invalid:focus { border-color: var(--fail); }
+
+/* shared by Select */
+.select {
+  appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 2px),
+    calc(100% - 11px) calc(50% - 2px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ChevronRight, Plus } from 'lucide-react';
 import { useCreatePlan, usePlans } from '../lib/queries';
 import { StatusBadge } from '../components/StatusBadge';
+import { Button, TextArea } from '../components/ui';
 import { tokens } from '../styles/tokens';
 import styles from './Overview.module.css';
 
@@ -50,17 +51,9 @@ export function PlansView() {
       <header className={styles.phaseHeader}>
         <div className={styles.phaseTitleRow}>
           <h1 className={styles.phaseTitle}>Plans</h1>
-          <button
-            onClick={() => setComposing((v) => !v)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '6px 12px', borderRadius: tokens.r6, cursor: 'pointer',
-              background: tokens.accent, border: 'none', color: '#fff',
-              fontFamily: tokens.fontSans, fontSize: 12, fontWeight: 600,
-            }}
-          >
+          <Button variant="primary" onClick={() => setComposing((v) => !v)}>
             <Plus size={14} aria-hidden /> New plan
-          </button>
+          </Button>
         </div>
         <p className={styles.phaseGoal}>
           Each plan walks the 9-phase machine: chat the roadmap, approve it,
@@ -71,43 +64,23 @@ export function PlansView() {
       {composing && (
         <section className={styles.section} aria-label="New plan">
           <h2 className={styles.sectionTitle + ' label'}>New plan — the brief</h2>
-          <textarea
+          <TextArea
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
             placeholder="Describe what you want built. The discovery conversation starts from this brief."
             rows={4}
             autoFocus
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: tokens.inputBg, border: `1px solid ${tokens.border}`,
-              borderRadius: tokens.r8, padding: '10px 12px',
-              fontFamily: tokens.fontSans, fontSize: 12, color: tokens.textPrimary,
-              outline: 'none', resize: 'vertical', lineHeight: 1.6,
-            }}
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button
+            <Button
+              variant="primary"
               onClick={submit}
-              disabled={!brief.trim() || createPlan.isPending}
-              style={{
-                padding: '7px 14px', borderRadius: tokens.r6, cursor: 'pointer',
-                background: tokens.accent, border: 'none', color: '#fff',
-                fontFamily: tokens.fontSans, fontSize: 12, fontWeight: 600,
-                opacity: !brief.trim() || createPlan.isPending ? 0.55 : 1,
-              }}
+              disabled={!brief.trim()}
+              pending={createPlan.isPending}
             >
-              {createPlan.isPending ? 'Creating…' : 'Create & start discovery'}
-            </button>
-            <button
-              onClick={() => setComposing(false)}
-              style={{
-                padding: '7px 14px', borderRadius: tokens.r6, cursor: 'pointer',
-                background: 'transparent', border: `1px solid ${tokens.border}`,
-                color: tokens.textSecond, fontFamily: tokens.fontSans, fontSize: 12,
-              }}
-            >
-              Cancel
-            </button>
+              Create &amp; start discovery
+            </Button>
+            <Button onClick={() => setComposing(false)}>Cancel</Button>
           </div>
         </section>
       )}

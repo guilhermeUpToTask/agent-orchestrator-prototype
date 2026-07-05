@@ -30,7 +30,7 @@ export function PhaseTimeline({
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 6,
       padding: '10px 14px',
-      background: tokens.panelBg + 'ee',
+      background: 'color-mix(in srgb, var(--bg-1) 93%, transparent)',
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',

@@ -29,18 +29,38 @@ export type AgentBody = {
      */
     capability_ids?: Array<string>;
     default_retry?: RetryPolicy;
+    /**
+     * Runtime Type
+     */
+    runtime_type?: string;
+    /**
+     * Provider Id
+     */
+    provider_id?: string | null;
+    /**
+     * Model Id
+     */
+    model_id?: string | null;
 };
 
 /**
  * AgentSpec
  *
- * Definition of an agent: who it is, what it can do, how it retries.
+ * Definition of an agent: who it is, what it can do, how it retries,
+ * and which runtime executes it.
  *
  * `role` is the agent's functional job in the orchestration (e.g. "test_writer",
  * "implementer", "reviewer"). `model_role` is an indirection key into the
  * provider/model catalog naming a model *tier* (e.g. "cheap", "smart",
  * "long_context") resolved to a concrete IAModel at runtime — so swapping the
  * model behind a tier does not require touching every agent that uses it.
+ *
+ * Runtime resolution (deliberate Phase-0 un-freeze, 2026-07-05): the agent
+ * registry is the authority on which runtime an agent resolves to —
+ * `runtime_type` picks the CLI runtime (or the dry-run dummy), and
+ * `provider_id`/`model_id` point into the providers/models catalog for the
+ * credentials and model string. Infra validates the wiring; the entity only
+ * carries it.
  */
 export type AgentSpec = {
     /**
@@ -68,6 +88,18 @@ export type AgentSpec = {
      */
     capabilities?: Array<Capability>;
     default_retry: RetryPolicy;
+    /**
+     * Runtime Type
+     */
+    runtime_type?: string;
+    /**
+     * Provider Id
+     */
+    provider_id?: string | null;
+    /**
+     * Model Id
+     */
+    model_id?: string | null;
 };
 
 /**
@@ -136,6 +168,16 @@ export type CreatePlanRequest = {
      * Brief
      */
     brief: string;
+};
+
+/**
+ * DefaultAgentResponse
+ */
+export type DefaultAgentResponse = {
+    /**
+     * Agent Id
+     */
+    agent_id: string | null;
 };
 
 /**
@@ -387,6 +429,40 @@ export type ProviderUpdateBody = {
 };
 
 /**
+ * ReasonerStatusResponse
+ */
+export type ReasonerStatusResponse = {
+    /**
+     * Mode
+     */
+    mode: string;
+    /**
+     * Valid
+     */
+    valid: boolean;
+    /**
+     * Detail
+     */
+    detail?: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id?: string | null;
+    /**
+     * Provider Name
+     */
+    provider_name?: string | null;
+    /**
+     * Model Id
+     */
+    model_id?: string | null;
+    /**
+     * Model Name
+     */
+    model_name?: string | null;
+};
+
+/**
  * RetryPolicy
  *
  * Domain rule for retry/terminal decisions.
@@ -417,6 +493,104 @@ export type RetryPolicy = {
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
+};
+
+/**
+ * RunnerAgentStatus
+ */
+export type RunnerAgentStatus = {
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Agent Name
+     */
+    agent_name: string;
+    /**
+     * Runtime Type
+     */
+    runtime_type: string;
+    /**
+     * Valid
+     */
+    valid: boolean;
+    /**
+     * Detail
+     */
+    detail?: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id?: string | null;
+    /**
+     * Provider Name
+     */
+    provider_name?: string | null;
+    /**
+     * Model Id
+     */
+    model_id?: string | null;
+    /**
+     * Model Name
+     */
+    model_name?: string | null;
+};
+
+/**
+ * RunnerBinaryStatus
+ */
+export type RunnerBinaryStatus = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Binary
+     */
+    binary: string;
+    /**
+     * Ok
+     */
+    ok: boolean;
+    /**
+     * Message
+     */
+    message: string;
+    /**
+     * Install Hint
+     */
+    install_hint?: string | null;
+    /**
+     * Is Runtime
+     */
+    is_runtime: boolean;
+};
+
+/**
+ * RunnerStatusResponse
+ */
+export type RunnerStatusResponse = {
+    /**
+     * Mode
+     */
+    mode: string;
+    /**
+     * Valid
+     */
+    valid: boolean;
+    /**
+     * Detail
+     */
+    detail?: string | null;
+    /**
+     * Binaries
+     */
+    binaries: Array<RunnerBinaryStatus>;
+    /**
+     * Agents
+     */
+    agents: Array<RunnerAgentStatus>;
 };
 
 /**
@@ -998,6 +1172,41 @@ export type ReferenceCreateAgentResponses = {
 
 export type ReferenceCreateAgentResponse = ReferenceCreateAgentResponses[keyof ReferenceCreateAgentResponses];
 
+export type ReferenceGetDefaultAgentData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/agents/default';
+};
+
+export type ReferenceGetDefaultAgentErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceGetDefaultAgentError = ReferenceGetDefaultAgentErrors[keyof ReferenceGetDefaultAgentErrors];
+
+export type ReferenceGetDefaultAgentResponses = {
+    /**
+     * Successful Response
+     */
+    200: DefaultAgentResponse;
+};
+
+export type ReferenceGetDefaultAgentResponse = ReferenceGetDefaultAgentResponses[keyof ReferenceGetDefaultAgentResponses];
+
 export type ReferenceDeleteAgentData = {
     body?: never;
     headers?: {
@@ -1387,6 +1596,46 @@ export type ReferenceDeleteModelResponses = {
 
 export type ReferenceDeleteModelResponse = ReferenceDeleteModelResponses[keyof ReferenceDeleteModelResponses];
 
+export type ReferenceUpdateModelData = {
+    body: ModelBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Model Id
+         */
+        model_id: string;
+    };
+    query?: never;
+    url: '/api/models/{model_id}';
+};
+
+export type ReferenceUpdateModelErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceUpdateModelError = ReferenceUpdateModelErrors[keyof ReferenceUpdateModelErrors];
+
+export type ReferenceUpdateModelResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceUpdateModelResponse = ReferenceUpdateModelResponses[keyof ReferenceUpdateModelResponses];
+
 export type ReferenceListProjectsData = {
     body?: never;
     headers?: {
@@ -1670,6 +1919,76 @@ export type ConfigSetValueResponses = {
 };
 
 export type ConfigSetValueResponse = ConfigSetValueResponses[keyof ConfigSetValueResponses];
+
+export type ReasonerReasonerStatusData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/reasoner/status';
+};
+
+export type ReasonerReasonerStatusErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReasonerReasonerStatusError = ReasonerReasonerStatusErrors[keyof ReasonerReasonerStatusErrors];
+
+export type ReasonerReasonerStatusResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReasonerStatusResponse;
+};
+
+export type ReasonerReasonerStatusResponse = ReasonerReasonerStatusResponses[keyof ReasonerReasonerStatusResponses];
+
+export type RunnerRunnerStatusData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/runner/status';
+};
+
+export type RunnerRunnerStatusErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RunnerRunnerStatusError = RunnerRunnerStatusErrors[keyof RunnerRunnerStatusErrors];
+
+export type RunnerRunnerStatusResponses = {
+    /**
+     * Successful Response
+     */
+    200: RunnerStatusResponse;
+};
+
+export type RunnerRunnerStatusResponse = RunnerRunnerStatusResponses[keyof RunnerRunnerStatusResponses];
 
 export type EventsStreamEventsData = {
     body?: never;

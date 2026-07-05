@@ -8,6 +8,9 @@ import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import App from './App';
 import { queryClient } from './lib/queries';
+import { applyTheme, getInitialTheme } from './lib/theme';
+
+applyTheme(getInitialTheme());
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

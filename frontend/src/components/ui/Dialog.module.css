@@ -1,0 +1,47 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: var(--sp-6);
+}
+
+.panel {
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-overlay);
+  outline: none;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-0);
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+}
+.close:hover { color: var(--text-1); background: var(--bg-3); }
+
+.content {
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}

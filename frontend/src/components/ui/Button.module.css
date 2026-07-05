@@ -1,0 +1,42 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border-radius: var(--r-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.btn:disabled { opacity: 0.55; }
+
+/* sizes */
+.md { padding: 8px 14px; }
+.sm { padding: 5px 10px; font-size: 12px; }
+
+/* blue is the machine, including your controls to it */
+.primary { background: var(--accent); color: var(--accent-text-on); }
+.primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+}
+.ghost:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
+
+.danger {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--fail) 55%, transparent);
+  color: var(--fail-text);
+}
+.danger:hover:not(:disabled) { background: var(--fail-bg); }
+
+.icon {
+  padding: 4px;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+}
+.icon:hover:not(:disabled) { color: var(--text-1); background: var(--bg-3); }
+.icon.sm { padding: 3px; }

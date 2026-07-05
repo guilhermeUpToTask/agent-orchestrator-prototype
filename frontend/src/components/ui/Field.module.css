@@ -1,0 +1,18 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.error {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fail-text);
+}

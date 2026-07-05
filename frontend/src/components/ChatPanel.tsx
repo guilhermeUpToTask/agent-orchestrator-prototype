@@ -29,8 +29,8 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isUser ? 'row-reverse' : 'row' }}>
         <div style={{
           width: 20, height: 20, borderRadius: '50%',
-          background: isUser ? tokens.accentDim : '#1a1d2a',
-          border: `1px solid ${isUser ? tokens.accent + '44' : tokens.border}`,
+          background: isUser ? tokens.accentDim : 'var(--bg-3)',
+          border: `1px solid ${isUser ? 'color-mix(in srgb, var(--accent) 27%, transparent)' : tokens.border}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           {isUser ? <User size={10} color={tokens.accent} /> : <Bot size={10} color={tokens.purple} />}
@@ -48,7 +48,7 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
       <div style={{
         maxWidth: '88%', padding: '8px 12px',
         background: isUser ? tokens.accentDim : tokens.cardBg,
-        border: `1px solid ${isUser ? tokens.accent + '33' : tokens.border}`,
+        border: `1px solid ${isUser ? 'color-mix(in srgb, var(--accent) 20%, transparent)' : tokens.border}`,
         borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
         fontSize: 12, color: tokens.textPrimary, fontFamily: tokens.fontSans,
         lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -155,7 +155,7 @@ export function ChatPanel() {
         </span>
         <span style={{
           fontSize: 8, fontFamily: tokens.fontMono, padding: '2px 6px', borderRadius: 3,
-          background: inputEnabled ? tokens.purpleDim : '#1c2030',
+          background: inputEnabled ? tokens.purpleDim : 'var(--bg-3)',
           color: inputEnabled ? tokens.purple : tokens.textMuted,
           marginLeft: 4,
         }}>
@@ -170,7 +170,7 @@ export function ChatPanel() {
       {/* Mode hint banner */}
       <div style={{
         padding: '6px 14px', borderBottom: `1px solid ${tokens.border}`,
-        background: inputEnabled ? 'transparent' : '#16121f',
+        background: inputEnabled ? 'transparent' : 'var(--bg-2)',
         fontSize: 9, fontFamily: tokens.fontMono, lineHeight: 1.5,
         color: inputEnabled ? tokens.textMuted : tokens.purple, flexShrink: 0,
       }}>
@@ -214,12 +214,12 @@ export function ChatPanel() {
           disabled={inputLocked || !input.trim()}
           style={{
             width: 36, height: 36, borderRadius: tokens.r8,
-            background: inputLocked || !input.trim() ? '#1a1d2a' : tokens.accent,
+            background: inputLocked || !input.trim() ? 'var(--bg-3)' : tokens.accent,
             border: 'none', cursor: inputLocked || !input.trim() ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
         >
-          <Send size={14} color={inputLocked || !input.trim() ? tokens.textMuted : '#fff'} />
+          <Send size={14} color={inputLocked || !input.trim() ? tokens.textMuted : 'var(--accent-text-on)'} />
         </button>
       </div>
     </div>

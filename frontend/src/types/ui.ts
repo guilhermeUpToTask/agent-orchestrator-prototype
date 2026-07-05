@@ -7,21 +7,43 @@
 // hand — keep it in sync with backend/src/domain (Plan/Goal/Task).
 
 import type {
+  AgentBody,
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  DefaultAgentResponse,
+  FailureKind,
   IaModel,
   MessageResponse,
   ModelProvider,
+  ProjectDefinition,
+  ProviderCreateBody,
+  ProviderUpdateBody,
+  ReasonerStatusResponse,
+  RetryPolicy,
+  RunnerAgentStatus,
+  RunnerBinaryStatus,
+  RunnerStatusResponse,
 } from './generated';
 
 export type {
+  AgentBody,
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  DefaultAgentResponse,
+  FailureKind,
   IaModel,
   MessageResponse,
   ModelProvider,
+  ProjectDefinition,
+  ProviderCreateBody,
+  ProviderUpdateBody,
+  ReasonerStatusResponse,
+  RetryPolicy,
+  RunnerAgentStatus,
+  RunnerBinaryStatus,
+  RunnerStatusResponse,
 };
 
 // ─── The 9-phase machine ────────────────────────────────────────────────────

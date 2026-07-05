@@ -72,22 +72,31 @@ export const CHAT_PHASES: PlanPhase[] = ['discovery', 'replanning'];
 export const raw = {
   bg0: '#131416', bg1: '#1a1b1e', bg2: '#222327',
   border0: '#2e3035', border1: '#3d4046',
-  text3: '#84878f',
+  text2: '#b4b6bc', text3: '#84878f',
   idle: '#84878f', run: '#5a9cf8', gate: '#e0a430', ok: '#4cc38a', fail: '#ef6a6a',
 } as const;
 
+/**
+ * Legacy inline-style tokens — now var() references, so every consumer
+ * follows the active theme. Colors that feed non-CSS contexts (React Flow
+ * edge strokes, minimap fills, hex+alpha concatenation) must use `raw`.
+ */
 export const tokens = {
-  bg: raw.bg0, panelBg: raw.bg1, cardBg: raw.bg2, cardHover: '#2a2c31', inputBg: raw.bg0,
-  border: raw.border0, borderFocus: raw.run, borderMuted: '#26272b',
-  accent: raw.run, accentHover: '#7cb0fa', accentDim: '#16243c', accentGlow: 'rgba(90,156,248,0.18)',
-  green: raw.ok, greenDim: '#122b1f',
-  yellow: raw.gate, yellowDim: '#332708',
-  red: raw.fail, redDim: '#371616',
-  purple: raw.run, purpleDim: '#16243c',
-  cyan: raw.run, cyanDim: '#16243c',
-  orange: raw.gate, orangeDim: '#332708',
-  textPrimary: '#ececee', textSecond: '#b4b6bc', textMuted: raw.text3, textDim: '#5a5d64',
+  bg: 'var(--bg-0)', panelBg: 'var(--bg-1)', cardBg: 'var(--bg-2)',
+  cardHover: 'var(--bg-3)', inputBg: 'var(--bg-0)',
+  border: 'var(--border-0)', borderFocus: 'var(--accent)', borderMuted: 'var(--border-0)',
+  accent: 'var(--accent)', accentHover: 'var(--accent-hover)',
+  accentDim: 'var(--run-bg)',
+  accentGlow: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+  green: 'var(--ok)', greenDim: 'var(--ok-bg)',
+  yellow: 'var(--gate)', yellowDim: 'var(--gate-bg)',
+  red: 'var(--fail)', redDim: 'var(--fail-bg)',
+  purple: 'var(--run)', purpleDim: 'var(--run-bg)',
+  cyan: 'var(--run)', cyanDim: 'var(--run-bg)',
+  orange: 'var(--gate)', orangeDim: 'var(--gate-bg)',
+  textPrimary: 'var(--text-1)', textSecond: 'var(--text-2)',
+  textMuted: 'var(--text-3)', textDim: 'var(--text-3)',
   fontMono: "'IBM Plex Mono', ui-monospace, monospace",
   fontSans: "'IBM Plex Sans', system-ui, sans-serif",
-  r4: '3px', r6: '6px', r8: '6px', r12: '10px',
+  r4: 'var(--r-1)', r6: 'var(--r-2)', r8: 'var(--r-2)', r12: 'var(--r-3)',
 } as const;
