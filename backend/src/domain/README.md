@@ -1,6 +1,8 @@
 # Domain Layer
 
-The pure core. **No imports from `application/`, `adapters/`, or infrastructure;
+The pure core — and **FROZEN** (Phase-0, 2026-07-02): contracts here change only
+with a deliberate, recorded un-freeze (see `docs/decisions/decision-log.md`).
+**No imports from `app/`, `infra/`, or `api/`;
 no `asyncio`, `sqlite`, `fastapi`, or any framework.** Everything here is plain
 Python + Pydantic and is unit-testable in milliseconds with zero I/O. If you can't
 construct and exercise something here without a database or network, it doesn't
@@ -113,5 +115,8 @@ scan honors. The domain decides *whether* and *how long*; it never sleeps.
 ## Further reading
 Each sub-package carries its own `README.md` with the local design notes:
 `aggregates/`, `entities/`, `services/`, `events/`, `policies/`, `repositories/`,
-`value_objects/`, `factories/`, and `errors/`. Open design decisions that still need a
-call — each with trade-offs and options — live in **[`../DESIGN_NOTES.md`](../DESIGN_NOTES.md)**.
+`value_objects/`, `factories/`, and `errors/`. The domain-design questions and how
+each was resolved at the freeze live in
+**[`docs/decisions/domain-design-decisions.md`](../../../docs/decisions/domain-design-decisions.md)**;
+lifecycle semantics are diagrammed in
+**[`docs/architecture/plan-lifecycle.md`](../../../docs/architecture/plan-lifecycle.md)**.

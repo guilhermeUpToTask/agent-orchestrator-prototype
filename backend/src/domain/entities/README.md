@@ -21,7 +21,7 @@ The unit of work. Guarded self-transitions with a backoff gate.
 - **`required_capabilities`** are capability **ids** (references into the catalog), not
   embedded `Capability` entities — embedding would duplicate catalog data into every task
   and go stale. Note `match_agent()` compares them against `{c.id for c in agent.capabilities}`,
-  so they must be ids, not names (see [`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md)).
+  so they must be ids, not names (see [`domain-design-decisions.md`](../../../../docs/decisions/domain-design-decisions.md)).
 - **`result`** is a single current slot (overwritten on requeue). The audit trail of prior
   attempts lives in telemetry/events, not on the aggregate (see DESIGN_NOTES).
 
@@ -44,4 +44,4 @@ behind a tier doesn't touch every agent that uses it.
 
 ## `base.py`
 Reserved for a shared `Entity` base (typed id + identity equality); not introduced yet —
-see [`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md).
+see [`domain-design-decisions.md`](../../../../docs/decisions/domain-design-decisions.md).

@@ -1,414 +1,262 @@
-# AIPOM / Agent Orchestrator
+# AIPOM — Agent Orchestrator
 
-A local Python system for **plan-driven software execution**. The center of the project is the planning layer: the `plan` workflow discovers requirements, proposes architecture, dispatches phase goals, and advances the project through review gates. Tasks, goals, workers, specs, and runtime adapters all exist to support that higher-level project plan. A React dashboard (in `frontend/`) visualizes the plan and streams execution progress live.
+**A local-first orchestrator that turns a project brief into an executed plan, with a human approving every consequential step.**
 
-## Current status
+You describe what you want in a chat. A planning LLM (the *reasoner*) negotiates a roadmap of goals with you, breaks each goal into executable tasks just-in-time, and binds each task to a coding agent (Claude Code, Gemini CLI, or `pi`). A worker process executes tasks one at a time, each in an isolated git worktree that merges into a per-plan branch only on success. You gate the plan before execution starts and after it finishes — and you can re-plan conversationally at any point without losing history.
 
-The codebase recently went through a full-codebase review and a five-milestone remediation (see `docs/code-review-report.md` and the `review M1`–`M5` commits). The headline outcomes:
+Everything runs on your machine: state is a single SQLite file, credentials are envelope-encrypted, and the default mode (`dry-run` + stub reasoner) exercises the entire system without any API key.
 
-- **Reliable event delivery** — per-worker consumer groups (no more lost assignments), pending-message recovery on consumer restart.
-- **Single coordinator process** — the FastAPI server hosts the task manager, goal orchestrator, and reconciler as lifespan threads; the goal orchestrator (including PR creation) runs out of the box.
-- **Single-writer task state** — workers publish `task.execution_*` result events; only the task manager writes task state, making the file-backed CAS contract sound.
-- **Real-time UI** — a Redis→SSE bridge fans worker/coordinator progress out to every connected dashboard tab; long planner operations (discovery, refinement) are `202 + session id` endpoints instead of multi-minute blocking requests.
-- **Green build, enforced** — 1250+ tests passing, `ruff` clean, and `mypy src` at zero errors (`src/domain` and `src/app` fully strict; adapter layers carry documented relaxations in `pyproject.toml`).
+```mermaid
+flowchart LR
+    subgraph you["You"]
+        chat["💬 Chat<br/>(discovery / replanning)"]
+        gates["✋ Gates<br/>(approve / finish / replan)"]
+    end
 
-Health gate for every change:
+    subgraph api["API process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate api start"]
+        rest["FastAPI<br/>thin routers → use cases"]
+        relay["Outbox relay thread"]
+        sse["SSE broker<br/>GET /api/events"]
+    end
 
-```bash
-make check        # ruff + mypy + pytest
+    subgraph state["SQLite&nbsp;&nbsp;·&nbsp;&nbsp;~/.orchestrator/orchestrator.db"]
+        plans[("plans<br/>(one JSON document<br/>+ lease columns)")]
+        outbox[("outbox +<br/>agent_events")]
+        catalog[("agents · capabilities<br/>providers · models<br/>config · secrets")]
+    end
+
+    subgraph worker["Worker process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate worker start"]
+        loop["Claim-and-drive loop<br/>(per-plan lease)"]
+        reasoner["Reasoner<br/>(stub | LLM)"]
+        runner["Agent runners<br/>(dry-run | pi | claude | gemini)"]
+    end
+
+    git[("Project repo<br/>plan/&lt;id&gt; branches<br/>task worktrees")]
+    ui["React dashboard<br/>frontend/"]
+
+    chat --> rest
+    gates --> rest
+    rest --> plans
+    rest --> catalog
+    plans <--> loop
+    loop --> reasoner
+    loop --> runner
+    runner --> git
+    loop --> outbox
+    rest --> outbox
+    outbox --> relay --> sse --> ui
+    ui --> rest
 ```
 
-## What the project is for
+---
 
-The main objective of this codebase is **project-level orchestration**, not just task execution.
+## Table of contents
 
-The current system combines:
+- [How a plan flows](#how-a-plan-flows)
+- [Quick start (dry-run, no API key)](#quick-start-dry-run-no-api-key)
+- [Going real](#going-real)
+- [Repository layout](#repository-layout)
+- [CLI reference](#cli-reference)
+- [Configuration](#configuration)
+- [HTTP API](#http-api)
+- [Testing](#testing)
+- [Documentation map](#documentation-map)
+- [Project status](#project-status)
 
-- **Strategic planning as the top-level workflow**: `plan init`, `plan architect`, `plan review`, and `plan status` manage the lifecycle of a project plan.
-- **Goal orchestration underneath the plan**: approved phases dispatch goals, and goals coordinate dependent task work, branch-level progress, and GitHub PRs.
-- **Task execution underneath goals**: workers execute assigned tasks in isolated workspaces, while the task manager and reconciler keep execution moving.
-- **Project spec governance**: `project_spec.yaml` constrains architecture and dependency choices, and spec changes are staged and operator-approved.
+---
 
-If you want to understand the product from the top down, start with the **`plan` command group** — or run the API + frontend and use the dashboard.
+## How a plan flows
 
-## Current architecture snapshot
+The plan lifecycle is a nine-phase state machine. Three different drivers advance it — **your chat messages**, **the worker**, and **your explicit gate commands** — and each phase belongs to exactly one driver. Phases the worker cannot advance are simply invisible to it (the claim predicate excludes them), so nothing ever spins waiting for input.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> DISCOVERY : POST /api/plans (brief)
+
+    DISCOVERY --> ARCHITECTURE : 💬 chat turn commits the roadmap
+    ARCHITECTURE --> ENRICHING : ⚙️ passthrough (checkpoint)
+    ENRICHING --> AWAITING_REVIEW : ⚙️ every goal has tasks,<br/>agents bound
+    AWAITING_REVIEW --> RUNNING : ✋ approve
+    RUNNING --> REVIEW : ⚙️ all goals terminal
+    REVIEW --> DONE : ✋ finish
+    REVIEW --> REPLANNING : ✋ replan
+    RUNNING --> REPLANNING : ✋ mid-run replan<br/>(skips pending work)
+    REPLANNING --> ARCHITECTURE : 💬 chat turn commits<br/>the new goal set<br/>(iteration += 1)
+    RUNNING --> FAILED : ⚙️ a goal exhausts retries
+    DONE --> [*]
+    FAILED --> [*]
+
+    note right of DISCOVERY
+        💬 chat-driven (multi-turn)
+        ⚙️ worker-driven (claimable)
+        ✋ human gate command
+    end note
+```
+
+Key mechanics, each explained in depth in [`docs/architecture/`](docs/architecture/):
+
+- **Multi-turn discovery with commit** — each chat message is one reasoner turn; a reply *without* goals keeps the conversation open, a reply *with* goals is the roadmap commit. Your messages are persisted before the LLM is called, so they survive a reasoner crash.
+- **ARCHITECTURE is a deliberate no-LLM passthrough** — the conversation already committed the user-agreed roadmap; the phase remains as a crash checkpoint and as the seam for a future autonomous structuring pass.
+- **ENRICHING is just-in-time** — one task-less goal per worker step is broken into 1..N plain tasks; a goal that already has tasks is never re-enriched, so a crash resumes exactly where it stopped.
+- **Execution is a pull-scan** — "what runs next" is *derived* by re-scanning statuses every step (`next_action`); there is no stored cursor to desync. Failed tasks retry with durable exponential backoff; `token_limit`/`auth_error` failures are terminal immediately.
+- **The replan loop is append-only** — completed goals are never touched; they stay as history *and* as context for the next iteration's conversation.
+- **Every task attempt runs in a git worktree** on `task/<task_id>/a<attempt>`, branched off `plan/<plan_id>`. Success `--no-ff`-merges into the plan branch; failure deletes the worktree and branch — a failed attempt leaves zero trace. `main` is never touched.
+
+## Quick start (dry-run, no API key)
+
+Requires Python 3.11+ and Node 18+.
+
+```bash
+# 1. Backend install + database
+cd backend
+uv pip install -e .[dev]                       # or: pip install -e .[dev]
+python -m src.infra.cli.main db upgrade        # DB under ORCHESTRATOR_HOME (default ~/.orchestrator)
+python -m src.infra.cli.main seed demo --stub  # capabilities, default agent, stub reasoner config
+
+# 2. Two processes (separate terminals)
+python -m src.infra.cli.main api start --port 8000
+python -m src.infra.cli.main worker start
+
+# 3. Frontend
+cd ../frontend
+npm install && npm run dev                     # http://localhost:5173
+```
+
+Create a plan in the UI and drive it with the stub reasoner's deterministic chat grammar:
+
+| You type | What happens |
+|---|---|
+| `ask: anything` | The reasoner replies with a question — the conversation stays open |
+| `goal: Build the API`<br>`task: scaffold FastAPI [caps: backend]`<br>`goal: Add tests` | The roadmap commits: listed goals (with optional pre-seeded tasks) → ARCHITECTURE → ENRICHING fills task-less goals → AWAITING_REVIEW |
+
+Then **approve** → watch tasks execute live (the dry-run runner simulates work, including realistic failures) → **finish**, or **replan** to loop another iteration.
+
+## Going real
+
+Two independent switches, both stored in SQLite config (not env vars):
+
+**1. Real planning LLM** (the reasoner):
+
+```bash
+export ORCHESTRATOR_MASTER_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+export OPENROUTER_API_KEY=sk-...
+python -m src.infra.cli.main seed demo --provider openrouter \
+    --model anthropic/claude-sonnet-4-5 --api-key-env OPENROUTER_API_KEY
+```
+
+`seed demo` stores the key envelope-encrypted, creates the provider/model rows, and sets `reasoner.mode=llm`. Presets exist for `openai | openrouter | anthropic | gemini | local`.
+
+**2. Real task execution** (the agent runner):
+
+```bash
+python -m src.infra.cli.main config set agent_runner.mode real
+export PROJECT_REPO_DIR=/path/to/the/repo/agents/should/work/on
+```
+
+In `real` mode each task resolves **per run** through the agent registry: the bound `AgentSpec.runtime_type` (`pi` default | `claude` | `gemini` | `dry-run`) picks the CLI runtime, and its `provider_id`/`model_id` catalog rows supply the decrypted key and model string. Edit agents or rotate keys at runtime — no restart needed. `GET /api/runner/status` reports mode, per-agent binding validity, and binary probes; the worker warns at boot about missing CLIs.
+
+> The two switches are orthogonal: stub reasoner + real runner, or LLM reasoner + dry-run execution, are both valid (and useful) combinations. Neither dry-run path ever touches the secret store, so no master key is needed until you go real.
+
+## Repository layout
 
 ```text
-plan workflow (CLI) + dashboard (frontend/, via API + SSE)
-  ↓
-goals + project plan + spec governance
-  ↓
-task orchestration and worker execution
-  ↓
-runtimes, git workspaces, Redis/events, filesystem state
+agent-orchestrator/
+├── README.md                ← you are here
+├── ROADMAP.md               ← everything planned but not yet implemented
+├── CLAUDE.md                ← invariants + rules for AI-assisted contributions
+├── docs/                    ← system documentation (see the map below)
+│   ├── architecture/        ← how it works, with diagrams (per-subsystem)
+│   ├── decisions/           ← ADRs + the consolidated decision log
+│   ├── legacy/              ← pre-refactor features preserved for possible reintroduction
+│   └── history/             ← archived plans, analyses, and pre-refactor docs
+├── backend/
+│   ├── src/
+│   │   ├── domain/          ← FROZEN core: Plan aggregate, 9-phase machine, ports (README inside)
+│   │   ├── app/             ← use cases + phase handlers + worker loop (README inside)
+│   │   ├── infra/           ← SQLite, git workspace, CLI runners, reasoner, container (README inside)
+│   │   └── api/             ← FastAPI: thin routers, SSE, outbox relay (README inside)
+│   ├── tests/               ← dual-backend truth tests + integration (README inside)
+│   ├── alembic/             ← migrations 0001_core … 0004_agent_runtime
+│   └── docs/                ← INTEGRATION_GUIDE.md — the frozen port contracts
+└── frontend/                ← React 18 + Vite dashboard (README inside)
 ```
 
-In code, that maps to:
+## CLI reference
 
-```text
-CLI (src/infra/cli)        API (src/api: FastAPI routers, SSE, sessions)
-  ↓                          ↓
-Application layer (src/app)
-  - planner orchestration
-  - goal orchestration
-  - task handlers / use cases / coordinator runners
-  ↓
-Domain layer (src/domain)
-  - project plan, goals, tasks, specs, ports, value objects
-  ↓
-Infrastructure layer (src/infra)
-  - repositories, runtimes, Redis adapters, git, logging, GitHub
-```
+Entry point: `python -m src.infra.cli.main` (or `orchestrate` once installed). All commands run from `backend/`.
 
-### Process topology
+| Command | Purpose |
+|---|---|
+| `db upgrade` | Apply Alembic migrations to the DB under `ORCHESTRATOR_HOME` |
+| `api start [--host] [--port]` | Serve the API (runs the outbox→SSE relay in-process) |
+| `worker start [--worker-id] [--poll-seconds] [--lease-seconds]` | Run the claim-and-drive worker loop |
+| `seed demo [--stub \| --provider … --model … --api-key-env …]` | Idempotently seed capabilities, the default agent, provider/model rows, and reasoner config |
+| `config get\|set\|list [scope]` | Read/write the two-tier config store (scope `orchestrator` or a project id) |
+| `plan list` / `plan show <id>` | Inspect plans from the terminal |
 
-`orchestrate system start` boots exactly two kinds of processes:
+## Configuration
 
-```text
-┌─ orchestrate system start ──────────────────────────────┐
-│  uvicorn (FastAPI)                                      │
-│   ├─ HTTP routers + per-client SSE fan-out              │
-│   ├─ lifespan thread: Redis events:all → SSE bridge     │
-│   ├─ lifespan thread: task manager loop                 │
-│   ├─ lifespan thread: goal orchestrator (PRs enabled)   │
-│   └─ lifespan thread: reconciler loop                   │
-│                                                         │
-│  worker processes (one per active agent)                │
-│   └─ agent CLI subprocess + isolated git workspace      │
-└─────────────────────────────────────────────────────────┘
-```
-
-- **Coordinators live in the API process** — one settings load, one writer process for task/goal state, direct access to the SSE bridge. Set `ORCHESTRATOR_EMBED_COORDINATORS=0` to opt out and run them standalone (`system task-manager`, `system reconciler`, `goals run`).
-- **Workers stay separate processes** so a hung or resource-hungry agent session can be killed without taking the API down. The supervisor restarts crashed workers with exponential backoff and gives up after repeated fast crashes.
-- **Workers never write task state.** They publish `task.execution_started/succeeded/failed` events with result facts; the task manager applies the transitions and emits the canonical `task.started/completed/failed` notifications.
-
-Key design choices:
-
-- **Plan-first workflow**: the project plan is the main control loop for the system.
-- **Project-scoped state** lives under `~/.orchestrator/projects/<project_name>/...`.
-- **Domain-first boundaries** keep business rules in `src/domain` and I/O in `src/infra` (enforced: no `app`/`infra`/`api` imports in domain, no `infra` imports in app).
-- **Multiple runtime adapters** are supported per registered agent (`dry-run`, `claude`, `gemini`, `pi`).
-- **PRs are opened by the orchestrator, merged by humans**: a goal reaching `READY_FOR_REVIEW` gets a PR against the base branch; the reconciler polls GitHub for checks/approval, and merging stays a human decision.
-- **Execution observability** is built in through structured logging, persisted event journals, and the live SSE stream.
-
-## CLI entry points
-
-The canonical entry point after `pip install -e .` (or `uv pip install -e .`) is:
-
-```bash
-orchestrate --help
-```
-
-Without installing, the module form works identically:
-
-```bash
-python -m src.infra.cli.main --help
-```
-
-## CLI overview
-
-### Top-level command groups
-
-| Group | Commands | Purpose |
-|---|---|---|
-| `plan` | `init`, `architect`, `review`, `status`, `logs` | **Primary project workflow** |
-| `goals` | `init`, `run`, `status`, `finalize` | Goal-level orchestration |
-| `tasks` | `create`, `list`, `retry`, `delete`, `prune` | Low-level task management |
-| `system` | `start`, `api`, `task-manager`, `worker`, `reconciler` | System processes |
-| `agents` | `create`, `list`, `edit`, `delete` | Agent registry management |
-| `spec` | `show`, `init`, `validate`, `propose`, `diff`, `apply` | Project-spec governance |
-| `project` | `status`, `list`, `use`, `reset` | Active project management |
-| `init` | `--defaults` | Setup wizard / default config |
-
-### The workflow hierarchy
-
-Think of the CLI in this order:
-
-1. **`plan`** decides what the project should do next.
-2. **`goals`** represent phase-approved chunks of work created or unlocked by the plan.
-3. **`tasks`** are the execution units inside goals.
-4. **`system`** runs the API (with embedded coordinators) and the workers.
-5. **`agents`**, **`spec`**, and **`project`** support that lifecycle.
-
-## API + frontend
-
-The FastAPI server exposes the plan, goals, tasks, agents, and spec over REST, plus a real-time `GET /api/events` SSE stream. The React dashboard consumes it.
-
-```bash
-# Backend API (also hosts the coordinators)
-orchestrate system api --port 8000
-
-# Frontend dev server
-cd frontend && npm install && npm run dev
-```
-
-Integration notes:
-
-- **Live updates**: every domain event published to Redis (`events:all`) is bridged to SSE and fanned out per connected client; the canvas updates as workers execute. Each tab gets its own queue.
-- **Long operations are sessions**: `POST /api/plan/refine` and `POST /api/plan/discovery/start` return `202 + session_id` immediately; progress streams over SSE and state/results are read from `GET /api/plan/sessions/{id}` / `GET /api/plan/discovery/{id}`.
-- **Generated types**: the frontend's API types are generated from the OpenAPI schema — `cd frontend && npm run generate:api` after changing API schemas.
-
-## Project layout on disk
-
-At runtime the orchestrator derives project-specific paths from `ORCHESTRATOR_HOME` and the active project in `config.json`.
-
-```text
-~/.orchestrator/
-  config.json
-  projects/
-    <project_name>/
-      agents/registry.json
-      events/
-      goals/
-      logs/
-      planner_sessions/
-      project.json
-      project_plan.yaml
-      project_spec.yaml
-      project_state/
-      repo/
-      tasks/
-      workspaces/
-```
-
-Important files:
-
-- `~/.orchestrator/config.json` — machine config: active project, mode, Redis URL
-- `project.json` — per-project operational settings such as source repo and GitHub settings (never secrets)
-- `project_plan.yaml` — the persisted project plan and current phase state
-- `planner_sessions/` — discovery / architecture / phase-review session records
-- `project_spec.yaml` — architecture and dependency constraints used by validation and planning
-
-## Plan-first quick start
-
-This is the recommended way to understand and use the project.
-
-### 1. Install dependencies
-
-Use Python 3.11+.
-
-```bash
-uv pip install -e ".[dev]"     # or: pip install -e ".[dev]"
-```
-
-### 2. Initialize local config
-
-```bash
-orchestrate init --defaults
-```
-
-For interactive setup (dependency checks, agent registration, GitHub wiring) instead:
-
-```bash
-orchestrate init
-```
-
-### 3. Register at least one agent
-
-A dry-run agent is the easiest starting point:
-
-```bash
-orchestrate agents create \
-  --agent-id dry-run-001 \
-  --name "Dry Run Worker" \
-  --capabilities code:backend \
-  --runtime-type dry-run
-```
-
-### 4. Start the plan workflow
-
-Begin with discovery:
-
-```bash
-orchestrate plan init --dry-run
-```
-
-That stage gathers requirements, produces a project brief, and asks for operator approval.
-
-After approving the brief, move into architecture planning:
-
-```bash
-orchestrate plan architect --dry-run
-```
-
-That stage proposes decisions and phases. Decisions can be approved, rejected, or edited in `$EDITOR` before approval. When approved, it dispatches the first phase's goals.
-
-### 5. Inspect project-plan state
-
-```bash
-orchestrate plan status
-```
-
-Use this command to understand where the project is in the lifecycle before reaching for lower-level `goals` or `tasks` commands.
-
-## Planning workflow
-
-The **main point of the project** is this planning loop. All three session commands support `--dry-run`, and `plan logs` replays the persisted session log of any run.
-
-### 1. Discovery — `plan init`
-
-- starts or resumes a **discovery** session
-- uses the interactive planner runtime to gather project requirements
-- prints a generated **project brief**
-- asks the operator whether to approve the brief
-
-If approved, the plan moves from `discovery` to `architecture`.
-
-### 2. Architecture — `plan architect`
-
-Runs when the plan is in `architecture` state:
-
-- runs the architecture planning session
-- shows pending architectural decisions and proposed phases
-- asks the operator which decisions to approve (`y`/`n`/`edit`)
-- asks whether to approve the phase plan and start execution
-
-When approved, the orchestrator applies approved decisions and any derived spec changes, transitions the plan into `phase_active`, and dispatches goals for the first approved phase.
-
-### 3. Phase review — `plan review`
-
-Runs when the plan is in `phase_review` state:
-
-- runs the review session for the completed phase
-- prints lessons learned and the next phase proposal
-- surfaces any pending decisions
-- asks whether to continue with the next phase, or — if not — whether to mark the project done (declining both leaves the plan unchanged)
-
-### 4. Inspecting the plan — `plan status` / `plan logs`
-
-```bash
-orchestrate plan status
-orchestrate plan logs --filter tools --tail 20
-```
-
-## Supporting workflows under the plan
-
-### Goals
-
-Goals are the layer directly below the plan. Approved phases dispatch or unlock goals; the goal orchestrator (embedded in the API) merges completed task branches into the goal branch, triggers JIT task planning when goals unblock, and opens a PR when a goal reaches `READY_FOR_REVIEW`. **The orchestrator never merges PRs** — that stays with humans (or a merge queue).
-
-```bash
-orchestrate goals init <goal-file.yaml>
-orchestrate goals status
-orchestrate goals finalize <goal_id>
-orchestrate goals run        # standalone orchestrator loop (escape hatch;
-                             # normally it runs inside the API process)
-```
-
-### Tasks
-
-Tasks are the execution units below goals — useful for operators and debugging, but not the main project-level entry point.
-
-```bash
-orchestrate tasks create \
-  --title "Add health endpoint" \
-  --description "Implement a basic health endpoint and tests" \
-  --capability code:backend \
-  --allow src/api/health.py \
-  --allow tests/test_health.py \
-  --test "pytest tests/test_health.py"
-
-orchestrate tasks list
-orchestrate tasks retry <task_id>
-```
-
-## Operating modes
-
-### Dry-run mode
-
-Default mode is `dry-run`. Use it to exercise the planning workflow locally, run the full system without Redis or live agent CLIs, and develop planner/domain behavior with minimal external dependencies. `AGENT_MODE=dry-run orchestrate system start` boots the whole topology with in-memory adapters and simulated agents.
-
-### Real mode
-
-Set `AGENT_MODE=real` to use Redis-backed events and live runtime adapters.
-
-Boot everything from the active registry:
-
-```bash
-AGENT_MODE=real orchestrate system start
-```
-
-`system start` boots the API (which hosts the task manager, goal orchestrator, reconciler, and SSE bridge), launches one worker per active agent, waits for heartbeats, then supervises the workers — restarting crashes with backoff and shutting the system down if the API exits.
-
-Standalone processes remain available as escape hatches (pair them with `ORCHESTRATOR_EMBED_COORDINATORS=0` on the API so task/goal state keeps a single writer process):
-
-```bash
-AGENT_MODE=real orchestrate system task-manager
-AGENT_MODE=real orchestrate system worker --agent-id dry-run-001
-AGENT_MODE=real orchestrate system reconciler
-```
-
-## Agent runtimes
-
-The runtime factory currently supports these runtime types:
-
-- `dry-run`
-- `gemini`
-- `claude`
-- `pi`
-
-Runtime-specific options are stored on each agent record in `runtime_config`, which allows multiple differently configured agents to coexist in the same registry.
-
-## Project spec workflow
-
-The project spec is the canonical source of architectural constraints used by planning and validation. Agents never write the spec directly — the only mutation flow is:
-
-```text
-spec propose → spec diff → spec apply
-```
-
-Representative commands:
-
-```bash
-orchestrate spec show
-orchestrate spec init
-orchestrate spec validate --description "add redis cache"
-orchestrate spec propose --add-required fastapi
-orchestrate spec diff
-orchestrate spec apply
-```
-
-Spec-derived behavior (validation, planner context, PR CI gates) reloads the spec per use, so `spec apply` takes effect on a running API without a restart.
-
-## Configuration reference
-
-Primary environment variables:
+**Environment variables** — read *only* in the composition root (`backend/src/infra/container.py`) and the API server:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AGENT_MODE` | `dry-run` | Selects dry-run vs Redis/live runtime behavior (CLI `--dry-run` flags override per command) |
-| `AGENT_ID` | unset | Worker identity for `system worker` (or pass `--agent-id`) |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for real mode |
-| `TASK_TIMEOUT_SECONDS` | `600` | Per-task runtime timeout |
-| `ORCHESTRATOR_HOME` | `~/.orchestrator` | Root orchestrator state directory |
-| `RECONCILER_INTERVAL` | `60` | Embedded reconciler poll interval (seconds) |
-| `RECONCILER_STUCK_AGE` | `120` | Stuck-task threshold (seconds) |
-| `ORCHESTRATOR_EMBED_COORDINATORS` | `1` | Set `0` to keep coordinator threads out of the API process |
-| `ANTHROPIC_API_KEY` | empty | Claude / pi-anthropic runtime auth |
-| `GEMINI_API_KEY` | empty | Gemini / pi-gemini runtime auth |
-| `OPENROUTER_API_KEY` | empty | pi-openrouter runtime auth |
-| `GITHUB_TOKEN` | empty | GitHub API auth for PR creation/polling |
+| `ORCHESTRATOR_HOME` | `~/.orchestrator` | State directory (SQLite DB, default workspace repo) |
+| `ORCHESTRATOR_MASTER_KEY` | unset | Fernet key wrapping the secret store. Only needed when a real provider key must be decrypted — dry-run/stub never ask for it |
+| `PROJECT_REPO_DIR` | `<home>/workspace-repo` | The git repo task agents work on (auto-seeded if absent) |
+| `ORCHESTRATOR_API_TOKEN` | unset | Control-plane bearer token; the API is open when unset |
+| `CORS_ALLOW_ORIGINS` | Vite dev origins | Comma-separated allowed origins |
+| `REASONER_SMOKE_API_KEY` (+`_BASE_URL`, `_MODEL`) | unset | Enables the cost-gated real-LLM smoke test only |
 
-The active project is **not** an environment variable — it lives in `~/.orchestrator/config.json` and is switched with `orchestrate project use <name>`.
+**SQLite config keys** (scope `orchestrator`) — runtime behavior lives here, *not* in env vars. There is no `AGENT_MODE` anymore:
 
-## Testing & quality gates
+| Key | Default | Purpose |
+|---|---|---|
+| `reasoner.mode` | `stub` | `stub` \| `llm` — which planning reasoner the factory builds |
+| `reasoner.provider_id` / `reasoner.model_id` | — | Catalog rows the LLM reasoner resolves (required in `llm` mode; invalid config fail-fasts as `REASONER_CONFIG_INVALID` → HTTP 422) |
+| `reasoner.temperature` / `reasoner.max_turns` | `0.2` / `8` | Agent-loop tuning |
+| `agent_runner.mode` | `dry-run` | `dry-run` \| `real` — global task-execution mode |
+| `agent_runner.timeout_seconds` | `600` | Per-attempt subprocess timeout |
+
+## HTTP API
+
+Thin routers map 1:1 onto use cases; domain errors bubble to one code→status table (`backend/src/api/exceptions.py`). Highlights (full mapping in [`backend/docs/INTEGRATION_GUIDE.md`](backend/docs/INTEGRATION_GUIDE.md)):
+
+| Route | Purpose |
+|---|---|
+| `POST /api/plans` (+ `Idempotency-Key`) | Create a plan from a brief → DISCOVERY |
+| `POST /api/plans/{id}/discovery/message` · `/replanning/message` | One chat turn → `{reply, committed, phase}`; the reply travels in the HTTP body, never SSE |
+| `GET /api/plans/{id}` · `/chat` | The full plan document · persisted conversation |
+| `POST /api/plans/{id}/approve` · `/review/finish` · `/review/replan` · `/replan` | The gate commands (and the mid-RUNNING replan) |
+| `POST /api/plans/{id}/edits` | Surgical structural edits (add/remove/reorder tasks, requirements, agent rebind) |
+| `/api/agents · /capabilities · /providers · /models · /projects` | Reference-data CRUD (delete-guarded against live references) |
+| `GET /api/reasoner/status` · `/api/runner/status` | Config validity, bindings, binary probes |
+| `GET /api/events` | SSE stream — named domain events + `agent.event` telemetry, at-least-once, dedup on `event_id` |
+
+## Testing
 
 ```bash
-make check                  # ruff + mypy + pytest — the gate for every change
-pytest tests/unit           # domain invariants and use-case logic
-pytest tests/integration    # fakeredis-backed pipelines, API, lifespan, e2e
+cd backend
+make check                    # ruff + mypy (zero errors, no excludes) + pytest
+pytest -m "not integration"   # fast unit suite
+pytest -m integration         # real SQLite, real git repos, API TestClient
+pytest -m llm                 # cost-gated real-provider smoke (needs REASONER_SMOKE_API_KEY)
 ```
 
-Conventions:
+The suite's centerpiece is the **truth test**: the entire orchestration suite runs twice — against in-memory fakes *and* against the real SQLite `UnitOfWork` — via one parametrized fixture. Crash-recovery, outbox-rollback, and backoff-survives-crash passing on real SQLite is the proof that transactional atomicity is real, not simulated. See [`backend/tests/README.md`](backend/tests/README.md).
 
-- Unit tests mock repositories/ports (`MagicMock`, `InMemoryEventAdapter`, `StubGitHubClient`).
-- Integration tests use `fakeredis` (≥ 2.36 — earlier versions lose messages on multi-stream reads) and `tmp_path` for all file I/O.
-- Typing is a ratchet: `mypy src` must stay at zero errors; `src/domain` and `src/app` are fully strict, and the per-module relaxations for `src/infra`/`src/api` in `pyproject.toml` should only ever shrink.
+## Documentation map
 
-## Additional documentation
+| Where | What |
+|---|---|
+| [`docs/README.md`](docs/README.md) | Index of all documentation |
+| [`docs/architecture/`](docs/architecture/) | Per-subsystem deep dives with diagrams: overview, plan lifecycle, execution model, events/observability, data model, frontend, known issues |
+| [`docs/decisions/`](docs/decisions/) | ADRs and the consolidated decision log (why things are the way they are) |
+| [`docs/legacy/pre-refactor-backend.md`](docs/legacy/pre-refactor-backend.md) | Features the old backend had (PR gate, project spec governance, decision gate, …) preserved for reintroduction analysis |
+| [`docs/history/`](docs/history/) | Archived planning documents and debugging analyses — the project's paper trail |
+| [`ROADMAP.md`](ROADMAP.md) | Everything designed or planned but not yet implemented, prioritized |
+| [`CLAUDE.md`](CLAUDE.md) | The contract for AI-assisted changes: invariants, commands, style |
 
-- `docs/architecture.md` — architecture, runtime workflows, and boundaries
-- `docs/code-review-report.md` — the full codebase review that drove the M1–M5 remediation
-- `CLAUDE.md` — architectural invariants and contribution rules
-- `roadmap.md` — current-state roadmap and likely next milestones
-- `src/infra/logging/README.md` — runtime logging subsystem details
+## Project status
+
+The system is a **working prototype past its core-integration milestone**: the nine-phase machine, the conversational reasoner (stub + OpenAI-compatible LLM), catalog-driven runtime resolution, the git-worktree workspace, live SSE, and the full-cycle test walk are all in place, with `mypy` at zero errors and the truth-test suite green. Known operational defects (verified, with reproduction notes) are tracked in [`docs/architecture/known-issues.md`](docs/architecture/known-issues.md) and scheduled in [`ROADMAP.md`](ROADMAP.md) — the two most important: the default lease/timeout combination permits double execution of long tasks under multiple workers, and a poisoned plan can starve a single-worker deployment.

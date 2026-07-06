@@ -17,4 +17,4 @@ For a simple reference entity the factory is nearly a passthrough, and you *coul
 constructor directly. It's kept for two reasons: `create()` centralizes id generation, and
 every entity following the same `create`/`reconstruct` shape is worth more than the few lines
 saved. Inline it only if the entity never grows birth invariants — see
-[`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md).
+[`domain-design-decisions.md`](../../../../docs/decisions/domain-design-decisions.md).

@@ -10,7 +10,7 @@ re-selected forever.
 
 Because it's shared, `tasks_vos` is a slightly misleading home — a neutral
 `value_objects/lifecycle.py` would be clearer. It's a rename-only cleanup; see
-[`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md).
+[`domain-design-decisions.md`](../../../../docs/decisions/domain-design-decisions.md).
 
 ## `TaskResult` (`tasks_vos.py`)
 The typed output of a task run **and** the idempotency record: if `task.result` is set, the

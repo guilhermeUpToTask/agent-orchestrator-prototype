@@ -23,5 +23,5 @@ Capped at `max_backoff_seconds`. Without the `- 1`, the first retry would jump s
 
 ### `non_retryable_reasons`
 Currently exact-string-matches a free-form `failure_reason` (`["invalid_input"]`). That's
-brittle and under-specified — see [`../../DESIGN_NOTES.md`](../../DESIGN_NOTES.md) (typed
+brittle and under-specified — see [`domain-design-decisions.md`](../../../../docs/decisions/domain-design-decisions.md) (typed
 `FailureKind` for retry classification).

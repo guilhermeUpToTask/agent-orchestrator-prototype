@@ -1,4 +1,7 @@
-# Design Notes — open decisions
+# Domain design decisions (formerly `backend/docs/DESIGN_NOTES.md`)
+
+> Code comments and tests referencing "DESIGN_NOTES #N" point at the numbered
+> entries in this file.
 
 > **RESOLVED (2026-07-02, Phase-0 domain freeze):** every entry below was decided by
 > adopting its **recommended option** — #1 AWAITING_REVIEW/REVIEW are the gates

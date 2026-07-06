@@ -1,90 +1,78 @@
 # Application Layer
 
-Use cases that orchestrate the domain. This layer **decides WHEN things happen** —
-transaction boundaries, when to persist, when to emit events, the order of
-operations — and depends only on **ports** (interfaces). It imports from `domain/`
-but never from `adapters/`/infrastructure. Adapters are injected in.
+Use cases and phase handlers that orchestrate the domain. This layer **decides WHEN things happen** — transaction boundaries, when to persist, when to emit events, the order of operations — and depends only on **ports** (Protocols). It imports `domain/` but never `infra/` or `api/`; adapters are injected in.
 
 ## Who-does-what (the persistence answer)
 
 > The **domain** mutates state and enforces invariants (persistence-ignorant).
 > The **application** (here) decides WHEN to persist and emit — it opens the
-> transaction and calls `repo.save` / `outbox.add`.
-> The **infrastructure** (not in this repo yet) actually writes to SQLite, behind
-> the ports.
+> transaction and calls `uow.plans.save` / `uow.outbox.add`.
+> The **infrastructure** actually writes to SQLite, behind the ports.
 
-The aggregate never saves itself; the use case never reaches into the aggregate to
-mutate a field (it calls the aggregate's methods). That separation is strict.
+The aggregate never saves itself; the use case never mutates an aggregate field directly (it calls the aggregate's guarded methods). Every write follows one shape: `plan.bump_version()` → `uow.outbox.add(event)` → `uow.plans.save(plan)`, all inside one `with uow:` block.
 
 ## Folder map
 
 ```
-application/
-├── ports.py                 ALL the interfaces the use cases depend on:
-│                            AgentRunner, Reasoner (stub), Outbox, AgentEventSink,
-│                            Workspace, Clock, UnitOfWork. (PlanRepository is the
-│                            DOMAIN port — referenced, not redefined here.)
+app/
+├── ports.py                 App-specific contracts (TaskFailed, Outbox, UnitOfWork,
+│                            ChatStore) + re-exports of the five DOMAIN ports
+│                            (Reasoner, AgentRunner, Workspace, AgentEventSink, Clock)
+│                            so use cases/adapters/tests keep one import path.
+├── handlers/                One concern per phase group (see below):
+│   ├── base.py              Signal enum + the PhaseHandler protocol
+│   ├── execution_handler.py RUNNING — the pull-scan loop + crash choreography
+│   ├── planning_handler.py  ARCHITECTURE (passthrough) + ENRICHING (JIT)
+│   └── gate_handler.py      the gates — returns PAUSED unconditionally
 ├── use_cases/
-│   ├── advance_plan.py      THE worker's one unit of work (see below)
-│   ├── create_plan.py       create from brief; idempotent on request_id
-│   ├── apply_edit.py        structural edits via domain edit_service; version-CAS
-│   ├── control.py           resume_from_review (the human-in-the-loop gate)
-│   └── run_worker.py        the loop: claim → drive_plan → heartbeat → release
-└── testing/fakes.py         in-memory doubles + DummyAgentRunner + FakeClock
-                             (let the whole loop be tested with ZERO infrastructure)
+│   ├── advance_plan.py      PlanDispatcher — thin phase→handler router (one unit of work)
+│   ├── run_worker.py        worker_tick / drive_plan — claim → advance loop → release
+│   ├── create_plan.py       brief → persisted plan; idempotent on request_id
+│   ├── conversation.py      discovery_message / replanning_message — the chat-driven
+│   │                        phases (multi-turn with commit)
+│   ├── control.py           the gate commands: approve · finish · replan-from-review
+│   ├── request_replan.py    mid-RUNNING entry to REPLANNING (state machinery only)
+│   └── apply_edit.py        surgical structural edits (≠ request_replan)
+└── testing/fakes.py         in-memory doubles: InMemoryPlanRepository (CAS + lease
+                             semantics identical to SQLite), DummyAgentRunner
+                             (scripted per task id, shared failure taxonomy),
+                             InMemoryChatStore, FakeClock — the whole loop runs with
+                             ZERO infrastructure. Infra re-exports the dummy as the
+                             dry-run runtime.
 ```
 
-## `advance_plan` — the heart (use_cases/advance_plan.py)
+## The dispatcher + handlers (advance_plan)
 
-One unit of work; returns a control signal the worker drives on:
-`"continue" | "paused" | "not_ready" | "done" | "failed"`.
+`advance_plan` routes on `plan.phase` and returns a `Signal` to the worker loop — it replaced the old god-function so task execution, planning, and gates can't disturb each other:
 
-It encodes every crash-safety decision:
+| Phase | Handler | Signal behavior |
+|---|---|---|
+| RUNNING | `ExecutionHandler` | CONTINUE per unit; NOT_READY when everything backs off; PAUSED into REVIEW |
+| ARCHITECTURE / ENRICHING | `PlanningHandler` | passthrough / one-goal-JIT, CONTINUE per checkpoint |
+| DISCOVERY / REPLANNING | (never worker-driven) | PAUSED — defensive; the claim predicate hides these |
+| AWAITING_REVIEW / REVIEW | `GateHandler` | PAUSED **unconditionally** (the old conditional check was the verified gate-spin bug) |
+| DONE / FAILED | terminal | DONE / FAILED |
 
-1. **check-before-act idempotency** — if the picked task already has a `result`
-   (crash after the agent ran, before the finalizing commit), finalize it WITHOUT
-   re-running the agent.
-2. **two-transaction write** — txn1 marks the task RUNNING and persists; the agent
-   side effect runs OUTSIDE any transaction; txn2 persists result+DONE. A crash in
-   the gap leaves a re-runnable RUNNING task (made safe by #1).
-3. **transactional outbox** — every coarse event is `outbox.add`-ed INSIDE the
-   state transaction, so state and event commit atomically (or roll back together).
-4. **retry/terminal is a domain decision** — on `TaskFailed`, `policy.should_retry`
-   decides requeue-vs-fail.
-5. **durable backoff gate** — on requeue, set `task.retry_not_before = now +
-   backoff_for(next_attempt)`. The scan skips the task until then. This survives a
-   worker crash (it's persisted) and never blocks other ready work — unlike an
-   in-memory sleep.
-6. **atomic task semantics** — requeue discards partial work (result stays None;
-   only success writes a result); the workspace is discarded on failure.
-7. **agent resolved before RUNNING** — a missing agent fails fast
-   (`AgentNotFoundError`) without leaving a stranded RUNNING task.
+## The crash-safety choreography (ExecutionHandler)
 
-**No live aggregate references cross a transaction boundary** — plain values
-(`goal_id`, `task_id`, `attempt`, a copied `retry_policy`, a copied task) are
-captured before txn1 closes, so the code is correct against a real SQLite session
-that detaches objects on commit.
+The rules every change here must preserve — each one answers a specific crash:
 
-## `run_worker` — the loop (use_cases/run_worker.py)
+1. **Check-before-act idempotency** — a picked task that already has a `result` (crash after the agent ran, before finalize) is finalized WITHOUT re-running the agent.
+2. **Two-transaction write** — txn1 marks RUNNING + persists + outbox; the agent side effect runs OUTSIDE any transaction; txn2 re-reads, re-guards, persists the outcome.
+3. **No live aggregate refs across transaction boundaries** — txn1 snapshots plain values into the frozen `_Unit`; finalize re-reads fresh (real SQLite detaches objects on commit).
+4. **Tolerant finalize** — if the plan left RUNNING mid-flight (replan), a late failure terminal-skips (never requeues into an abandoned iteration); a late success lands as harmless history.
+5. **Durable backoff gate** — requeue sets `retry_not_before = now + backoff`; the scan honors it; it survives crashes and never blocks other ready work.
+6. **Retry-vs-terminal is a domain decision** — `RetryPolicy.should_retry(attempt, kind)` on the shared `FailureKind` taxonomy.
+7. **Agent resolved before RUNNING** — a missing agent fails fast, never strands a RUNNING task.
 
-`worker_tick`: claim a plan (lease) → `drive_plan` → release (always, in `finally`).
-`drive_plan`: `while signal == "continue": advance_plan; heartbeat`. Within a plan,
-advancing is the loop — **no polling, no goal "trying to start".** `"not_ready"`
-means the plan is waiting out a backoff gate → release and let a later tick re-check
-once the gate (a persisted timestamp) expires. The ONLY polling is between ticks.
+## The conversational phases (conversation.py)
 
-This is what REPLACES the old push-dispatch + reconciler:
-- pending-goal noise is gone: `next_action` never selects an unready goal.
-- crash recovery is the lease: a dead worker's plan is reclaimed and resumed from
-  persisted state (proven by `tests/test_worker_loop.py::test_crash_recovery_via_reclaim`).
+Per message turn: guard phase on a fresh read → persist the USER message BEFORE the LLM call (own short chat txn — it survives reasoner crashes) → `reasoner.converse(...)` outside any txn → no goals = append the reply, phase unchanged; goals = re-open the plan txn, RE-GUARD (a racing human command wins), commit goals + phase + `PhaseAdvanced` atomically. Chat is display history; the plan transaction is truth — neither can roll the other back.
 
-## The Clock port
-Backoff needs "now". The domain scan takes `now` as an argument (stays pure); the
-use cases get it from the injected `Clock` port. Real adapter is
-`datetime.now(timezone.utc)`; tests use `FakeClock` to control time deterministically.
+## The worker loop (run_worker.py)
 
-## Reasoner (stub)
-`Reasoner` in ports.py is a forward declaration for the planning phases
-(DISCOVERY/ARCHITECTURE/ENRICHING/REPLANNING) — not yet wired into `advance_plan`
-(those phases currently just pause). Build it when implementing the planning
-phases (roadmap 2.5): the PlanningHandler seam is where it lands.
+`worker_tick`: claim (lease) → `drive_plan` (`while signal == CONTINUE: advance; heartbeat`) → release in `finally`. The tick returns **progress, not claiming** — a claim that yields zero steps returns False so the caller sleeps (the verified spin fix). Crash recovery is the lease: a dead worker's plan is reclaimed by any worker from persisted state.
+
+## Deep dives
+
+Lifecycle semantics: [`docs/architecture/plan-lifecycle.md`](../../../docs/architecture/plan-lifecycle.md) · execution mechanics: [`docs/architecture/execution-model.md`](../../../docs/architecture/execution-model.md) · the exact port contracts: [`backend/docs/INTEGRATION_GUIDE.md`](../../docs/INTEGRATION_GUIDE.md).

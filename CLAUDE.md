@@ -113,8 +113,20 @@ agent-orchestrator/
 │   │                       #   + unit/reasoner + integration
 │   ├── alembic/            # migration chain (0001_core, 0002_reference, 0003_chat,
 │   │                       #   0004_agent_runtime)
-│   └── docs/               # INTEGRATION_GUIDE.md (frozen contracts), DESIGN_NOTES.md,
-│                           #   adr-concurrency-lease.md
+│   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
+├── docs/                   # system documentation:
+│   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,
+│   │                       #   data-model, frontend, known-issues (verified defects)
+│   ├── decisions/          #   decision-log.md, ADRs, domain-design-decisions.md
+│   ├── legacy/             #   pre-refactor features kept for reintroduction analysis
+│   └── history/            #   archived plans/analyses/pre-refactor docs (immutable)
+├── ROADMAP.md              # everything planned but not yet implemented (+ do-not-do)
 └── frontend/               # React/Vite on the thin API: plan list + /plans/:id shell,
                             #   chat panel, gates, 9-phase rail, goals canvas, SSE bridge
 ```
+
+**Docs discipline**: a doc contradicting the code is a bug in the doc — fix it in the
+same PR. Unimplemented ideas go to `ROADMAP.md`, never into `docs/architecture/`.
+When fixing an entry in `docs/architecture/known-issues.md`, delete it and add the
+regression test that locks it. Domain un-freezes get a `docs/decisions/decision-log.md`
+entry.
