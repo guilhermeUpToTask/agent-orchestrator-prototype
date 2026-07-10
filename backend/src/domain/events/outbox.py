@@ -29,12 +29,14 @@ class TaskRequeued(DomainEvent):
     task_id: str
     attempt: int
     reason: str
+    kind: str | None = None  # FailureKind value — rate_limit visibility
 
 
 class TaskFailedEvent(DomainEvent):
     goal_id: str
     task_id: str
     reason: str
+    kind: str | None = None  # FailureKind value — rate_limit visibility
 
 
 class TaskAbandoned(DomainEvent):
@@ -69,6 +71,37 @@ class PlanCompleted(DomainEvent):
 
 class PlanFailed(DomainEvent):
     reason: str
+
+
+class PlanPaused(DomainEvent):
+    """The plan's pause gate was armed. auto=True means the system paused itself
+    — a task exhausted its retry budget or failed non-retryably — and needs
+    human attention (edit while paused, then resume); auto=False is a human
+    pause command."""
+
+    reason: str | None = None
+    auto: bool = False
+
+
+class PlanResumed(DomainEvent):
+    """Human resume: the pause gate cleared and FAILED tasks were requeued with
+    a fresh attempt budget (the manual retry, decision #17)."""
+
+    retried_task_ids: list[str] = []
+
+
+class ReasonerFailed(DomainEvent):
+    """The planning LLM failed in a worker-driven planning phase (ARCHITECTURE/
+    ENRICHING). `transient` true = the plan armed its backoff gate and will retry
+    (`retry_at` is when); false = the failure was permanent or the retry budget was
+    exhausted and the plan moved to FAILED (a PlanFailed follows). This is the
+    signal that reaches the frontend — a worker-phase reasoner failure used to be
+    invisible outside the worker logs."""
+
+    phase: str
+    reason: str
+    transient: bool
+    retry_at: str | None = None
 
 
 class AgentFellBackToDefault(DomainEvent):

@@ -39,6 +39,7 @@ __all__ = [
     "Outbox",
     "Reasoner",
     "ReasonerReply",
+    "ReasonerUnavailable",
     "TaskFailed",
     "UnitOfWork",
     "Workspace",
@@ -54,6 +55,23 @@ class TaskFailed(Exception):
     def __init__(self, reason: str, kind: FailureKind | None = None) -> None:
         self.reason = reason
         self.kind = kind
+        super().__init__(reason)
+
+
+class ReasonerUnavailable(Exception):
+    """Raised by a Reasoner when it cannot produce a usable turn/artifact — the
+    planning-phase analog of TaskFailed. `transient` marks a failure worth
+    retrying (rate limit, timeout, upstream blip) versus a permanent config
+    error (model lacks tool use, bad key). The PlanningHandler catches this to
+    arm the plan-level backoff gate or fail the plan.
+
+    Kept app-side (like TaskFailed) so the handler stays free of infra imports;
+    the infra ReasonerError subclasses it, so the concrete adapter's raise
+    crosses the boundary as this type without app ever importing infra."""
+
+    def __init__(self, reason: str, *, transient: bool = False) -> None:
+        self.reason = reason
+        self.transient = transient
         super().__init__(reason)
 
 

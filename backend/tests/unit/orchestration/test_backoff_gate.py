@@ -57,7 +57,7 @@ def test_scan_skips_task_gated_in_future_returns_not_ready():
     )  # gate expired -> runnable
 
 
-def test_scan_runs_ungated_task_even_if_another_is_gated():
+def test_head_of_line_task_backing_off_blocks_the_goal():
     gated = Task(
         id="t0",
         name="t0",
@@ -67,9 +67,33 @@ def test_scan_runs_ungated_task_even_if_another_is_gated():
     )
     ready = Task(id="t1", name="t1", position=1, description="")
     g = Goal(id="g1", name="g", position=0, description="", tasks=[gated, ready])
-    # t0 gated -> skipped; t1 ready -> returned (backoff doesn't block other work)
-    goal, task = next_action([g], NOW)
-    assert task.id == "t1"
+    # tasks in a goal are a sequential chain: a backing-off head blocks the whole
+    # goal — the scan never skips ahead to t1 (un-freeze #3 strict order)
+    assert next_action([g], NOW) == NOT_READY
+
+
+def test_blocked_goal_yields_to_next_dependency_satisfied_goal():
+    gated = Task(
+        id="t0",
+        name="t0",
+        position=0,
+        description="",
+        retry_not_before=NOW + timedelta(seconds=99),
+    )
+    g1 = Goal(id="g1", name="g1", position=0, description="", tasks=[gated])
+    g2 = Goal(
+        id="g2",
+        name="g2",
+        position=1,
+        description="",
+        tasks=[Task(id="t1", name="t1", position=0, description="")],
+    )
+    # strictness is WITHIN a goal; cross-goal order stays position + depends_on,
+    # so an independent later goal still runs while g1 waits out its backoff
+    action = next_action([g1, g2], NOW)
+    assert action not in (None, NOT_READY)
+    goal, task = action
+    assert goal.id == "g2" and task.id == "t1"
 
 
 def test_not_ready_distinct_from_done():

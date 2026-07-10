@@ -47,6 +47,17 @@ class PlanTable(Base):
     lease_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lease_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Durable plan-level backoff gate (epoch seconds UTC): a worker-driven planning
+    # phase that hit a transient reasoner failure is not re-claimed until now passes
+    # this. Projected from Plan.planning_retry_not_before; the claim predicate ANDs it.
+    retry_not_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Human pause gate (un-freeze #3): projected from Plan.paused; the claim
+    # predicate skips paused plans, so pause holds durably across crashes.
+    paused: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=_utcnow_iso)
     updated_at: Mapped[str] = mapped_column(
         String, nullable=False, default=_utcnow_iso, onupdate=_utcnow_iso
@@ -101,12 +112,17 @@ class AgentEventTable(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     plan_id: Mapped[str] = mapped_column(String, nullable=False)
-    task_id: Mapped[str] = mapped_column(String, nullable=False)
+    # NULL task_id = a plan-scoped telemetry row (e.g. the reasoner's llm.call);
+    # task-scoped rows carry the task id as before.
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     occurred_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    # The per-plan / per-task history read path (GET /plans/{id}/agent-events).
+    __table_args__ = (Index("ix_agent_events_plan_task", "plan_id", "task_id", "id"),)
 
 
 # ---------------------------------------------------------------------------

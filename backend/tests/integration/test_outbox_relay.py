@@ -91,6 +91,31 @@ def test_relay_tails_agent_events_by_cursor(sf):
     assert broker.published == []
 
 
+def test_relay_forwards_plan_scoped_event_with_null_task_id(sf):
+    from src.domain.events.agent_events import AgentEvent
+    from src.infra.db.agent_event_sink import SqliteAgentEventSink
+
+    sink = SqliteAgentEventSink(sf)
+    asyncio.run(
+        sink.emit(
+            AgentEvent(
+                plan_id="p1",
+                task_id=None,  # plan-scoped reasoner telemetry
+                attempt=0,
+                seq=0,
+                type="llm.call",
+                payload={"total_tokens": "42"},
+            )
+        )
+    )
+
+    broker = CollectingBroker()
+    relay_once(sf, broker, agent_cursor=0)
+    (event,) = [p for t, p in broker.published if t == "agent.event"]
+    assert event["task_id"] is None and event["type"] == "llm.call"
+    assert event["payload"]["total_tokens"] == "42"
+
+
 def test_relay_survives_crash_between_publish_and_mark(sf):
     """At-least-once: if marking fails after publishing, the next pass
     re-delivers the same event (same event_id — consumers dedup)."""

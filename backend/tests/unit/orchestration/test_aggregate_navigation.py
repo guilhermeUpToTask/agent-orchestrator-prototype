@@ -18,6 +18,7 @@ from src.domain.services import edit_service as ed
 from src.domain.factories.plan_factory import PlanFactory
 from src.domain.errors.tasks_errors import (
     GoalNotFoundError,
+    InvalidTransitionError,
     TaskNotFoundError,
     GoalAlreadyRunningError,
 )
@@ -157,15 +158,53 @@ def test_unknown_task_raises():
 
 def test_mutation_on_terminal_plan_raises():
     p = exec_plan([goal("g1", 0, [task(0)])])
-    p.fail_goal("g1")  # -> phase FAILED
+    p.phase = PlanPhase.FAILED  # terminal (only fail_plan reaches this now)
     with pytest.raises(PlanAlreadyTerminalError):
         p.start_task("g1", "t0")
 
 
-def test_fail_goal_halts_plan():
+def test_reopen_discovery_from_awaiting_review():
     p = exec_plan([goal("g1", 0, [task(0)])])
-    p.fail_goal("g1")
-    assert p.phase == PlanPhase.FAILED
+    p.phase = PlanPhase.AWAITING_REVIEW
+    p.reopen_discovery()
+    assert p.phase == PlanPhase.DISCOVERY
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [PlanPhase.DISCOVERY, PlanPhase.RUNNING, PlanPhase.REVIEW, PlanPhase.ENRICHING],
+)
+def test_reopen_discovery_rejected_outside_awaiting_review(phase):
+    p = exec_plan([goal("g1", 0, [task(0)])])
+    p.phase = phase
+    with pytest.raises(InvalidTransitionError):
+        p.reopen_discovery()
+
+
+def test_reopen_discovery_clears_pause_gate():
+    p = exec_plan([goal("g1", 0, [task(0)])])
+    p.phase = PlanPhase.AWAITING_REVIEW
+    p.paused = True
+    p.paused_reason = "held"
+    p.reopen_discovery()
+    assert not p.paused and p.paused_reason is None
+
+
+def test_failed_task_pause_policy_is_recoverable():
+    """Un-freeze #3: a terminal task failure pauses the plan (goal stays open,
+    phase stays RUNNING); resume() is the manual retry — the FAILED task returns
+    to PENDING with a fresh attempt budget."""
+    p = exec_plan([goal("g1", 0, [task(0)])])
+    p.start_task("g1", "t0")
+    p.fail_task("g1", "t0", "boom")
+    p.pause("task t0 failed")
+    assert p.paused and p.phase == PlanPhase.RUNNING
+
+    retried = p.resume()
+    assert retried == ["t0"]
+    assert not p.paused and p.paused_reason is None
+    t = p.goals[0].tasks[0]
+    assert t.status == Status.PENDING and t.attempt == 0 and t.result is None
 
 
 # ===== FULL retry cycle through the aggregate =====

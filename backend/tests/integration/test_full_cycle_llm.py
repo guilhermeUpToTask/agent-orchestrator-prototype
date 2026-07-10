@@ -106,7 +106,9 @@ class LLMStack:
         self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities)
+        self.planning = PlanningHandler(
+            self.reasoner, self.agents, self.capabilities, self.clock
+        )
 
     def tick(self):
         return asyncio.run(

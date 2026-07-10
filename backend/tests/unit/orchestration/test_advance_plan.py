@@ -103,20 +103,23 @@ def test_retry_then_succeed(env_factory):
     )  # 2 failed runs discarded, 1 committed
 
 
-def test_permanent_failure_halts_plan(env_factory):
+def test_permanent_failure_auto_pauses_plan(env_factory):
     env = env_factory({"g0t0": DummyBehavior(always_fail=True, fail_reason="boom")})
     sig = asyncio.run(run_to_completion(env, make_plan(retry_max=3)))
-    assert sig == "failed"
+    assert sig == "paused"
     final = env.stored("p1")
-    assert final.phase == PlanPhase.FAILED
+    # un-freeze #3: exhaustion auto-pauses (recoverable) instead of terminal FAILED
+    assert final.phase == PlanPhase.RUNNING and final.paused
+    assert final.paused_reason is not None
     assert final.goals[0].tasks[0].status == Status.FAILED
-    # attempts: tries until exhausted (max_attempts=3) then terminal
+    # attempts: tries until exhausted (max_attempts=3) then pauses
     assert env.runner.calls["g0t0"] == 3
     types = env.outbox_types()
-    assert "TaskFailedEvent" in types and "PlanFailed" in types
+    assert "TaskFailedEvent" in types and "PlanPaused" in types
+    assert "PlanFailed" not in types and "GoalFailedEvent" not in types
 
 
-def test_non_retryable_fails_immediately(env_factory):
+def test_non_retryable_pauses_immediately(env_factory):
     env = env_factory(
         {
             "g0t0": DummyBehavior(
@@ -127,8 +130,9 @@ def test_non_retryable_fails_immediately(env_factory):
         }
     )
     sig = asyncio.run(run_to_completion(env, make_plan(retry_max=5)))
-    assert sig == "failed"
+    assert sig == "paused"
     assert env.runner.calls["g0t0"] == 1  # non-retryable -> no retries despite max=5
+    assert env.stored("p1").paused  # human fixes credentials, then resumes
 
 
 # ---- idempotency / crash recovery ----

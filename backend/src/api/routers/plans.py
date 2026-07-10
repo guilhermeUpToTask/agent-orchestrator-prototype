@@ -18,12 +18,16 @@ from src.app.use_cases.apply_edit import (
     Edit,
     EditTaskRequirements,
     RebindTaskAgent,
+    RemoveGoal,
     RemoveTask,
     ReorderTasks,
+    UpdateGoal,
+    UpdateTask,
     apply_edit,
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
 from src.app.use_cases.create_plan import create_plan
+from src.app.use_cases.pause_resume import pause_plan, resume_plan
 from src.app.use_cases.request_replan import request_replan
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
@@ -78,6 +82,9 @@ class EditRequest(BaseModel):
         "reorder_tasks",
         "edit_task_requirements",
         "rebind_task_agent",
+        "update_task",
+        "update_goal",
+        "remove_goal",
     ]
     goal_id: str
     task_id: str | None = None
@@ -85,6 +92,9 @@ class EditRequest(BaseModel):
     ordered_task_ids: list[str] | None = None
     required_capabilities: list[str] | None = None
     agent_id: str | None = None
+    name: str | None = None
+    description: str | None = None
+    depends_on: list[str] | None = None
 
 
 def _require(value: Any, field: str, edit_type: str) -> Any:
@@ -119,6 +129,22 @@ def _to_edit(body: EditRequest) -> Edit:
             _require(body.task_id, "task_id", body.type),
             _require(body.required_capabilities, "required_capabilities", body.type),
         )
+    if body.type == "update_task":
+        return UpdateTask(
+            goal_id=body.goal_id,
+            task_id=_require(body.task_id, "task_id", body.type),
+            name=body.name,
+            description=body.description,
+        )
+    if body.type == "update_goal":
+        return UpdateGoal(
+            goal_id=body.goal_id,
+            name=body.name,
+            description=body.description,
+            depends_on=body.depends_on,
+        )
+    if body.type == "remove_goal":
+        return RemoveGoal(body.goal_id)
     return RebindTaskAgent(
         body.goal_id,
         _require(body.task_id, "task_id", body.type),
@@ -166,10 +192,40 @@ def edit_plan(
     )
 
 
+class PauseRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/{plan_id}/pause", status_code=204)
+def pause(
+    plan_id: str,
+    body: PauseRequest | None = None,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Arm the pause gate: the worker stops claiming the plan at the next unit
+    boundary and goals/tasks become editable. Idempotent."""
+    reason = body.reason if body is not None else None
+    pause_plan(plan_id, container.new_unit_of_work(), reason)
+
+
+@router.post("/{plan_id}/resume", status_code=204)
+def resume(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
+    """Clear the pause gate and requeue failed work (the manual retry): FAILED
+    tasks return to PENDING with a fresh attempt budget. 422 when not paused."""
+    resume_plan(plan_id, container.new_unit_of_work())
+
+
 @router.post("/{plan_id}/approve", status_code=204)
 def approve(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING."""
     control.resume_from_review(plan_id, container.new_unit_of_work())
+
+
+@router.post("/{plan_id}/review/reopen", status_code=204)
+def reopen(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
+    """Human "request changes" at the pre-execution gate: AWAITING_REVIEW ->
+    DISCOVERY. Re-opens the planning chat; the next commit replaces the roadmap."""
+    control.reopen_discovery(plan_id, container.new_unit_of_work())
 
 
 @router.post("/{plan_id}/review/finish", status_code=204)
@@ -234,6 +290,52 @@ async def replanning(
     return MessageResponse(
         reply=result.reply, committed=result.committed, phase=result.phase.value
     )
+
+
+class AgentEventResponse(BaseModel):
+    id: int
+    event_id: str
+    plan_id: str
+    task_id: str | None
+    attempt: int
+    seq: int
+    type: str
+    payload: dict[str, Any]
+    occurred_at: str
+
+
+@router.get("/{plan_id}/agent-events", response_model=list[AgentEventResponse])
+def agent_events(
+    plan_id: str,
+    task_id: str | None = None,
+    limit: int = 200,
+    before_id: int | None = None,
+    container: AppContainer = Depends(get_container),
+) -> list[AgentEventResponse]:
+    """The plan's fine-grained agent/reasoner telemetry history (most-recent
+    first), optionally filtered to one task. 404s for an unknown plan."""
+    import json
+
+    uow = container.new_unit_of_work()
+    with uow:
+        uow.plans.get(plan_id)  # existence check -> PLAN_NOT_FOUND -> 404
+    rows = container.agent_event_reader.list(
+        plan_id, task_id=task_id, limit=limit, before_id=before_id
+    )
+    return [
+        AgentEventResponse(
+            id=r["id"],
+            event_id=r["event_id"],
+            plan_id=r["plan_id"],
+            task_id=r["task_id"],
+            attempt=r["attempt"],
+            seq=r["seq"],
+            type=r["type"],
+            payload=json.loads(r["payload"]) if r["payload"] else {},
+            occurred_at=r["occurred_at"],
+        )
+        for r in rows
+    ]
 
 
 @router.get("/{plan_id}/chat", response_model=list[ChatMessageResponse])

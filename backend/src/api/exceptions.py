@@ -59,6 +59,10 @@ _STATUS_BY_CODE: dict[str, int] = {
     "NO_DEFAULT_AGENT": 422,
     "REASONER_CONFIG_INVALID": 422,
     "AGENT_RUNNER_CONFIG_INVALID": 422,
+    # 502 — upstream provider failed (rate limit / out of credits / upstream error).
+    # The chat path (DISCOVERY/REPLANNING) surfaces reasoner failures through this;
+    # worker-phase reasoner failures surface via the ReasonerFailed SSE event.
+    "REASONER_FAILED": 502,
 }
 _DEFAULT_DOMAIN_STATUS = 400
 _DEFAULT_INFRA_STATUS = 503

@@ -64,7 +64,41 @@ class RebindTaskAgent:
     agent_id: str
 
 
-Edit = AddTask | RemoveTask | ReorderTasks | EditTaskRequirements | RebindTaskAgent
+@dataclass
+class UpdateTask:
+    """Rename / re-describe a task (un-freeze #3, editable while paused)."""
+
+    goal_id: str
+    task_id: str
+    name: str | None = None
+    description: str | None = None
+
+
+@dataclass
+class UpdateGoal:
+    """Rename / re-describe a goal, or rewrite its connections (depends_on)."""
+
+    goal_id: str
+    name: str | None = None
+    description: str | None = None
+    depends_on: list[str] | None = None
+
+
+@dataclass
+class RemoveGoal:
+    goal_id: str
+
+
+Edit = (
+    AddTask
+    | RemoveTask
+    | ReorderTasks
+    | EditTaskRequirements
+    | RebindTaskAgent
+    | UpdateTask
+    | UpdateGoal
+    | RemoveGoal
+)
 
 
 def _validate_capability_ids(
@@ -85,32 +119,65 @@ def apply_edit(
 ) -> None:
     with uow:
         plan = uow.plans.get(plan_id)
+        paused = plan.paused  # RUNNING goals + FAILED tasks are editable while paused
 
         if isinstance(edit, AddTask):
             _validate_capability_ids(edit.task.required_capabilities, capabilities)
-            edit_service.add_task(plan.goals, edit.goal_id, edit.task)
+            edit_service.add_task(plan.goals, edit.goal_id, edit.task, paused=paused)
         elif isinstance(edit, RemoveTask):
-            edit_service.remove_task(plan.goals, edit.goal_id, edit.task_id)
+            edit_service.remove_task(
+                plan.goals, edit.goal_id, edit.task_id, paused=paused
+            )
         elif isinstance(edit, ReorderTasks):
-            edit_service.reorder_tasks(plan.goals, edit.goal_id, edit.ordered_task_ids)
+            edit_service.reorder_tasks(
+                plan.goals, edit.goal_id, edit.ordered_task_ids, paused=paused
+            )
         elif isinstance(edit, EditTaskRequirements):
             _validate_capability_ids(edit.required_capabilities, capabilities)
             edit_service.edit_task_requirements(
-                plan.goals, edit.goal_id, edit.task_id, edit.required_capabilities
+                plan.goals,
+                edit.goal_id,
+                edit.task_id,
+                edit.required_capabilities,
+                paused=paused,
             )
             # requirements changed -> re-run the match (locked rebind-on-edit rule)
             task = find_task(find_goal(plan.goals, edit.goal_id), edit.task_id)
             task.agent_id, _ = match_agent(
                 task.required_capabilities, agents.list(), agents.default_agent_id()
             )
+        elif isinstance(edit, UpdateTask):
+            edit_service.update_task(
+                plan.goals,
+                edit.goal_id,
+                edit.task_id,
+                name=edit.name,
+                description=edit.description,
+                paused=paused,
+            )
+        elif isinstance(edit, UpdateGoal):
+            edit_service.update_goal(
+                plan.goals,
+                edit.goal_id,
+                name=edit.name,
+                description=edit.description,
+                depends_on=edit.depends_on,
+                paused=paused,
+            )
+        elif isinstance(edit, RemoveGoal):
+            edit_service.remove_goal(plan.goals, edit.goal_id, paused=paused)
         elif isinstance(edit, RebindTaskAgent):
             # task-level guard (not the goal-level _assert_editable): rebinding a
-            # PENDING task of a RUNNING goal is allowed; a RUNNING/terminal task is not.
+            # PENDING task of a RUNNING goal is allowed; so is a FAILED task while
+            # paused (the edit-and-retry window); a RUNNING/terminal task is not.
             task = find_task(find_goal(plan.goals, edit.goal_id), edit.task_id)
-            if task.status != Status.PENDING:
+            rebindable = task.status == Status.PENDING or (
+                task.status == Status.FAILED and paused
+            )
+            if not rebindable:
                 raise InvalidEditError(
                     f"task '{edit.task_id}' is {task.status.value}; "
-                    "only a pending task's agent can be rebound"
+                    "its agent cannot be rebound"
                 )
             agents.get(edit.agent_id)  # existence check: AgentNotFoundError
             task.agent_id = edit.agent_id

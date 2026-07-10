@@ -37,6 +37,7 @@ from src.infra.db.reference_repos import (
     SqliteModelRepository,
     SqliteProjectRepository,
 )
+from src.infra.db.agent_event_reader import SqliteAgentEventReader
 from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
@@ -116,6 +117,10 @@ class AppContainer:
     @cached_property
     def agent_event_sink(self) -> SqliteAgentEventSink:
         return SqliteAgentEventSink(self.session_factory)
+
+    @cached_property
+    def agent_event_reader(self) -> SqliteAgentEventReader:
+        return SqliteAgentEventReader(self.session_factory)
 
     @cached_property
     def chat_store(self) -> SqliteChatRepository:

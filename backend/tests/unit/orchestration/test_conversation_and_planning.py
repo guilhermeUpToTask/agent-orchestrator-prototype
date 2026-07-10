@@ -16,7 +16,7 @@ from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
 from src.domain.errors.tasks_errors import InvalidTransitionError
-from src.domain.ports.reasoner_port import ReasonerReply
+from src.domain.ports.reasoner_port import ChatMessage, ReasonerReply
 from src.domain.value_objects.lifecycle import Status
 from src.domain.value_objects.tasks_vos import TaskResult
 
@@ -67,7 +67,7 @@ class ScriptedReasoner:
 
 def handler(reasoner, env, capabilities=None):
     return PlanningHandler(
-        reasoner, env.agents, InMemoryCapabilityRepository(capabilities)
+        reasoner, env.agents, InMemoryCapabilityRepository(capabilities), env.clock
     )
 
 
@@ -122,6 +122,40 @@ def test_commit_turn_advances_and_marks_meta(env_factory):
     # the second converse call saw the first turn's two messages as history
     assert reasoner.converse_calls[1] == ("discovery", "sqlite is fine", 2)
     assert chat.list("p1")[-1].meta == {"committed": True}
+
+
+def test_discovery_commit_after_reopen_replaces_unexecuted_roadmap(env_factory):
+    """Gate chat-back (un-freeze #3): reopen_discovery returns AWAITING_REVIEW to
+    DISCOVERY, and the next commit REPLACES the un-executed goals (set_iteration_goals
+    keeps only terminal history) — the chat survives the round-trip."""
+    from src.app.use_cases.control import reopen_discovery
+
+    env = env_factory()
+    # a plan already enriched and sitting at the pre-execution gate
+    old = goal("g-old", 0, [task("t-old")])
+    env.seed(plan_in(PlanPhase.AWAITING_REVIEW, [old]))
+    chat = InMemoryChatStore()
+    chat.append(
+        "p1",
+        ChatMessage(
+            role="user", content="the original brief", created_at=env.clock.now()
+        ),
+    )
+
+    reopen_discovery("p1", env.uow)
+    assert env.stored("p1").phase == PlanPhase.DISCOVERY
+
+    reasoner = ScriptedReasoner(
+        replies=[ReasonerReply(message="new roadmap", goals=[goal("g-new", 0, [task("t-new")])])]
+    )
+    result = turn(env, chat, reasoner, "actually, do it differently")
+
+    assert (result.committed, result.phase) == (True, PlanPhase.ARCHITECTURE)
+    stored = env.stored("p1")
+    assert [g.id for g in stored.goals] == ["g-new"]  # old un-executed goal replaced
+    assert stored.iteration == 1  # replacement, not a new append-only iteration
+    # chat history spans the reopen
+    assert [m.content for m in chat.list("p1")][0] == "the original brief"
 
 
 def test_user_message_survives_reasoner_crash(env_factory):

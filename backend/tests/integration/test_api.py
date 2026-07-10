@@ -88,6 +88,181 @@ def test_plan_lifecycle_over_http(client):
     assert client.get("/api/plans/ghost/chat").status_code == 404
 
 
+def _plan_at_awaiting_review(client) -> str:
+    """Drive a stub plan discovery->architecture->enriching->awaiting_review by
+    committing a roadmap then advancing the worker phases synchronously."""
+    from src.api import dependencies
+    from src.app.use_cases.advance_plan import advance_plan
+    from src.app.handlers.planning_handler import PlanningHandler
+
+    # a default agent is needed for the enrich->bind step
+    agent_id = client.post(
+        "/api/agents",
+        json={"name": "A", "role": "implementer", "model_role": "smart"},
+    ).json()["id"]
+    client.post(f"/api/agents/{agent_id}/default")
+
+    plan_id = client.post(
+        "/api/plans", json={"brief": "b"}
+    ).json()["plan_id"]
+    # commit a two-goal roadmap through discovery
+    client.post(
+        f"/api/plans/{plan_id}/discovery/message",
+        json={"message": "goal: G1\ntask: t one\ngoal: G2\ntask: t two"},
+    )
+    container = dependencies.get_container()
+    import asyncio
+
+    handler = PlanningHandler(
+        container.reasoner, container.agent_repo, container.capability_repo,
+        container.clock,
+    )
+    for _ in range(10):
+        phase = client.get(f"/api/plans/{plan_id}").json()["phase"]
+        if phase == "awaiting_review":
+            break
+        asyncio.run(
+            advance_plan(
+                plan_id,
+                container.new_unit_of_work(),
+                container.agent_runner,
+                container.agent_repo,
+                container.workspace,
+                container.agent_event_sink,
+                container.clock,
+                handler,
+            )
+        )
+    return plan_id
+
+
+def test_pause_resume_and_edit_over_http(client):
+    plan_id = _plan_at_awaiting_review(client)
+    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "awaiting_review"
+    goals = client.get(f"/api/plans/{plan_id}").json()["goals"]
+    g1 = goals[0]["id"]
+
+    # edit at the pre-execution gate (goals are PENDING): update_goal + update_task
+    assert client.post(
+        f"/api/plans/{plan_id}/edits",
+        json={"type": "update_goal", "goal_id": g1, "name": "G1 renamed"},
+    ).status_code == 204
+    task_id = client.get(f"/api/plans/{plan_id}").json()["goals"][0]["tasks"][0]["id"]
+    assert client.post(
+        f"/api/plans/{plan_id}/edits",
+        json={
+            "type": "update_task",
+            "goal_id": g1,
+            "task_id": task_id,
+            "name": "t renamed",
+        },
+    ).status_code == 204
+    refreshed = client.get(f"/api/plans/{plan_id}").json()
+    assert refreshed["goals"][0]["name"] == "G1 renamed"
+    assert refreshed["goals"][0]["tasks"][0]["name"] == "t renamed"
+
+    # remove_goal strips it from the roadmap
+    g2 = refreshed["goals"][1]["id"]
+    assert client.post(
+        f"/api/plans/{plan_id}/edits",
+        json={"type": "remove_goal", "goal_id": g2},
+    ).status_code == 204
+    assert len(client.get(f"/api/plans/{plan_id}").json()["goals"]) == 1
+
+    # pause is rejected at a gate (not a worker-claimable phase)
+    bad_pause = client.post(f"/api/plans/{plan_id}/pause")
+    assert bad_pause.status_code == 422
+    assert bad_pause.json()["error"]["code"] == "INVALID_TRANSITION"
+
+    # approve -> RUNNING, then pause is allowed; resume when not paused is 422
+    assert client.post(f"/api/plans/{plan_id}/approve").status_code == 204
+    assert client.post(
+        f"/api/plans/{plan_id}/pause", json={"reason": "hold"}
+    ).status_code == 204
+    assert client.get(f"/api/plans/{plan_id}").json()["paused"] is True
+    assert client.post(f"/api/plans/{plan_id}/resume").status_code == 204
+    assert client.get(f"/api/plans/{plan_id}").json()["paused"] is False
+    assert client.post(f"/api/plans/{plan_id}/resume").status_code == 422
+
+
+def test_pause_unknown_plan_404(client):
+    assert client.post("/api/plans/ghost/pause").status_code == 404
+
+
+def _seed_agent_events(events):
+    """Write agent_events rows directly through the sink for read-side tests."""
+    import asyncio
+
+    from src.api import dependencies
+    from src.domain.events.agent_events import AgentEvent
+
+    sink = dependencies.get_container().agent_event_sink
+    for e in events:
+        asyncio.run(sink.emit(AgentEvent(**e)))
+
+
+def test_agent_events_read_endpoint(client):
+    plan_id = client.post("/api/plans", json={"brief": "b"}).json()["plan_id"]
+    _seed_agent_events(
+        [
+            {"plan_id": plan_id, "task_id": "t1", "attempt": 1, "seq": 0,
+             "type": "agent.started", "payload": {"runtime": "pi"}},
+            {"plan_id": plan_id, "task_id": "t1", "attempt": 1, "seq": 1,
+             "type": "agent.finished", "payload": {"elapsed_seconds": "3.0"}},
+            {"plan_id": plan_id, "task_id": "t2", "attempt": 1, "seq": 0,
+             "type": "agent.started", "payload": {"runtime": "pi"}},
+            {"plan_id": plan_id, "task_id": None, "attempt": 0, "seq": 0,
+             "type": "llm.call", "payload": {"total_tokens": "50"}},
+        ]
+    )
+
+    # whole plan, most-recent first
+    all_events = client.get(f"/api/plans/{plan_id}/agent-events").json()
+    assert [e["type"] for e in all_events][0] == "llm.call"  # newest
+    assert len(all_events) == 4
+    # the plan-scoped row round-trips a null task_id
+    assert any(e["task_id"] is None for e in all_events)
+
+    # filtered to one task
+    t1 = client.get(f"/api/plans/{plan_id}/agent-events?task_id=t1").json()
+    assert {e["type"] for e in t1} == {"agent.started", "agent.finished"}
+    assert all(e["task_id"] == "t1" for e in t1)
+
+    # unknown plan -> 404
+    assert client.get("/api/plans/ghost/agent-events").status_code == 404
+
+
+def test_metrics_endpoint(client):
+    plan_id = client.post("/api/plans", json={"brief": "b"}).json()["plan_id"]
+    _seed_agent_events(
+        [
+            {"plan_id": plan_id, "task_id": None, "attempt": 0, "seq": 0,
+             "type": "llm.call",
+             "payload": {"llm_calls": "2", "prompt_tokens": "30",
+                         "completion_tokens": "13", "total_tokens": "43"}},
+            {"plan_id": plan_id, "task_id": "t1", "attempt": 1, "seq": 0,
+             "type": "agent.started", "payload": {"runtime": "pi"}},
+            {"plan_id": plan_id, "task_id": "t1", "attempt": 1, "seq": 1,
+             "type": "agent.failed", "payload": {"kind": "rate_limit"}},
+            {"plan_id": plan_id, "task_id": "t2", "attempt": 1, "seq": 1,
+             "type": "agent.failed", "payload": {"kind": "rate_limit"}},
+        ]
+    )
+
+    body = client.get("/api/metrics").json()
+    assert body["llm"] == {
+        "sessions": 1, "calls": 2, "prompt_tokens": 30,
+        "completion_tokens": 13, "total_tokens": 43,
+    }
+    assert body["agent"]["runs"] == 1
+    assert body["agent"]["failed"] == 2
+    assert body["agent"]["failures_by_kind"]["rate_limit"] == 2
+
+    # per-plan filter narrows the same way (unknown plan -> zeros)
+    empty = client.get("/api/metrics?plan_id=ghost").json()
+    assert empty["llm"]["total_tokens"] == 0
+
+
 def test_error_mapping_table(client):
     # 404 PLAN_NOT_FOUND
     missing = client.get("/api/plans/ghost")

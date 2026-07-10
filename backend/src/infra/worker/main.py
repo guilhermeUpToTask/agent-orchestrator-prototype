@@ -40,7 +40,10 @@ async def run_worker_forever(
 
     uow = container.new_unit_of_work()
     planning_handler = PlanningHandler(
-        container.reasoner, container.agent_repo, container.capability_repo
+        container.reasoner,
+        container.agent_repo,
+        container.capability_repo,
+        container.clock,
     )
     runner_mode = validate_agent_runner_mode(container.config_store)
     if runner_mode.mode == "real":

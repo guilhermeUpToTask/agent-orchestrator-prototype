@@ -32,6 +32,24 @@ def resume_from_review(plan_id: str, uow: UnitOfWork) -> None:
         uow.plans.save(plan)
 
 
+def reopen_discovery(plan_id: str, uow: UnitOfWork) -> None:
+    """Human "request changes" at the pre-execution gate: AWAITING_REVIEW ->
+    DISCOVERY. Re-opens the planning conversation; the next commit REPLACES the
+    un-executed roadmap (set_iteration_goals keeps only terminal history)."""
+    with uow:
+        plan = uow.plans.get(plan_id)
+        plan.reopen_discovery()
+        plan.bump_version()
+        uow.outbox.add(
+            PhaseAdvanced(
+                plan_id=plan_id,
+                from_phase=PlanPhase.AWAITING_REVIEW.value,
+                to_phase=PlanPhase.DISCOVERY.value,
+            )
+        )
+        uow.plans.save(plan)
+
+
 def finish_review(plan_id: str, uow: UnitOfWork) -> None:
     """Human "finish" at the post-execution gate: REVIEW -> DONE. This is the ONLY
     place a plan reaches DONE, and where PlanCompleted is emitted."""

@@ -26,6 +26,9 @@ from src.app.use_cases.apply_edit import (
     ReorderTasks,
     EditTaskRequirements,
     RebindTaskAgent,
+    RemoveGoal,
+    UpdateGoal,
+    UpdateTask,
 )
 from src.app.use_cases.control import finish_review, resume_from_review
 from src.app.testing.fakes import (
@@ -210,6 +213,129 @@ def test_rebind_task_agent_rejected_unless_pending():
     uow, _ = uow_with(plan)
     with pytest.raises(InvalidEditError):
         edit("p1", RebindTaskAgent("g1", "t0", "a-default"), uow)
+
+
+# ---- new edit ops (un-freeze #3): update_task / update_goal / remove_goal ----
+def _paused_running_plan():
+    """A RUNNING plan on the pause gate — the edit-while-paused window."""
+    plan = _plan_with_goal(status=Status.RUNNING)
+    plan.phase = PlanPhase.RUNNING
+    plan.paused = True
+    return plan
+
+
+def test_update_task_name_and_description():
+    plan = _plan_with_goal()
+    uow, repo = uow_with(plan)
+    edit("p1", UpdateTask("g1", "t0", name="renamed", description="new desc"), uow)
+    saved = repo.get("p1").goals[0].tasks[0]
+    assert saved.name == "renamed" and saved.description == "new desc"
+
+
+def test_update_task_empty_name_rejected():
+    plan = _plan_with_goal()
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError):
+        edit("p1", UpdateTask("g1", "t0", name="  "), uow)
+
+
+def test_update_goal_fields_and_depends_on():
+    g2 = Goal(id="g2", name="g2", position=1, description="", tasks=[])
+    plan = _plan_with_goal()
+    plan.goals.append(g2)
+    uow, repo = uow_with(plan)
+    edit("p1", UpdateGoal("g2", name="g2-new", depends_on=["g1"]), uow)
+    saved = next(g for g in repo.get("p1").goals if g.id == "g2")
+    assert saved.name == "g2-new" and saved.depends_on == ["g1"]
+
+
+def test_update_goal_depends_on_unknown_rejected():
+    plan = _plan_with_goal()
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError):
+        edit("p1", UpdateGoal("g1", depends_on=["ghost"]), uow)
+
+
+def test_update_goal_depends_on_self_rejected():
+    plan = _plan_with_goal()
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError):
+        edit("p1", UpdateGoal("g1", depends_on=["g1"]), uow)
+
+
+def test_update_goal_depends_on_cycle_rejected():
+    g2 = Goal(id="g2", name="g2", position=1, description="", depends_on=["g1"])
+    plan = _plan_with_goal()
+    plan.goals.append(g2)
+    uow, _ = uow_with(plan)
+    # g1 -> g2 while g2 -> g1 already: a cycle
+    with pytest.raises(InvalidEditError):
+        edit("p1", UpdateGoal("g1", depends_on=["g2"]), uow)
+
+
+def test_remove_goal_strips_dangling_depends_on_and_renumbers():
+    g2 = Goal(id="g2", name="g2", position=1, description="", depends_on=["g1"])
+    g3 = Goal(id="g3", name="g3", position=2, description="", depends_on=["g1"])
+    plan = _plan_with_goal()
+    plan.goals.extend([g2, g3])
+    uow, repo = uow_with(plan)
+    edit("p1", RemoveGoal("g1"), uow)
+    saved = repo.get("p1").goals
+    assert [g.id for g in saved] == ["g2", "g3"]
+    assert all("g1" not in g.depends_on for g in saved)  # dangling edge stripped
+    assert sorted(g.position for g in saved) == [0, 1]  # renumbered
+
+
+def test_remove_goal_with_running_task_rejected_even_paused():
+    plan = _paused_running_plan()
+    plan.goals[0].tasks[0].status = Status.RUNNING
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError):
+        edit("p1", RemoveGoal("g1"), uow)
+
+
+def test_edit_running_goal_rejected_when_not_paused():
+    plan = _plan_with_goal(status=Status.RUNNING)
+    plan.phase = PlanPhase.RUNNING  # not paused
+    uow, _ = uow_with(plan)
+    with pytest.raises(GoalAlreadyRunningError):
+        edit("p1", UpdateTask("g1", "t0", name="x"), uow)
+
+
+def test_add_task_on_paused_running_goal_allowed():
+    plan = _paused_running_plan()
+    uow, repo = uow_with(plan)
+    edit("p1", AddTask("g1", Task(id="tX", name="tX", position=9, description="")), uow)
+    assert any(t.id == "tX" for t in repo.get("p1").goals[0].tasks)
+
+
+def test_remove_failed_task_while_paused():
+    plan = _paused_running_plan()
+    plan.goals[0].tasks[0].status = Status.FAILED
+    uow, repo = uow_with(plan)
+    edit("p1", RemoveTask("g1", "t0"), uow)
+    assert all(t.id != "t0" for t in repo.get("p1").goals[0].tasks)
+
+
+def test_remove_running_task_rejected_even_while_paused():
+    plan = _paused_running_plan()
+    plan.goals[0].tasks[0].status = Status.RUNNING
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError):
+        edit("p1", RemoveTask("g1", "t0"), uow)
+
+
+def test_rebind_failed_task_agent_while_paused():
+    plan = _paused_running_plan()
+    plan.goals[0].tasks[0].status = Status.FAILED
+    uow, repo = uow_with(plan)
+    edit(
+        "p1",
+        RebindTaskAgent("g1", "t0", "a-override"),
+        uow,
+        agents=[make_agent("a-default"), make_agent("a-override")],
+    )
+    assert repo.get("p1").goals[0].tasks[0].agent_id == "a-override"
 
 
 # ---- worker-vs-edit race (version-CAS) ----

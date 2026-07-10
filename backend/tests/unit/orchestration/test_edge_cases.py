@@ -158,7 +158,7 @@ def test_two_different_tasks_each_retry_then_succeed():
     assert all(t.status == Status.DONE for t in repo.get("p1").goals[0].tasks)
 
 
-def test_first_task_succeeds_second_permanently_fails_halts():
+def test_first_task_succeeds_second_permanently_fails_pauses():
     g = Goal(
         id="g1",
         name="g1",
@@ -179,11 +179,12 @@ def test_first_task_succeeds_second_permanently_fails_halts():
     script = {"t1": DummyBehavior(always_fail=True, fail_reason="boom")}
     repo, uow, runner, agents, ws, sink, clock = harness(p, script)
     sig = asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))
-    assert sig == "failed"
+    assert sig == "paused"
     final = repo.get("p1")
     assert final.goals[0].tasks[0].status == Status.DONE  # first succeeded
     assert final.goals[0].tasks[1].status == Status.FAILED  # second exhausted
-    assert final.phase == PlanPhase.FAILED
+    # un-freeze #3: recoverable auto-pause, not terminal FAILED
+    assert final.phase == PlanPhase.RUNNING and final.paused
 
 
 # ===== BACKOFF WIRING (the fix) =====

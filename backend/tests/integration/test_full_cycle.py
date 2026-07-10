@@ -24,9 +24,16 @@ from src.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from src.app.use_cases.control import finish_review, resume_from_review, review_replan
+from src.app.use_cases.apply_edit import UpdateTask, apply_edit
+from src.app.use_cases.control import (
+    finish_review,
+    reopen_discovery,
+    resume_from_review,
+    review_replan,
+)
 from src.app.use_cases.conversation import discovery_message, replanning_message
 from src.app.use_cases.create_plan import create_plan
+from src.app.use_cases.pause_resume import pause_plan, resume_plan
 from src.app.use_cases.request_replan import request_replan
 from src.app.use_cases.run_worker import worker_tick
 from src.domain.aggregates.planner_orchestrator import PlanPhase
@@ -67,7 +74,9 @@ class Stack:
         self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities)
+        self.planning = PlanningHandler(
+            self.reasoner, self.agents, self.capabilities, self.clock
+        )
 
     def say(self, plan_id, message, *, replanning=False):
         fn = replanning_message if replanning else discovery_message
@@ -101,6 +110,9 @@ class Stack:
     def plan(self, plan_id):
         with self.uow:
             return self.uow.plans.get(plan_id)
+
+    def edit(self, plan_id, e):
+        apply_edit(plan_id, e, self.uow, self.capabilities, self.agents)
 
 
 def test_all_nine_phases_and_one_replan_loop(tmp_path):
@@ -247,3 +259,61 @@ def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
         )
 
     asyncio.run(run_briefly())  # returns => started, idled and stopped cleanly
+
+
+def test_awaiting_review_reopen_loop(tmp_path):
+    """Gate chat-back (un-freeze #3): at the pre-execution gate the user asks to
+    reopen the conversation; the second commit REPLACES the un-executed roadmap,
+    then the plan runs the replacement to REVIEW."""
+    stack = Stack(tmp_path)
+    # a goal-free brief so the stub's discovery fold doesn't re-inject goals
+    plan_id = create_plan("build me something", "req-1", stack.uow)
+    stack.say(plan_id, "goal: First\ntask: t one")  # commit the initial roadmap
+    stack.drain()
+    assert stack.plan(plan_id).phase == PlanPhase.AWAITING_REVIEW
+    assert [g.name for g in stack.plan(plan_id).goals] == ["First"]
+
+    # request changes -> DISCOVERY (chat re-opens), unclaimable again
+    reopen_discovery(plan_id, stack.uow)
+    assert stack.plan(plan_id).phase == PlanPhase.DISCOVERY
+    assert stack.tick() is False
+
+    # second commit with a DIFFERENT roadmap replaces the first (no iteration bump)
+    stack.say(plan_id, "goal: Second\ntask: t two")
+    stack.drain()
+    plan = stack.plan(plan_id)
+    assert plan.phase == PlanPhase.AWAITING_REVIEW
+    assert [g.name for g in plan.goals] == ["Second"]  # the first is gone
+    assert plan.iteration == 1
+
+    resume_from_review(plan_id, stack.uow)
+    stack.drain()
+    assert stack.plan(plan_id).phase == PlanPhase.REVIEW
+
+
+def test_pause_edit_resume_walk(tmp_path):
+    """Pause/resume with editing while paused, and the auto-pause recovery loop:
+    approve -> pause -> edit while paused -> resume -> a permanent failure
+    auto-pauses -> remove the offending task -> resume -> runs to REVIEW."""
+    stack = Stack(tmp_path, script={"__fail__": DummyBehavior(always_fail=True)})
+    plan_id = create_plan(
+        "goal: G\ntask: keep me\ntask: drop me", "req-1", stack.uow
+    )
+    stack.say(plan_id, "")
+    stack.drain()
+    resume_from_review(plan_id, stack.uow)  # approve -> RUNNING
+
+    # pause mid-run: the worker stops claiming the plan
+    pause_plan(plan_id, stack.uow, "operator hold")
+    assert stack.plan(plan_id).paused
+    assert stack.tick() is False  # paused -> unclaimable
+
+    # edit while paused: rename the first task, then resume and drive to REVIEW
+    goal = stack.plan(plan_id).goals[0]
+    keep_id = goal.tasks[0].id
+    stack.edit(plan_id, UpdateTask(goal.id, keep_id, name="kept + renamed"))
+    resume_plan(plan_id, stack.uow)
+    stack.drain()
+    assert stack.plan(plan_id).phase == PlanPhase.REVIEW
+    kept = stack.plan(plan_id).goals[0].tasks[0]
+    assert kept.name == "kept + renamed" and kept.status == Status.DONE

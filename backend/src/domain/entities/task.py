@@ -72,6 +72,23 @@ class Task(BaseModel):
         self._guard({Status.RUNNING, Status.PENDING}, Status.SKIPPED)
         self.status = Status.SKIPPED
 
+    def retry(self) -> None:
+        """Human-driven retry of a FAILED task (resume-from-pause, decision #17).
+        Back to PENDING with a FRESH attempt budget — attempt resets so the retry
+        policy cannot immediately re-exhaust — bypassing should_retry by
+        construction. Clears the failed result (the TaskFailedEvent and the
+        agent_events rows remain the record of the failure)."""
+        self._guard({Status.FAILED}, Status.PENDING)
+        self.status = Status.PENDING
+        self.result = None
+        self.attempt = 0
+        self.retry_not_before = None
+
+    def clear_backoff(self) -> None:
+        """Human resume: drop an armed backoff gate so the scan re-selects the
+        task immediately. Not a transition — status is untouched."""
+        self.retry_not_before = None
+
     def reopen(self) -> None:
         """Human-driven redo of a good result (DONE -> PENDING). Clears the result
         so the scan re-selects the task; counted on reopen_count, NOT attempt, so

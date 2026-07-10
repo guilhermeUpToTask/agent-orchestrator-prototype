@@ -32,14 +32,25 @@ human command), writes, and commits state + events atomically via the outbox.
 """
 from __future__ import annotations
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from datetime import timedelta
+
+from src.domain.aggregates.planner_orchestrator import (
+    Plan,
+    PlanPhase,
+    WORKER_PLANNING_PHASES,
+)
 from src.domain.entities.goal import Goal
-from src.domain.events.outbox import AgentFellBackToDefault, PhaseAdvanced
+from src.domain.events.outbox import (
+    AgentFellBackToDefault,
+    PhaseAdvanced,
+    PlanFailed,
+    ReasonerFailed,
+)
 from src.domain.repositories.agent_repo import AgentRepository
 from src.domain.repositories.capability_repo import CapabilityRepository
 
 from src.app.handlers.base import Signal
-from src.app.ports import Reasoner, UnitOfWork
+from src.app.ports import Clock, Reasoner, ReasonerUnavailable, UnitOfWork
 
 
 def _next_unenriched(plan: Plan) -> Goal | None:
@@ -54,10 +65,12 @@ class PlanningHandler:
         reasoner: Reasoner,
         agents: AgentRepository,
         capabilities: CapabilityRepository,
+        clock: Clock,
     ) -> None:
         self._reasoner = reasoner
         self._agents = agents
         self._capabilities = capabilities
+        self._clock = clock
 
     async def handle(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         if plan.phase == PlanPhase.ARCHITECTURE:
@@ -72,7 +85,7 @@ class PlanningHandler:
         committed the roadmap; validate the phase and flow into ENRICHING."""
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.phase != PlanPhase.ARCHITECTURE:
+            if plan.phase != PlanPhase.ARCHITECTURE or plan.paused:
                 return Signal.PAUSED  # raced by a human command; theirs wins
             plan.advance_phase(PlanPhase.ENRICHING)
             plan.bump_version()
@@ -87,6 +100,8 @@ class PlanningHandler:
         return Signal.CONTINUE
 
     async def _enrich(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
+        if plan.paused:
+            return Signal.PAUSED  # don't spend an LLM call on a paused plan
         target = _next_unenriched(plan)
         if target is not None:
             return await self._enrich_one(plan_id, target, plan, uow)
@@ -96,12 +111,18 @@ class PlanningHandler:
         self, plan_id: str, target: Goal, plan: Plan, uow: UnitOfWork
     ) -> Signal:
         """Populate ONE goal's tasks, commit, CONTINUE (the JIT checkpoint)."""
-        tasks = await self._reasoner.enrich_goal(  # LLM, outside any txn
-            plan, target, self._capabilities.list()
-        )
+        try:
+            tasks = await self._reasoner.enrich_goal(  # LLM, outside any txn
+                plan, target, self._capabilities.list()
+            )
+        except ReasonerUnavailable as exc:
+            # The reasoner is down (rate limit / upstream error / bad config). Arm
+            # the durable backoff gate or fail the plan — and surface it (outbox ->
+            # SSE) instead of letting it propagate to a silent worker.tick_failed loop.
+            return self._handle_reasoner_failure(plan_id, exc, uow)
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.phase != PlanPhase.ENRICHING:
+            if plan.phase != PlanPhase.ENRICHING or plan.paused:
                 return Signal.PAUSED
             fresh = next((g for g in plan.goals if g.id == target.id), None)
             if fresh is None or fresh.tasks:
@@ -118,9 +139,54 @@ class PlanningHandler:
                         for i, t in enumerate(tasks)
                     ]
             plan.set_iteration_goals(goals)
+            plan.clear_planning_retry()  # progressed: disarm any prior backoff gate
             plan.bump_version()
             uow.plans.save(plan)
         return Signal.CONTINUE
+
+    def _handle_reasoner_failure(
+        self, plan_id: str, exc: ReasonerUnavailable, uow: UnitOfWork
+    ) -> Signal:
+        """A reasoner failure during ENRICHING: re-read + re-guard, then either arm
+        the plan-level backoff gate (transient, budget left) or fail the plan
+        (permanent, or budget exhausted). Emits a ReasonerFailed event either way so
+        the frontend sees it; the transient path returns NOT_READY so the worker
+        releases and sleeps (the gate blocks re-claim until it opens)."""
+        with uow:
+            plan = uow.plans.get(plan_id)
+            if plan.phase not in WORKER_PLANNING_PHASES or plan.paused:
+                return Signal.PAUSED  # raced by a human command; theirs wins
+            phase = plan.phase.value
+            next_attempt = plan.planning_attempts + 1
+            terminal = not exc.transient or next_attempt >= plan.retry_policy.max_attempts
+
+            if terminal:
+                plan.fail_plan()
+                plan.bump_version()
+                uow.outbox.add(
+                    ReasonerFailed(
+                        plan_id=plan_id, phase=phase, reason=exc.reason,
+                        transient=False, retry_at=None,
+                    )
+                )
+                uow.outbox.add(PlanFailed(plan_id=plan_id, reason=exc.reason))
+                uow.plans.save(plan)
+                return Signal.FAILED
+
+            delay = plan.retry_policy.backoff_for(next_attempt + 1)
+            not_before = (
+                self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
+            )
+            plan.record_planning_retry(not_before)
+            plan.bump_version()
+            uow.outbox.add(
+                ReasonerFailed(
+                    plan_id=plan_id, phase=phase, reason=exc.reason, transient=True,
+                    retry_at=not_before.isoformat() if not_before else None,
+                )
+            )
+            uow.plans.save(plan)
+        return Signal.NOT_READY
 
     async def _bind_and_gate(self, plan_id: str, uow: UnitOfWork) -> Signal:
         """Every goal carries tasks: bind agents and pause at the gate."""
@@ -128,7 +194,7 @@ class PlanningHandler:
         default_id = self._agents.default_agent_id()
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.phase != PlanPhase.ENRICHING:
+            if plan.phase != PlanPhase.ENRICHING or plan.paused:
                 return Signal.PAUSED
             fell_back = plan.bind_agents(agents, default_id)
             plan.advance_phase(PlanPhase.AWAITING_REVIEW)

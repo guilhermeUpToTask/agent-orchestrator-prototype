@@ -30,8 +30,11 @@ def next_action(goals: list[Goal], now: datetime) -> NextAction:
     """Derive the next actionable unit by scanning statuses at time `now`.
 
     `now` is injected (never read inside) so the scan stays pure/testable. Backoff
-    is a readiness condition: a task whose retry_not_before is in the future is
-    skipped, exactly like a goal whose dependencies are unmet.
+    is a readiness condition with head-of-line semantics: a goal whose head task
+    has retry_not_before in the future is blocked as a whole (tasks are a
+    sequential chain — the scan never runs a later task past a waiting earlier
+    one); the scan then moves on, exactly like a goal whose dependencies are
+    unmet.
 
     Returns: (goal,task) run it | (goal,None) close goal | (goal,"GOAL_FAILED")
     apply policy | "NOT_READY" backing off, recheck later | None plan complete.
@@ -45,23 +48,28 @@ def next_action(goals: list[Goal], now: datetime) -> NextAction:
         if not _goal_ready(goal, done_goal_ids):
             continue
 
-        goal_has_actionable = False
-        for task in sorted(goal.tasks, key=lambda t: t.position):
-            if task.status in TERMINAL:
-                continue
-            goal_has_actionable = True
-            if not task.is_ready_at(now):
-                saw_backing_off = True
-                continue
-            return goal, task
-
-        if goal_has_actionable:
-            # non-terminal tasks exist but all backing off -> not this goal's turn
+        # Tasks in a goal are a sequential chain: only the HEAD (first non-terminal
+        # task in position order) is ever a candidate. A backing-off head blocks
+        # the whole goal — never skip ahead to a later task. Cross-goal order is
+        # unaffected: the scan moves on to the next goal whose depends_on are met.
+        head = next(
+            (
+                t
+                for t in sorted(goal.tasks, key=lambda t: t.position)
+                if t.status not in TERMINAL
+            ),
+            None,
+        )
+        if head is not None:
+            if head.is_ready_at(now):
+                return goal, head
+            saw_backing_off = True
             continue
 
-        # No actionable tasks left but at least one FAILED -> emit the GOAL_FAILED signal;
-        # the worker turns that into Plan.fail_goal(). A task with retries left is still
-        # actionable (handled above), so a transient failure never reaches here.
+        # No actionable tasks left but at least one FAILED -> emit the GOAL_FAILED
+        # signal; the worker turns that into the auto-pause (needs-attention). A
+        # task with retries left is still actionable (handled above), so a
+        # transient failure never reaches here.
         if any(t.status == Status.FAILED for t in goal.tasks):
             return goal, "GOAL_FAILED"
         return goal, None

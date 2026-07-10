@@ -6,7 +6,9 @@ the core of the old advance_plan; extracted here so task execution is one isolat
 concern that adding planning phases can never disturb.
 
 Exhausting the scan transitions RUNNING -> REVIEW (the post-execution gate); DONE
-is reached ONLY from REVIEW "finish". Late results landing after a mid-RUNNING
+is reached ONLY from REVIEW "finish". A terminal task failure AUTO-PAUSES the plan
+(un-freeze #3) — the pause gate keeps it unclaimable until a human edits/resumes;
+resume is the manual retry. Late results landing after a mid-RUNNING
 replan are handled by the TOLERANT FINALIZE: the finalize transactions re-check
 plan.phase — a late failure terminal-skips (never requeues into an abandoned
 iteration), a late success completes as harmless history unless the task was
@@ -24,9 +26,8 @@ from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
 from src.domain.events.outbox import (
     GoalCompleted,
-    GoalFailedEvent,
     PhaseAdvanced,
-    PlanFailed,
+    PlanPaused,
     TaskAbandoned,
     TaskCompleted,
     TaskFailedEvent,
@@ -82,6 +83,8 @@ class ExecutionHandler:
         # ---- txn1: pick the unit, mark RUNNING, persist + outbox atomically ----
         with uow:
             plan = uow.plans.get(plan_id)
+            if plan.paused:
+                return Signal.PAUSED  # pause gate armed while we were dispatched
             action = plan.peek_next(self._clock.now())
 
             if action is None:
@@ -93,7 +96,7 @@ class ExecutionHandler:
             if second is None:  # goal's tasks all terminal, none failed -> close it
                 return self._close_goal(plan_id, plan, goal, uow)
             if second == "GOAL_FAILED":
-                return self._fail_goal(plan_id, plan, goal, uow)
+                return self._pause_on_failed_goal(plan_id, plan, goal, uow)
 
             task = second
             # check-before-act: result already exists -> finalize without re-running.
@@ -146,15 +149,21 @@ class ExecutionHandler:
         uow.plans.save(plan)
         return Signal.CONTINUE
 
-    def _fail_goal(
+    def _pause_on_failed_goal(
         self, plan_id: str, plan: Plan, goal: Goal, uow: UnitOfWork
     ) -> Signal:
-        plan.fail_goal(goal.id)
+        """Goal-failure policy (amended by un-freeze #3): a goal whose remaining
+        work is a FAILED task AUTO-PAUSES the plan instead of failing it
+        terminally — the halt is preserved (nothing runs until a human acts) but
+        recovery is in-band: edit while paused, then resume (= manual retry).
+        Normally the finalize that failed the task pauses in the same txn; this
+        scan-level branch is the defensive backstop."""
+        reason = f"goal {goal.id} has a failed task"
+        plan.pause(reason)
         plan.bump_version()
-        uow.outbox.add(GoalFailedEvent(plan_id=plan_id, goal_id=goal.id))
-        uow.outbox.add(PlanFailed(plan_id=plan_id, reason=f"goal {goal.id} failed"))
+        uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=True))
         uow.plans.save(plan)
-        return Signal.FAILED
+        return Signal.PAUSED
 
     def _finalize_existing(
         self, plan_id: str, plan: Plan, goal: Goal, task: Task, uow: UnitOfWork
@@ -246,22 +255,39 @@ class ExecutionHandler:
                         task_id=unit.task_id,
                         attempt=unit.attempt,
                         reason=exc.reason,
+                        kind=exc.kind.value if exc.kind else None,
                     )
                 )
                 uow.plans.save(plan)
-            else:
-                plan.fail_task(unit.goal_id, unit.task_id, exc.reason, exc.kind)
-                plan.bump_version()
-                uow.outbox.add(
-                    TaskFailedEvent(
-                        plan_id=plan_id,
-                        goal_id=unit.goal_id,
-                        task_id=unit.task_id,
-                        reason=exc.reason,
-                    )
+                return Signal.CONTINUE
+
+            # Terminal task failure (retry budget exhausted or non-retryable kind):
+            # record the FAILED task and AUTO-PAUSE the plan in the same txn
+            # (un-freeze #3) — recoverable via edit-while-paused + resume, instead
+            # of the old terminal plan FAILED.
+            reason = (
+                f"task {unit.task_id} failed after {unit.attempt} attempt(s): "
+                f"{exc.reason}"
+            )
+            plan.fail_task(unit.goal_id, unit.task_id, exc.reason, exc.kind)
+            uow.outbox.add(
+                TaskFailedEvent(
+                    plan_id=plan_id,
+                    goal_id=unit.goal_id,
+                    task_id=unit.task_id,
+                    reason=exc.reason,
+                    kind=exc.kind.value if exc.kind else None,
                 )
-                uow.plans.save(plan)
-        return Signal.CONTINUE
+            )
+            # Only arm the auto-pause if the plan is not already paused — a human
+            # pause landing during the in-flight attempt must keep its auto=False
+            # semantics (don't flip it to needs-attention with a spurious event).
+            if not plan.paused:
+                plan.pause(reason)
+                uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=True))
+            plan.bump_version()
+            uow.plans.save(plan)
+            return Signal.PAUSED
 
     def _finalize_success(
         self, plan_id: str, unit: _Unit, result: TaskResult, uow: UnitOfWork

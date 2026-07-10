@@ -62,6 +62,11 @@ class PlanDispatcher:
         if phase in _TERMINAL_PHASES:
             return Signal.DONE if phase == PlanPhase.DONE else Signal.FAILED
 
+        if plan.paused:
+            # Pause gate armed (the claim predicate normally filters these; this
+            # covers a pause landing after the claim): release without dispatching.
+            return Signal.PAUSED
+
         if phase == PlanPhase.RUNNING:
             return await self._execution.handle(plan_id, plan, uow)
 

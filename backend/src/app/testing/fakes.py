@@ -99,6 +99,13 @@ class InMemoryPlanRepository:
         for plan in self._store.values():
             if plan.phase not in WORKER_CLAIMABLE_PHASES:
                 continue  # gates + conversational phases are invisible to workers
+            if (
+                plan.planning_retry_not_before is not None
+                and plan.planning_retry_not_before > now
+            ):
+                continue  # planning-phase backoff gate armed: not yet claimable
+            if plan.paused:
+                continue  # human pause gate armed: not claimable
             claim = self._claims.get(plan.id)
             if claim is not None and claim.expires_at > now:
                 continue  # live lease (even our own): not claimable

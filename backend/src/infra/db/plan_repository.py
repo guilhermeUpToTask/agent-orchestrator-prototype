@@ -42,13 +42,18 @@ _CLAIMABLE_PHASES = tuple(sorted(p.value for p in WORKER_CLAIMABLE_PHASES))
 
 _UPSERT_SQL = text(
     """
-    INSERT INTO plans (id, version, phase, iteration, data, created_at, updated_at)
-    VALUES (:id, :version, :phase, :iteration, :data, :now, :now)
+    INSERT INTO plans
+        (id, version, phase, iteration, data, retry_not_before, paused,
+         created_at, updated_at)
+    VALUES (:id, :version, :phase, :iteration, :data, :retry_not_before, :paused,
+            :now, :now)
     ON CONFLICT(id) DO UPDATE SET
         version   = excluded.version,
         phase     = excluded.phase,
         iteration = excluded.iteration,
         data      = excluded.data,
+        retry_not_before = excluded.retry_not_before,
+        paused    = excluded.paused,
         updated_at = excluded.updated_at
     WHERE plans.version < excluded.version
     """
@@ -65,6 +70,8 @@ _CLAIM_SQL = text(
         SELECT id FROM plans
         WHERE phase IN {_CLAIMABLE_PHASES!r}
           AND (claimed_by IS NULL OR lease_expires_at < :now_epoch)
+          AND (retry_not_before IS NULL OR retry_not_before < :now_epoch)
+          AND paused = 0
         ORDER BY updated_at
         LIMIT 1
     )
@@ -129,6 +136,12 @@ class SqlitePlanRepository:
                 "phase": plan.phase.value,
                 "iteration": plan.iteration,
                 "data": plan.model_dump_json(),
+                "retry_not_before": (
+                    int(plan.planning_retry_not_before.timestamp())
+                    if plan.planning_retry_not_before is not None
+                    else None
+                ),
+                "paused": 1 if plan.paused else 0,
                 "now": self._clock.now().isoformat(),
             },
         )
@@ -200,8 +213,8 @@ class SqlitePlanRepository:
         with self._session_factory() as session:
             rows = session.execute(
                 text(
-                    "SELECT id, phase, iteration, version, claimed_by, updated_at"
-                    " FROM plans ORDER BY updated_at DESC"
+                    "SELECT id, phase, iteration, version, claimed_by, updated_at,"
+                    " paused FROM plans ORDER BY updated_at DESC"
                 )
             ).all()
         return [
@@ -212,6 +225,7 @@ class SqlitePlanRepository:
                 "version": r[3],
                 "claimed_by": r[4],
                 "updated_at": r[5],
+                "paused": bool(r[6]),
             }
             for r in rows
         ]

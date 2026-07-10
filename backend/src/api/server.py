@@ -32,7 +32,15 @@ from src.api.exceptions import register_exception_handlers
 from src.api.logging.config import configure_logging
 from src.api.middleware.request_logging import RequestLoggingMiddleware
 from src.api.outbox_relay import run_outbox_relay
-from src.api.routers import config, events, plans, reasoner, reference, runner
+from src.api.routers import (
+    config,
+    events,
+    metrics,
+    plans,
+    reasoner,
+    reference,
+    runner,
+)
 from src.api.schemas.common import HealthResponse
 from src.api.sse import get_broker
 from src.infra.container import AppContainer
@@ -121,6 +129,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(config.router, prefix=_prefix)
     app.include_router(reasoner.router, prefix=_prefix)
     app.include_router(runner.router, prefix=_prefix)
+    app.include_router(metrics.router, prefix=_prefix)
     app.include_router(events.router, prefix=_prefix)
 
     @app.get(
