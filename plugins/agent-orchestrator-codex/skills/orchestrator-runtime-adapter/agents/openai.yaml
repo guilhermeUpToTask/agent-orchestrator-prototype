@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runtime Adapter Builder"
+  short_description: "Extend reasoners and agent runtimes safely"
+  default_prompt: "Use $orchestrator-runtime-adapter to add or modify this reasoner or agent runtime integration."

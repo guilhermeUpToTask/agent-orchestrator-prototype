@@ -1,0 +1,4 @@
+interface:
+  display_name: "API Contract Sync"
+  short_description: "Synchronize backend and frontend API contracts"
+  default_prompt: "Use $orchestrator-contract-sync to update and verify the backend-to-frontend API contract."

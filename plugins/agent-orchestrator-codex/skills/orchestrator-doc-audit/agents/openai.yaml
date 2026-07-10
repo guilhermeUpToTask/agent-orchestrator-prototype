@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Auditor"
+  short_description: "Keep architecture docs aligned with behavior"
+  default_prompt: "Use $orchestrator-doc-audit to find and fix documentation drift caused by this change."

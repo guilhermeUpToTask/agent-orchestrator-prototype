@@ -14,6 +14,22 @@ permissions:
   contents: read
 
 jobs:
+  codex-plugin:
+    name: Codex plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate repository skills, tools, and agents
+        run: python plugins/agent-orchestrator-codex/scripts/validate.py
+
   backend:
     name: Backend (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
