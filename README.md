@@ -60,6 +60,7 @@ flowchart LR
 - [Configuration](#configuration)
 - [HTTP API](#http-api)
 - [Testing](#testing)
+- [Contributing / workflow](#contributing--workflow)
 - [Documentation map](#documentation-map)
 - [Project status](#project-status)
 
@@ -246,6 +247,16 @@ pytest -m llm                 # cost-gated real-provider smoke (needs REASONER_S
 ```
 
 The suite's centerpiece is the **truth test**: the entire orchestration suite runs twice — against in-memory fakes *and* against the real SQLite `UnitOfWork` — via one parametrized fixture. Crash-recovery, outbox-rollback, and backoff-survives-crash passing on real SQLite is the proof that transactional atomicity is real, not simulated. See [`backend/tests/README.md`](backend/tests/README.md).
+
+## Contributing / workflow
+
+All human and agent changes use short-lived branches and pull requests into
+`main`. PR titles follow Conventional Commits, required CI must pass, and
+release-please turns the resulting squash-merge history into versioned releases.
+See [`docs/git-flow.md`](docs/git-flow.md) for branch names, commit conventions,
+hotfixes, and the release process.
+
+---
 
 ## Documentation map
 

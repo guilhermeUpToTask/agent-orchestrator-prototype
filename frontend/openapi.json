@@ -178,6 +178,95 @@
         }
       }
     },
+    "/api/plans/{plan_id}/pause": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Pause",
+        "description": "Arm the pause gate: the worker stops claiming the plan at the next unit\nboundary and goals/tasks become editable. Idempotent.",
+        "operationId": "plans-pause",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PauseRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/resume": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Resume",
+        "description": "Clear the pause gate and requeue failed work (the manual retry): FAILED\ntasks return to PENDING with a fresh attempt budget. 422 when not paused.",
+        "operationId": "plans-resume",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/approve": {
       "post": {
         "tags": [
@@ -186,6 +275,42 @@
         "summary": "Approve",
         "description": "Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING.",
         "operationId": "plans-approve",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/review/reopen": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Reopen",
+        "description": "Human \"request changes\" at the pre-execution gate: AWAITING_REVIEW ->\nDISCOVERY. Re-opens the planning chat; the next commit replaces the roadmap.",
+        "operationId": "plans-reopen",
         "parameters": [
           {
             "name": "plan_id",
@@ -411,6 +536,95 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/agent-events": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Agent Events",
+        "description": "The plan's fine-grained agent/reasoner telemetry history (most-recent\nfirst), optionally filtered to one task. 404s for an unknown plan.",
+        "operationId": "plans-agent_events",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentEventResponse"
+                  },
+                  "title": "Response Plans-Agent Events"
                 }
               }
             }
@@ -2406,6 +2620,87 @@
         }
       }
     },
+    "/api/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Metrics",
+        "operationId": "metrics-metrics",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
@@ -2524,6 +2819,98 @@
           "model_role"
         ],
         "title": "AgentBody"
+      },
+      "AgentEventResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "occurred_at": {
+            "type": "string",
+            "title": "Occurred At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "event_id",
+          "plan_id",
+          "task_id",
+          "attempt",
+          "seq",
+          "type",
+          "payload",
+          "occurred_at"
+        ],
+        "title": "AgentEventResponse"
+      },
+      "AgentMetrics": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "finished": {
+            "type": "integer",
+            "title": "Finished"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "failures_by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Failures By Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "finished",
+          "failed",
+          "failures_by_kind"
+        ],
+        "title": "AgentMetrics"
       },
       "AgentSpec": {
         "properties": {
@@ -2714,7 +3101,10 @@
               "remove_task",
               "reorder_tasks",
               "edit_task_requirements",
-              "rebind_task_agent"
+              "rebind_task_agent",
+              "update_task",
+              "update_goal",
+              "remove_goal"
             ],
             "title": "Type"
           },
@@ -2781,6 +3171,42 @@
               }
             ],
             "title": "Agent Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
           }
         },
         "type": "object",
@@ -2858,6 +3284,39 @@
         ],
         "title": "IAModel"
       },
+      "LlmMetrics": {
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions",
+          "calls",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "title": "LlmMetrics"
+      },
       "MessageRequest": {
         "properties": {
           "message": {
@@ -2894,6 +3353,22 @@
         ],
         "title": "MessageResponse",
         "description": "One conversation turn: the assistant reply, whether the roadmap was\ncommitted, and the (possibly advanced) phase."
+      },
+      "MetricsResponse": {
+        "properties": {
+          "llm": {
+            "$ref": "#/components/schemas/LlmMetrics"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AgentMetrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "llm",
+          "agent"
+        ],
+        "title": "MetricsResponse"
       },
       "ModelBody": {
         "properties": {
@@ -2969,6 +3444,23 @@
           "name"
         ],
         "title": "NewTaskBody"
+      },
+      "PauseRequest": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "title": "PauseRequest"
       },
       "PlanCreatedResponse": {
         "properties": {

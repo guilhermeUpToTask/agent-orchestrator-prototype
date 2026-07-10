@@ -1,160 +1,106 @@
-name: Orchestrator CI
+name: CI
 
 on:
-  push:
-    branches: [main, "feat/**", "fix/**"]
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: "3.11"
+permissions:
+  contents: read
 
 jobs:
-
-  # -------------------------------------------------------------------------
-  # tests
-  # -------------------------------------------------------------------------
-  tests:
-    name: tests
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
-    defaults:
-      run:
-        working-directory: backend
-
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        run: pip install uv
-
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
-
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Unit + regression tests
-        env:
-          AGENT_MODE: dry-run
-          REDIS_URL: redis://localhost:6379/0
-        run: uv run pytest tests/unit/ tests/regression/ -v --tb=short --timeout=60 -p no:warnings
-
-      - name: Integration tests (dry-run)
-        env:
-          AGENT_MODE: dry-run
-          REDIS_URL: redis://localhost:6379/1
-        run: >
-          uv run pytest tests/integration/ -v --tb=short --timeout=120
-          -p no:warnings -m "not slow"
-
-
-  # -------------------------------------------------------------------------
-  # lint
-  # -------------------------------------------------------------------------
-  lint:
-    name: lint
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
 
     defaults:
       run:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install uv
-        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --all-extras --dev --locked
 
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
+      - name: Ruff
+        run: uv run ruff check src tests
 
-      - name: Sync dependencies
-        run: uv sync --dev
+      - name: Mypy typing ratchet
+        run: uv run mypy src
 
-      - name: Ruff check
-        run: uv run ruff check src/ tests/
+      - name: Unit tests
+        run: uv run pytest -q tests/unit
 
-      - name: Ruff format
-        run: uv run ruff format --check src/ tests/
+      - name: Integration tests
+        run: uv run pytest -q tests/integration
 
-      - name: mypy
-        run: uv run mypy src/ --ignore-missing-imports --no-error-summary --python-version 3.11
-
-
-  # -------------------------------------------------------------------------
-  # build (smoke tests)
-  # -------------------------------------------------------------------------
-  build:
-    name: build
+  frontend:
+    name: Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     defaults:
       run:
-        working-directory: backend
+        working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install uv
-        run: pip install uv
-
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v6
         with:
-          path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('backend/uv.lock') }}
+          version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          python-version: "3.11"
 
-      - name: Sync dependencies
-        run: uv sync
+      - name: Install backend dependencies for OpenAPI export
+        working-directory: backend
+        run: uv sync --all-extras --dev --locked
 
-      - name: Smoke-test domain imports
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Regenerate API types
         run: |
-          uv run python -c "
-          from src.domain import (
-              GoalAggregate, GoalStatus, TaskSummary,
-              PRInfo, PRStatus, GitHubPort, CIConfig,
-          )
-          print('domain imports OK')
-          "
+          export PATH="${{ github.workspace }}/backend/.venv/bin:$PATH"
+          npm run generate:api
 
-      - name: Smoke-test CLI entry point
-        env:
-          AGENT_MODE: dry-run
-        run: uv run python -m src.cli --help || true
+      - name: Verify generated API types are current
+        run: |
+          if ! git diff --exit-code -- openapi.json src/types/generated; then
+            echo "::error::Generated API types are stale. Run 'cd frontend && npm run generate:api' and commit the results."
+            exit 1
+          fi

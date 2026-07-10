@@ -44,6 +44,74 @@ export type AgentBody = {
 };
 
 /**
+ * AgentEventResponse
+ */
+export type AgentEventResponse = {
+    /**
+     * Id
+     */
+    id: number;
+    /**
+     * Event Id
+     */
+    event_id: string;
+    /**
+     * Plan Id
+     */
+    plan_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string | null;
+    /**
+     * Attempt
+     */
+    attempt: number;
+    /**
+     * Seq
+     */
+    seq: number;
+    /**
+     * Type
+     */
+    type: string;
+    /**
+     * Payload
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+    /**
+     * Occurred At
+     */
+    occurred_at: string;
+};
+
+/**
+ * AgentMetrics
+ */
+export type AgentMetrics = {
+    /**
+     * Runs
+     */
+    runs: number;
+    /**
+     * Finished
+     */
+    finished: number;
+    /**
+     * Failed
+     */
+    failed: number;
+    /**
+     * Failures By Kind
+     */
+    failures_by_kind: {
+        [key: string]: number;
+    };
+};
+
+/**
  * AgentSpec
  *
  * Definition of an agent: who it is, what it can do, how it retries,
@@ -190,7 +258,7 @@ export type EditRequest = {
     /**
      * Type
      */
-    type: 'add_task' | 'remove_task' | 'reorder_tasks' | 'edit_task_requirements' | 'rebind_task_agent';
+    type: 'add_task' | 'remove_task' | 'reorder_tasks' | 'edit_task_requirements' | 'rebind_task_agent' | 'update_task' | 'update_goal' | 'remove_goal';
     /**
      * Goal Id
      */
@@ -212,6 +280,18 @@ export type EditRequest = {
      * Agent Id
      */
     agent_id?: string | null;
+    /**
+     * Name
+     */
+    name?: string | null;
+    /**
+     * Description
+     */
+    description?: string | null;
+    /**
+     * Depends On
+     */
+    depends_on?: Array<string> | null;
 };
 
 /**
@@ -266,6 +346,32 @@ export type IaModel = {
 };
 
 /**
+ * LlmMetrics
+ */
+export type LlmMetrics = {
+    /**
+     * Sessions
+     */
+    sessions: number;
+    /**
+     * Calls
+     */
+    calls: number;
+    /**
+     * Prompt Tokens
+     */
+    prompt_tokens: number;
+    /**
+     * Completion Tokens
+     */
+    completion_tokens: number;
+    /**
+     * Total Tokens
+     */
+    total_tokens: number;
+};
+
+/**
  * MessageRequest
  */
 export type MessageRequest = {
@@ -294,6 +400,14 @@ export type MessageResponse = {
      * Phase
      */
     phase: string;
+};
+
+/**
+ * MetricsResponse
+ */
+export type MetricsResponse = {
+    llm: LlmMetrics;
+    agent: AgentMetrics;
 };
 
 /**
@@ -348,6 +462,16 @@ export type NewTaskBody = {
      * Required Capabilities
      */
     required_capabilities?: Array<string>;
+};
+
+/**
+ * PauseRequest
+ */
+export type PauseRequest = {
+    /**
+     * Reason
+     */
+    reason?: string | null;
 };
 
 /**
@@ -736,6 +860,69 @@ export type PlansEditPlanResponses = {
 
 export type PlansEditPlanResponse = PlansEditPlanResponses[keyof PlansEditPlanResponses];
 
+export type PlansPauseData = {
+    /**
+     * Body
+     */
+    body?: PauseRequest | null;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/pause';
+};
+
+export type PlansPauseErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansPauseError = PlansPauseErrors[keyof PlansPauseErrors];
+
+export type PlansPauseResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansPauseResponse = PlansPauseResponses[keyof PlansPauseResponses];
+
+export type PlansResumeData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/resume';
+};
+
+export type PlansResumeErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansResumeError = PlansResumeErrors[keyof PlansResumeErrors];
+
+export type PlansResumeResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansResumeResponse = PlansResumeResponses[keyof PlansResumeResponses];
+
 export type PlansApproveData = {
     body?: never;
     path: {
@@ -765,6 +952,36 @@ export type PlansApproveResponses = {
 };
 
 export type PlansApproveResponse = PlansApproveResponses[keyof PlansApproveResponses];
+
+export type PlansReopenData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/review/reopen';
+};
+
+export type PlansReopenErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReopenError = PlansReopenErrors[keyof PlansReopenErrors];
+
+export type PlansReopenResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansReopenResponse = PlansReopenResponses[keyof PlansReopenResponses];
 
 export type PlansFinishData = {
     body?: never;
@@ -915,6 +1132,51 @@ export type PlansReplanningResponses = {
 };
 
 export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplanningResponses];
+
+export type PlansAgentEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: {
+        /**
+         * Task Id
+         */
+        task_id?: string | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Before Id
+         */
+        before_id?: number | null;
+    };
+    url: '/api/plans/{plan_id}/agent-events';
+};
+
+export type PlansAgentEventsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAgentEventsError = PlansAgentEventsErrors[keyof PlansAgentEventsErrors];
+
+export type PlansAgentEventsResponses = {
+    /**
+     * Response Plans-Agent Events
+     *
+     * Successful Response
+     */
+    200: Array<AgentEventResponse>;
+};
+
+export type PlansAgentEventsResponse = PlansAgentEventsResponses[keyof PlansAgentEventsResponses];
 
 export type PlansChatHistoryData = {
     body?: never;
@@ -1989,6 +2251,46 @@ export type RunnerRunnerStatusResponses = {
 };
 
 export type RunnerRunnerStatusResponse = RunnerRunnerStatusResponses[keyof RunnerRunnerStatusResponses];
+
+export type MetricsMetricsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: {
+        /**
+         * Plan Id
+         */
+        plan_id?: string | null;
+    };
+    url: '/api/metrics';
+};
+
+export type MetricsMetricsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type MetricsMetricsError = MetricsMetricsErrors[keyof MetricsMetricsErrors];
+
+export type MetricsMetricsResponses = {
+    /**
+     * Successful Response
+     */
+    200: MetricsResponse;
+};
+
+export type MetricsMetricsResponse = MetricsMetricsResponses[keyof MetricsMetricsResponses];
 
 export type EventsStreamEventsData = {
     body?: never;
