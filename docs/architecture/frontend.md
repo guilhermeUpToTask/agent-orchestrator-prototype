@@ -33,7 +33,11 @@ flowchart TB
 ```
 
 - **GoalsView** renders the goal/task tree as a two-level dagre-laid-out flow graph (`lib/layout.ts`): goal group nodes containing task nodes with status badges.
-- **GatePanel** is where the human gates live: AWAITING_REVIEW → approve (with surgical-edit affordances via `POST /edits`), REVIEW → finish or replan.
+- **GatePanel** is where the human gates live: AWAITING_REVIEW → an inline **RoadmapEditor** (rename/add/remove goals & tasks via `POST /edits` — the first real call sites of `useApplyEdit`), then approve, or "request changes" (`POST /review/reopen` → reopens the chat, next commit replaces the roadmap); REVIEW → finish or replan.
+- **LifecycleRail** carries the pause controls: a **Pause** button in the worker-driven phases, an amber **paused card** (any phase) with **Resume** (= the manual retry), and a red dead-end card for terminal `failed`. `PlanPaused`/`PlanResumed` SSE events toast and invalidate.
+- **DetailPanel** is editable at the gate or while paused (rename/description via `update_task`, delete via `remove_task`, agent rebind via `rebind_task_agent`, mirroring the backend guards) and shows a durable per-task **Agent log** from `GET /plans/{id}/agent-events`.
+- **ConsoleDock** colors the live feed by severity (`agent.failed` red, `agent.finished` green, `llm.call` purple) and can filter to the selected task; plan-scoped `llm.call` rows show a `plan` badge.
+- **Activity** carries a **metrics strip** (`GET /api/metrics`, polled): LLM sessions/calls/tokens and agent run/failure counts, with rate-limited failures highlighted.
 - **ChatPanel** is enabled only in the conversational phases; a send POSTs the message and appends the reply from the HTTP body (`MessageResponse{reply, committed, phase}`) — it does not wait on SSE. History hydrates from `GET /plans/{id}/chat`.
 
 ## Data flow — one source of truth per kind of state

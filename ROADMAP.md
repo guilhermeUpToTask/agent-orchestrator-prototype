@@ -32,7 +32,7 @@ A plan whose drive raises before any save keeps `updated_at` unchanged; the clai
 
 The operator currently cannot answer "what happened to attempt 2 of task X" without reading worker stdout.
 
-3. **Attempt history on the task** — `requeue()` currently *erases* the failed attempt's result; keep a bounded `attempt_history` instead. Requires a deliberate one-field domain un-freeze (precedent: the AgentSpec runtime fields, 2026-07-05). Alembic revision is additive.
+3. **Attempt history on the task** — `requeue()` (and now `Task.retry()` on resume) *erases* the failed attempt's result; keep a bounded `attempt_history` instead. Requires a deliberate one-field domain un-freeze (precedent: the AgentSpec runtime fields, 2026-07-05). Alembic revision is additive. **More visible now** that resume-as-retry resets `attempt` to 0 (un-freeze #3): the `TaskFailedEvent{kind}` + `agent_events` are the only surviving record of a failed attempt.
 4. **Stop replaying agent history on API boot** — the relay's `agent_events` cursor restarts at 0 every startup, re-publishing the whole table to SSE. Start at `MAX(id)` or persist the cursor in `config`.
 5. **Retention** — `outbox`, `agent_events`, and `plan_chat_messages` grow forever. Add a `db prune` CLI command (delivered outbox rows, aged agent events).
 6. **Attempt-history endpoint** — `GET /api/plans/{id}/tasks/{tid}/attempts` so incidents are answerable from the API alone.
@@ -50,7 +50,7 @@ Take these up only when real usage demonstrates the need.
 10. **Multi-worker deployment, documented + truth-tested** [EVO Phase 4] — the code supports it once H1 lands; add a two-worker truth test and operator docs.
 11. **Goal-level parallelism** [MRF 0.2, ADR-001] — the lease *granularity* is the designed parallelism switch (plan → goal → task). Requires `next_action` returning a set of ready units and a workspace merge-conflict strategy. The `Goal.depends_on` DAG seam already exists, unused. Do **not** bolt a queue on top; move the lease.
 12. **Mutation guards `PLAN_BUSY` / `TASK_RUNNING`** [MRF 3.5] — task/goal edit-delete guards beyond the current status checks; plan-DELETE gated by the lease. The HTTP codes are already reserved in the API error map.
-13. **`manual_retry` use case** [MRF, decision #11] — human-triggered retry that clears the backoff gate, resets attempts, and requeues, bypassing `should_retry`.
+13. ~~**`manual_retry` use case**~~ [MRF, decision #11] — **done** (un-freeze #3, 2026-07-09): built as `Plan.resume()` — clears the pause + backoff gates, resets attempts, requeues every FAILED task in a non-terminal goal, bypassing `should_retry`. `POST /plans/{id}/resume`.
 14. **Worker/scheduler health surface** [MRF 3.6] — expose last-heartbeat, current claims, and restart counts (a `/api/workers` endpoint). The lease is the recovery *mechanism*; this is *visibility* — you can't tell a hung worker from an idle one today.
 15. **Launcher / OS supervision** [MRF 3.2] — a thin, idempotent supervisor (systemd or process manager) that restarts a dead worker; the lease handles the takeover. Document the failure modes; no distributed consensus.
 16. **pi NDJSON streaming** [MRF 2.4] — the full pi stdio handshake streaming fine-grained agent events; the seam is `src/infra/runtime/pi_protocol.py` (agent events currently emit only start/finish, `seq` 0/1).

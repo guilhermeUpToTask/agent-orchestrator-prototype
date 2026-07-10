@@ -8,9 +8,9 @@ Code anchors: `backend/src/domain/events/` (the event types), `backend/src/infra
 
 | | **outbox** (domain events) | **agent_events** (runtime telemetry) |
 |---|---|---|
-| Granularity | Coarse: `PhaseAdvanced`, `TaskStarted/Completed/Requeued/FailedEvent/Abandoned`, `GoalCompleted/GoalFailedEvent`, `PlanCompleted/PlanFailed`, `ReplanRequested`, `AgentFellBackToDefault` | Fine: `agent.started` / `agent.finished` / `agent.failed` per attempt (streaming tool-call events are a roadmap seam — `seq` is currently just 0/1) |
+| Granularity | Coarse: `PhaseAdvanced`, `TaskStarted/Completed/Requeued/FailedEvent/Abandoned`, `GoalCompleted/GoalFailedEvent`, `PlanCompleted/PlanFailed`, `PlanPaused/PlanResumed`, `ReasonerFailed`, `ReplanRequested`, `AgentFellBackToDefault` | Fine: `agent.started` / `agent.finished` / `agent.failed` per attempt, plus the reasoner's plan-scoped `llm.call` token-usage rows (streaming tool-call events are a roadmap seam — `seq` is currently just 0/1) |
 | Written | **Inside the state transaction** (`uow.outbox.add` + `uow.plans.save` commit together) — an event exists iff its state change committed | Best-effort, own connection, **never** inside the plan transaction; `INSERT OR IGNORE` dedup on `event_id` |
-| Payloads | Minimal — IDs + tiny metadata; consumers refetch state | Attempt-tagged runtime facts (runtime, cwd, elapsed, failure kind/reason) |
+| Payloads | Minimal — IDs + tiny metadata; consumers refetch state. `TaskRequeued`/`TaskFailedEvent` carry the `FailureKind`; `PlanPaused` carries `auto` (system vs human) | Attempt-tagged runtime facts (runtime, cwd, elapsed, failure kind/reason). `task_id` is **nullable** — `llm.call` rows are plan-scoped (no task); the reasoner emits them with the summed token usage per session |
 | Delivery marker | `delivered_at` column | Cursor kept by the relay (in memory — see caveat below) |
 
 The split is deliberate: losing telemetry must never roll back plan state, and plan state committing must never block on a telemetry write.
@@ -64,8 +64,12 @@ The contract, end to end:
 | What's happening right now | `GET /api/events` SSE — domain events + live agent start/finish |
 | Is the runtime wired correctly? | `GET /api/runner/status` (mode, per-agent binding validity, binary probes) · `GET /api/reasoner/status` |
 | What did the user and reasoner say? | `GET /api/plans/{id}/chat` |
+| A plan's agent/reasoner telemetry history | `GET /api/plans/{id}/agent-events?task_id=&limit=` — durable, most-recent-first, optionally per task (the console/DetailPanel live tail plus reload-survivable history) |
+| LLM token spend + agent run/failure counts | `GET /api/metrics?plan_id=` — sessions/calls/tokens and failures grouped by `FailureKind` (rate-limit visibility), aggregated over `agent_events` via `json_extract` |
 
-**Known blind spots** (scheduled in [ROADMAP.md](../../ROADMAP.md) "Next"): per-attempt history (a requeue erases the failed result — the trail survives only in outbox payloads), failed attempts' stdout beyond `reason[-500:]`, worker liveness as a first-class surface, metrics of any kind, and the task→git-branch mapping.
+**Reasoner token telemetry** (un-freeze #3): `OpenAIChatClient` reads `response.usage` (previously discarded); `run_tool_session` sums it across turns; `OpenAIReasoner` emits one plan-scoped `llm.call` `agent_event` per session with `prompt_tokens`/`completion_tokens`/`total_tokens`/`llm_calls`. Best-effort — a failed session drops its usage, and the emit never raises. CLI-agent (pi/claude/gemini) token capture is still deferred to the pi NDJSON seam.
+
+**Known blind spots** (scheduled in [ROADMAP.md](../../ROADMAP.md) "Next"): per-attempt history (a requeue — and now `Task.retry()` on resume — erases the failed result; the trail survives only in outbox payloads + `agent_events`), failed attempts' stdout beyond `reason[-500:]`, worker liveness as a first-class surface, CLI-agent token usage, and the task→git-branch mapping.
 
 ## Secrets hygiene
 

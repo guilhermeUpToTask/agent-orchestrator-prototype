@@ -38,10 +38,10 @@ Concurrency today is **sequential per plan** by decision ([ADR-001](../decisions
 
 Pure function, no stored cursor. Every RUNNING step re-derives the frontier by scanning statuses:
 
-- **`(goal, task)`** — run this task: first non-terminal, ready task (position order) in the first reachable goal.
+- **`(goal, task)`** — run this task: the goal's **head** (first non-terminal task, position order) when it is ready. Tasks in a goal are a sequential chain: a backing-off head blocks the whole goal — the scan never skips ahead to a later task (un-freeze #3, strict order).
 - **`(goal, None)`** — the goal's tasks are all terminal, none failed → close it DONE.
-- **`(goal, "GOAL_FAILED")`** — a FAILED task with no retries left → the goal-failure policy halts the plan.
-- **`NOT_READY`** — work exists but everything runnable is gated by an unexpired `retry_not_before` → release and re-check later.
+- **`(goal, "GOAL_FAILED")`** — a FAILED task with no retries left → the execution handler **auto-pauses** the plan (`PlanPaused{auto:true}`), a recoverable halt (edit-while-paused + resume). Normally the finalize that failed the task pauses first; this scan branch is the backstop.
+- **`NOT_READY`** — work exists but everything runnable is gated by an unexpired `retry_not_before` (a backing-off head blocks its goal) → release and re-check later.
 - **`None`** — nothing left → RUNNING exits into REVIEW.
 
 Readiness conditions make nodes *skipped, not stuck*: a goal whose `depends_on` aren't all DONE, and a task whose backoff hasn't expired, are simply never selected. `now` is injected — the domain never reads a clock.
@@ -79,7 +79,7 @@ sequenceDiagram
         H->>WS: discard → worktree + branch deleted (zero trace)
         rect rgba(240,120,120,0.12)
             note over H,DB: txn2 — finalize failure
-            H->>DB: re-read · tolerant-finalize check<br/>should_retry(attempt, kind)?<br/>yes → requeue(retry_not_before = now + backoff)<br/>no → fail_task → GOAL_FAILED next scan
+            H->>DB: re-read · tolerant-finalize check<br/>should_retry(attempt, kind)?<br/>yes → requeue(retry_not_before = now + backoff)<br/>no → fail_task + pause (PlanPaused auto) → Signal.PAUSED
         end
     end
 ```
@@ -89,7 +89,17 @@ The rules that make this safe, each the answer to a specific crash:
 1. **Check-before-act idempotency** — a crash *after* the agent returned but *before* txn2 leaves a RUNNING task with a persisted result; the next pick finalizes it without re-invoking the agent. (⚠ The window between the *git merge* and txn2 is not covered — known-issue #2.)
 2. **No live aggregate refs cross a transaction boundary** — txn1 snapshots plain values into the frozen `_Unit` dataclass; finalize transactions re-read fresh state. This is what detached-aggregate semantics on real SQLite demand.
 3. **Tolerant finalize** — if the plan left RUNNING mid-flight (a replan), a late failure **terminal-skips** (never requeues into the abandoned iteration) and a late success lands as harmless history unless the finalize-abandon already closed the task.
-4. **The backoff gate is durable** — `retry_not_before` is a persisted timestamp the scan honors, not an in-memory sleep. It survives crashes and never blocks other ready work.
+4. **The backoff gate is durable** — `retry_not_before` is a persisted timestamp the scan honors, not an in-memory sleep. It survives crashes and never blocks *other goals'* ready work (a backing-off head does block its own goal — strict in-goal order).
+
+### Pause, auto-pause, and resume (un-freeze #3)
+
+`Plan.paused` is a durable claim gate (promoted column `plans.paused`, ANDed into the claim predicate) — not a phase. Two ways in, one way out:
+
+- **Human pause** (`pause_plan`, allowed in the worker-claimable phases): the worker stops claiming at the next unit boundary. An attempt already in flight finalizes normally — pause latches at the unit boundary, and the finalize is CAS-protected, so there is no torn write.
+- **Auto-pause**: a terminal task failure (retry budget exhausted, or a non-retryable `auth_error`/`token_limit`) does `fail_task` + `pause` in the same finalize transaction and emits `PlanPaused{auto:true}` — a *needs-attention* signal. The plan stays RUNNING+paused; the goal stays open. This replaced the old terminal `fail_goal` → FAILED (decision 18, amended).
+- **Resume** (`resume_plan`) = the **manual retry** (decision 17): clears the pause gate and returns every FAILED task in a non-terminal goal to PENDING with a fresh attempt budget (`Task.retry()` — `attempt=0`, `result=None`), bypassing `should_retry`, and drops backoff gates on backing-off PENDING siblings.
+
+While paused, goals/tasks are editable (`apply_edit` passes `plan.paused` to the edit-service guards): a RUNNING goal is editable, a FAILED task is editable/removable/rebindable, a RUNNING task never (its finalize looks it up by id). The typical recovery loop is **auto-pause → edit the offending task (or fix credentials) → resume**.
 
 ## Retries — the shared failure taxonomy
 

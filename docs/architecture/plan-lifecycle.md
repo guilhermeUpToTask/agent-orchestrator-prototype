@@ -24,9 +24,9 @@ stateDiagram-v2
     ENRICHING --> ENRICHING : one task-less goal enriched<br/>(JIT, Signal.CONTINUE)
     ENRICHING --> AWAITING_REVIEW : no task-less goal left<br/>→ bind_agents
     AWAITING_REVIEW --> RUNNING : approve
-    RUNNING --> RUNNING : task executed / retried / goal closed
+    AWAITING_REVIEW --> DISCOVERY : reopen_discovery<br/>("request changes" — replaces roadmap)
+    RUNNING --> RUNNING : task executed / retried / goal closed<br/>· terminal task failure → paused (auto)
     RUNNING --> REVIEW : scan returns None<br/>(all goals terminal)
-    RUNNING --> FAILED : goal exhausts retries<br/>(fail-halts policy)
     RUNNING --> REPLANNING : request_replan<br/>(skips PENDING work now)
     REVIEW --> DONE : finish<br/>(the ONLY path to DONE)
     REVIEW --> REPLANNING : replan
@@ -47,8 +47,10 @@ The single most important structural idea after the phases themselves. Each phas
 | DISCOVERY, REPLANNING | 💬 each user message | `conversation.discovery_message` / `replanning_message` — one reasoner turn per message |
 | ARCHITECTURE, ENRICHING | ⚙️ worker | `PlanningHandler` — passthrough / JIT enrichment |
 | RUNNING | ⚙️ worker | `ExecutionHandler` — the pull-scan (see [execution-model.md](execution-model.md)) |
-| AWAITING_REVIEW, REVIEW | ✋ gate commands | `control.resume_from_review` / `finish_review` / `review_replan` — gates **always** pause; `GateHandler` returns `PAUSED` unconditionally |
+| AWAITING_REVIEW, REVIEW | ✋ gate commands | `control.resume_from_review` / `reopen_discovery` / `finish_review` / `review_replan` — gates **always** pause; `GateHandler` returns `PAUSED` unconditionally |
 | DONE, FAILED | terminal | — |
+
+**The pause gate** (un-freeze #3) is orthogonal to the phase machine: `Plan.paused` is a boolean claim gate (promoted column `plans.paused`, ANDed into the claim predicate — the same durable-gate pattern as the planning `retry_not_before`). A human `pause` (allowed in the worker-claimable phases) or the **auto-pause** on a terminal task failure sets it; the worker stops claiming at the next unit boundary and goals/tasks become editable. `resume` clears it and requeues failed work (the manual retry). Pausing does not change `phase`; a paused RUNNING plan is still RUNNING.
 
 ## The conversational phases (multi-turn with commit)
 
@@ -92,6 +94,8 @@ Design points worth internalizing:
 
 One task-less goal per worker step: `reasoner.enrich_goal(plan, goal, capabilities)` (outside any txn) → re-read, re-guard, re-find the goal by id → commit its 1..N plain tasks → `Signal.CONTINUE`. The idempotency guard — *a goal that already has tasks is never re-enriched* — absorbs both crashes between the LLM call and the commit, and racing workers. Goals the user populated in chat are skipped entirely. When no task-less goal remains, `bind_agents` matches each task's `required_capabilities` against the agent registry (falling back to the default agent, with an `AgentFellBackToDefault` event) and the plan pauses at AWAITING_REVIEW.
 
+**When the reasoner fails** (rate limit / upstream error / bad config), the handler catches it (`ReasonerUnavailable`) rather than letting it bubble into a silent `worker.tick_failed` loop. A **transient** failure arms the durable **plan-level backoff gate** (`planning_retry_not_before` — the planning-phase analog of a task's `retry_not_before`, honored by the claim predicate so the worker backs off instead of re-hitting the provider every poll) and emits a `ReasonerFailed` event; a **permanent** failure, or an exhausted retry budget (`retry_policy.max_attempts`), calls `fail_plan` → FAILED and emits `ReasonerFailed` + `PlanFailed`. Either way the frontend sees it — see [decision 41](../decisions/decision-log.md) (domain un-freeze #2).
+
 ## The replan loop — append-only, two entry points, one phase
 
 REPLANNING is reached from REVIEW ("replan next phase") and from mid-RUNNING chat (`request_replan`). Either way:
@@ -117,5 +121,7 @@ Two distinct user capabilities, deliberately not conflated:
 - DONE is reached **only** via REVIEW "finish" (`finish_review` emits `PlanCompleted`). Execution exhausting its scan goes to REVIEW, never DONE.
 - Goal/task fields are mutated **only** through the aggregate's guarded methods — never from use cases.
 - Every phase-advancing write: `bump_version()` → outbox event → `save()`, all in one transaction.
-- A failed goal halts the plan (`fail_goal` sets FAILED) — skip-and-continue is a future knob, not current behavior.
-- `iteration` increments in exactly one place: `commit_replanned_goals`.
+- A terminal task failure **auto-pauses** the plan (`fail_task` + `pause`, `PlanPaused{auto:true}`) — the goal stays open, `phase` stays RUNNING, and a human edits/resumes to recover (un-freeze #3). Terminal FAILED is reachable only via `fail_plan` (permanent reasoner failure); `fail_goal` was deleted. Skip-and-continue is still a future knob.
+- `resume` is the manual retry: it returns every FAILED task in a non-terminal goal to PENDING with a fresh attempt budget, bypassing `should_retry`.
+- Goals/tasks are editable only at the AWAITING_REVIEW gate or while paused; a RUNNING task is never editable (its finalize looks it up by id).
+- `iteration` increments in exactly one place: `commit_replanned_goals` — `reopen_discovery` → `set_iteration_goals` **replaces** the un-executed roadmap without bumping it.

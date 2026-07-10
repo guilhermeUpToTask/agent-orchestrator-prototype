@@ -123,6 +123,8 @@ cd ../frontend
 npm install && npm run dev                     # http://localhost:5173
 ```
 
+> **After every pull, re-run `python -m src.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
+
 Create a plan in the UI and drive it with the stub reasoner's deterministic chat grammar:
 
 | You type | What happens |
@@ -188,7 +190,7 @@ Entry point: `python -m src.infra.cli.main` (or `orchestrate` once installed). A
 
 | Command | Purpose |
 |---|---|
-| `db upgrade` | Apply Alembic migrations to the DB under `ORCHESTRATOR_HOME` |
+| `db upgrade` | Apply Alembic migrations to the DB under `ORCHESTRATOR_HOME`. Run it after every pull, before `seed demo`/`api start`/`worker start` — a stale schema fails with `no such column: …` |
 | `api start [--host] [--port]` | Serve the API (runs the outbox→SSE relay in-process) |
 | `worker start [--worker-id] [--poll-seconds] [--lease-seconds]` | Run the claim-and-drive worker loop |
 | `seed demo [--stub \| --provider … --model … --api-key-env …]` | Idempotently seed capabilities, the default agent, provider/model rows, and reasoner config |
