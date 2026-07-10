@@ -10,13 +10,21 @@ from src.infra.reasoner.runtime.llm_client import AssistantTurn
 from src.infra.reasoner.runtime.tools import ToolCall, ToolSpec
 
 
-def text_turn(text: str) -> AssistantTurn:
+def text_turn(text: str, usage: dict[str, int] | None = None) -> AssistantTurn:
     return AssistantTurn(
-        text=text, tool_calls=[], raw_message={"role": "assistant", "content": text}
+        text=text,
+        tool_calls=[],
+        raw_message={"role": "assistant", "content": text},
+        usage=usage,
     )
 
 
-def tool_turn(name: str, arguments: dict[str, Any], call_id: str = "call-1") -> AssistantTurn:
+def tool_turn(
+    name: str,
+    arguments: dict[str, Any],
+    call_id: str = "call-1",
+    usage: dict[str, int] | None = None,
+) -> AssistantTurn:
     return AssistantTurn(
         text="",
         tool_calls=[ToolCall(id=call_id, name=name, arguments=arguments)],
@@ -31,6 +39,7 @@ def tool_turn(name: str, arguments: dict[str, Any], call_id: str = "call-1") -> 
                 }
             ],
         },
+        usage=usage,
     )
 
 

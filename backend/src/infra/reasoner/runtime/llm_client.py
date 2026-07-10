@@ -29,14 +29,16 @@ from src.infra.reasoner.runtime.tools import ToolCall, ToolSpec
 
 
 class AssistantTurn(BaseModel):
-    """One normalized assistant response: display text, parsed tool calls, and
-    the raw provider message (appended verbatim to keep the transcript valid)."""
+    """One normalized assistant response: display text, parsed tool calls, the
+    raw provider message (appended verbatim to keep the transcript valid), and
+    the token usage for this call (None when the provider omits it)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     text: str
     tool_calls: list[ToolCall]
     raw_message: dict[str, Any]
+    usage: dict[str, int] | None = None
 
 
 @runtime_checkable
@@ -83,7 +85,7 @@ class OpenAIChatClient:
     async def complete(
         self, messages: list[dict[str, Any]], tools: list[ToolSpec]
     ) -> AssistantTurn:
-        msg = await self._request_message(messages, to_provider_tools(tools))
+        msg, usage = await self._request_message(messages, to_provider_tools(tools))
 
         tool_calls: list[ToolCall] = []
         for tc in msg.tool_calls or []:
@@ -103,11 +105,26 @@ class OpenAIChatClient:
             text=msg.content or "",
             tool_calls=tool_calls,
             raw_message=msg.model_dump(exclude_none=True),
+            usage=usage,
         )
+
+    @staticmethod
+    def _extract_usage(response: Any) -> dict[str, int] | None:
+        """Normalize the provider's token usage into prompt/completion/total.
+        Returns None when the provider omits usage (never breaks a live call)."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        out: dict[str, int] = {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = getattr(usage, key, None)
+            if isinstance(value, int):
+                out[key] = value
+        return out or None
 
     async def _request_message(
         self, messages: list[dict[str, Any]], provider_tools: list[dict[str, Any]]
-    ) -> Any:
+    ) -> tuple[Any, dict[str, int] | None]:
         """Call the provider, retrying transient failures with exponential
         backoff. A response carrying no ``choices`` is an in-band provider
         error (some OpenAI-compatible proxies return one with HTTP 200); it is
@@ -127,7 +144,7 @@ class OpenAIChatClient:
                 error = classify_provider_error(self.model, exc)
             else:
                 if response.choices:
-                    return response.choices[0].message
+                    return response.choices[0].message, self._extract_usage(response)
                 error = provider_error_from_empty_choices(self.model, response)
 
             last_error = error

@@ -35,6 +35,7 @@ from src.domain.errors.config_errors import (
     ModelProviderNotFoundError,
 )
 from src.domain.ports.reasoner_port import Reasoner
+from src.domain.ports.telemetry_port import AgentEventSink
 from src.domain.repositories.capability_repo import CapabilityRepository
 from src.infra.db.reference_repos import (
     SqliteConfigStore,
@@ -152,9 +153,11 @@ def build_reasoner(
     model_repo: SqliteModelRepository,
     secret_store: Callable[[], SqliteSecretStore],
     capability_repo: CapabilityRepository,
+    event_sink: AgentEventSink | None = None,
 ) -> Reasoner:
     """`secret_store` is a thunk: stub mode must never construct it (it fails
-    closed on a missing master key, which dry-run does not have)."""
+    closed on a missing master key, which dry-run does not have). `event_sink`
+    (when provided) receives the reasoner's plan-scoped llm.call telemetry."""
     status = validate_reasoner_config(config_store, provider_repo, model_repo)
     if not status.valid:
         raise _invalid(status.detail or "reasoner config is invalid")
@@ -180,4 +183,5 @@ def build_reasoner(
         client,
         capability_repo.list(),
         converse_max_turns=max_turns,
+        event_sink=event_sink,
     )

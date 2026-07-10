@@ -28,13 +28,15 @@ from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
+from src.domain.events.agent_events import AgentEvent
 from src.domain.factories.identity import new_id
 from src.domain.ports.reasoner_port import (
     ChatMessage,
     ConversationMode,
     ReasonerReply,
 )
-from src.infra.reasoner.runtime.agent_loop import run_tool_session
+from src.domain.ports.telemetry_port import AgentEventSink
+from src.infra.reasoner.runtime.agent_loop import SessionResult, run_tool_session
 from src.infra.reasoner.runtime.llm_client import LLMClient
 from src.infra.reasoner.runtime.prompts import (
     SYSTEM_PROMPT,
@@ -159,11 +161,41 @@ class OpenAIReasoner:
         *,
         converse_max_turns: int = 8,
         enrich_max_turns: int = 4,
+        event_sink: AgentEventSink | None = None,
     ) -> None:
         self._client = client
         self._default_caps = list(capabilities or [])
         self._converse_max_turns = converse_max_turns
         self._enrich_max_turns = enrich_max_turns
+        self._event_sink = event_sink
+
+    async def _emit_usage(
+        self, plan: Plan, mode: str, result: SessionResult
+    ) -> None:
+        """Best-effort plan-scoped telemetry: one llm.call row per session with
+        the summed token usage (decision #33 — rides the agent_events stream, no
+        third store). Never raises: a telemetry miss must not fail planning."""
+        if self._event_sink is None:
+            return
+        payload = {
+            "mode": mode,
+            "phase": plan.phase.value,
+            "model": getattr(self._client, "model", ""),
+            "turns": str(result.turns),
+            "llm_calls": str(result.llm_calls),
+        }
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            payload[key] = str(result.usage.get(key, 0))
+        await self._event_sink.emit(
+            AgentEvent(
+                plan_id=plan.id,
+                task_id=None,
+                attempt=0,
+                seq=0,
+                type="llm.call",
+                payload=payload,
+            )
+        )
 
     # ---- converse -------------------------------------------------------
     async def converse(
@@ -242,6 +274,7 @@ class OpenAIReasoner:
             max_turns=self._converse_max_turns,
             allow_plain_reply=True,
         )
+        await self._emit_usage(plan, mode, result)
 
         if not result.submitted:
             return ReasonerReply(message=result.text, goals=None)
@@ -324,6 +357,7 @@ class OpenAIReasoner:
             max_turns=self._enrich_max_turns,
             allow_plain_reply=False,
         )
+        await self._emit_usage(plan, "enrich", result)
         return [
             _build_task(task_raw, ti, known_caps)
             for ti, task_raw in enumerate(result.submit_args["tasks"])

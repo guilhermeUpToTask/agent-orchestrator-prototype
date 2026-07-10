@@ -176,3 +176,70 @@ def test_unknown_capability_rejected_then_filtered_after_budget():
     assert "made-up" in first_rejection["errors"][0]
     (task,) = tasks
     assert task.required_capabilities == ["backend"]  # unknown id filtered
+
+
+# ---- token/usage telemetry (un-freeze #3, WP5) ----
+def test_converse_emits_llm_call_with_summed_usage():
+    from src.app.testing.fakes import CollectingEventSink
+
+    client = FakeLLMClient(
+        [
+            # first submit is rejected (empty goals) -> session continues
+            tool_turn(
+                "submit_goals",
+                {"goals": []},
+                "c1",
+                usage={"prompt_tokens": 10, "completion_tokens": 5,
+                       "total_tokens": 15},
+            ),
+            tool_turn(
+                "submit_goals",
+                {"goals": [{"name": "G", "description": "d"}]},
+                "c2",
+                usage={"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28},
+            ),
+        ]
+    )
+    sink = CollectingEventSink()
+    reasoner = OpenAIReasoner(client, CAPS, event_sink=sink)
+
+    # a rejected submit then an accepted one: 2 llm calls, usage summed
+    reply = converse(reasoner, make_plan(), [], "go")
+    assert reply.goals is not None
+
+    (event,) = sink.events
+    assert event.type == "llm.call"
+    assert event.task_id is None  # plan-scoped telemetry
+    assert event.plan_id == "p1"
+    assert event.payload["mode"] == "discovery"
+    assert event.payload["llm_calls"] == "2"
+    assert event.payload["prompt_tokens"] == "30"
+    assert event.payload["completion_tokens"] == "13"
+    assert event.payload["total_tokens"] == "43"
+
+
+def test_enrich_emits_llm_call_and_missing_usage_is_zero():
+    from src.app.testing.fakes import CollectingEventSink
+
+    # no usage scripted -> counters default to 0, still emits
+    client = FakeLLMClient(
+        [tool_turn("submit_tasks", {"tasks": [{"name": "t", "description": "d"}]})]
+    )
+    sink = CollectingEventSink()
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+    asyncio.run(
+        OpenAIReasoner(client, CAPS, event_sink=sink).enrich_goal(
+            make_plan(PlanPhase.ENRICHING), goal, CAPS
+        )
+    )
+
+    (event,) = sink.events
+    assert event.type == "llm.call" and event.payload["mode"] == "enrich"
+    assert event.payload["total_tokens"] == "0"
+
+
+def test_no_event_sink_is_a_silent_noop():
+    client = FakeLLMClient([text_turn("hi")])
+    # no event_sink: converse still works, nothing to emit
+    reply = converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
+    assert reply.message == "hi"

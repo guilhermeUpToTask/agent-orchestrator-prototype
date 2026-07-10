@@ -9,16 +9,22 @@ llm_client.py.
 """
 from __future__ import annotations
 
+from src.app.ports import ReasonerUnavailable
 from src.infra.errors import InfrastructureError
 
 
-class ReasonerError(InfrastructureError):
-    """The planning LLM runtime could not produce a usable turn/artifact."""
+class ReasonerError(InfrastructureError, ReasonerUnavailable):
+    """The planning LLM runtime could not produce a usable turn/artifact.
+
+    Subclasses the app-layer ReasonerUnavailable so the PlanningHandler can catch
+    it without importing infra, AND InfrastructureError so the API error map keys
+    off `code` (REASONER_FAILED) on the chat path — one exception, both roles."""
 
     code = "REASONER_FAILED"
 
     def __init__(self, message: str, *, transient: bool = False) -> None:
-        super().__init__(message)
+        super().__init__(message)  # InfrastructureError.__init__ (MRO)
+        self.reason = message
         self.transient = transient
 
 

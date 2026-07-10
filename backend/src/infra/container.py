@@ -154,4 +154,5 @@ class AppContainer:
             self.model_repo,
             lambda: self.secret_store,
             self.capability_repo,
+            self.agent_event_sink,
         )

@@ -33,6 +33,15 @@ class SessionResult(BaseModel):
     submitted: bool  # did a terminal tool accept?
     submit_args: dict[str, Any]  # the accepted terminal call's arguments
     turns: int  # assistant turns consumed
+    llm_calls: int = 0  # provider calls made (== turns on a clean run)
+    usage: dict[str, int] = {}  # summed token usage across the session's turns
+
+
+def _accumulate_usage(total: dict[str, int], turn_usage: dict[str, int] | None) -> None:
+    if not turn_usage:
+        return
+    for key, value in turn_usage.items():
+        total[key] = total.get(key, 0) + value
 
 
 async def run_tool_session(
@@ -47,10 +56,12 @@ async def run_tool_session(
     results are appended, so the caller sees the full transcript)."""
     terminal_names = {t.name for t in tools if t.terminal}
     final_text = ""
+    usage_total: dict[str, int] = {}
 
     for turn_index in range(max_turns):
         turn = await client.complete(messages, tools)
         final_text = turn.text or final_text
+        _accumulate_usage(usage_total, turn.usage)
         messages.append(turn.raw_message)
 
         if not turn.tool_calls:
@@ -61,6 +72,8 @@ async def run_tool_session(
                     submitted=False,
                     submit_args={},
                     turns=turn_index + 1,
+                    llm_calls=turn_index + 1,
+                    usage=usage_total,
                 )
             raise ReasonerError(
                 "Reasoner replied with plain text where a tool submit was "
@@ -96,6 +109,8 @@ async def run_tool_session(
                 submitted=True,
                 submit_args=submitted_args,
                 turns=turn_index + 1,
+                llm_calls=turn_index + 1,
+                usage=usage_total,
             )
 
     raise ReasonerError(
