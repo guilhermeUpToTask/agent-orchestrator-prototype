@@ -55,6 +55,7 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+.pytest_cache
 
 # Type checkers
 .mypy_cache/
@@ -90,4 +91,6 @@ workflow/
 
 node_modules/
 
-agent_benchmark/
+# Ignore Graphify local cache and manifest
+graphify-out/cache
+graphify-out/manifest.json
