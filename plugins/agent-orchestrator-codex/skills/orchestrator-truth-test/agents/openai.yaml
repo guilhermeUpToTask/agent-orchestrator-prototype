@@ -1,0 +1,4 @@
+interface:
+  display_name: "Truth Test Router"
+  short_description: "Choose focused tests and verify adapter parity"
+  default_prompt: "Use $orchestrator-truth-test to select and run the trustworthy test set for this change."

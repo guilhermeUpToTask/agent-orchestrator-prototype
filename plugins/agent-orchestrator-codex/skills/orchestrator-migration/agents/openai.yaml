@@ -1,0 +1,4 @@
+interface:
+  display_name: "Migration Safety"
+  short_description: "Evolve SQLite and adapters without schema drift"
+  default_prompt: "Use $orchestrator-migration to implement and verify this database schema change safely."

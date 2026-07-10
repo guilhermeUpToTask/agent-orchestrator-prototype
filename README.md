@@ -256,6 +256,17 @@ release-please turns the resulting squash-merge history into versioned releases.
 See [`docs/git-flow.md`](docs/git-flow.md) for branch names, commit conventions,
 hotfixes, and the release process.
 
+Repository-aware Codex workflows are bundled in
+[`plugins/agent-orchestrator-codex/`](plugins/agent-orchestrator-codex/). Install
+that local plugin in Codex to use its seven skills, deterministic helper tools,
+and impact/core/adapter/verification agent profiles. The `Codex plugin` CI job
+validates their structure and safe read-only checks.
+
+```bash
+codex plugin marketplace add .
+codex plugin add agent-orchestrator-codex@personal
+```
+
 ---
 
 ## Documentation map

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Domain Invariant Guard"
+  short_description: "Protect the phase machine and core invariants"
+  default_prompt: "Use $orchestrator-domain-guard to implement or review this backend core change without violating domain invariants."
