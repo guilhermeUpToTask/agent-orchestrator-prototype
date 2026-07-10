@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change Impact Router"
+  short_description: "Map changes to tests, contracts, and risks"
+  default_prompt: "Use $orchestrator-change-impact to map this request or diff to affected layers, invariants, artifacts, docs, and tests."

@@ -1,0 +1,18 @@
+{
+  "name": "agent-orchestrator-codex",
+  "version": "0.1.0",
+  "description": "Repository-aware Codex workflows, tools, and agents for Agent Orchestrator",
+  "author": {
+    "name": "Agent Orchestrator maintainers"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Orchestrator Codex",
+    "shortDescription": "Safely change and verify Agent Orchestrator.",
+    "longDescription": "Routes changes across the frozen domain, adapters, API contracts, migrations, runtime integrations, tests, and documentation.",
+    "developerName": "Agent Orchestrator maintainers",
+    "category": "Developer Tools",
+    "capabilities": ["skills", "agents", "scripts"],
+    "defaultPrompt": "Analyze this Agent Orchestrator task, route its impact, implement it safely, and verify the correct gates."
+  }
+}
