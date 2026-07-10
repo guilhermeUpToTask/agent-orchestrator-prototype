@@ -109,3 +109,58 @@
   max-height: 260px;
   overflow-y: auto;
 }
+
+/* Inline edit controls (un-freeze #3: edit at the gate or while paused). */
+.editInput {
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: var(--r-2, 6px);
+  border: 1px solid var(--border);
+  background: var(--bg-0, transparent);
+  color: var(--text-1, var(--text));
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+.saveBtn {
+  padding: 6px 14px;
+  border-radius: var(--r-2, 6px);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text-on, #fff);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.saveBtn:disabled { opacity: 0.55; cursor: default; }
+.cancelBtn {
+  padding: 6px 14px;
+  border-radius: var(--r-2, 6px);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2, var(--text-muted));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Per-task agent-event history (durable, from GET /agent-events). */
+.agentLog {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-radius: var(--r-2, 6px);
+  background: var(--bg-0, transparent);
+  border: 1px solid var(--border);
+}
+.agentLogLine {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2, var(--text-muted));
+}

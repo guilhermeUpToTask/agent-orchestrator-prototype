@@ -103,6 +103,9 @@ export interface Plan {
   iteration: number;
   version: number;
   goals: Goal[];
+  /** Human/auto pause gate (un-freeze #3): unclaimable + editable while true. */
+  paused: boolean;
+  paused_reason: string | null;
 }
 
 /** GET /api/plans — cheap listing off the promoted columns. */
@@ -113,6 +116,7 @@ export interface PlanSummary {
   version: number;
   claimed_by: string | null;
   updated_at: string;
+  paused: boolean;
 }
 
 // ─── SSE event payloads (relay-fed; every payload carries event_id) ─────────

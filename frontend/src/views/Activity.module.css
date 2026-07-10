@@ -141,3 +141,31 @@
   box-shadow: var(--shadow-overlay);
 }
 .jumper:hover { background: var(--accent-hover); }
+
+/* Telemetry metrics strip (LLM tokens + agent run/failure counters). */
+.metricsStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4, 16px);
+  padding: var(--sp-3, 12px) var(--sp-4, 16px);
+  border-bottom: 1px solid var(--border);
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 72px;
+}
+.metricValue {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-1, var(--text));
+  line-height: 1.1;
+}
+.metricLabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-3, var(--text-muted));
+  text-transform: uppercase;
+}

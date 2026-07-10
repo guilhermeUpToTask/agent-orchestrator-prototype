@@ -104,6 +104,19 @@ export function PlansView() {
                   <span className={styles.rowTitle} style={{ fontFamily: tokens.fontMono }}>
                     {p.id}
                   </span>
+                  {p.paused && (
+                    <span
+                      style={{
+                        fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
+                        padding: '2px 7px', borderRadius: 5,
+                        color: 'var(--gate-text, #b7791f)',
+                        background: 'var(--gate-bg, color-mix(in srgb, #f5a623 14%, transparent))',
+                        border: '1px solid color-mix(in srgb, #f5a623 45%, transparent)',
+                      }}
+                    >
+                      PAUSED
+                    </span>
+                  )}
                   <span className={styles.rowMeta}>
                     iter {p.iteration} · v{p.version}
                     {p.claimed_by && ` · claimed by ${p.claimed_by}`}

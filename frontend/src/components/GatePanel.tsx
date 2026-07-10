@@ -1,9 +1,12 @@
 import React from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
+  useApplyEdit,
   useApprovePlan,
   useFinishReview,
   usePlan,
+  useReopenReview,
   useReplanFromReview,
 } from '../lib/queries';
 import { Dialog, ConfirmAction } from './ui';
@@ -89,6 +92,102 @@ function RoadmapDoc({ plan }: { plan: Plan }) {
   );
 }
 
+/* ── Editable roadmap (pre-execution gate) ────────────────────────────────── */
+
+function RoadmapEditor({ plan, planId }: { plan: Plan; planId: string }) {
+  const edit = useApplyEdit(planId);
+  const [newTaskByGoal, setNewTaskByGoal] = React.useState<Record<string, string>>({});
+  const liveGoals = plan.goals
+    .filter((g) => !['done', 'failed', 'skipped'].includes(g.status))
+    .slice()
+    .sort((a, b) => a.position - b.position);
+
+  const renameGoal = (goalId: string, name: string, current: string) => {
+    if (name.trim() && name !== current) {
+      edit.mutate({ type: 'update_goal', goal_id: goalId, name });
+    }
+  };
+  const renameTask = (goalId: string, taskId: string, name: string, current: string) => {
+    if (name.trim() && name !== current) {
+      edit.mutate({ type: 'update_task', goal_id: goalId, task_id: taskId, name });
+    }
+  };
+
+  return (
+    <div className={styles.doc}>
+      {liveGoals.map((g) => (
+        <section key={g.id} className={styles.docSection}>
+          <div className={styles.editRow}>
+            <input
+              className={styles.editInput}
+              defaultValue={g.name}
+              onBlur={(e) => renameGoal(g.id, e.target.value, g.name)}
+              aria-label={`Goal ${g.name} name`}
+            />
+            <button
+              className={styles.iconBtn}
+              onClick={() => edit.mutate({ type: 'remove_goal', goal_id: g.id })}
+              aria-label={`Remove goal ${g.name}`}
+              disabled={liveGoals.length <= 1}
+              title={liveGoals.length <= 1 ? 'A plan needs at least one goal' : 'Remove goal'}
+            >
+              <Trash2 size={13} aria-hidden />
+            </button>
+          </div>
+          <ul className={styles.docList}>
+            {g.tasks
+              .slice()
+              .sort((a, b) => a.position - b.position)
+              .map((t) => (
+                <li key={t.id} className={styles.editRow}>
+                  <input
+                    className={styles.editInput}
+                    defaultValue={t.name}
+                    onBlur={(e) => renameTask(g.id, t.id, e.target.value, t.name)}
+                    aria-label={`Task ${t.name} name`}
+                  />
+                  <button
+                    className={styles.iconBtn}
+                    onClick={() => edit.mutate({ type: 'remove_task', goal_id: g.id, task_id: t.id })}
+                    aria-label={`Remove task ${t.name}`}
+                  >
+                    <Trash2 size={12} aria-hidden />
+                  </button>
+                </li>
+              ))}
+            <li className={styles.editRow}>
+              <input
+                className={styles.editInput}
+                placeholder="Add a task…"
+                value={newTaskByGoal[g.id] ?? ''}
+                onChange={(e) =>
+                  setNewTaskByGoal((m) => ({ ...m, [g.id]: e.target.value }))
+                }
+                aria-label={`New task for ${g.name}`}
+              />
+              <button
+                className={styles.iconBtn}
+                disabled={!(newTaskByGoal[g.id] ?? '').trim()}
+                onClick={() => {
+                  const name = (newTaskByGoal[g.id] ?? '').trim();
+                  if (!name) return;
+                  edit.mutate(
+                    { type: 'add_task', goal_id: g.id, task: { name } },
+                    { onSuccess: () => setNewTaskByGoal((m) => ({ ...m, [g.id]: '' })) },
+                  );
+                }}
+                aria-label={`Add task to ${g.name}`}
+              >
+                <Plus size={13} aria-hidden />
+              </button>
+            </li>
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 /* ── AWAITING_REVIEW: the pre-execution gate ──────────────────────────────── */
 
 function PreExecutionGate({
@@ -99,19 +198,28 @@ function PreExecutionGate({
   onDone: () => void;
 }) {
   const approve = useApprovePlan(planId);
+  const reopen = useReopenReview(planId);
   return (
     <div className={styles.content}>
       <h2 className={styles.title}>Approve the roadmap (iteration {plan.iteration})</h2>
       <p className={styles.body}>
-        Enrichment is done: every goal below carries executable tasks with bound
-        agents. Approving starts autonomous execution.
+        Enrichment is done: every goal below carries executable tasks. Edit the
+        roadmap inline, approve to start execution, or reopen the chat to plan a
+        different roadmap.
       </p>
-      <RoadmapDoc plan={plan} />
+      <RoadmapEditor plan={plan} planId={planId} />
       <ConfirmAction
         label="Approve & start execution"
         consequence="Workers begin executing the tasks above, goal by goal."
         pending={approve.isPending}
         onConfirm={() => approve.mutate(undefined, { onSuccess: onDone })}
+      />
+      <ConfirmAction
+        label="Request changes (reopen chat)"
+        consequence="Reopens the planning conversation. The next commit REPLACES this roadmap."
+        pending={reopen.isPending}
+        demoted
+        onConfirm={() => reopen.mutate(undefined, { onSuccess: onDone })}
       />
     </div>
   );

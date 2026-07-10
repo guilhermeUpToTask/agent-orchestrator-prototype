@@ -1,9 +1,12 @@
 import React from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import {
-  Activity, Check, ChevronRight, Cpu, LayoutDashboard, Play, RefreshCw, Target,
+  Activity, AlertTriangle, Check, ChevronRight, Cpu, LayoutDashboard, Pause,
+  Play, RefreshCw, Target,
 } from 'lucide-react';
-import { usePlan, useReplanMidRunning } from '../lib/queries';
+import {
+  usePausePlan, usePlan, useReplanMidRunning, useResumePlan,
+} from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { PLAN_PHASE } from '../styles/tokens';
 import type { PlanPhase } from '../types/ui';
@@ -35,8 +38,14 @@ export function LifecycleRail() {
   const { data: plan, isLoading } = usePlan(planId || null);
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
   const replanMidRunning = useReplanMidRunning(planId);
+  const pausePlan = usePausePlan(planId);
+  const resumePlan = useResumePlan(planId);
 
   const phase = plan?.phase;
+  const paused = plan?.paused ?? false;
+  // pause is a claim gate, only meaningful in the worker-driven phases
+  const pausable =
+    phase === 'running' || phase === 'architecture' || phase === 'enriching';
   const cursor = phase
     ? WALK.indexOf(phase === 'replanning' ? 'architecture' : phase)
     : -1;
@@ -149,6 +158,47 @@ export function LifecycleRail() {
             >
               <RefreshCw size={12} aria-hidden /> Replan now
             </button>
+          </div>
+        )}
+
+        {/* Pause is the standing intervention in the worker-driven phases. */}
+        {pausable && !paused && (
+          <button
+            className={styles.secondaryBtn}
+            onClick={() => pausePlan.mutate(undefined)}
+            disabled={pausePlan.isPending}
+          >
+            <Pause size={12} aria-hidden /> Pause plan
+          </button>
+        )}
+
+        {/* The pause gate — any phase. Amber, with Resume (= the manual retry). */}
+        {paused && (
+          <div className={styles.pausedCard} aria-live="polite">
+            <div className={styles.gateTitle}>Plan paused</div>
+            <p className={styles.cardBody}>
+              {plan?.paused_reason ??
+                'The worker is holding. Goals and tasks are editable while paused.'}
+            </p>
+            <button
+              className={styles.gateBtn}
+              onClick={() => resumePlan.mutate()}
+              disabled={resumePlan.isPending}
+            >
+              <Play size={12} aria-hidden /> Resume &amp; retry failed work
+            </button>
+          </div>
+        )}
+
+        {phase === 'failed' && (
+          <div className={styles.failedCard}>
+            <div className={styles.failedTitle}>
+              <AlertTriangle size={13} aria-hidden /> Plan failed
+            </div>
+            <p className={styles.cardBody}>
+              Planning failed permanently (the reasoner was unavailable or its
+              retry budget ran out). Create a new plan to try again.
+            </p>
           </div>
         )}
 

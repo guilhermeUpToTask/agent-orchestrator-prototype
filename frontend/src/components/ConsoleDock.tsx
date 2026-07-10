@@ -4,19 +4,37 @@ import { useParams } from 'react-router-dom';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 
+/** Color an agent-event line by severity (mirrors Activity's eventKind). */
+function lineColor(type: string): string {
+  if (type === 'agent.failed') return tokens.red;
+  if (type === 'agent.finished') return tokens.green;
+  if (type === 'llm.call') return tokens.purple;
+  return tokens.textSecond;
+}
+
 /**
  * Bottom console dock — the live agent feed. Tails the "agent.event" SSE
- * stream (fine-grained runtime telemetry: step/output events emitted by the
- * agent runners, deduped on event_id by the store), filtered to the plan the
- * operator is looking at.
+ * stream (fine-grained runtime telemetry emitted by the agent runners and the
+ * reasoner, deduped on event_id by the store), filtered to the plan the
+ * operator is looking at. Failures are red, completions green, reasoner
+ * llm.call rows purple; a toggle narrows to the selected task.
  */
 export function ConsoleDock() {
   const { planId = '' } = useParams();
   const consoleOpen = usePlannerStore((s) => s.ui.consoleOpen);
   const toggleConsole = usePlannerStore((s) => s.toggleConsole);
   const agentLog = usePlannerStore((s) => s.agentLog);
+  const selectedTaskId = usePlannerStore((s) => s.ui.selectedTaskId);
+  const [taskOnly, setTaskOnly] = React.useState(false);
 
-  const lines = planId ? agentLog.filter((l) => l.plan_id === planId) : agentLog;
+  const planLines = agentLog.filter((l) => !planId || l.plan_id === planId);
+  // the task filter is only meaningful when the selected task has lines in the
+  // plan being viewed — otherwise the toggle would silently blank the feed
+  const selectedInPlan =
+    !!selectedTaskId && planLines.some((l) => l.task_id === selectedTaskId);
+  const lines = planLines.filter(
+    (l) => !(taskOnly && selectedInPlan) || l.task_id === selectedTaskId,
+  );
 
   // Auto-scroll to the tail, but only while the operator is pinned to the
   // bottom — don't yank the view if they scrolled up to read history.
@@ -54,6 +72,25 @@ export function ConsoleDock() {
           AGENT CONSOLE {lines.length > 0 && `· ${lines.length}`}
         </span>
         <div style={{ flex: 1 }} />
+        {selectedInPlan && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); setTaskOnly((v) => !v); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setTaskOnly((v) => !v); }
+            }}
+            style={{
+              fontSize: 9, fontFamily: tokens.fontMono, letterSpacing: '0.06em',
+              padding: '2px 7px', borderRadius: 5, marginRight: 8,
+              border: `1px solid ${tokens.border}`,
+              color: taskOnly ? tokens.accent : tokens.textMuted,
+              background: taskOnly ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+            }}
+          >
+            SELECTED TASK
+          </span>
+        )}
         {consoleOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronUp size={13} aria-hidden />}
       </button>
 
@@ -71,15 +108,17 @@ export function ConsoleDock() {
             lines.map((l) => (
               <div key={l.id} style={{
                 fontSize: 9.5, fontFamily: tokens.fontMono, lineHeight: 1.7,
-                color: tokens.textSecond, whiteSpace: 'nowrap',
+                color: lineColor(l.type), whiteSpace: 'nowrap',
                 overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 <span style={{ color: tokens.textDim }}>
                   {new Date(l.at).toLocaleTimeString()}{' '}
                 </span>
-                <span style={{ color: tokens.accent }}>{l.task_id.slice(0, 8)}</span>
+                <span style={{ color: l.task_id ? tokens.accent : tokens.purple }}>
+                  {l.task_id ? l.task_id.slice(0, 8) : 'plan'}
+                </span>
                 <span style={{ color: tokens.textDim }}> a{l.attempt}#{l.seq} </span>
-                <span style={{ color: tokens.purple }}>{l.type}</span>{' '}
+                <span style={{ color: lineColor(l.type) }}>{l.type}</span>{' '}
                 {l.text}
               </div>
             ))

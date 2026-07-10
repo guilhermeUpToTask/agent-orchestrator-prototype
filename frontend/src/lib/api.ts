@@ -95,6 +95,18 @@ export const replanFromReview = (planId: string): Promise<void> =>
 export const replanMidRunning = (planId: string): Promise<void> =>
   post(`/api/plans/${encodeURIComponent(planId)}/replan`);
 
+/** Request changes at the pre-execution gate: AWAITING_REVIEW -> DISCOVERY. */
+export const reopenReview = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/review/reopen`);
+
+/** Arm the pause gate: the worker stops claiming; goals/tasks become editable. */
+export const pausePlan = (planId: string, reason?: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/pause`, { reason: reason ?? null });
+
+/** Clear the pause gate and requeue failed work (the manual retry). */
+export const resumePlan = (planId: string): Promise<void> =>
+  post(`/api/plans/${encodeURIComponent(planId)}/resume`);
+
 // ─── Plans: conversation (multi-turn with commit) ─────────────────────────────
 
 export const sendDiscoveryMessage = (
@@ -120,17 +132,69 @@ export interface EditBody {
     | 'remove_task'
     | 'reorder_tasks'
     | 'edit_task_requirements'
-    | 'rebind_task_agent';
+    | 'rebind_task_agent'
+    | 'update_task'
+    | 'update_goal'
+    | 'remove_goal';
   goal_id: string;
   task_id?: string;
   task?: { name: string; description?: string; required_capabilities?: string[] };
   ordered_task_ids?: string[];
   required_capabilities?: string[];
   agent_id?: string;
+  name?: string;
+  description?: string;
+  depends_on?: string[];
 }
 
 export const applyEdit = (planId: string, edit: EditBody): Promise<void> =>
   post(`/api/plans/${encodeURIComponent(planId)}/edits`, edit);
+
+// ─── Plans: telemetry read side ───────────────────────────────────────────────
+
+export interface AgentEventRow {
+  id: number;
+  event_id: string;
+  plan_id: string;
+  task_id: string | null;
+  attempt: number;
+  seq: number;
+  type: string;
+  payload: Record<string, string>;
+  occurred_at: string;
+}
+
+/** A plan's fine-grained agent/reasoner telemetry history (most-recent first). */
+export const fetchAgentEvents = (
+  planId: string,
+  opts?: { taskId?: string; limit?: number },
+): Promise<AgentEventRow[]> => {
+  const params = new URLSearchParams();
+  if (opts?.taskId) params.set('task_id', opts.taskId);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return get(`/api/plans/${enc(planId)}/agent-events${qs ? `?${qs}` : ''}`);
+};
+
+export interface MetricsResponse {
+  llm: {
+    sessions: number;
+    calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  agent: {
+    runs: number;
+    finished: number;
+    failed: number;
+    failures_by_kind: Record<string, number>;
+  };
+}
+
+/** Global (or per-plan) telemetry roll-up: LLM tokens + agent run/failure counts. */
+export const fetchMetrics = (planId?: string): Promise<MetricsResponse> =>
+  get(`/api/metrics${planId ? `?plan_id=${enc(planId)}` : ''}`);
 
 // ─── Reference data: reads ────────────────────────────────────────────────────
 
@@ -232,6 +296,9 @@ export const SSE_EVENT_TYPES = [
   'GoalFailedEvent',
   'PlanCompleted',
   'PlanFailed',
+  'PlanPaused',
+  'PlanResumed',
+  'ReasonerFailed',
   'AgentFellBackToDefault',
   'agent.event',
 ] as const;

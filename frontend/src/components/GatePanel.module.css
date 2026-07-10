@@ -46,3 +46,36 @@
   flex-direction: column;
   gap: 4px;
 }
+
+/* Inline roadmap editor (un-freeze #3: edit at the pre-execution gate). */
+.editRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+.editInput {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: var(--r-2, 6px);
+  border: 1px solid var(--border);
+  background: var(--bg-0, transparent);
+  color: var(--text-1, var(--text));
+  font-size: 12px;
+  font-family: inherit;
+}
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--r-2, 6px);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2, var(--text-muted));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.iconBtn:hover { background: color-mix(in srgb, var(--text-3) 12%, transparent); }
+.iconBtn:disabled { opacity: 0.4; cursor: default; }

@@ -33,7 +33,9 @@ import {
   deleteModel,
   deleteProject,
   deleteProvider,
+  fetchAgentEvents,
   fetchChat,
+  fetchMetrics,
   fetchPlan,
   finishReview,
   getConfigScope,
@@ -46,9 +48,12 @@ import {
   listPlans,
   listProjects,
   listProviders,
+  pausePlan,
   renameModel,
+  reopenReview,
   replanFromReview,
   replanMidRunning,
+  resumePlan,
   sendDiscoveryMessage,
   sendReplanningMessage,
   setConfigKey,
@@ -98,6 +103,9 @@ export const keys = {
   config: (scope: string) => ['config', scope] as const,
   reasonerStatus: ['reasoner-status'] as const,
   runnerStatus: ['runner-status'] as const,
+  agentEvents: (planId: string, taskId?: string) =>
+    ['agent-events', planId, taskId ?? '*'] as const,
+  metrics: (planId?: string) => ['metrics', planId ?? '*'] as const,
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────────
@@ -119,6 +127,24 @@ export function useChat(planId: string | null) {
     queryKey: keys.chat(planId ?? ''),
     queryFn: () => fetchChat(planId as string),
     enabled: !!planId,
+  });
+}
+
+/** Durable agent/reasoner telemetry history for a plan (optionally one task). */
+export function useAgentEvents(planId: string | null, taskId?: string) {
+  return useQuery({
+    queryKey: keys.agentEvents(planId ?? '', taskId),
+    queryFn: () => fetchAgentEvents(planId as string, { taskId }),
+    enabled: !!planId,
+  });
+}
+
+/** Global (or per-plan) telemetry roll-up; polled while mounted. */
+export function useMetrics(planId?: string) {
+  return useQuery({
+    queryKey: keys.metrics(planId),
+    queryFn: () => fetchMetrics(planId),
+    refetchInterval: 15000,
   });
 }
 
@@ -223,6 +249,22 @@ export const useReplanFromReview = (planId: string) =>
   usePlanCommand(planId, replanFromReview, 'Replan');
 export const useReplanMidRunning = (planId: string) =>
   usePlanCommand(planId, replanMidRunning, 'Replan');
+export const useReopenReview = (planId: string) =>
+  usePlanCommand(planId, reopenReview, 'Request changes');
+export const useResumePlan = (planId: string) =>
+  usePlanCommand(planId, resumePlan, 'Resume');
+
+export function usePausePlan(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason?: string) => pausePlan(planId, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+    },
+    onError: (err) => toast.error('Pause failed', errorDetail(err)),
+  });
+}
 
 export function useApplyEdit(planId: string) {
   const qc = useQueryClient();
@@ -462,6 +504,40 @@ export function useSSEBridge() {
 
           case 'PlanFailed':
             toast.error('Plan failed', (payload.reason as string) ?? undefined);
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
+            break;
+
+          case 'ReasonerFailed': {
+            const reason = (payload.reason as string) ?? undefined;
+            if (payload.transient) {
+              // Backing off — the plan will retry on its own; a PlanFailed follows
+              // only if the retry budget runs out.
+              toast.info('Planner backing off', reason);
+            } else {
+              toast.error('Planner unavailable', reason);
+            }
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
+            break;
+          }
+
+          case 'PlanPaused': {
+            const reason = (payload.reason as string) ?? undefined;
+            if (payload.auto) {
+              // the system paused itself (a task exhausted its retries or failed
+              // non-retryably) — it needs a human to edit and resume
+              toast.error('Plan needs attention', reason ?? 'Paused after a failure.');
+            } else {
+              toast.info('Plan paused', 'Goals and tasks are editable while paused.');
+            }
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.plans });
+            break;
+          }
+
+          case 'PlanResumed':
+            toast.info('Plan resumed', 'Failed tasks were requeued for retry.');
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;

@@ -210,3 +210,52 @@
   color: #1f1602;
 }
 .gateBtn:hover { background: color-mix(in srgb, var(--gate) 85%, white); }
+
+/* Pause gate — amber like a gate, but its own card so it can appear in any phase. */
+.pausedCard {
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--gate-bg);
+  border: 1px solid color-mix(in srgb, var(--gate) 55%, transparent);
+  margin-top: var(--sp-2);
+}
+.pausedCard .cardBody { color: color-mix(in srgb, var(--gate-text) 75%, var(--text-2)); }
+
+/* Terminal failure — a red dead-end (only permanent reasoner failure reaches it). */
+.failedCard {
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: color-mix(in srgb, var(--fail, #e5484d) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fail, #e5484d) 45%, transparent);
+}
+.failedTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--fail, #e5484d);
+}
+
+/* Secondary (outline) button for Pause alongside a primary action. */
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border, color-mix(in srgb, var(--text-3) 40%, transparent));
+}
+.secondaryBtn:hover { background: color-mix(in srgb, var(--text-3) 12%, transparent); }
+.secondaryBtn:disabled { opacity: 0.55; }

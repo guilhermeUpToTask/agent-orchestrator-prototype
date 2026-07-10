@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 import { usePlannerStore, type BufferedEvent } from '../store/plannerStore';
+import { useMetrics } from '../lib/queries';
 import { absTime, relTime, useNow } from '../lib/time';
 import { tokens } from '../styles/tokens';
 import styles from './Activity.module.css';
@@ -10,6 +12,7 @@ type EventKind = 'ok' | 'fail' | 'neutral';
 /** Classify an event for color: success / failure / neutral. */
 function eventKind(e: BufferedEvent): EventKind {
   const t = e.type;
+  if (t === 'ReasonerFailed') return e.payload.transient ? 'neutral' : 'fail';
   if (t === 'TaskFailedEvent' || t === 'GoalFailedEvent' || t === 'PlanFailed') return 'fail';
   if (t === 'TaskCompleted' || t === 'GoalCompleted' || t === 'PlanCompleted') return 'ok';
   return 'neutral';
@@ -30,13 +33,50 @@ function compact(payload: Record<string, unknown>): string {
   return parts.join(' ');
 }
 
+/** A compact counter tile for the metrics strip. */
+function Metric({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
+  return (
+    <div className={styles.metric}>
+      <span
+        className={styles.metricValue}
+        style={warn && value > 0 ? { color: tokens.red } : undefined}
+      >
+        {value.toLocaleString()}
+      </span>
+      <span className={styles.metricLabel}>{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Global (or per-plan) telemetry roll-up — LLM token usage and agent
+ * run/failure counts, refreshed on a poll. rate_limit failures are the run's
+ * usual cause of death, so they get their own highlighted tile.
+ */
+function MetricsStrip({ planId }: { planId?: string }) {
+  const { data } = useMetrics(planId);
+  if (!data) return null;
+  const rateLimited = data.agent.failures_by_kind['rate_limit'] ?? 0;
+  return (
+    <div className={styles.metricsStrip}>
+      <Metric label="LLM sessions" value={data.llm.sessions} />
+      <Metric label="LLM calls" value={data.llm.calls} />
+      <Metric label="Tokens" value={data.llm.total_tokens} />
+      <Metric label="Agent runs" value={data.agent.runs} />
+      <Metric label="Failures" value={data.agent.failed} warn />
+      <Metric label="Rate-limited" value={rateLimited} warn />
+    </div>
+  );
+}
+
 /**
  * The system event log: monospace, dense, filterable — fed by the outbox
  * relay over SSE. Scroll position is preserved while reading; auto-follow
- * only when the operator is pinned to the bottom.
+ * only when the operator is pinned to the bottom. A metrics strip sits on top.
  */
 export function ActivityView() {
   const events = usePlannerStore((s) => s.events);
+  const { planId } = useParams();
   const now = useNow(1000);
 
   const [text, setText] = useState('');
@@ -89,6 +129,7 @@ export function ActivityView() {
 
   return (
     <div className={styles.page}>
+      <MetricsStrip planId={planId} />
       <div className={styles.toolbar}>
         <input
           className={styles.search}
