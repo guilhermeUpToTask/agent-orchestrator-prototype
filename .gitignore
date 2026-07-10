@@ -36,7 +36,6 @@ env/
 ENV/
 
 # uv
-uv.lock
 
 # Installer logs
 pip-log.txt
