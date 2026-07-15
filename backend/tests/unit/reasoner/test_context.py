@@ -42,6 +42,7 @@ def make_plan():
     )
     empty_goal = Goal(id="g3", name="Docs", position=2, description="", tasks=[])
     return Plan(
+        project_id="project-1",
         id="p1",
         brief="tiny service",
         phase=PlanPhase.REPLANNING,

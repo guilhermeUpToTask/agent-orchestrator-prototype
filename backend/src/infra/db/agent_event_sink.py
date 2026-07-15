@@ -7,10 +7,12 @@ hiccup must never roll back state, and state rollback must never lose the
 record of what the agent actually did. INSERT OR IGNORE on event_id keeps
 re-deliveries idempotent.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import text
@@ -24,9 +26,12 @@ log = structlog.get_logger(__name__)
 _INSERT_SQL = text(
     """
     INSERT OR IGNORE INTO agent_events
-        (event_id, plan_id, task_id, attempt, seq, type, payload, occurred_at)
-    VALUES (:event_id, :plan_id, :task_id, :attempt, :seq, :type, :payload,
-            :occurred_at)
+        (event_id, plan_id, task_id, attempt, seq, type, observation_kind,
+         source, quality, schema_version, source_sequence, payload, occurred_at,
+         recorded_at)
+    VALUES (:event_id, :plan_id, :task_id, :attempt, :seq, :type,
+            :observation_kind, 'legacy', 'legacy_unknown', 0, :source_sequence,
+            :payload, :occurred_at, :recorded_at)
     """
 )
 
@@ -43,8 +48,11 @@ class SqliteAgentEventSink:
             "attempt": event.attempt,
             "seq": event.seq,
             "type": event.type,
+            "observation_kind": event.type,
+            "source_sequence": event.seq,
             "payload": json.dumps(event.payload),
             "occurred_at": event.occurred_at.isoformat(),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
             await asyncio.to_thread(

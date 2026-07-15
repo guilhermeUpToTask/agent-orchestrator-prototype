@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronRight, Plus } from 'lucide-react';
-import { useCreatePlan, usePlans } from '../lib/queries';
+import { useCreatePlan, usePlans, useProjects } from '../lib/queries';
 import { StatusBadge } from '../components/StatusBadge';
 import { Button, TextArea } from '../components/ui';
 import { tokens } from '../styles/tokens';
@@ -15,14 +15,17 @@ import styles from './Overview.module.css';
 export function PlansView() {
   const { data: plans = [], isLoading, error, refetch } = usePlans();
   const createPlan = useCreatePlan();
+  const { data: projects = [] } = useProjects();
   const navigate = useNavigate();
 
   const [composing, setComposing] = useState(false);
   const [brief, setBrief] = useState('');
+  const [projectId, setProjectId] = useState('');
 
   const submit = () => {
-    if (!brief.trim() || createPlan.isPending) return;
-    createPlan.mutate(brief, {
+    const selectedProject = projectId || projects[0]?.id;
+    if (!brief.trim() || !selectedProject || createPlan.isPending) return;
+    createPlan.mutate({ brief, projectId: selectedProject }, {
       onSuccess: ({ plan_id }) => {
         setComposing(false);
         setBrief('');
@@ -56,14 +59,25 @@ export function PlansView() {
           </Button>
         </div>
         <p className={styles.phaseGoal}>
-          Each plan walks the 9-phase machine: chat the roadmap, approve it,
-          watch execution, review, replan.
+          Each project owns one long-lived plan. Review intent and cycle drafts,
+          run verified work, publish a cycle, then return to idle.
         </p>
       </header>
 
       {composing && (
         <section className={styles.section} aria-label="New plan">
           <h2 className={styles.sectionTitle + ' label'}>New plan — the brief</h2>
+          <label className="label" htmlFor="new-plan-project">Project</label>
+          <select
+            id="new-plan-project"
+            value={projectId || projects[0]?.id || ""}
+            onChange={(event) => setProjectId(event.target.value)}
+            style={{ width: "100%", marginBottom: 8 }}
+          >
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
           <TextArea
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
@@ -75,10 +89,10 @@ export function PlansView() {
             <Button
               variant="primary"
               onClick={submit}
-              disabled={!brief.trim()}
+              disabled={!brief.trim() || projects.length === 0}
               pending={createPlan.isPending}
             >
-              Create &amp; start discovery
+              Create project plan
             </Button>
             <Button onClick={() => setComposing(false)}>Cancel</Button>
           </div>
@@ -100,11 +114,11 @@ export function PlansView() {
             {plans.map((p) => (
               <li key={p.id}>
                 <Link className={styles.row} to={`/plans/${encodeURIComponent(p.id)}`}>
-                  <StatusBadge domain="phase" value={p.phase} bare />
+                  <StatusBadge domain="plan" value={p.status} bare />
                   <span className={styles.rowTitle} style={{ fontFamily: tokens.fontMono }}>
                     {p.id}
                   </span>
-                  {p.paused && (
+                  {(p.paused || p.pause_requested) && (
                     <span
                       style={{
                         fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
@@ -114,7 +128,7 @@ export function PlansView() {
                         border: '1px solid color-mix(in srgb, #f5a623 45%, transparent)',
                       }}
                     >
-                      PAUSED
+                      {p.pause_requested ? "PAUSE REQUESTED" : "PAUSED"}
                     </span>
                   )}
                   <span className={styles.rowMeta}>

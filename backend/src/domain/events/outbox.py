@@ -73,6 +73,26 @@ class PlanFailed(DomainEvent):
     reason: str
 
 
+class PauseRequested(DomainEvent):
+    """A graceful pause is waiting for the current atomic action to finalize."""
+
+    reason: str | None = None
+
+
+class PlanBlocked(DomainEvent):
+    block_id: str
+    stage: str
+    goal_id: str | None = None
+    task_id: str | None = None
+    task_revision: int | None = None
+    run_id: str | None = None
+
+
+class BlockResolved(DomainEvent):
+    block_id: str
+    resolution: str
+
+
 class PlanPaused(DomainEvent):
     """The plan's pause gate was armed. auto=True means the system paused itself
     — a task exhausted its retry budget or failed non-retryably — and needs
@@ -88,6 +108,74 @@ class PlanResumed(DomainEvent):
     a fresh attempt budget (the manual retry, decision #17)."""
 
     retried_task_ids: list[str] = []
+
+
+class IntentProposed(DomainEvent):
+    proposal_id: str
+    revision: int
+
+
+class IntentApproved(DomainEvent):
+    proposal_id: str
+    revision: int
+
+
+class CycleDrafted(DomainEvent):
+    draft_id: str
+    revision: int
+
+
+class CycleVerified(DomainEvent):
+    cycle_id: str
+    evidence_refs: list[str]
+
+
+class CycleActivated(DomainEvent):
+    cycle_id: str
+    draft_id: str
+
+
+class ReviewGateOpened(DomainEvent):
+    gate_id: str
+    subject_type: str
+    subject_id: str
+    subject_revision: int
+
+
+class OutputDispositionRecorded(DomainEvent):
+    cycle_id: str
+    disposition: str
+    output_reference: str | None = None
+
+
+class TestBundleFrozen(DomainEvent):
+    goal_id: str
+    task_id: str
+    task_revision: int
+    test_commit_sha: str
+
+
+class TaskVerificationAccepted(DomainEvent):
+    goal_id: str
+    task_id: str
+    task_revision: int
+    evidence_refs: list[str]
+
+
+class TaskVerificationRejected(DomainEvent):
+    goal_id: str
+    task_id: str
+    task_revision: int
+    reasons: list[str]
+
+
+class TaskRetried(DomainEvent):
+    """A human reset retry-policy budget for one selected task."""
+
+    goal_id: str
+    task_id: str
+    retry_cycle: int
+    next_attempt_number: int
 
 
 class ReasonerFailed(DomainEvent):

@@ -21,7 +21,7 @@ from src.domain.value_objects.lifecycle import FailureKind, Status
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.control import finish_review
-from src.app.use_cases.pause_resume import pause_plan, resume_plan
+from src.app.use_cases.pause_resume import pause_plan, resume_plan, retry_task
 
 
 def task(tid: str, position: int, **kwargs) -> Task:
@@ -32,6 +32,7 @@ def task(tid: str, position: int, **kwargs) -> Task:
 
 def running_plan(tasks: list[Task] | None = None, retry_max: int = 3) -> Plan:
     return Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,
@@ -123,10 +124,10 @@ def test_resume_unpaused_raises_invalid_transition(env_factory):
         resume_plan("p1", env.uow)
 
 
-# ---- resume = the manual retry (decision #17) ----
-def test_resume_requeues_failed_task_and_clears_gates(env_factory):
+# ---- resume and retry are separate commands ----
+def test_resume_changes_availability_only(env_factory):
     env = env_factory()
-    failed = task("t0", 0, status=Status.FAILED, attempt=3)
+    failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
     gated = task(
         "t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300)
     )
@@ -141,14 +142,35 @@ def test_resume_requeues_failed_task_and_clears_gates(env_factory):
     stored = env.stored("p1")
     assert not stored.paused and stored.paused_reason is None
     t0, t1 = stored.goals[0].tasks
-    assert t0.status == Status.PENDING and t0.attempt == 0 and t0.result is None
-    assert t1.retry_not_before is None  # backing-off sibling released too
+    assert t0.status == Status.FAILED and t0.attempt == 3
+    assert t1.retry_not_before is not None
     assert env.outbox_types() == ["PlanResumed"]
 
 
-def test_resume_clears_planning_backoff_gate(env_factory):
+def test_targeted_retry_preserves_absolute_attempt_and_unrelated_gates(env_factory):
     env = env_factory()
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.ENRICHING,
+    failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
+    gated = task(
+        "t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300)
+    )
+    plan = running_plan(tasks=[failed, gated])
+    plan.goals[0].status = Status.RUNNING
+    plan.paused = True
+    env.seed(plan)
+
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
+
+    stored = env.stored("p1")
+    t0, t1 = stored.goals[0].tasks
+    assert t0.status == Status.PENDING
+    assert t0.attempt == 3 and t0.cycle_attempt == 0 and t0.retry_cycle == 1
+    assert t1.retry_not_before is not None
+    assert env.outbox_types() == ["TaskRetried"]
+
+
+def test_resume_preserves_planning_backoff_gate(env_factory):
+    env = env_factory()
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.ENRICHING,
                 goals=[Goal(id="g1", name="g1", position=0, description="")])
     plan.record_planning_retry(env.clock.now() + timedelta(seconds=300))
     plan.pause("operator pause")
@@ -157,8 +179,9 @@ def test_resume_clears_planning_backoff_gate(env_factory):
     resume_plan("p1", env.uow)
 
     stored = env.stored("p1")
-    assert stored.planning_retry_not_before is None and stored.planning_attempts == 0
-    assert env.uow.plans.claim_one_unit("w1", lease_seconds=60) is not None
+    assert stored.planning_retry_not_before is not None
+    assert stored.planning_attempts == 1
+    assert env.uow.plans.claim_one_unit("w1", lease_seconds=60) is None
 
 
 def test_resume_retry_bypasses_should_retry_for_auth_error(env_factory):
@@ -176,6 +199,7 @@ def test_resume_retry_bypasses_should_retry_for_auth_error(env_factory):
     assert env.runner.calls["t0"] == 1
 
     env.runner.script["t0"] = DummyBehavior(output="ok")  # human fixed the key
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
     resume_plan("p1", env.uow)
     sig = asyncio.run(drive(env))
 
@@ -254,6 +278,7 @@ def test_pause_then_resume_completes_to_review(env_factory):
     assert env.stored("p1").paused
 
     env.runner.script["t0"] = DummyBehavior(output="ok")  # quota restored
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
     resume_plan("p1", env.uow)
     assert asyncio.run(drive(env)) == "paused"  # the REVIEW gate this time
     assert env.stored("p1").phase == PlanPhase.REVIEW

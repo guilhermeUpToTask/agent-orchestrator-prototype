@@ -38,7 +38,7 @@ def task(tid: str, position: int = 0) -> Task:
 
 
 def plan_in(phase: PlanPhase, goals: list[Goal] | None = None) -> Plan:
-    return Plan(id="p1", brief="the brief", phase=phase, goals=goals or [])
+    return Plan(project_id="project-1", id="p1", brief="the brief", phase=phase, goals=goals or [])
 
 
 class ScriptedReasoner:

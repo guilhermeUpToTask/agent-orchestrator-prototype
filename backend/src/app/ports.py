@@ -10,8 +10,11 @@ app-specific: the TaskFailed signal and the transaction machinery
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from src.app.execution_records import ExecutionRecordRepository
 from src.domain.events.base import DomainEvent
 from src.domain.ports import (
     AgentEventSink,
@@ -36,6 +39,7 @@ __all__ = [
     "ChatStore",
     "Clock",
     "ConversationMode",
+    "ExecutionRecordRepository",
     "Outbox",
     "Reasoner",
     "ReasonerReply",
@@ -44,7 +48,32 @@ __all__ = [
     "UnitOfWork",
     "Workspace",
     "WorkspaceHandle",
+    "VerificationExecutor",
+    "CommandExecution",
 ]
+
+
+@dataclass(frozen=True)
+class CommandExecution:
+    command: str
+    exit_code: int
+    started_at: datetime
+    finished_at: datetime
+    bounded_output_ref: str
+
+
+@runtime_checkable
+class VerificationExecutor(Protocol):
+    async def changed_paths(
+        self,
+        workspace_path: str,
+        base_ref: str | None = None,
+    ) -> list[str]: ...
+    async def run(
+        self,
+        workspace_path: str,
+        commands: list[str],
+    ) -> list[CommandExecution]: ...
 
 
 class TaskFailed(Exception):
@@ -96,9 +125,9 @@ class Outbox(Protocol):
 
 @runtime_checkable
 class UnitOfWork(Protocol):
-    """Transaction boundary. Owns a PlanRepository and an Outbox; entering starts
-    a transaction, exiting commits (or rolls back on exception). This is how
-    state + outbox become atomic.
+    """Transaction boundary. Owns Plan, execution-ledger, and Outbox repositories;
+    entering starts a transaction and exiting commits (or rolls back on exception).
+    This is how state + execution identity + outbox become atomic.
 
     plans/outbox are read-only properties on the protocol so concrete
     implementations' narrower attribute types remain assignable (covariance)."""
@@ -107,6 +136,8 @@ class UnitOfWork(Protocol):
     def plans(self) -> PlanRepository: ...
     @property
     def outbox(self) -> Outbox: ...
+    @property
+    def executions(self) -> ExecutionRecordRepository: ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...

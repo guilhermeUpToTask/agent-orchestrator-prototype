@@ -19,7 +19,11 @@ class RetryPolicy(BaseModel):
     # Typed classification (shared failure taxonomy): a token-limit or auth failure
     # will fail identically on every retry, so it is terminal immediately.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(
-        {FailureKind.TOKEN_LIMIT, FailureKind.AUTH_ERROR}
+        {
+            FailureKind.TOKEN_LIMIT,
+            FailureKind.AUTH_ERROR,
+            FailureKind.VERIFICATION_ERROR,
+        }
     )
 
     def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:

@@ -76,6 +76,7 @@ async def run_worker_forever(
                 worker_id,
                 lease_seconds,
                 planning_handler=planning_handler,
+                verifier=container.verification_executor,
             )
         except Exception:
             # One poisoned plan must not kill the worker: the tick's finally

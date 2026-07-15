@@ -29,6 +29,8 @@ from pydantic import BaseModel, Field
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
+from src.domain.entities.execution_contracts import GoalContract
+from src.domain.entities.planning_artifacts import GoalOutline
 from src.domain.entities.task import Task
 
 ChatRole = Literal["user", "assistant"]
@@ -74,3 +76,12 @@ class Reasoner(Protocol):
         goal: Goal,
         capabilities: Sequence[Capability],
     ) -> list[Task]: ...
+
+    async def architect_cycle(self, plan: Plan) -> list[GoalOutline]: ...
+
+    async def enrich_goal_contract(
+        self,
+        plan: Plan,
+        goal: Goal,
+        capabilities: Sequence[Capability],
+    ) -> GoalContract: ...

@@ -15,7 +15,7 @@ from src.domain.value_objects.lifecycle import Status
 
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.control import finish_review
-from src.app.use_cases.run_worker import drive_plan, worker_tick
+from src.app.use_cases.run_worker import _advance_with_heartbeats, drive_plan, worker_tick
 
 
 def plan_with_chain():
@@ -36,7 +36,7 @@ def plan_with_chain():
         depends_on=["g1"],
         tasks=[Task(id="g2t0", name="t", position=0, description="", agent_id="a1")],
     )
-    return Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g1, g2])
+    return Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g1, g2])
 
 
 def test_worker_tick_drives_plan_to_review_gate(env_factory):
@@ -119,13 +119,11 @@ def test_claim_predicate_is_the_driver_model(env_factory):
         PlanPhase.FAILED,
     ]
     for i, phase in enumerate(unclaimable):
-        env.seed(Plan(id=f"u{i}", brief="b", phase=phase))
+        env.seed(Plan(project_id=f"project-u{i}", id=f"u{i}", brief="b", phase=phase))
     assert env.uow.plans.claim_one_unit("w1", 60) is None
 
-    for i, phase in enumerate(
-        [PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING, PlanPhase.RUNNING]
-    ):
-        env.seed(Plan(id=f"c{i}", brief="b", phase=phase))
+    for i, phase in enumerate([PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING, PlanPhase.RUNNING]):
+        env.seed(Plan(project_id=f"project-c{i}", id=f"c{i}", brief="b", phase=phase))
     claimed_ids = {env.uow.plans.claim_one_unit("w1", 60).id for _ in range(3)}
     assert claimed_ids == {"c0", "c1", "c2"}
     assert env.uow.plans.claim_one_unit("w1", 60) is None  # all leases live now
@@ -133,7 +131,7 @@ def test_claim_predicate_is_the_driver_model(env_factory):
 
 def test_release_frees_the_claim(env_factory):
     env = env_factory()
-    env.seed(Plan(id="p1", brief="b", phase=PlanPhase.RUNNING))
+    env.seed(Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING))
     assert env.uow.plans.claim_one_unit("w1", 60).id == "p1"
     assert env.uow.plans.claim_one_unit("w2", 60) is None  # held by w1
     env.uow.plans.release("p1", "w2")  # someone else's release is a no-op
@@ -144,7 +142,7 @@ def test_release_frees_the_claim(env_factory):
 
 def test_heartbeat_extends_only_own_lease(env_factory):
     env = env_factory()
-    env.seed(Plan(id="p1", brief="b", phase=PlanPhase.RUNNING))
+    env.seed(Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING))
     assert env.uow.plans.claim_one_unit("w1", lease_seconds=60) is not None
 
     # w1 heartbeats at t+50 -> lease now runs to ~t+110
@@ -178,3 +176,43 @@ def test_worker_tick_reports_progress_not_claiming(env_factory):
     did = asyncio.run(worker_tick(*env.args, "w1"))
     assert did is True
     assert env.runner.calls.get("g1t0") == 1
+
+
+def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
+    env = env_factory()
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def pending_advance() -> str:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def scenario() -> None:
+        task = asyncio.create_task(pending_advance())
+        await started.wait()
+
+        def fail_heartbeat(plan_id: str, worker_id: str) -> None:
+            raise RuntimeError("lease renewal failed")
+
+        env.uow.plans.heartbeat = fail_heartbeat
+        try:
+            await _advance_with_heartbeats(
+                "p1",
+                "w1",
+                60,
+                0,
+                env.uow,
+                task,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "lease renewal failed"
+        else:
+            raise AssertionError("heartbeat failure was not propagated")
+
+        assert task.cancelled()
+        assert cancelled.is_set()
+
+    asyncio.run(scenario())

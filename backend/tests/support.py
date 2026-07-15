@@ -12,6 +12,7 @@ atomicity is real, not simulated by the fake.
 Both envs share the same FakeClock/DummyAgentRunner/NoOpWorkspace/agent fakes —
 only the persistence boundary changes.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -115,6 +116,15 @@ def make_sqlite_env(
     uow = SqliteUnitOfWork(make_session_factory(engine), clock)
 
     def seed(plan: Plan) -> None:
+        if plan.project_id is not None:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT OR IGNORE INTO projects (id, name, repo_url) "
+                        "VALUES (:id, :name, NULL)"
+                    ),
+                    {"id": plan.project_id, "name": plan.project_id},
+                )
         with uow:
             uow.plans.save(plan)
 

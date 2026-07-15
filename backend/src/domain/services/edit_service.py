@@ -38,9 +38,7 @@ def _assert_task_mutable(task: Task, *, paused: bool = False) -> None:
     if task.status == Status.FAILED and paused:
         return
     hint = "" if paused else " (pause the plan to edit failed tasks)"
-    raise InvalidEditError(
-        f"task '{task.id}' is {task.status.value}; not editable{hint}"
-    )
+    raise InvalidEditError(f"task '{task.id}' is {task.status.value}; not editable{hint}")
 
 
 class _Positioned(Protocol):
@@ -54,9 +52,7 @@ def _renumber(items: Sequence[_Positioned]) -> None:
         item.position = idx
 
 
-def add_task(
-    goals: list[Goal], goal_id: str, task: Task, *, paused: bool = False
-) -> None:
+def add_task(goals: list[Goal], goal_id: str, task: Task, *, paused: bool = False) -> None:
     goal = find_goal(goals, goal_id)
     _assert_editable(goal, paused=paused)
     if any(t.id == task.id for t in goal.tasks):
@@ -67,9 +63,7 @@ def add_task(
 
 # Filter-by-id (not list.remove/pop, which need the object or an index) so a miss
 # raises a typed InvalidEditError instead of a bare ValueError.
-def remove_task(
-    goals: list[Goal], goal_id: str, task_id: str, *, paused: bool = False
-) -> None:
+def remove_task(goals: list[Goal], goal_id: str, task_id: str, *, paused: bool = False) -> None:
     goal = find_goal(goals, goal_id)
     _assert_editable(goal, paused=paused)
     target = next((t for t in goal.tasks if t.id == task_id), None)
@@ -90,9 +84,7 @@ def reorder_tasks(
     _assert_editable(goal, paused=paused)
     existing = {t.id for t in goal.tasks}
     if set(ordered_ids) != existing:
-        raise InvalidEditError(
-            f"reorder for goal '{goal_id}' must list exactly its task ids"
-        )
+        raise InvalidEditError(f"reorder for goal '{goal_id}' must list exactly its task ids")
     pos = {tid: i for i, tid in enumerate(ordered_ids)}
     for t in goal.tasks:
         t.position = pos[t.id]
@@ -129,12 +121,10 @@ def update_task(
     _assert_editable(goal, paused=paused)
     task = find_task(goal, task_id)
     _assert_task_mutable(task, paused=paused)
-    if name is not None:
-        if not name.strip():
-            raise InvalidEditError("task name cannot be empty")
-        task.name = name
-    if description is not None:
-        task.description = description
+    if name is not None and not name.strip():
+        raise InvalidEditError("task name cannot be empty")
+    if name is not None or description is not None:
+        task.semantic_edit(name=name, description=description)
 
 
 def _assert_acyclic(goals: list[Goal], goal_id: str, new_deps: list[str]) -> None:
@@ -146,9 +136,7 @@ def _assert_acyclic(goals: list[Goal], goal_id: str, new_deps: list[str]) -> Non
     while stack:
         current = stack.pop()
         if current == goal_id:
-            raise InvalidEditError(
-                f"depends_on for goal '{goal_id}' would create a cycle"
-            )
+            raise InvalidEditError(f"depends_on for goal '{goal_id}' would create a cycle")
         if current in seen:
             continue
         seen.add(current)
@@ -192,9 +180,7 @@ def remove_goal(goals: list[Goal], goal_id: str, *, paused: bool = False) -> Non
     goal = find_goal(goals, goal_id)
     _assert_editable(goal, paused=paused)
     if any(t.status == Status.RUNNING for t in goal.tasks):
-        raise InvalidEditError(
-            f"goal '{goal_id}' has a running task and cannot be removed"
-        )
+        raise InvalidEditError(f"goal '{goal_id}' has a running task and cannot be removed")
     goals[:] = [g for g in goals if g.id != goal_id]
     for other in goals:
         if goal_id in other.depends_on:

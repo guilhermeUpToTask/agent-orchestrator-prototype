@@ -24,7 +24,7 @@ def goal(gid: str, position: int, tasks: list[Task] | None = None) -> Goal:
 
 
 def enriching_plan() -> Plan:
-    return Plan(id="p1", brief="b", phase=PlanPhase.ENRICHING, goals=[goal("g1", 0)])
+    return Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.ENRICHING, goals=[goal("g1", 0)])
 
 
 class FailingReasoner:

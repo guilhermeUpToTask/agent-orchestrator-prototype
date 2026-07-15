@@ -1,8 +1,10 @@
 # Decision log
 
-*Every locked design decision, consolidated. Sources: the [master roadmap](../history/planning/2026-07-02-master-roadmap-final-fable-5.md) ("ALL DECISIONS" section, r2-audited against running code), the [working-prototype plan](../history/planning/2026-07-03-working-prototype-reasoner-frontend-fable-5.md), the [domain design record](domain-design-decisions.md), and [ADR-001](adr-001-concurrency-lease.md). Statements are facts about the current system unless marked superseded.*
+*Every locked design decision, consolidated. Decisions 1-42 remain historical
+evidence, but incompatible lifecycle statements are superseded by decision 43
+and [ADR-003](adr-003-cyclic-project-plan-lifecycle.md).*
 
-## Phase machine & the loop (locked 2026-07-02, Phase-0 freeze)
+## Historical phase machine (superseded by decision 43)
 
 1. **Nine phases**: DISCOVERY, REPLANNING, ARCHITECTURE, ENRICHING, AWAITING_REVIEW, RUNNING, REVIEW, DONE, FAILED. Terminal = {DONE, FAILED}.
 2. **ENRICHING is separate from ARCHITECTURE** for crash-recovery granularity — more phase boundaries = more checkpoints = finer resume. Semantically one activity in two steps, deliberately.
@@ -80,3 +82,8 @@
 ## Deferred by decision (seams preserved)
 
 PR gate · project spec governance · decision gate · GitHub PR output · parallelism · env provisioner · Postgres · Redis claim path · pi NDJSON streaming. Details and reintroduction designs: [../legacy/pre-refactor-backend.md](../legacy/pre-refactor-backend.md); scheduling: [ROADMAP.md](../../ROADMAP.md).
+
+
+43. **Domain unfreeze #4 (2026-07-14): cyclic ProjectPlan + deterministic TDD execution.** [ADR-003](adr-003-cyclic-project-plan-lifecycle.md) deliberately supersedes the terminal nine-phase lifecycle and the incompatible parts of decisions 1-9, 13, 17-18, 22, 24-25, 34-35, and unfreezes 2-3. One immutable project owns one long-lived plan; root status is `running | paused | waiting | blocked | idle`; finite work lives in cycles; intent, architecture, and publication are exact-revision review gates; pause and retry are separate; runs are monotonic and leased; task completion requires protected, independently verified executable evidence; and verified task-to-goal-to-cycle staging produces one recorded output disposition per cycle. Legacy rows are preserved through the explicit mapping and project-binding quarantine in ADR-003; ownership and approval/publication history are never fabricated.
+
+44. **Domain unfreeze #5 (2026-07-14): durable Git-promotion reservation.** Candidate and goal promotion now reserve the plan before crossing the database-to-Git side-effect boundary. While the reservation is held, pause requests remain legal but replans, semantic edits, intent/draft replacement, and cycle activation are rejected. Finalization re-reads the reservation and captured cycle/task identity before clearing it in the same transaction as task/goal completion. This closes the check-to-merge race without holding a database transaction open across Git I/O.

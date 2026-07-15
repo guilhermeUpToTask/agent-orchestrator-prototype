@@ -3,6 +3,7 @@
 that drive the two gates and the replan loop. Routes map 1:1 onto use cases;
 errors bubble to the global mapping layer.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -27,8 +28,24 @@ from src.app.use_cases.apply_edit import (
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
 from src.app.use_cases.create_plan import create_plan
-from src.app.use_cases.pause_resume import pause_plan, resume_plan
+from src.app.use_cases.cyclic_planning import (
+    activate_cycle,
+    approve_intent,
+    cancel_cycle_draft,
+    cancel_intent,
+    propose_intent,
+    record_output_disposition,
+    revise_cycle_draft,
+    revise_intent,
+    submit_cycle_draft as submit_cycle_draft_use_case,
+)
+from src.app.use_cases.pause_resume import pause_plan, resume_plan, retry_task
 from src.app.use_cases.request_replan import request_replan
+from src.domain.entities.planning_artifacts import (
+    GoalOutline,
+    OutputDisposition,
+    ProposalKind,
+)
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.factories.identity import new_id
@@ -40,10 +57,74 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 # ---- DTOs ----
 class CreatePlanRequest(BaseModel):
     brief: str
+    project_id: str
 
 
 class PlanCreatedResponse(BaseModel):
     plan_id: str
+
+
+class ActiveRunResponse(BaseModel):
+    run_id: str
+    attempt_id: str
+    attempt_number: int
+    goal_id: str
+    task_id: str
+    started_at: str
+
+
+class PlanDetailResponse(BaseModel):
+    id: str
+    project_id: str | None
+    brief: str
+    version: int
+    status: str
+    status_reason: dict[str, str | None]
+    activity: str
+    current_goal_id: str | None
+    current_task_id: str | None
+    tdd_stage: str | None
+    legal_actions: list[str]
+    pause_requested: bool
+    paused: bool
+    paused_reason: str | None
+    active_run: ActiveRunResponse | None
+    active_cycle: dict[str, Any] | None
+    pending_gate: dict[str, Any] | None
+    block: dict[str, Any] | None
+    goals: list[dict[str, Any]]
+    cycles: list[dict[str, Any]]
+    intent_proposal: dict[str, Any] | None
+    cycle_draft: dict[str, Any] | None
+    legacy_phase: str | None = None
+    phase: str | None = None
+    iteration: int | None = None
+
+
+class IntentProposalRequest(BaseModel):
+    objective: str
+    scope: list[str] = []
+    constraints: list[str] = []
+    exclusions: list[str] = []
+    kind: ProposalKind = ProposalKind.INITIAL
+    planner_session_ref: str | None = None
+
+
+class ReviewDecisionRequest(BaseModel):
+    gate_id: str
+    subject_revision: int
+
+
+class CycleDraftRequest(BaseModel):
+    goals: list[GoalOutline]
+    unfinished_source_treatment: str | None = None
+
+
+class PublicationRequest(BaseModel):
+    gate_id: str
+    subject_revision: int
+    disposition: OutputDisposition
+    output_reference: str | None = None
 
 
 class MessageRequest(BaseModel):
@@ -160,7 +241,8 @@ def create(
     container: AppContainer = Depends(get_container),
 ) -> PlanCreatedResponse:
     request_id = idempotency_key or str(uuid.uuid4())
-    plan_id = create_plan(body.brief, request_id, container.new_unit_of_work())
+    container.project_repo.get(body.project_id)
+    plan_id = create_plan(body.brief, body.project_id, request_id, container.new_unit_of_work())
     return PlanCreatedResponse(plan_id=plan_id)
 
 
@@ -169,12 +251,223 @@ def list_plans(container: AppContainer = Depends(get_container)) -> list[dict]:
     return container.new_unit_of_work().plans.list_summaries()
 
 
-@router.get("/{plan_id}")
-def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> dict:
+@router.get("/{plan_id}", response_model=PlanDetailResponse)
+def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> PlanDetailResponse:
     uow = container.new_unit_of_work()
     with uow:
         plan = uow.plans.get(plan_id)
-    return plan.model_dump(mode="json")
+        open_attempts = uow.executions.list_open_attempts(plan_id)
+    latest = max(open_attempts, key=lambda attempt: attempt.number, default=None)
+    cycle = plan.active_cycle
+    goals = cycle.goals if cycle is not None else plan.goals
+    current_goal = min(
+        (goal for goal in goals if not goal.is_terminal),
+        key=lambda goal: goal.position,
+        default=None,
+    )
+    current_task = (
+        min(
+            (task for task in current_goal.tasks if not task.is_terminal),
+            key=lambda task: task.position,
+            default=None,
+        )
+        if current_goal is not None
+        else None
+    )
+    return PlanDetailResponse(
+        id=plan.id,
+        project_id=plan.project_id,
+        brief=plan.brief,
+        version=plan.version,
+        status=plan.status.value,
+        status_reason=plan.status_reason,
+        activity=plan.activity,
+        current_goal_id=current_goal.id if current_goal is not None else None,
+        current_task_id=current_task.id if current_task is not None else None,
+        tdd_stage=current_task.tdd_stage if current_task is not None else None,
+        legal_actions=plan.legal_actions,
+        pause_requested=plan.pause_requested,
+        paused=plan.paused,
+        paused_reason=plan.paused_reason,
+        active_run=(
+            ActiveRunResponse(
+                run_id=latest.run_id,
+                attempt_id=latest.id,
+                attempt_number=latest.number,
+                goal_id=latest.goal_id,
+                task_id=latest.task_id,
+                started_at=latest.started_at.isoformat(),
+            )
+            if latest is not None
+            else None
+        ),
+        active_cycle=cycle.model_dump(mode="json") if cycle is not None else None,
+        pending_gate=(
+            plan.review_gate.model_dump(mode="json")
+            if plan.review_gate is not None and plan.review_gate.unresolved
+            else None
+        ),
+        block=(
+            plan.block.model_dump(mode="json")
+            if plan.block is not None and plan.block.active
+            else None
+        ),
+        goals=[goal.model_dump(mode="json") for goal in goals],
+        cycles=[item.model_dump(mode="json") for item in plan.cycles],
+        intent_proposal=(
+            plan.intent_proposal.model_dump(mode="json")
+            if plan.intent_proposal is not None
+            else None
+        ),
+        cycle_draft=(
+            plan.cycle_draft.model_dump(mode="json") if plan.cycle_draft is not None else None
+        ),
+        legacy_phase=plan.legacy_phase,
+        phase=plan.phase.value,
+        iteration=plan.iteration,
+    )
+
+
+@router.post("/{plan_id}/intent", status_code=201)
+def propose_intent_route(
+    plan_id: str,
+    body: IntentProposalRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    proposal = propose_intent(
+        plan_id,
+        objective=body.objective,
+        scope=body.scope,
+        constraints=body.constraints,
+        exclusions=body.exclusions,
+        kind=body.kind,
+        planner_session_ref=body.planner_session_ref,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return proposal.model_dump(mode="json")
+
+
+@router.put("/{plan_id}/intent")
+def revise_intent_route(
+    plan_id: str,
+    body: IntentProposalRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    proposal = revise_intent(
+        plan_id,
+        objective=body.objective,
+        scope=body.scope,
+        constraints=body.constraints,
+        exclusions=body.exclusions,
+        planner_session_ref=body.planner_session_ref,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return proposal.model_dump(mode="json")
+
+
+@router.delete("/{plan_id}/intent", status_code=204)
+def cancel_intent_route(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    cancel_intent(
+        plan_id,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+
+
+@router.post("/{plan_id}/intent/approve", status_code=204)
+def approve_intent_route(
+    plan_id: str,
+    body: ReviewDecisionRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    approve_intent(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+
+
+@router.post("/{plan_id}/cycle-draft", status_code=201)
+def submit_cycle_draft_route(
+    plan_id: str,
+    body: CycleDraftRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    draft = submit_cycle_draft_use_case(
+        plan_id,
+        goals=body.goals,
+        unfinished_source_treatment=body.unfinished_source_treatment,
+        uow=container.new_unit_of_work(),
+    )
+    return draft.model_dump(mode="json")
+
+
+@router.put("/{plan_id}/cycle-draft")
+def revise_cycle_draft_route(
+    plan_id: str,
+    body: CycleDraftRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    draft = revise_cycle_draft(
+        plan_id,
+        goals=body.goals,
+        unfinished_source_treatment=body.unfinished_source_treatment,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return draft.model_dump(mode="json")
+
+
+@router.delete("/{plan_id}/cycle-draft", status_code=204)
+def cancel_cycle_draft_route(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    cancel_cycle_draft(
+        plan_id,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+
+
+@router.post("/{plan_id}/cycle-draft/approve", status_code=201)
+def activate_cycle_route(
+    plan_id: str,
+    body: ReviewDecisionRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    cycle = activate_cycle(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+    return cycle.model_dump(mode="json")
+
+
+@router.post("/{plan_id}/publication", status_code=204)
+def publish_cycle_route(
+    plan_id: str,
+    body: PublicationRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    record_output_disposition(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        body.disposition,
+        body.output_reference,
+        container.new_unit_of_work(),
+        container.clock,
+    )
 
 
 @router.post("/{plan_id}/edits", status_code=204)
@@ -215,6 +508,27 @@ def resume(plan_id: str, container: AppContainer = Depends(get_container)) -> No
     resume_plan(plan_id, container.new_unit_of_work())
 
 
+class RetryTaskRequest(BaseModel):
+    goal_id: str
+    task_id: str
+
+
+@router.post("/{plan_id}/retry", status_code=204)
+def retry_blocked_task(
+    plan_id: str,
+    body: RetryTaskRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retry only the selected failed task; resume remains a separate command."""
+    retry_task(
+        plan_id,
+        body.goal_id,
+        body.task_id,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+
+
 @router.post("/{plan_id}/approve", status_code=204)
 def approve(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING."""
@@ -235,17 +549,13 @@ def finish(plan_id: str, container: AppContainer = Depends(get_container)) -> No
 
 
 @router.post("/{plan_id}/review/replan", status_code=204)
-def replan_from_review(
-    plan_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def replan_from_review(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Human "replan next phase" at the post-execution gate: REVIEW -> REPLANNING."""
     control.review_replan(plan_id, container.new_unit_of_work())
 
 
 @router.post("/{plan_id}/replan", status_code=204)
-def replan_mid_running(
-    plan_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def replan_mid_running(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Chat-triggered mid-RUNNING replan: skip pending work -> REPLANNING."""
     request_replan(plan_id, container.new_unit_of_work())
 
@@ -266,9 +576,7 @@ async def discovery(
         container.chat_store,
         container.clock,
     )
-    return MessageResponse(
-        reply=result.reply, committed=result.committed, phase=result.phase.value
-    )
+    return MessageResponse(reply=result.reply, committed=result.committed, phase=result.phase.value)
 
 
 @router.post("/{plan_id}/replanning/message", response_model=MessageResponse)
@@ -287,9 +595,7 @@ async def replanning(
         container.chat_store,
         container.clock,
     )
-    return MessageResponse(
-        reply=result.reply, committed=result.committed, phase=result.phase.value
-    )
+    return MessageResponse(reply=result.reply, committed=result.committed, phase=result.phase.value)
 
 
 class AgentEventResponse(BaseModel):

@@ -7,6 +7,7 @@ plus one complete replan loop (REVIEW -> REPLANNING -> chat -> ARCHITECTURE ->
 ... -> DONE, iteration 2, append-only history) and the mid-RUNNING replan with
 an in-flight task (tolerant finalize on the real stack).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,9 +38,11 @@ from src.app.use_cases.pause_resume import pause_plan, resume_plan
 from src.app.use_cases.request_replan import request_replan
 from src.app.use_cases.run_worker import worker_tick
 from src.domain.aggregates.planner_orchestrator import PlanPhase
+from src.domain.entities.project_definition import ProjectDefinition
 from src.domain.value_objects.lifecycle import Status
 from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
+from src.infra.db.reference_repos import SqliteProjectRepository
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.reasoner.stub_reasoner import StubReasoner
 from tests.support import make_agent_spec
@@ -65,6 +68,9 @@ class Stack:
         engine = build_engine(f"sqlite:///{tmp_path / 'full.db'}")
         Base.metadata.create_all(engine)
         sf = make_session_factory(engine)
+        SqliteProjectRepository(sf).add(
+            ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+        )
         self.clock = FakeClock()
         self.uow = SqliteUnitOfWork(sf, self.clock)
         self.reasoner = StubReasoner()
@@ -74,15 +80,11 @@ class Stack:
         self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(
-            self.reasoner, self.agents, self.capabilities, self.clock
-        )
+        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities, self.clock)
 
     def say(self, plan_id, message, *, replanning=False):
         fn = replanning_message if replanning else discovery_message
-        return asyncio.run(
-            fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock)
-        )
+        return asyncio.run(fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock))
 
     def tick(self, worker_id="w1"):
         return asyncio.run(
@@ -119,7 +121,7 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     stack = Stack(tmp_path)
 
     # DISCOVERY (conversational — invisible to workers)
-    plan_id = create_plan(BRIEF, "req-1", stack.uow)
+    plan_id = create_plan(BRIEF, "project-1", "req-1", stack.uow)
     assert stack.plan(plan_id).phase == PlanPhase.DISCOVERY
     assert stack.tick() is False  # not claimable
 
@@ -142,7 +144,9 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     # grammar-specified tasks are untouched by enrichment...
     grammar_tasks = [t for g in plan.goals[:2] for t in g.tasks]
     assert [t.name for t in grammar_tasks] == [
-        "scaffold the app", "add health endpoint", "wire sqlite",
+        "scaffold the app",
+        "add health endpoint",
+        "wire sqlite",
     ]
     assert all(t.description == "" for t in grammar_tasks)
     # ...while the task-less goal was JIT-populated by the reasoner
@@ -171,7 +175,10 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     assert plan.iteration == 2
     # append-only: iteration-1 history untouched, new goal after it
     assert [g.name for g in plan.goals] == [
-        "API skeleton", "Persistence", "Docs", "Hardening",
+        "API skeleton",
+        "Persistence",
+        "Docs",
+        "Hardening",
     ]
     assert [g.position for g in plan.goals] == [0, 1, 2, 3]
     assert plan.goals[0].status == Status.DONE and plan.goals[1].status == Status.DONE
@@ -207,12 +214,10 @@ def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
             return await super().run(task, spec, **kw)
 
     stack = Stack(tmp_path)
-    runner = ReplanMidRun(
-        {"__all__": DummyBehavior()}, stack.uow
-    )
+    runner = ReplanMidRun({"__all__": DummyBehavior()}, stack.uow)
     stack.runner = runner
 
-    plan_id = create_plan("goal: G1\ntask: only task", "req-1", stack.uow)
+    plan_id = create_plan("goal: G1\ntask: only task", "project-1", "req-1", stack.uow)
     runner._plan_id = plan_id
     runner.script = {}  # default success behavior; the trigger is the point
     stack.say(plan_id, "")
@@ -223,9 +228,10 @@ def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
     stack.drain()
     plan = stack.plan(plan_id)
     assert plan.phase == PlanPhase.REPLANNING
-    # late SUCCESS completed as harmless history (task was still RUNNING)
+    # A late success is rejected: obsolete work cannot become accepted history.
     task = plan.goals[0].tasks[0]
-    assert task.status == Status.DONE
+    assert task.status == Status.SKIPPED
+    assert task.result is None
 
     # the conversational re-plan commits a fresh iteration and runs to DONE
     stack.say(plan_id, "goal: G2\ntask: redo", replanning=True)
@@ -254,9 +260,7 @@ def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
             await asyncio.sleep(0.15)
             stop.set()
 
-        await asyncio.gather(
-            run_worker_forever(container, poll_seconds=0.02, stop=stop), stopper()
-        )
+        await asyncio.gather(run_worker_forever(container, poll_seconds=0.02, stop=stop), stopper())
 
     asyncio.run(run_briefly())  # returns => started, idled and stopped cleanly
 
@@ -267,7 +271,7 @@ def test_awaiting_review_reopen_loop(tmp_path):
     then the plan runs the replacement to REVIEW."""
     stack = Stack(tmp_path)
     # a goal-free brief so the stub's discovery fold doesn't re-inject goals
-    plan_id = create_plan("build me something", "req-1", stack.uow)
+    plan_id = create_plan("build me something", "project-1", "req-1", stack.uow)
     stack.say(plan_id, "goal: First\ntask: t one")  # commit the initial roadmap
     stack.drain()
     assert stack.plan(plan_id).phase == PlanPhase.AWAITING_REVIEW
@@ -296,9 +300,7 @@ def test_pause_edit_resume_walk(tmp_path):
     approve -> pause -> edit while paused -> resume -> a permanent failure
     auto-pauses -> remove the offending task -> resume -> runs to REVIEW."""
     stack = Stack(tmp_path, script={"__fail__": DummyBehavior(always_fail=True)})
-    plan_id = create_plan(
-        "goal: G\ntask: keep me\ntask: drop me", "req-1", stack.uow
-    )
+    plan_id = create_plan("goal: G\ntask: keep me\ntask: drop me", "project-1", "req-1", stack.uow)
     stack.say(plan_id, "")
     stack.drain()
     resume_from_review(plan_id, stack.uow)  # approve -> RUNNING

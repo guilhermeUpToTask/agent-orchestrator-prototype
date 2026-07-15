@@ -28,7 +28,7 @@ flowchart TB
         tick --> dispatch --> handlers --> adapters
     end
 
-    db[("SQLite — WAL, synchronous=FULL<br/><i>~/.orchestrator/orchestrator.db</i><br/>plans + lease · outbox · agent_events ·<br/>chat · catalogs · config · secrets")]
+    db[("SQLite — WAL, synchronous=FULL<br/><i>~/.orchestrator/orchestrator.db</i><br/>plans + lease · execution runs/attempts ·<br/>outbox · agent_events · chat · catalogs · config · secrets")]
 
     browser["Browser<br/>React dashboard"]
     repo[("Project git repo<br/><i>PROJECT_REPO_DIR</i>")]
@@ -76,15 +76,20 @@ flowchart LR
 | Plan/goal/task state machine | `domain/aggregates/planner_orchestrator.py` | The aggregate is the **only** caller of entity transitions; illegal moves raise `InvalidTransitionError` |
 | "What runs next" | `domain/services/navigation.py` | **Derived, never stored** — re-scan every tick; no cursor to desync |
 | Retry/terminal decision | `domain/policies/retry_policies.py` + `FailureKind` | The domain decides *whether/how long*; it never sleeps — backoff is a persisted timestamp the scan honors |
-| Transaction boundaries | `app/use_cases/*`, `app/handlers/*` | `bump_version()` then `save()` (CAS); outbox rows in the same txn |
+| Transaction boundaries | `app/use_cases/*`, `app/handlers/*` | `bump_version()` then `save()` (CAS); execution identity and outbox rows in the same txn |
+| Execution identity | `app/execution_records.py`, `infra/db/execution_record_repository.py` | Logical run across automatic retries; unique invocation attempt before side effects |
 | Phase routing | `app/use_cases/advance_plan.py` | Thin dispatcher: RUNNING→Execution, planning phases→Planning, gates→Gate, terminal→signal |
-| Persistence | `infra/db/` | Plan = one JSON document; promoted columns only for what SQL must predicate on |
+| Persistence | `infra/db/` | Plan = one JSON document; execution lifecycle is a separate operational ledger; typed observations evolve the existing `agent_events` stream additively |
 | Runtime resolution | `infra/runtime/factory.py`, `infra/reasoner/factory.py` | Catalog-driven, per-run; dry-run/stub **never** construct the secret store |
+| Operational evidence | `app/observations.py`, `infra/db/observation_repository.py` | Runtime-neutral source/quality/kind, nullable missing usage, idempotent append outside aggregate transactions |
 | Event delivery | `api/outbox_relay.py` + `api/sse.py` | At-least-once, publish-then-mark, consumers dedup on `event_id` |
 
-## The domain freeze
+## Deliberate domain evolution
 
-The domain layer is **frozen** (Phase-0, 2026-07-02): its contracts change only with a deliberate, recorded un-freeze. One has happened so far — `AgentSpec.runtime_type/provider_id/model_id` (2026-07-05, the agent registry taking ownership of runtime resolution). The freeze is why the rest of the system could be rebuilt around the core with confidence; treat un-freezes as events worth a decision-log entry, not casual edits.
+Domain contracts change only through a recorded unfreeze. ADR-003 deliberately
+replaced the terminal phase lifecycle with the project-bound cyclic model;
+`PlanPhase` now serves legacy compatibility only. Current authority is the
+aggregate plus the planning/execution artifact models and decision 43.
 
 ## Configuration model
 

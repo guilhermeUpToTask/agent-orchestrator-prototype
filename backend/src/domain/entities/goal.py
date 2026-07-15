@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from src.domain.entities.execution_contracts import GoalContract
 from src.domain.entities.task import Task
 from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.value_objects.lifecycle import Status, TERMINAL
@@ -18,6 +19,7 @@ class Goal(BaseModel):
     status: Status = Status.PENDING
     tasks: list[Task] = []
     depends_on: list[str] = []
+    contract: GoalContract | None = None
 
     def _guard(self, allowed_from: set[Status], to: Status) -> None:
         if self.status not in allowed_from:
@@ -41,9 +43,7 @@ class Goal(BaseModel):
         — the finalize-abandon path closes the tasks first, then the goal. A
         RUNNING goal with live tasks can never be skipped out from under them."""
         if self.status == Status.RUNNING and not all(t.is_terminal for t in self.tasks):
-            raise InvalidTransitionError(
-                "Goal", self.id, self.status.value, Status.SKIPPED.value
-            )
+            raise InvalidTransitionError("Goal", self.id, self.status.value, Status.SKIPPED.value)
         self._guard({Status.PENDING, Status.RUNNING}, Status.SKIPPED)
         self.status = Status.SKIPPED
 

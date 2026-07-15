@@ -24,7 +24,7 @@ import type {
   RunnerAgentStatus,
   RunnerBinaryStatus,
   RunnerStatusResponse,
-} from './generated';
+} from "./generated";
 
 export type {
   AgentBody,
@@ -49,22 +49,24 @@ export type {
 // ─── The 9-phase machine ────────────────────────────────────────────────────
 
 export type PlanPhase =
-  | 'discovery'
-  | 'replanning'
-  | 'architecture'
-  | 'enriching'
-  | 'awaiting_review'
-  | 'running'
-  | 'review'
-  | 'done'
-  | 'failed';
+  | "discovery"
+  | "replanning"
+  | "architecture"
+  | "enriching"
+  | "awaiting_review"
+  | "running"
+  | "review"
+  | "done"
+  | "failed";
 
-export type Status = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+export type PlanStatus = "running" | "paused" | "waiting" | "blocked" | "idle";
+
+export type Status = "pending" | "running" | "done" | "failed" | "skipped";
 
 // ─── Plan aggregate read model (GET /api/plans/{id}) ────────────────────────
 
 export interface TaskResult {
-  status: 'success' | 'failure';
+  status: "success" | "failure";
   output: string;
   artifacts: Record<string, string>;
   failure_reason: string | null;
@@ -96,8 +98,42 @@ export interface Goal {
   depends_on: string[];
 }
 
+export interface PendingGate {
+  id: string;
+  subject_type: "intent" | "cycle_draft" | "cycle_completion" | string;
+  subject_id: string;
+  subject_revision: number;
+  allowed_decisions: string[];
+  continuation: string;
+}
+
+export interface ActiveCycle {
+  id: string;
+  [key: string]: unknown;
+}
+
 export interface Plan {
   id: string;
+  project_id: string | null;
+  status: PlanStatus;
+  status_reason: { kind: string; code: string | null; message: string | null };
+  activity: string;
+  current_goal_id: string | null;
+  current_task_id: string | null;
+  tdd_stage: string | null;
+  legal_actions: string[];
+  pause_requested: boolean;
+  active_run: {
+    run_id: string;
+    attempt_id: string;
+    attempt_number: number;
+    goal_id: string;
+    task_id: string;
+    started_at: string;
+  } | null;
+  active_cycle: ActiveCycle | null;
+  pending_gate: PendingGate | null;
+  block: Record<string, unknown> | null;
   brief: string;
   phase: PlanPhase;
   iteration: number;
@@ -111,6 +147,9 @@ export interface Plan {
 /** GET /api/plans — cheap listing off the promoted columns. */
 export interface PlanSummary {
   id: string;
+  project_id: string | null;
+  status: PlanStatus;
+  pause_requested: boolean;
   phase: PlanPhase;
   iteration: number;
   version: number;
@@ -129,7 +168,7 @@ export interface SSEPayload {
 
 // ─── Chat (server history + UI decoration) ─────────────────────────────────
 
-export type ChatRole = 'user' | 'assistant' | 'system';
+export type ChatRole = "user" | "assistant" | "system";
 
 export interface UIChatMessage {
   id: string;
@@ -156,7 +195,7 @@ export interface PlannerUIState {
   selectedTaskId: string | null;
   detailPanelOpen: boolean;
   chatPanelCollapsed: boolean;
-  layoutDirection: 'LR' | 'TB';
+  layoutDirection: "LR" | "TB";
   gateOpen: boolean;
   consoleOpen: boolean;
 }

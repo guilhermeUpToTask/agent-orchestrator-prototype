@@ -4,6 +4,7 @@ test_full_cycle.py (which stays on the stub, the deterministic dry-run gate),
 but exercising the production planning path: tool-calling sessions, the
 question turn, submit_goals commits, the per-goal submit_tasks JIT step and
 the plain-text history replay."""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,9 +27,11 @@ from src.app.use_cases.create_plan import create_plan
 from src.app.use_cases.run_worker import worker_tick
 from src.domain.aggregates.planner_orchestrator import PlanPhase
 from src.domain.entities.capability import Capability
+from src.domain.entities.project_definition import ProjectDefinition
 from src.domain.value_objects.lifecycle import Status
 from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
+from src.infra.db.reference_repos import SqliteProjectRepository
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
@@ -96,6 +99,9 @@ class LLMStack:
         engine = build_engine(f"sqlite:///{tmp_path / 'llm.db'}")
         Base.metadata.create_all(engine)
         sf = make_session_factory(engine)
+        SqliteProjectRepository(sf).add(
+            ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+        )
         self.clock = FakeClock()
         self.uow = SqliteUnitOfWork(sf, self.clock)
         self.llm = FakeLLMClient(list(SCRIPT))
@@ -106,15 +112,20 @@ class LLMStack:
         self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(
-            self.reasoner, self.agents, self.capabilities, self.clock
-        )
+        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities, self.clock)
 
     def tick(self):
         return asyncio.run(
             worker_tick(
-                self.uow, self.runner, self.agents, self.ws, self.sink,
-                self.clock, "w1", 60, planning_handler=self.planning,
+                self.uow,
+                self.runner,
+                self.agents,
+                self.ws,
+                self.sink,
+                self.clock,
+                "w1",
+                60,
+                planning_handler=self.planning,
             )
         )
 
@@ -126,9 +137,7 @@ class LLMStack:
 
     def say(self, plan_id, message, *, replanning=False):
         fn = replanning_message if replanning else discovery_message
-        return asyncio.run(
-            fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock)
-        )
+        return asyncio.run(fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock))
 
     def plan(self, plan_id):
         with self.uow:
@@ -137,7 +146,7 @@ class LLMStack:
 
 def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
     stack = LLMStack(tmp_path)
-    plan_id = create_plan("Build a tiny service with docs", "req-1", stack.uow)
+    plan_id = create_plan("Build a tiny service with docs", "project-1", "req-1", stack.uow)
 
     # ---- DISCOVERY: question turn, then the commit turn ----
     asked = stack.say(plan_id, "I want a tiny service")
@@ -153,7 +162,8 @@ def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
     second_call = stack.llm.calls[1]["messages"]
     assert {"role": "user", "content": "I want a tiny service"} in second_call
     assert {
-        "role": "assistant", "content": "What kind of docs do you need?",
+        "role": "assistant",
+        "content": "What kind of docs do you need?",
     } in second_call
 
     # ---- worker: ARCHITECTURE passthrough + ENRICHING JIT + binding ----
@@ -164,7 +174,8 @@ def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
     assert [t.name for t in api_goal.tasks] == ["scaffold app"]  # pre-populated
     assert api_goal.tasks[0].required_capabilities == ["backend"]
     assert [(t.name, t.position) for t in docs_goal.tasks] == [
-        ("write quickstart", 0), ("write api reference", 1),
+        ("write quickstart", 0),
+        ("write api reference", 1),
     ]
     assert all(t.agent_id == "a1" for g in plan.goals for t in g.tasks)
 
@@ -197,8 +208,11 @@ def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
     # chat history holds the whole conversation in order
     rows = stack.chat.list(plan_id)
     assert [(m.role, m.meta.get("committed")) for m in rows] == [
-        ("user", None), ("assistant", False),
-        ("user", None), ("assistant", True),
-        ("user", None), ("assistant", True),
+        ("user", None),
+        ("assistant", False),
+        ("user", None),
+        ("assistant", True),
+        ("user", None),
+        ("assistant", True),
     ]
     assert stack.llm.script == []  # every scripted turn was consumed

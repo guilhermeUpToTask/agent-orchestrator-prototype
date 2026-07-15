@@ -27,12 +27,20 @@ enrich_goal() returns one deterministic task per goal:
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Sequence
 
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
+from src.domain.entities.execution_contracts import (
+    ContractCriterion,
+    GoalContract,
+    TaskContract,
+    VerificationStrategy,
+)
+from src.domain.entities.planning_artifacts import GoalOutline
 from src.domain.factories.identity import new_id
 from src.domain.ports.reasoner_port import (
     ChatMessage,
@@ -137,3 +145,45 @@ class StubReasoner:
                 description=f"[enriched] implement: {goal.name} (goal: {goal.name})",
             )
         ]
+
+    async def architect_cycle(self, plan: Plan) -> list[GoalOutline]:
+        proposal = plan.intent_proposal
+        objective = proposal.objective if proposal is not None else plan.brief
+        return [
+            GoalOutline(
+                key="delivery",
+                name=objective[:80] or "Deliver the cycle",
+                objective=objective,
+                position=0,
+            )
+        ]
+
+    async def enrich_goal_contract(
+        self,
+        plan: Plan,
+        goal: Goal,
+        capabilities: Sequence[Capability],
+    ) -> GoalContract:
+        criterion = ContractCriterion(id="goal-outcome", description=goal.description)
+        task_criterion = ContractCriterion(
+            id="task-outcome",
+            description=f"Implement and verify {goal.name}",
+        )
+        contract = TaskContract(
+            id=new_id(),
+            position=0,
+            objective=f"Implement {goal.name}",
+            acceptance_criteria=[task_criterion],
+            goal_criterion_ids=[criterion.id],
+            allowed_scope=["."],
+            forbidden_scope=[".git/"],
+            verification_commands=["git diff --check"],
+            verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+        )
+        return GoalContract(
+            id=goal.id,
+            objective=goal.description or goal.name,
+            acceptance_criteria=[criterion],
+            tasks=[contract],
+            frozen_at=datetime.min.replace(tzinfo=timezone.utc),
+        )

@@ -2,10 +2,15 @@ import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { usePlannerStore } from '../store/plannerStore';
 import {
+  useActivateCycle,
   useApplyEdit,
+  useApproveIntentGate,
   useApprovePlan,
+  useCancelCycleDraft,
+  useCancelIntent,
   useFinishReview,
   usePlan,
+  useRecordOutputDisposition,
   useReopenReview,
   useReplanFromReview,
 } from '../lib/queries';
@@ -14,7 +19,7 @@ import type { Plan } from '../types/ui';
 import styles from './GatePanel.module.css';
 
 /**
- * The two human gates of the 9-phase machine get a dedicated surface:
+ * Legacy phase gates and cyclic artifact gates share a dedicated surface:
  *   AWAITING_REVIEW — the pre-execution gate: review the enriched roadmap,
  *                     approve to start execution.
  *   REVIEW          — the post-execution gate: finish the plan, or replan
@@ -29,6 +34,12 @@ export function GatePanel({ planId }: { planId: string }) {
   if (!plan) return null;
 
   const close = () => setGateOpen(false);
+  const gate = plan.pending_gate;
+  const cyclicGate = gate && [
+    'intent',
+    'cycle_draft',
+    'cycle_completion',
+  ].includes(gate.subject_type);
 
   return (
     <Dialog
@@ -38,18 +49,152 @@ export function GatePanel({ planId }: { planId: string }) {
       title="Operator gate"
       width={640}
     >
-      {plan.phase === 'awaiting_review' && (
+      {cyclicGate && gate && (
+        <CyclicReviewGate plan={plan} planId={planId} onDone={close} />
+      )}
+      {!cyclicGate && plan.phase === 'awaiting_review' && (
         <PreExecutionGate plan={plan} planId={planId} onDone={close} />
       )}
-      {plan.phase === 'review' && (
+      {!cyclicGate && plan.phase === 'review' && (
         <PostExecutionGate plan={plan} planId={planId} onDone={close} />
       )}
-      {!['awaiting_review', 'review'].includes(plan.phase) && (
+      {!cyclicGate && !['awaiting_review', 'review'].includes(plan.phase) && (
         <p className={styles.body}>
           Nothing is waiting on you — the plan is in “{plan.phase}”.
         </p>
       )}
     </Dialog>
+  );
+}
+
+function CyclicReviewGate({
+  plan,
+  planId,
+  onDone,
+}: {
+  plan: Plan;
+  planId: string;
+  onDone: () => void;
+}) {
+  const gate = plan.pending_gate;
+  if (!gate) return null;
+
+  return (
+    <CyclicReviewGateActions
+      plan={plan}
+      planId={planId}
+      gateId={gate.id}
+      revision={gate.subject_revision}
+      subjectType={gate.subject_type}
+      continuation={gate.continuation}
+      allowedDecisions={gate.allowed_decisions}
+      onDone={onDone}
+    />
+  );
+}
+
+function CyclicReviewGateActions({
+  plan,
+  planId,
+  gateId,
+  revision,
+  subjectType,
+  continuation,
+  allowedDecisions,
+  onDone,
+}: {
+  plan: Plan;
+  planId: string;
+  gateId: string;
+  revision: number;
+  subjectType: string;
+  continuation: string;
+  allowedDecisions: string[];
+  onDone: () => void;
+}) {
+  const approveIntent = useApproveIntentGate(planId, gateId, revision);
+  const cancelIntent = useCancelIntent(planId);
+  const activateCycle = useActivateCycle(planId, gateId, revision);
+  const cancelDraft = useCancelCycleDraft(planId);
+  const publish = useRecordOutputDisposition(planId, gateId, revision);
+  const cycleRef = plan.active_cycle
+    ? `refs/heads/cycle/${plan.active_cycle.id}`
+    : null;
+
+  const complete = (
+    disposition: 'open_pr' | 'merge' | 'retain_branch' | 'discard',
+  ) => publish.mutate(
+    {
+      disposition,
+      outputReference: disposition === 'discard' ? null : cycleRef,
+    },
+    { onSuccess: onDone },
+  );
+
+  return (
+    <div className={styles.content}>
+      <h2 className={styles.title}>Review {subjectType.replace(/_/g, ' ')}</h2>
+      <p className={styles.body}>{continuation}</p>
+
+      {subjectType === 'intent' && (
+        <>
+          <ConfirmAction
+            label="Approve intent"
+            consequence="Locks this intent revision and starts cycle architecture."
+            pending={approveIntent.isPending}
+            onConfirm={() => approveIntent.mutate(undefined, { onSuccess: onDone })}
+          />
+          {allowedDecisions.includes('cancel') && (
+            <ConfirmAction
+              label="Cancel intent"
+              consequence="Discards this proposal and returns to the prior idle or paused state."
+              pending={cancelIntent.isPending}
+              demoted
+              onConfirm={() => cancelIntent.mutate(undefined, { onSuccess: onDone })}
+            />
+          )}
+        </>
+      )}
+
+      {subjectType === 'cycle_draft' && (
+        <>
+          <ConfirmAction
+            label="Approve & activate cycle"
+            consequence="Freezes this draft revision and makes its goals executable."
+            pending={activateCycle.isPending}
+            onConfirm={() => activateCycle.mutate(undefined, { onSuccess: onDone })}
+          />
+          {allowedDecisions.includes('cancel') && (
+            <ConfirmAction
+              label="Cancel cycle draft"
+              consequence="Discards this draft without starting its goals."
+              pending={cancelDraft.isPending}
+              demoted
+              onConfirm={() => cancelDraft.mutate(undefined, { onSuccess: onDone })}
+            />
+          )}
+        </>
+      )}
+
+      {subjectType === 'cycle_completion' && allowedDecisions.map((decision) => {
+        const disposition = decision as 'open_pr' | 'merge' | 'retain_branch' | 'discard';
+        return (
+          <ConfirmAction
+            key={decision}
+            label={decision.replace(/_/g, ' ')}
+            consequence={
+              decision === 'discard'
+                ? 'Marks the cycle cancelled and records no promoted output reference.'
+                : `Records ${cycleRef ?? 'the cycle branch'} as the promoted output.`
+            }
+            pending={publish.isPending}
+            demoted={decision !== 'merge'}
+            tone={decision === 'discard' ? 'danger' : 'gate'}
+            onConfirm={() => complete(disposition)}
+          />
+        );
+      })}
+    </div>
   );
 }
 

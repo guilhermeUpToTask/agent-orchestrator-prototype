@@ -79,13 +79,13 @@ def edit(plan_id, e, uow, agents=None, capabilities=None):
 # ---- create_plan ----
 def test_create_plan_returns_id():
     uow, repo = uow_with()
-    pid = create_plan("build a REST API", "req-1", uow)
+    pid = create_plan("build a REST API", "project-1", "req-1", uow)
     assert pid and repo.get(pid).brief == "build a REST API"
 
 
 def test_create_plan_starts_in_discovery_iteration_1():
     uow, repo = uow_with()
-    pid = create_plan("build x", "req-1", uow)
+    pid = create_plan("build x", "project-1", "req-1", uow)
     created = repo.get(pid)
     assert created.phase == PlanPhase.DISCOVERY
     assert created.iteration == 1
@@ -93,23 +93,23 @@ def test_create_plan_starts_in_discovery_iteration_1():
 
 def test_create_plan_idempotent_on_request_id():
     uow, repo = uow_with()
-    pid1 = create_plan("build x", "req-1", uow)
-    pid2 = create_plan("build x", "req-1", uow)  # same request_id
+    pid1 = create_plan("build x", "project-1", "req-1", uow)
+    pid2 = create_plan("build x", "project-1", "req-1", uow)  # same request_id
     assert pid1 == pid2  # NOT a duplicate
     assert len([p for p in repo._store]) == 1
 
 
 def test_create_plan_different_requests_make_different_plans():
     uow, repo = uow_with()
-    pid1 = create_plan("build x", "req-1", uow)
-    pid2 = create_plan("build x", "req-2", uow)
+    pid1 = create_plan("build x", "project-1", "req-1", uow)
+    pid2 = create_plan("build x", "project-2", "req-2", uow)
     assert pid1 != pid2
 
 
 def test_create_plan_empty_brief_raises():
     uow, _ = uow_with()
     with pytest.raises(EmptyPlanError):
-        create_plan("   ", "req-1", uow)
+        create_plan("   ", "project-1", "req-1", uow)
 
 
 # ---- apply_edit ----
@@ -125,7 +125,7 @@ def _plan_with_goal(status=Status.PENDING):
             Task(id="t1", name="t1", position=1, description=""),
         ],
     )
-    return Plan(id="p1", brief="b", phase=PlanPhase.AWAITING_REVIEW, goals=[g])
+    return Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.AWAITING_REVIEW, goals=[g])
 
 
 def test_apply_edit_add_task_bumps_version():

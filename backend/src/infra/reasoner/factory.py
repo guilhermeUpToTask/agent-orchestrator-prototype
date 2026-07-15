@@ -23,11 +23,13 @@ Config keys (scope 'orchestrator'):
 secret existence/decryption is still checked at build time, because checking
 it here would require the master key (which dry-run does not have).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
 
+from src.app.observations import ObservationRepository
 from src.domain.entities.ia_model import IAModel
 from src.domain.entities.model_provider import ModelProvider
 from src.domain.errors.config_errors import (
@@ -35,7 +37,6 @@ from src.domain.errors.config_errors import (
     ModelProviderNotFoundError,
 )
 from src.domain.ports.reasoner_port import Reasoner
-from src.domain.ports.telemetry_port import AgentEventSink
 from src.domain.repositories.capability_repo import CapabilityRepository
 from src.infra.db.reference_repos import (
     SqliteConfigStore,
@@ -117,8 +118,7 @@ def validate_reasoner_config(
             mode=mode,
             valid=False,
             detail=(
-                f"reasoner.provider_id '{provider_id}' does not exist in the "
-                "providers catalog."
+                f"reasoner.provider_id '{provider_id}' does not exist in the providers catalog."
             ),
         )
     try:
@@ -128,10 +128,7 @@ def validate_reasoner_config(
             mode=mode,
             valid=False,
             provider=provider,
-            detail=(
-                f"reasoner.model_id '{model_id}' does not exist in the models "
-                "catalog."
-            ),
+            detail=(f"reasoner.model_id '{model_id}' does not exist in the models catalog."),
         )
     if model.provider_id != provider.id:
         return ReasonerConfigStatus(
@@ -153,11 +150,11 @@ def build_reasoner(
     model_repo: SqliteModelRepository,
     secret_store: Callable[[], SqliteSecretStore],
     capability_repo: CapabilityRepository,
-    event_sink: AgentEventSink | None = None,
+    observation_repository: ObservationRepository | None = None,
 ) -> Reasoner:
     """`secret_store` is a thunk: stub mode must never construct it (it fails
-    closed on a missing master key, which dry-run does not have). `event_sink`
-    (when provided) receives the reasoner's plan-scoped llm.call telemetry."""
+    closed on a missing master key, which dry-run does not have).
+    `observation_repository` receives provider usage evidence independently."""
     status = validate_reasoner_config(config_store, provider_repo, model_repo)
     if not status.valid:
         raise _invalid(status.detail or "reasoner config is invalid")
@@ -183,5 +180,6 @@ def build_reasoner(
         client,
         capability_repo.list(),
         converse_max_turns=max_turns,
-        event_sink=event_sink,
+        observation_repository=observation_repository,
+        provider=provider.id,
     )

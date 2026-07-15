@@ -2,7 +2,7 @@
 
 *One SQLite file holds everything. The plan is a document; the catalogs are relational; secrets are envelope-encrypted.*
 
-Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain: `0001_core` → `0002_reference` → `0003_chat` → `0004_agent_runtime`).
+Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0008_typed_observations`).
 
 ## Schema at a glance
 
@@ -30,14 +30,45 @@ erDiagram
         text payload
         string delivered_at "NULL = undelivered (partial index)"
     }
+    execution_runs {
+        string id PK "stable logical run id"
+        string plan_id FK
+        string goal_id
+        string task_id
+        string status "running | retrying | succeeded | failed | abandoned"
+        string started_at
+        string completed_at
+    }
+    execution_attempts {
+        string id PK "unique invocation id"
+        string run_id FK
+        string plan_id FK
+        string goal_id
+        string task_id
+        int number "monotonic over task lifetime"
+        int task_attempt "domain retry-counter snapshot"
+        string status "running | succeeded | failed | abandoned"
+        string started_at
+        string completed_at
+    }
     agent_events {
         int id PK "relay cursor"
-        string event_id UK "INSERT OR IGNORE dedup"
+        string event_id UK "observation id / legacy dedup"
         string plan_id
+        string goal_id
         string task_id
-        int attempt
-        int seq
-        text payload
+        string run_id
+        string attempt_id
+        int attempt "legacy/task-lifetime compatibility"
+        int seq "legacy compatibility"
+        string observation_kind
+        string source
+        string quality
+        int schema_version
+        int source_sequence
+        text payload "allowlisted typed or legacy JSON"
+        string occurred_at "observed time"
+        string recorded_at
     }
     plan_chat_messages {
         int id PK
@@ -87,6 +118,9 @@ erDiagram
     }
 
     plans ||--o{ plan_requests : "idempotency"
+    plans ||--o{ execution_runs : "operational lifecycle"
+    plans ||--o{ execution_attempts : "correlation"
+    execution_runs ||--o{ execution_attempts : "invocations"
     plans ||--o{ plan_chat_messages : "conversation"
     agents ||--o{ agent_capabilities : ""
     capabilities ||--o{ agent_capabilities : ""
@@ -96,6 +130,10 @@ erDiagram
 ## The plan-as-document decision
 
 The `Plan` aggregate — goals, tasks, results, retry policy, everything — is stored as **one JSON document** in `plans.data`. Scalar columns are promoted *only* for what SQL must predicate on: the claim query (`phase` + lease columns), the version CAS, and cheap listings (`updated_at`, `iteration`). There is no ORM mapping of the domain; repositories do JSON in / JSON out via `PlanFactory.reconstruct`.
+
+`execution_runs` and `execution_attempts` are deliberately outside that document. They are operational application records, not aggregates: a logical run spans automatic retries, while every actual invocation gets a UUID attempt plus a task-lifetime monotonic number. A human retry starts a new run without reusing the workspace attempt number.
+
+`agent_events` is the compatibility physical stream for both typed operational observations and legacy runtime events. Typed rows use `event_id` as the stable observation ID and retain provenance, quality, schema version, observed/recorded times, and optional run/attempt correlation. Legacy rows are preserved and marked `legacy_unknown`; nullable metadata permits rolling compatibility with older writers.
 
 What this buys, and what it costs:
 
@@ -113,9 +151,9 @@ Use cases call `plan.bump_version()` *then* `uow.plans.save(plan)`. The save is 
 
 ## Transactions — the UnitOfWork
 
-`SqliteUnitOfWork` is **re-enterable by design**: each `with uow:` opens a *fresh* Session + transaction and commits/rolls back on exit. One drive pass enters it many times sequentially (dispatcher read, txn1, finalize txn). State and outbox rows commit **atomically** because the open transaction *is* the outbox staging area — a rollback discards both. One UoW instance per worker/request; it is not thread-safe.
+`SqliteUnitOfWork` is **re-enterable by design**: each `with uow:` opens a *fresh* Session + transaction and commits/rolls back on exit. One drive pass enters it many times sequentially (dispatcher read, txn1, finalize txn). Plan state, execution run/attempt boundaries, and outbox rows commit **atomically** in the same open transaction. A rollback discards all three. One UoW instance per worker/request; it is not thread-safe.
 
-Chat (`plan_chat_messages`) and agent telemetry deliberately do **not** use the plan UoW — own short transactions, so display history and plan truth can never roll each other back.
+Chat (`plan_chat_messages`) and operational observations deliberately do **not** use the plan UoW — each uses its own short transaction, so display/diagnostic evidence and plan truth can never roll each other back. The typed observation repository is append-only and rejects an observation ID reused for different evidence; identical replays are idempotent.
 
 ## Engine policy
 

@@ -101,9 +101,7 @@ Edit = (
 )
 
 
-def _validate_capability_ids(
-    ids: list[str], capabilities: CapabilityRepository
-) -> None:
+def _validate_capability_ids(ids: list[str], capabilities: CapabilityRepository) -> None:
     known = {c.id for c in capabilities.list()}
     for cap_id in ids:
         if cap_id not in known:
@@ -119,15 +117,14 @@ def apply_edit(
 ) -> None:
     with uow:
         plan = uow.plans.get(plan_id)
+        plan.assert_lifecycle_mutation_allowed()
         paused = plan.paused  # RUNNING goals + FAILED tasks are editable while paused
 
         if isinstance(edit, AddTask):
             _validate_capability_ids(edit.task.required_capabilities, capabilities)
             edit_service.add_task(plan.goals, edit.goal_id, edit.task, paused=paused)
         elif isinstance(edit, RemoveTask):
-            edit_service.remove_task(
-                plan.goals, edit.goal_id, edit.task_id, paused=paused
-            )
+            edit_service.remove_task(plan.goals, edit.goal_id, edit.task_id, paused=paused)
         elif isinstance(edit, ReorderTasks):
             edit_service.reorder_tasks(
                 plan.goals, edit.goal_id, edit.ordered_task_ids, paused=paused
@@ -171,13 +168,10 @@ def apply_edit(
             # PENDING task of a RUNNING goal is allowed; so is a FAILED task while
             # paused (the edit-and-retry window); a RUNNING/terminal task is not.
             task = find_task(find_goal(plan.goals, edit.goal_id), edit.task_id)
-            rebindable = task.status == Status.PENDING or (
-                task.status == Status.FAILED and paused
-            )
+            rebindable = task.status == Status.PENDING or (task.status == Status.FAILED and paused)
             if not rebindable:
                 raise InvalidEditError(
-                    f"task '{edit.task_id}' is {task.status.value}; "
-                    "its agent cannot be rebound"
+                    f"task '{edit.task_id}' is {task.status.value}; its agent cannot be rebound"
                 )
             agents.get(edit.agent_id)  # existence check: AgentNotFoundError
             task.agent_id = edit.agent_id

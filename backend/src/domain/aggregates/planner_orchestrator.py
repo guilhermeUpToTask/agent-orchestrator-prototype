@@ -1,14 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import (
+    Cycle,
+    CycleDraft,
+    CycleStatus,
+    IntentProposal,
+    OutputDisposition,
+    PlanBlock,
+    PlanStatus,
+    ProposalKind,
+    ReviewGate,
+    ReviewResolution,
+)
 from src.domain.entities.task import Task
-from src.domain.errors.planning_errors import PlanAlreadyTerminalError
+from src.domain.errors.planning_errors import InvalidEditError, PlanAlreadyTerminalError
 from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.services.capability_matching import match_agent
@@ -72,6 +84,20 @@ class Plan(BaseModel):
     new goal set (one defined point, not at request time)."""
 
     id: str
+    # Long-lived project ownership and cyclic lifecycle.
+    project_id: str | None = None
+    status: PlanStatus = PlanStatus.WAITING
+    cycles: list[Cycle] = []
+    intent_proposal: IntentProposal | None = None
+    cycle_draft: CycleDraft | None = None
+    review_gate: ReviewGate | None = None
+    block: PlanBlock | None = None
+    pause_requested: bool = False
+    # Durable check-to-merge reservation. While set, pause requests may land,
+    # but lifecycle/artifact mutations that could supersede the candidate may not.
+    promotion_reservation: str | None = None
+    legacy_phase: str | None = None
+    legacy_mapped_status: PlanStatus | None = None
     version: int = 0
     brief: str
     phase: PlanPhase = PlanPhase.DISCOVERY
@@ -95,7 +121,42 @@ class Plan(BaseModel):
     paused: bool = False
     paused_reason: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_legacy_phase_status(cls, data: object) -> object:
+        if not isinstance(data, dict) or "status" in data:
+            return data
+        raw_phase = data.get("phase", PlanPhase.DISCOVERY.value)
+        phase = raw_phase.value if isinstance(raw_phase, PlanPhase) else str(raw_phase)
+        mapped = {
+            PlanPhase.DISCOVERY.value: PlanStatus.WAITING,
+            PlanPhase.REPLANNING.value: PlanStatus.WAITING,
+            PlanPhase.ARCHITECTURE.value: PlanStatus.RUNNING,
+            PlanPhase.ENRICHING.value: PlanStatus.RUNNING,
+            PlanPhase.AWAITING_REVIEW.value: PlanStatus.WAITING,
+            PlanPhase.RUNNING.value: PlanStatus.RUNNING,
+            PlanPhase.REVIEW.value: PlanStatus.WAITING,
+            PlanPhase.DONE.value: PlanStatus.IDLE,
+            PlanPhase.FAILED.value: PlanStatus.BLOCKED,
+        }
+        return {**data, "status": mapped.get(phase, PlanStatus.BLOCKED)}
+
     # ---- helpers ----
+    def _set_phase(self, phase: PlanPhase) -> None:
+        """Compatibility checkpoint while active behavior migrates to artifacts."""
+        self.phase = phase
+        self.status = {
+            PlanPhase.DISCOVERY: PlanStatus.WAITING,
+            PlanPhase.REPLANNING: PlanStatus.WAITING,
+            PlanPhase.ARCHITECTURE: PlanStatus.RUNNING,
+            PlanPhase.ENRICHING: PlanStatus.RUNNING,
+            PlanPhase.AWAITING_REVIEW: PlanStatus.WAITING,
+            PlanPhase.RUNNING: PlanStatus.RUNNING,
+            PlanPhase.REVIEW: PlanStatus.WAITING,
+            PlanPhase.DONE: PlanStatus.IDLE,
+            PlanPhase.FAILED: PlanStatus.BLOCKED,
+        }[phase]
+
     def bump_version(self) -> None:
         self.version += 1
 
@@ -103,19 +164,51 @@ class Plan(BaseModel):
         if self.phase in TERMINAL_PHASES:
             raise PlanAlreadyTerminalError(self.id, self.phase.value)
 
+    def assert_lifecycle_mutation_allowed(self) -> None:
+        if self.promotion_reservation is not None:
+            raise InvalidEditError("a verified Git promotion is in progress")
+
+    def reserve_promotion(self, reservation: str) -> None:
+        if self.promotion_reservation not in (None, reservation):
+            raise InvalidEditError("another verified Git promotion is in progress")
+        self.promotion_reservation = reservation
+
+    def release_promotion(self, reservation: str) -> None:
+        if self.promotion_reservation == reservation:
+            self.promotion_reservation = None
+
+    def abandon_execution_task(
+        self,
+        cycle_id: str | None,
+        goal_id: str,
+        task_id: str,
+    ) -> None:
+        goals = self.goals
+        if cycle_id is not None:
+            cycle = next((item for item in self.cycles if item.id == cycle_id), None)
+            if cycle is None:
+                raise InvalidEditError(f"cycle '{cycle_id}' not found")
+            goals = cycle.goals
+        find_task(find_goal(goals, goal_id), task_id).abandon()
+
     def _guard_phase(self, allowed_from: set[PlanPhase], to: PlanPhase) -> None:
         if self.phase not in allowed_from:
             raise InvalidTransitionError("Plan", self.id, self.phase.value, to.value)
 
+    @property
+    def execution_goals(self) -> list[Goal]:
+        cycle = self.active_cycle
+        return cycle.goals if cycle is not None else self.goals
+
     def _goal(self, goal_id: str) -> Goal:
-        return find_goal(self.goals, goal_id)
+        return find_goal(self.execution_goals, goal_id)
 
     def _task(self, goal: Goal, task_id: str) -> Task:
         return find_task(goal, task_id)
 
     # ---- navigation ----
     def peek_next(self, now: datetime) -> NextAction:
-        return next_action(self.goals, now)
+        return next_action(self.execution_goals, now)
 
     # ---- task transitions (aggregate calls entity methods) ----
     def start_task(self, goal_id: str, task_id: str) -> None:
@@ -133,9 +226,7 @@ class Plan(BaseModel):
         goal = self._goal(goal_id)
         self._task(goal, task_id).complete(result)
 
-    def requeue_task(
-        self, goal_id: str, task_id: str, not_before: datetime | None = None
-    ) -> None:
+    def requeue_task(self, goal_id: str, task_id: str, not_before: datetime | None = None) -> None:
         self._assert_not_terminal()
         goal = self._goal(goal_id)
         self._task(goal, task_id).requeue(not_before)
@@ -170,7 +261,27 @@ class Plan(BaseModel):
         self._assert_not_terminal()
         self._goal(goal_id).complete()
 
-    # ---- human pause gate (un-freeze #3) ----
+    # ---- graceful human pause gate ----
+    def request_pause(self, active_action: bool, reason: str | None = None) -> None:
+        """Block new claims immediately; settle only after an active action finalizes."""
+        if self.paused or self.pause_requested:
+            if reason is not None:
+                self.paused_reason = reason
+            return
+        if self.status != PlanStatus.RUNNING or self.phase not in WORKER_CLAIMABLE_PHASES:
+            raise InvalidTransitionError("Plan", self.id, self.status.value, "paused")
+        self.paused_reason = reason
+        if active_action:
+            self.pause_requested = True
+            return
+        self.settle_pause()
+
+    def settle_pause(self) -> None:
+        """Transition a requested pause at an atomic action boundary."""
+        self.pause_requested = False
+        self.paused = True
+        self.status = PlanStatus.PAUSED
+
     def pause(self, reason: str | None = None) -> None:
         """Arm the pause gate: the claim predicate skips a paused plan, so the
         worker stops at the next unit boundary (an in-flight attempt finalizes
@@ -185,30 +296,40 @@ class Plan(BaseModel):
             raise InvalidTransitionError("Plan", self.id, self.phase.value, "paused")
         self.paused = True
         self.paused_reason = reason
+        self.status = PlanStatus.PAUSED
 
-    def resume(self) -> list[str]:
-        """Human resume — and the manual retry (decision #17): clear the pause
-        gate and the planning backoff gate, return every FAILED task in a
-        non-terminal goal to PENDING with a fresh attempt budget (bypassing
-        should_retry by construction), and drop backoff gates on PENDING tasks so
-        work restarts immediately. Returns the retried task ids (the caller emits
-        PlanResumed)."""
+    def resume(self) -> None:
+        """Remove a manual pause without mutating retry or backoff state."""
         if not self.paused:
             raise InvalidTransitionError("Plan", self.id, self.phase.value, "resumed")
         self.paused = False
+        self.pause_requested = False
         self.paused_reason = None
-        self.clear_planning_retry()
-        retried: list[str] = []
-        for goal in self.goals:
-            if goal.is_terminal:
-                continue
-            for task in goal.tasks:
-                if task.status == Status.FAILED:
-                    task.retry()
-                    retried.append(task.id)
-                elif task.status == Status.PENDING and task.retry_not_before:
-                    task.clear_backoff()
-        return retried
+        self.status = (
+            PlanStatus.RUNNING
+            if self.active_cycle is not None or self.phase in WORKER_CLAIMABLE_PHASES
+            else PlanStatus.IDLE
+        )
+
+    def retry_task(self, goal_id: str, task_id: str, resolved_at: datetime) -> None:
+        """Retry exactly one failed task; absolute attempt identity is preserved."""
+        blocked = self.block is not None and self.block.active
+        if not self.paused and not blocked:
+            raise InvalidTransitionError("Plan", self.id, self.status.value, "retry")
+        if blocked and (
+            self.block is None
+            or self.block.goal_id != goal_id
+            or self.block.task_id != task_id
+            or "retry_stage" not in self.block.legal_resolutions
+        ):
+            raise InvalidEditError("retry does not target the active plan block")
+        goal = self._goal(goal_id)
+        self._task(goal, task_id).retry()
+        if blocked:
+            assert self.block is not None
+            self.block.resolution = "retry_stage"
+            self.block.resolved_at = resolved_at
+            self.status = PlanStatus.RUNNING
 
     # ---- worker-driven planning retry gate (un-freeze 2026-07-08) ----
     def record_planning_retry(self, not_before: datetime | None) -> None:
@@ -232,7 +353,7 @@ class Plan(BaseModel):
         FAILED: a terminal *task* failure auto-pauses instead (un-freeze #3), so
         execution failures stay recoverable in-band."""
         self._guard_phase(set(WORKER_PLANNING_PHASES), PlanPhase.FAILED)
-        self.phase = PlanPhase.FAILED
+        self._set_phase(PlanPhase.FAILED)
 
     # ---- phase transitions ----
     def advance_phase(self, to: PlanPhase) -> None:
@@ -240,12 +361,12 @@ class Plan(BaseModel):
         -> ENRICHING -> AWAITING_REVIEW). The gate/loop transitions below are the
         guarded, named paths — prefer them wherever one exists."""
         self._assert_not_terminal()
-        self.phase = to
+        self._set_phase(to)
 
     def approve(self) -> None:
         """Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING."""
         self._guard_phase({PlanPhase.AWAITING_REVIEW}, PlanPhase.RUNNING)
-        self.phase = PlanPhase.RUNNING
+        self._set_phase(PlanPhase.RUNNING)
 
     def reopen_discovery(self) -> None:
         """Human "request changes" at the pre-execution gate: AWAITING_REVIEW ->
@@ -257,18 +378,18 @@ class Plan(BaseModel):
         self._guard_phase({PlanPhase.AWAITING_REVIEW}, PlanPhase.DISCOVERY)
         self.paused = False
         self.paused_reason = None
-        self.phase = PlanPhase.DISCOVERY
+        self._set_phase(PlanPhase.DISCOVERY)
 
     def enter_review(self) -> None:
         """Execution exhausted the goal list: RUNNING -> REVIEW (the post-exec
         gate). DONE is reached only from REVIEW via finish_review()."""
         self._guard_phase({PlanPhase.RUNNING}, PlanPhase.REVIEW)
-        self.phase = PlanPhase.REVIEW
+        self._set_phase(PlanPhase.REVIEW)
 
     def finish_review(self) -> None:
         """Human "finish" at the post-execution gate: REVIEW -> DONE."""
         self._guard_phase({PlanPhase.REVIEW}, PlanPhase.DONE)
-        self.phase = PlanPhase.DONE
+        self._set_phase(PlanPhase.DONE)
 
     def begin_replanning(self) -> None:
         """Enter the conversational re-plan. Two entry points, one phase: from
@@ -278,6 +399,7 @@ class Plan(BaseModel):
         task finalizes via tolerant finalize; whatever remains is closed by the
         finalize-abandon in commit_replanned_goals(). A human replan supersedes
         any pause: the gate clears so the committed roadmap can execute."""
+        self.assert_lifecycle_mutation_allowed()
         self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
         self.paused = False
         self.paused_reason = None
@@ -292,7 +414,7 @@ class Plan(BaseModel):
                     if task.status == Status.PENDING:
                         task.skip()
                 # leave the goal RUNNING: its in-flight task finalizes tolerantly
-        self.phase = PlanPhase.REPLANNING
+        self._set_phase(PlanPhase.REPLANNING)
 
     def set_iteration_goals(self, new_goals: list[Goal]) -> None:
         """The planning phases' write path (roadmap 2.5 driver): replace the
@@ -300,6 +422,7 @@ class Plan(BaseModel):
         DISCOVERY drafts them, ARCHITECTURE structures them, ENRICHING details
         them. Terminal goals (prior-iteration history) are never touched; the
         new set is renumbered to positions after them."""
+        self.assert_lifecycle_mutation_allowed()
         self._guard_phase(
             {PlanPhase.DISCOVERY, PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING},
             self.phase,
@@ -316,6 +439,7 @@ class Plan(BaseModel):
         hole — a stale goal must never be re-executed after the next iteration
         starts), append the new goals (append-only history), bump the iteration,
         and flow into ARCHITECTURE like DISCOVERY does."""
+        self.assert_lifecycle_mutation_allowed()
         self._guard_phase({PlanPhase.REPLANNING}, PlanPhase.ARCHITECTURE)
         for goal in self.goals:
             if goal.is_terminal:
@@ -329,14 +453,352 @@ class Plan(BaseModel):
             goal.position = base + offset
             self.goals.append(goal)
         self.iteration += 1
-        self.phase = PlanPhase.ARCHITECTURE
+        self._set_phase(PlanPhase.ARCHITECTURE)
+
+    def bind_legacy_project(self, project_id: str, resolved_at: datetime) -> None:
+        """Operator-only binding for quarantined legacy rows."""
+        if self.project_id is not None:
+            if self.project_id == project_id:
+                return
+            raise InvalidEditError("project identity is immutable")
+        if self.block is None or self.block.kind != "project_binding" or not self.block.active:
+            raise InvalidEditError("plan is not waiting for a project binding")
+        self.project_id = project_id
+        self.block.resolution = "bind_project"
+        self.block.resolved_at = resolved_at
+        self.status = self.legacy_mapped_status or PlanStatus.IDLE
+
+    # ---- cyclic project-plan lifecycle (unfreeze #4) ----
+    @property
+    def active_cycle(self) -> Cycle | None:
+        return next(
+            (cycle for cycle in self.cycles if cycle.status == CycleStatus.ACTIVE),
+            None,
+        )
+
+    @property
+    def status_reason(self) -> dict[str, str | None]:
+        if self.promotion_reservation is not None:
+            return {
+                "kind": "promotion",
+                "code": "git_promotion",
+                "message": "Promoting verified code at an atomic boundary.",
+            }
+        if self.block is not None and self.block.active:
+            return {
+                "kind": "block",
+                "code": self.block.kind,
+                "message": self.block.explanation,
+            }
+        if self.review_gate is not None and self.review_gate.unresolved:
+            return {
+                "kind": "review_gate",
+                "code": self.review_gate.subject_type.value,
+                "message": self.review_gate.continuation,
+            }
+        if self.pause_requested:
+            return {
+                "kind": "pause_requested",
+                "code": "active_action",
+                "message": self.paused_reason or "waiting for the current action",
+            }
+        if self.paused:
+            return {
+                "kind": "manual_pause",
+                "code": "paused",
+                "message": self.paused_reason,
+            }
+        return {"kind": self.status.value, "code": None, "message": None}
+
+    @property
+    def legal_actions(self) -> list[str]:
+        if self.promotion_reservation is not None:
+            return ["pause"] if self.status == PlanStatus.RUNNING else []
+        if self.block is not None and self.block.active:
+            return list(self.block.legal_resolutions)
+        if self.review_gate is not None and self.review_gate.unresolved:
+            return [f"review:{decision}" for decision in self.review_gate.allowed_decisions]
+        if self.pause_requested:
+            return []
+        if self.status == PlanStatus.RUNNING:
+            return ["pause", "start_replan"]
+        if self.status == PlanStatus.PAUSED:
+            return [
+                "resume",
+                "start_replan",
+                "edit_pending_work",
+                "cancel_cycle",
+            ]
+        if self.status == PlanStatus.IDLE or (
+            self.status == PlanStatus.WAITING
+            and self.review_gate is None
+            and self.intent_proposal is None
+        ):
+            return ["start_intent"]
+        return []
+
+    @property
+    def activity(self) -> str:
+        """Derived activity; never persisted as a second lifecycle enum."""
+        if self.block is not None and self.block.active:
+            return f"blocked:{self.block.stage}"
+        if self.review_gate is not None and self.review_gate.unresolved:
+            return f"review:{self.review_gate.subject_type.value}"
+        if self.intent_proposal is not None and self.intent_proposal.approved_at is None:
+            return "intent_discovery"
+        if (
+            self.intent_proposal is not None
+            and self.intent_proposal.approved_at is not None
+            and self.cycle_draft is None
+        ):
+            return "cycle_architecture"
+        if self.cycle_draft is not None and self.cycle_draft.approved_at is None:
+            return "cycle_architecture"
+        cycle = self.active_cycle
+        if cycle is None:
+            return "intent_discovery" if self.status == PlanStatus.WAITING else "idle"
+        action = next_action(cycle.goals, datetime.max.replace(tzinfo=timezone.utc))
+        if isinstance(action, tuple):
+            goal, subject = action
+            if isinstance(subject, Task):
+                return f"task:{goal.id}:{subject.id}"
+            return f"goal:{goal.id}"
+        return "cycle_verification"
+
+    def _open_review_gate(self, gate: ReviewGate) -> None:
+        if self.review_gate is not None and self.review_gate.unresolved:
+            raise InvalidEditError("a blocking review gate is already open")
+        self.review_gate = gate
+        self.status = PlanStatus.WAITING
+
+    def _resolve_review_gate(
+        self,
+        gate_id: str,
+        subject_revision: int,
+        decision: str,
+        resolved_at: datetime,
+        resolved_by: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        gate = self.review_gate
+        if gate is None or gate.id != gate_id:
+            raise InvalidEditError("review gate not found")
+        if gate.resolution is not None:
+            if gate.resolution.decision == decision:
+                return
+            raise InvalidEditError("review gate was already resolved differently")
+        if gate.invalidated_at is not None:
+            raise InvalidEditError("review gate is invalidated")
+        if gate.subject_revision != subject_revision:
+            raise InvalidEditError("review decision targets a stale subject revision")
+        if decision not in gate.allowed_decisions:
+            raise InvalidEditError(f"review decision '{decision}' is not legal")
+        gate.resolution = ReviewResolution(
+            decision=decision,
+            resolved_at=resolved_at,
+            resolved_by=resolved_by,
+            note=note,
+        )
+
+    def propose_intent(self, proposal: IntentProposal, gate: ReviewGate) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        if self.project_id is None:
+            raise InvalidEditError("project binding is required before intent planning")
+        if self.intent_proposal is not None and self.intent_proposal.cancelled_at is None:
+            raise InvalidEditError("an intent proposal is already open")
+        if proposal.base_plan_version != self.version:
+            raise InvalidEditError("intent proposal base version is stale")
+        if proposal.kind == ProposalKind.REPLAN:
+            if proposal.source_cycle_id != (
+                self.active_cycle.id if self.active_cycle is not None else None
+            ):
+                raise InvalidEditError("replan source cycle is stale")
+        self.intent_proposal = proposal
+        self.cycle_draft = None
+        self._open_review_gate(gate)
+
+    def revise_intent(
+        self,
+        proposal: IntentProposal,
+        replacement_gate: ReviewGate,
+        invalidated_at: datetime,
+    ) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        current = self.intent_proposal
+        if current is None or current.id != proposal.id:
+            raise InvalidEditError("intent proposal not found")
+        if proposal.revision != current.revision + 1:
+            raise InvalidEditError("intent proposal revision must increment by one")
+        if proposal.base_plan_version != self.version:
+            raise InvalidEditError("intent proposal base version is stale")
+        if proposal.kind != current.kind or proposal.source_cycle_id != current.source_cycle_id:
+            raise InvalidEditError("intent kind and replan source are immutable")
+        if self.review_gate is not None and self.review_gate.unresolved:
+            self.review_gate.invalidated_at = invalidated_at
+        self.review_gate = None
+        self.intent_proposal = proposal
+        self._open_review_gate(replacement_gate)
+
+    def cancel_intent(self, cancelled_at: datetime) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        proposal = self.intent_proposal
+        if proposal is None or proposal.approved_at is not None:
+            raise InvalidEditError("open intent proposal not found")
+        proposal.cancelled_at = cancelled_at
+        if self.review_gate is not None and self.review_gate.unresolved:
+            self.review_gate.invalidated_at = cancelled_at
+        self.intent_proposal = None
+        self.review_gate = None
+        self.status = PlanStatus.PAUSED if self.active_cycle is not None else PlanStatus.IDLE
+
+    def approve_intent(self, gate_id: str, revision: int, resolved_at: datetime) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        proposal = self.intent_proposal
+        if proposal is None or proposal.revision != revision:
+            raise InvalidEditError("intent proposal revision is stale")
+        self._resolve_review_gate(gate_id, revision, "approve", resolved_at)
+        proposal.approved_at = resolved_at
+        self.status = PlanStatus.RUNNING
+
+    def submit_cycle_draft(self, draft: CycleDraft, gate: ReviewGate) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        proposal = self.intent_proposal
+        if proposal is None or proposal.approved_at is None:
+            raise InvalidEditError("an approved intent is required")
+        if draft.intent_proposal_id != proposal.id:
+            raise InvalidEditError("cycle draft references the wrong intent")
+        if draft.base_plan_version != self.version:
+            raise InvalidEditError("cycle draft base version is stale")
+        if draft.source_cycle_id != proposal.source_cycle_id:
+            raise InvalidEditError("cycle draft source cycle is stale")
+        self.review_gate = None
+        self.cycle_draft = draft
+        self._open_review_gate(gate)
+
+    def revise_cycle_draft(
+        self,
+        draft: CycleDraft,
+        replacement_gate: ReviewGate,
+        invalidated_at: datetime,
+    ) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        current = self.cycle_draft
+        if current is None or current.id != draft.id:
+            raise InvalidEditError("cycle draft not found")
+        if draft.revision != current.revision + 1:
+            raise InvalidEditError("cycle draft revision must increment by one")
+        if draft.base_plan_version != self.version:
+            raise InvalidEditError("cycle draft base version is stale")
+        if (
+            draft.intent_proposal_id != current.intent_proposal_id
+            or draft.source_cycle_id != current.source_cycle_id
+        ):
+            raise InvalidEditError("cycle draft intent and source are immutable")
+        if self.review_gate is not None and self.review_gate.unresolved:
+            self.review_gate.invalidated_at = invalidated_at
+        self.review_gate = None
+        self.cycle_draft = draft
+        self._open_review_gate(replacement_gate)
+
+    def activate_cycle(
+        self,
+        gate_id: str,
+        revision: int,
+        cycle: Cycle,
+        resolved_at: datetime,
+    ) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        draft = self.cycle_draft
+        if draft is None or draft.revision != revision:
+            raise InvalidEditError("cycle draft revision is stale")
+        if self.version != draft.base_plan_version + 1:
+            raise InvalidEditError("cycle draft base version is stale")
+        if cycle.draft_id != draft.id or cycle.intent_proposal_id != draft.intent_proposal_id:
+            raise InvalidEditError("cycle does not match the approved draft")
+        source = self.active_cycle
+        if draft.source_cycle_id is not None:
+            if source is None or source.id != draft.source_cycle_id:
+                raise InvalidEditError("active source cycle changed; regenerate the draft")
+            source.status = CycleStatus.SUPERSEDED
+            source.superseded_at = resolved_at
+        elif source is not None:
+            raise InvalidEditError("only one active cycle is allowed")
+        self._resolve_review_gate(gate_id, revision, "approve", resolved_at)
+        draft.approved_at = resolved_at
+        self.cycles.append(cycle)
+        self.intent_proposal = None
+        self.cycle_draft = None
+        self.review_gate = None
+        self.block = None
+        self.paused = False
+        self.pause_requested = False
+        self.status = PlanStatus.RUNNING
+
+    def cancel_cycle_draft(self, cancelled_at: datetime) -> None:
+        self.assert_lifecycle_mutation_allowed()
+        if self.cycle_draft is None:
+            raise InvalidEditError("cycle draft not found")
+        self.cycle_draft.cancelled_at = cancelled_at
+        self.cycle_draft = None
+        self.intent_proposal = None
+        self.review_gate = None
+        self.status = PlanStatus.PAUSED if self.active_cycle is not None else PlanStatus.IDLE
+
+    def open_block(self, block: PlanBlock) -> None:
+        if self.block is not None and self.block.active:
+            raise InvalidEditError("a plan block is already active")
+        self.block = block
+        self.status = PlanStatus.BLOCKED
+
+    def resolve_block(self, resolution: str, resolved_at: datetime) -> None:
+        if self.block is None or not self.block.active:
+            raise InvalidEditError("no active plan block")
+        if resolution not in self.block.legal_resolutions:
+            raise InvalidEditError(f"block resolution '{resolution}' is not legal")
+        self.block.resolution = resolution
+        self.block.resolved_at = resolved_at
+        self.status = PlanStatus.PAUSED if self.active_cycle is not None else PlanStatus.IDLE
+
+    def open_completion_gate(self, gate: ReviewGate, evidence_refs: list[str]) -> None:
+        cycle = self.active_cycle
+        if cycle is None:
+            raise InvalidEditError("no active cycle to verify")
+        cycle.evidence_refs = list(evidence_refs)
+        self._open_review_gate(gate)
+
+    def record_output_disposition(
+        self,
+        gate_id: str,
+        revision: int,
+        disposition: OutputDisposition,
+        output_reference: str | None,
+        resolved_at: datetime,
+    ) -> None:
+        cycle = self.active_cycle
+        if cycle is None:
+            raise InvalidEditError("no active cycle")
+        if disposition != OutputDisposition.DISCARD and not output_reference:
+            raise InvalidEditError("successful output disposition requires a reference")
+        self._resolve_review_gate(gate_id, revision, disposition.value, resolved_at)
+        cycle.output_disposition = disposition
+        cycle.output_reference = output_reference
+        cycle.completed_at = resolved_at
+        if disposition == OutputDisposition.DISCARD:
+            cycle.cancelled_at = resolved_at
+        cycle.status = (
+            CycleStatus.CANCELLED
+            if disposition == OutputDisposition.DISCARD
+            else CycleStatus.COMPLETED
+        )
+        self.review_gate = None
+        self.status = PlanStatus.IDLE
 
     # ---- creation-time agent binding ----
     def bind_agents(self, agents: list[AgentSpec], default_agent_id: str) -> list[str]:
         """Bind unbound tasks to agents by capability. Returns task ids that fell
         back to the default (caller emits AgentFellBackToDefault events)."""
         fell_back: list[str] = []
-        for goal in self.goals:
+        for goal in self.execution_goals:
             for task in goal.tasks:
                 if task.agent_id is None:
                     agent_id, used_default = match_agent(

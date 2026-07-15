@@ -1,5 +1,6 @@
 """The CLI runner against a scripted fake CLI: success path, and every
 FailureKind classification the shared taxonomy defines (roadmap 2.4 #12)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -61,14 +62,18 @@ def spec():
     )
 
 
-def run(runner, workdir):
+def run(runner, workdir, idempotency_key="p1:g1:t1"):
     class _H:
         path = str(workdir)
 
     sink = CollectingEventSink()
     result = asyncio.run(
         runner.run(
-            task(), spec(), idempotency_key="p1:g1:t1", event_sink=sink, workspace=_H()
+            task(),
+            spec(),
+            idempotency_key=idempotency_key,
+            event_sink=sink,
+            workspace=_H(),
         )
     )
     return result, sink
@@ -81,6 +86,22 @@ def test_success_returns_result_and_emits_events(tmp_path):
     assert "did the work" in result.output
     assert [e.type for e in sink.events] == ["agent.started", "agent.finished"]
     assert all(e.task_id == "t1" and e.attempt == 1 for e in sink.events)
+
+
+def test_execution_correlation_is_allowlisted_into_subprocess_env(tmp_path):
+    cli = make_cli(
+        tmp_path,
+        'printf "%s|%s|%s|%s|%s|%s\\n" '
+        '"$ORCHESTRATOR_PLAN_ID" "$ORCHESTRATOR_GOAL_ID" '
+        '"$ORCHESTRATOR_TASK_ID" "$ORCHESTRATOR_RUN_ID" '
+        '"$ORCHESTRATOR_ATTEMPT_NUMBER" "$ORCHESTRATOR_ATTEMPT_ID"',
+    )
+    result, _ = run(
+        ScriptedCliRunner(cli),
+        tmp_path,
+        idempotency_key="p1:g1:t1:run-1:7:attempt-1",
+    )
+    assert result.output.strip() == "p1|g1|t1|run-1|7|attempt-1"
 
 
 @pytest.mark.parametrize(

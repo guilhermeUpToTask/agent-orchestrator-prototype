@@ -22,6 +22,7 @@ operation never blocks the worker's loop.
 LocalDirWorkspace is the "go straight to the repo dir" output strategy: no
 isolation, no rollback (discard is a no-op) — for trivial/dry runs only.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,12 +60,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _git_ok(repo: Path, *args: str) -> bool:
-    return (
-        subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True
-        ).returncode
-        == 0
-    )
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True).returncode == 0
 
 
 @dataclass
@@ -72,6 +68,7 @@ class GitWorkspaceHandle:
     path: str  # the worktree directory the agent works in
     plan_branch: str
     task_branch: str
+    base_ref: str
 
 
 class GitBranchWorkspace:
@@ -81,9 +78,39 @@ class GitBranchWorkspace:
 
     # ---- Workspace port ----
     async def begin(
-        self, plan_id: str, task_id: str, attempt: int
+        self,
+        plan_id: str,
+        task_id: str,
+        attempt: int,
+        *,
+        cycle_id: str | None = None,
+        goal_id: str | None = None,
+        run_id: str | None = None,
+        base_ref: str | None = None,
     ) -> GitWorkspaceHandle:
-        return await asyncio.to_thread(self._begin_sync, plan_id, task_id, attempt)
+        return await asyncio.to_thread(
+            self._begin_sync,
+            plan_id,
+            task_id,
+            attempt,
+            cycle_id,
+            goal_id,
+            run_id,
+            base_ref,
+        )
+
+    async def snapshot(self, handle: WorkspaceHandle) -> str:
+        assert isinstance(handle, GitWorkspaceHandle)
+        return await asyncio.to_thread(self._snapshot_sync, handle)
+
+    async def checkpoint(self, handle: WorkspaceHandle) -> str:
+        assert isinstance(handle, GitWorkspaceHandle)
+        commit_sha = await self.snapshot(handle)
+        await asyncio.to_thread(self._remove_task_worktree, handle)
+        return commit_sha
+
+    async def merge_goal(self, plan_id: str, cycle_id: str, goal_id: str) -> str:
+        return await asyncio.to_thread(self._merge_goal_sync, cycle_id, goal_id)
 
     async def commit(self, handle: WorkspaceHandle) -> None:
         assert isinstance(handle, GitWorkspaceHandle)
@@ -97,25 +124,41 @@ class GitBranchWorkspace:
     def _ensure_repo(self) -> None:
         if not (self._repo / ".git").exists():
             self._repo.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                ["git", "init", str(self._repo)], check=True, capture_output=True
-            )
+            subprocess.run(["git", "init", str(self._repo)], check=True, capture_output=True)
             _git(self._repo, "checkout", "-B", self._default_branch)
             _git(self._repo, "commit", "--allow-empty", "-m", "chore: initial commit")
             log.info("workspace.repo_seeded", repo=str(self._repo))
 
-    def _begin_sync(self, plan_id: str, task_id: str, attempt: int) -> GitWorkspaceHandle:
+    def _begin_sync(
+        self,
+        plan_id: str,
+        task_id: str,
+        attempt: int,
+        cycle_id: str | None,
+        goal_id: str | None,
+        run_id: str | None,
+        base_ref: str | None,
+    ) -> GitWorkspaceHandle:
         self._ensure_repo()
-        plan_branch = f"plan/{plan_id}"
-        task_branch = f"task/{task_id}/a{attempt}"
-
-        if not _git_ok(self._repo, "rev-parse", "--verify", plan_branch):
-            _git(self._repo, "branch", plan_branch, self._default_branch)
-            log.info("workspace.plan_branch_created", branch=plan_branch)
+        if cycle_id is not None and goal_id is not None and run_id is not None:
+            cycle_branch = f"cycle/{cycle_id}"
+            plan_branch = f"goal/{goal_id}"
+            task_branch = f"task/{task_id}/{run_id}"
+            if not _git_ok(self._repo, "rev-parse", "--verify", cycle_branch):
+                _git(self._repo, "branch", cycle_branch, self._default_branch)
+            if not _git_ok(self._repo, "rev-parse", "--verify", plan_branch):
+                _git(self._repo, "branch", plan_branch, cycle_branch)
+        else:
+            plan_branch = f"plan/{plan_id}"
+            task_branch = f"task/{task_id}/a{attempt}"
+            if not _git_ok(self._repo, "rev-parse", "--verify", plan_branch):
+                _git(self._repo, "branch", plan_branch, self._default_branch)
+                log.info("workspace.plan_branch_created", branch=plan_branch)
 
         # -f: a stale branch from a crashed prior run of this attempt is reset,
         # so begin is idempotent (stateless task execution).
-        _git(self._repo, "branch", "-f", task_branch, plan_branch)
+        task_base = _git(self._repo, "rev-parse", base_ref or plan_branch)
+        _git(self._repo, "branch", "-f", task_branch, task_base)
         worktree = tempfile.mkdtemp(prefix=f"task-{task_id}-a{attempt}-")
         # the empty mkdtemp dir must not exist for `worktree add`
         os.rmdir(worktree)
@@ -133,14 +176,45 @@ class GitBranchWorkspace:
             worktree=worktree,
         )
         return GitWorkspaceHandle(
-            path=worktree, plan_branch=plan_branch, task_branch=task_branch
+            path=worktree,
+            plan_branch=plan_branch,
+            task_branch=task_branch,
+            base_ref=task_base,
         )
 
-    def _commit_sync(self, handle: GitWorkspaceHandle) -> None:
+    def _snapshot_sync(self, handle: GitWorkspaceHandle) -> str:
         wt = Path(handle.path)
         _git(wt, "add", "-A")
         if _git(wt, "status", "--porcelain"):
             _git(wt, "commit", "-m", f"task: {handle.task_branch}")
+        return _git(wt, "rev-parse", "HEAD")
+
+    def _merge_goal_sync(self, cycle_id: str, goal_id: str) -> str:
+        cycle_branch = f"cycle/{cycle_id}"
+        goal_branch = f"goal/{goal_id}"
+        if not _git_ok(self._repo, "rev-parse", "--verify", goal_branch):
+            raise TaskFailed(
+                f"goal branch is missing: {goal_branch}",
+                FailureKind.TOOL_ERROR,
+            )
+        merge_wt = tempfile.mkdtemp(prefix="cycle-merge-")
+        os.rmdir(merge_wt)
+        _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+        try:
+            _git(
+                Path(merge_wt),
+                "merge",
+                "--no-ff",
+                goal_branch,
+                "-m",
+                f"merge: {goal_branch} into {cycle_branch}",
+            )
+            return _git(Path(merge_wt), "rev-parse", "HEAD")
+        finally:
+            _git(self._repo, "worktree", "remove", "--force", merge_wt)
+
+    def _commit_sync(self, handle: GitWorkspaceHandle) -> None:
+        self._snapshot_sync(handle)
         # merge into the plan branch via a throwaway worktree (the plan branch
         # is never checked out anywhere permanent)
         merge_wt = tempfile.mkdtemp(prefix="plan-merge-")
@@ -190,6 +264,7 @@ class GitBranchWorkspace:
 @dataclass
 class LocalDirHandle:
     path: str
+    base_ref: str | None = None
 
 
 class LocalDirWorkspace:
@@ -199,8 +274,27 @@ class LocalDirWorkspace:
         self._root = Path(root)
         self._root.mkdir(parents=True, exist_ok=True)
 
-    async def begin(self, plan_id: str, task_id: str, attempt: int) -> LocalDirHandle:
+    async def begin(
+        self,
+        plan_id: str,
+        task_id: str,
+        attempt: int,
+        *,
+        cycle_id: str | None = None,
+        goal_id: str | None = None,
+        run_id: str | None = None,
+        base_ref: str | None = None,
+    ) -> LocalDirHandle:
         return LocalDirHandle(path=str(self._root))
+
+    async def snapshot(self, handle: WorkspaceHandle) -> str:
+        return "local-directory"
+
+    async def checkpoint(self, handle: WorkspaceHandle) -> str:
+        return await self.snapshot(handle)
+
+    async def merge_goal(self, plan_id: str, cycle_id: str, goal_id: str) -> str:
+        return "local-directory"
 
     async def commit(self, handle: WorkspaceHandle) -> None:
         pass

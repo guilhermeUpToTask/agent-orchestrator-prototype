@@ -1,24 +1,5 @@
-"""
-src/infra/db/plan_repository.py — SqlitePlanRepository (the PlanRepository port).
+"""SQLite Plan repository with CAS, project ownership, and plan leases."""
 
-Contracts mirrored EXACTLY from the in-memory fake the application suite runs on:
-
-- Detached aggregates: get() parses fresh JSON -> PlanFactory.reconstruct; no ORM
-  mapping, no instance caching — a returned Plan can never alias stored state.
-- Version CAS: use cases bump_version() BEFORE save(); the store rejects when
-  stored.version >= incoming.version. Implemented as one upsert whose UPDATE arm
-  only fires when ``plans.version < excluded.version``; rowcount 0 -> reload the
-  stored version -> StaleVersionError. save() never touches the lease columns.
-- Lease: claim_one_unit is a single atomic UPDATE..RETURNING over the driver-model
-  claim predicate (phase ∈ ARCHITECTURE/ENRICHING/RUNNING, lease NULL or expired).
-  Lease times are integer epochs from the injected Clock, so FakeClock.advance()
-  drives expiry deterministically in the truth tests.
-
-Transaction binding: get/save/find_by_request_id/bind_request_id run on the
-UnitOfWork's live session (bound via bind()/unbind() per with-block). The lease
-trio (claim/heartbeat/release) is called by the worker loop OUTSIDE any UoW
-block, so each runs on its own short session via run_in_session.
-"""
 from __future__ import annotations
 
 import json
@@ -29,38 +10,37 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.app.ports import Clock
-from src.domain.aggregates.planner_orchestrator import (
-    Plan,
-    WORKER_CLAIMABLE_PHASES,
-)
+from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.errors.planning_errors import PlanNotFoundError
 from src.domain.errors.tasks_errors import StaleVersionError
 from src.domain.factories.plan_factory import PlanFactory
 from src.infra.db._session import run_in_session
 
-_CLAIMABLE_PHASES = tuple(sorted(p.value for p in WORKER_CLAIMABLE_PHASES))
-
 _UPSERT_SQL = text(
     """
     INSERT INTO plans
-        (id, version, phase, iteration, data, retry_not_before, paused,
-         created_at, updated_at)
-    VALUES (:id, :version, :phase, :iteration, :data, :retry_not_before, :paused,
-            :now, :now)
+        (id, project_id, version, status, phase, iteration, data,
+         retry_not_before, paused, pause_requested, created_at, updated_at)
+    VALUES
+        (:id, :project_id, :version, :status, :phase, :iteration, :data,
+         :retry_not_before, :paused, :pause_requested, :now, :now)
     ON CONFLICT(id) DO UPDATE SET
-        version   = excluded.version,
-        phase     = excluded.phase,
+        project_id = excluded.project_id,
+        version = excluded.version,
+        status = excluded.status,
+        phase = excluded.phase,
         iteration = excluded.iteration,
-        data      = excluded.data,
+        data = excluded.data,
         retry_not_before = excluded.retry_not_before,
-        paused    = excluded.paused,
+        paused = excluded.paused,
+        pause_requested = excluded.pause_requested,
         updated_at = excluded.updated_at
     WHERE plans.version < excluded.version
     """
 )
 
 _CLAIM_SQL = text(
-    f"""
+    """
     UPDATE plans
     SET claimed_by = :worker_id,
         claimed_at = :now_epoch,
@@ -68,10 +48,12 @@ _CLAIM_SQL = text(
         lease_seconds = :lease_seconds
     WHERE id = (
         SELECT id FROM plans
-        WHERE phase IN {_CLAIMABLE_PHASES!r}
+        WHERE status = 'running'
+          AND project_id IS NOT NULL
           AND (claimed_by IS NULL OR lease_expires_at < :now_epoch)
           AND (retry_not_before IS NULL OR retry_not_before < :now_epoch)
           AND paused = 0
+          AND pause_requested = 0
         ORDER BY updated_at
         LIMIT 1
     )
@@ -103,7 +85,6 @@ class SqlitePlanRepository:
         self._clock = clock
         self._session: Session | None = None
 
-    # --- UnitOfWork binding ---
     def bind(self, session: Session) -> None:
         self._session = session
 
@@ -117,7 +98,6 @@ class SqlitePlanRepository:
             )
         return self._session
 
-    # --- persistence (inside the UoW transaction) ---
     def get(self, plan_id: str) -> Plan:
         row = self._bound().execute(
             text("SELECT data FROM plans WHERE id = :id"), {"id": plan_id}
@@ -132,7 +112,9 @@ class SqlitePlanRepository:
             _UPSERT_SQL,
             {
                 "id": plan.id,
+                "project_id": plan.project_id,
                 "version": plan.version,
+                "status": plan.status.value,
                 "phase": plan.phase.value,
                 "iteration": plan.iteration,
                 "data": plan.model_dump_json(),
@@ -141,7 +123,8 @@ class SqlitePlanRepository:
                     if plan.planning_retry_not_before is not None
                     else None
                 ),
-                "paused": 1 if plan.paused else 0,
+                "paused": int(plan.paused),
+                "pause_requested": int(plan.pause_requested),
                 "now": self._clock.now().isoformat(),
             },
         )
@@ -151,7 +134,13 @@ class SqlitePlanRepository:
             ).scalar_one()
             raise StaleVersionError(plan.id, plan.version, int(stored))
 
-    # --- create idempotency (inside the UoW transaction) ---
+    def find_by_project_id(self, project_id: str) -> str | None:
+        row = self._bound().execute(
+            text("SELECT id FROM plans WHERE project_id = :project_id"),
+            {"project_id": project_id},
+        ).one_or_none()
+        return None if row is None else str(row[0])
+
     def find_by_request_id(self, request_id: str) -> str | None:
         row = self._bound().execute(
             text("SELECT plan_id FROM plan_requests WHERE request_id = :rid"),
@@ -168,11 +157,10 @@ class SqlitePlanRepository:
             {"rid": request_id, "pid": plan_id},
         )
 
-    # --- lease (own short transactions; called OUTSIDE the UoW) ---
     def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None:
         now_epoch = int(self._clock.now().timestamp())
 
-        def _claim(session: Session) -> str | None:
+        def claim(session: Session) -> str | None:
             row = session.execute(
                 _CLAIM_SQL,
                 {
@@ -184,16 +172,14 @@ class SqlitePlanRepository:
             ).one_or_none()
             return None if row is None else str(row[0])
 
-        data = run_in_session(self._session_factory, _claim)
-        if data is None:
-            return None
-        return PlanFactory.reconstruct(json.loads(data))
+        data = run_in_session(self._session_factory, claim)
+        return None if data is None else PlanFactory.reconstruct(json.loads(data))
 
     def heartbeat(self, plan_id: str, worker_id: str) -> None:
         now_epoch = int(self._clock.now().timestamp())
         run_in_session(
             self._session_factory,
-            lambda s: s.execute(
+            lambda session: session.execute(
                 _HEARTBEAT_SQL,
                 {"plan_id": plan_id, "worker_id": worker_id, "now_epoch": now_epoch},
             ),
@@ -202,30 +188,32 @@ class SqlitePlanRepository:
     def release(self, plan_id: str, worker_id: str) -> None:
         run_in_session(
             self._session_factory,
-            lambda s: s.execute(
+            lambda session: session.execute(
                 _RELEASE_SQL, {"plan_id": plan_id, "worker_id": worker_id}
             ),
         )
 
-    # --- read-side extras (not part of the PlanRepository port) ---
     def list_summaries(self) -> list[dict[str, object]]:
-        """Cheap listing off the promoted columns — no document parsing."""
         with self._session_factory() as session:
             rows = session.execute(
                 text(
-                    "SELECT id, phase, iteration, version, claimed_by, updated_at,"
-                    " paused FROM plans ORDER BY updated_at DESC"
+                    "SELECT id, project_id, status, phase, iteration, version, "
+                    "claimed_by, updated_at, paused, pause_requested "
+                    "FROM plans ORDER BY updated_at DESC"
                 )
             ).all()
         return [
             {
-                "id": r[0],
-                "phase": r[1],
-                "iteration": r[2],
-                "version": r[3],
-                "claimed_by": r[4],
-                "updated_at": r[5],
-                "paused": bool(r[6]),
+                "id": row[0],
+                "project_id": row[1],
+                "status": row[2],
+                "phase": row[3],
+                "iteration": row[4],
+                "version": row[5],
+                "claimed_by": row[6],
+                "updated_at": row[7],
+                "paused": bool(row[8]),
+                "pause_requested": bool(row[9]),
             }
-            for r in rows
+            for row in rows
         ]

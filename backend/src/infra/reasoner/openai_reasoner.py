@@ -17,25 +17,39 @@ Implements the two-method domain port on the runtime package's agent loop:
 Handlers RE-VALIDATE everything (provider schema enforcement is never
 trusted) and build the domain objects with new_id() and position=index.
 """
+
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 import structlog
 
+from src.app.observations import (
+    ModelUsagePayload,
+    ObservationCorrelation,
+    ObservationKind,
+    ObservationQuality,
+    ObservationRepository,
+    ObservationSource,
+    TelemetryObservation,
+)
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
+from src.domain.entities.execution_contracts import (
+    GoalContract,
+    VerificationStrategy,
+)
+from src.domain.entities.planning_artifacts import GoalOutline
 from src.domain.entities.task import Task
-from src.domain.events.agent_events import AgentEvent
 from src.domain.factories.identity import new_id
 from src.domain.ports.reasoner_port import (
     ChatMessage,
     ConversationMode,
     ReasonerReply,
 )
-from src.domain.ports.telemetry_port import AgentEventSink
 from src.infra.reasoner.runtime.agent_loop import SessionResult, run_tool_session
 from src.infra.reasoner.runtime.llm_client import LLMClient
 from src.infra.reasoner.runtime.prompts import (
@@ -45,6 +59,11 @@ from src.infra.reasoner.runtime.prompts import (
     build_replanning_prompt,
 )
 from src.infra.reasoner.runtime.tools import ToolSpec
+from src.infra.reasoner.runtime.tool_profiles import (
+    ArtifactCollector,
+    ReasoningPurpose,
+    build_tool_profile,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -98,10 +117,110 @@ SUBMIT_GOALS_SCHEMA: dict[str, Any] = {
 
 SUBMIT_TASKS_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {
-        "tasks": {"type": "array", "minItems": 1, "items": _TASK_ITEM_SCHEMA}
-    },
+    "properties": {"tasks": {"type": "array", "minItems": 1, "items": _TASK_ITEM_SCHEMA}},
     "required": ["tasks"],
+}
+
+SUBMIT_CYCLE_DRAFT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "goals": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "name": {"type": "string"},
+                    "objective": {"type": "string"},
+                    "position": {"type": "integer", "minimum": 0},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["key", "name", "objective", "position", "depends_on"],
+            },
+        }
+    },
+    "required": ["goals"],
+}
+
+_CRITERION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "description": {"type": "string"},
+    },
+    "required": ["id", "description"],
+}
+
+SUBMIT_GOAL_CONTRACT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "objective": {"type": "string"},
+        "acceptance_criteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": _CRITERION_SCHEMA,
+        },
+        "tasks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "objective": {"type": "string"},
+                    "acceptance_criteria": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": _CRITERION_SCHEMA,
+                    },
+                    "goal_criterion_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string"},
+                    },
+                    "allowed_scope": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string"},
+                    },
+                    "forbidden_scope": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "verification_commands": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string"},
+                    },
+                    "verification_strategy": {
+                        "type": "string",
+                        "enum": [item.value for item in VerificationStrategy],
+                    },
+                    "required_capabilities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "objective",
+                    "acceptance_criteria",
+                    "goal_criterion_ids",
+                    "allowed_scope",
+                    "verification_commands",
+                    "verification_strategy",
+                ],
+            },
+        },
+        "cross_task_integration_criterion_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "required_capabilities": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": ["objective", "acceptance_criteria", "tasks"],
 }
 
 
@@ -161,41 +280,68 @@ class OpenAIReasoner:
         *,
         converse_max_turns: int = 8,
         enrich_max_turns: int = 4,
-        event_sink: AgentEventSink | None = None,
+        observation_repository: ObservationRepository | None = None,
+        provider: str | None = None,
     ) -> None:
         self._client = client
         self._default_caps = list(capabilities or [])
         self._converse_max_turns = converse_max_turns
         self._enrich_max_turns = enrich_max_turns
-        self._event_sink = event_sink
+        self._observation_repository = observation_repository
+        self._provider = provider
 
-    async def _emit_usage(
-        self, plan: Plan, mode: str, result: SessionResult
-    ) -> None:
-        """Best-effort plan-scoped telemetry: one llm.call row per session with
-        the summed token usage (decision #33 — rides the agent_events stream, no
-        third store). Never raises: a telemetry miss must not fail planning."""
-        if self._event_sink is None:
+    async def _emit_usage(self, plan: Plan, mode: str, result: SessionResult) -> None:
+        """Persist provider usage without fabricating absent token counts.
+
+        Observation failure is isolated from planning: passive telemetry can be
+        lost, but it cannot change a domain transition or reasoner result.
+        """
+        if self._observation_repository is None:
             return
-        payload = {
-            "mode": mode,
-            "phase": plan.phase.value,
-            "model": getattr(self._client, "model", ""),
-            "turns": str(result.turns),
-            "llm_calls": str(result.llm_calls),
-        }
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            payload[key] = str(result.usage.get(key, 0))
-        await self._event_sink.emit(
-            AgentEvent(
-                plan_id=plan.id,
-                task_id=None,
-                attempt=0,
-                seq=0,
-                type="llm.call",
-                payload=payload,
+        input_tokens = result.usage.get("prompt_tokens")
+        output_tokens = result.usage.get("completion_tokens")
+        reasoning_tokens = result.usage.get("reasoning_tokens")
+        cached_tokens = result.usage.get("cached_tokens")
+        total_tokens = result.usage.get("total_tokens")
+        reported = any(
+            value is not None
+            for value in (
+                input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                cached_tokens,
+                total_tokens,
             )
         )
+        observation = TelemetryObservation(
+            correlation=ObservationCorrelation(plan_id=plan.id),
+            observed_at=datetime.now(timezone.utc),
+            source=ObservationSource.PROVIDER,
+            quality=(ObservationQuality.REPORTED if reported else ObservationQuality.UNAVAILABLE),
+            kind=ObservationKind.MODEL_USAGE,
+            payload=ModelUsagePayload(
+                model_request_count=result.llm_calls,
+                turn_count=result.turns,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                reasoning_tokens=reasoning_tokens,
+                cached_tokens=cached_tokens,
+                total_tokens=total_tokens,
+                model=getattr(self._client, "model", None),
+                provider=self._provider,
+                context=mode,
+                phase=plan.phase.value,
+                unavailable_reason=(None if reported else "provider_did_not_report_usage"),
+            ),
+        )
+        try:
+            await self._observation_repository.append(observation)
+        except Exception:
+            log.warning(
+                "reasoner.usage_observation_failed",
+                observation_id=observation.observation_id,
+                exc_info=True,
+            )
 
     # ---- converse -------------------------------------------------------
     async def converse(
@@ -206,9 +352,7 @@ class OpenAIReasoner:
         mode: ConversationMode,
     ) -> ReasonerReply:
         prompt = (
-            build_discovery_prompt(plan)
-            if mode == "discovery"
-            else build_replanning_prompt(plan)
+            build_discovery_prompt(plan) if mode == "discovery" else build_replanning_prompt(plan)
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -242,11 +386,7 @@ class OpenAIReasoner:
                     errors.append(f"{where}: 'tasks' must be an array when present")
                     continue
                 for ti, task_raw in enumerate(tasks_raw):
-                    errors.extend(
-                        _validate_task_item(
-                            task_raw, f"{where}.tasks[{ti}]", known_caps
-                        )
-                    )
+                    errors.extend(_validate_task_item(task_raw, f"{where}.tasks[{ti}]", known_caps))
             if errors and _only_capability_errors(errors):
                 state["rejections"] += 1
                 if state["rejections"] <= MAX_CAPABILITY_REJECTIONS:
@@ -280,14 +420,10 @@ class OpenAIReasoner:
             return ReasonerReply(message=result.text, goals=None)
 
         goals = self._build_goals(result.submit_args, known_caps)
-        reply_text = result.text or (
-            f"Committing {len(goals)} goal(s) to the roadmap."
-        )
+        reply_text = result.text or (f"Committing {len(goals)} goal(s) to the roadmap.")
         return ReasonerReply(message=reply_text, goals=goals)
 
-    def _build_goals(
-        self, args: dict[str, Any], known_caps: set[str]
-    ) -> list[Goal]:
+    def _build_goals(self, args: dict[str, Any], known_caps: set[str]) -> list[Goal]:
         goals: list[Goal] = []
         for gi, goal_raw in enumerate(args["goals"]):
             tasks = [
@@ -327,9 +463,7 @@ class OpenAIReasoner:
                 return _rejected(["'tasks' must be a non-empty array"])
             errors: list[str] = []
             for ti, task_raw in enumerate(tasks_raw):
-                errors.extend(
-                    _validate_task_item(task_raw, f"tasks[{ti}]", known_caps)
-                )
+                errors.extend(_validate_task_item(task_raw, f"tasks[{ti}]", known_caps))
             if errors and _only_capability_errors(errors):
                 state["rejections"] += 1
                 if state["rejections"] <= MAX_CAPABILITY_REJECTIONS:
@@ -342,8 +476,7 @@ class OpenAIReasoner:
         submit_tasks = ToolSpec(
             name="submit_tasks",
             description=(
-                f"Submit the ordered task breakdown for goal '{goal.name}'. "
-                "Call exactly once."
+                f"Submit the ordered task breakdown for goal '{goal.name}'. Call exactly once."
             ),
             input_schema=SUBMIT_TASKS_SCHEMA,
             handler=handle_submit_tasks,
@@ -363,6 +496,118 @@ class OpenAIReasoner:
             for ti, task_raw in enumerate(result.submit_args["tasks"])
             if isinstance(task_raw, dict)
         ]
+
+    async def architect_cycle(self, plan: Plan) -> list[GoalOutline]:
+        proposal = plan.intent_proposal
+        if proposal is None or proposal.approved_at is None:
+            raise ValueError("approved intent is required for cycle architecture")
+        collector = ArtifactCollector()
+        readers = {
+            "read_project_spec": lambda: json.dumps({"project_id": plan.project_id}),
+            "read_project_plan": lambda: plan.model_dump_json(),
+            "read_repository_context": lambda: json.dumps(
+                {"availability": "adapter_context_only"}
+            ),
+            "read_approved_intent": lambda: proposal.model_dump_json(),
+            "read_prior_evidence": lambda: json.dumps(
+                [cycle.evidence_refs for cycle in plan.cycles]
+            ),
+        }
+        tools = build_tool_profile(
+            ReasoningPurpose.CYCLE_ARCHITECTURE,
+            readers,
+            SUBMIT_CYCLE_DRAFT_SCHEMA,
+            collector.submit,
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Generate one ordered CycleDraft for the approved intent. "
+                    "Use stable local goal keys and only real dependency keys; "
+                    "strict execution order is represented by position, not fake edges. "
+                    "Submit it with submit_cycle_draft."
+                ),
+            },
+        ]
+        result = await run_tool_session(
+            self._client,
+            messages,
+            tools,
+            max_turns=self._converse_max_turns,
+            allow_plain_reply=False,
+        )
+        await self._emit_usage(plan, "cycle_architecture", result)
+        value = collector.value or result.submit_args
+        goals = [GoalOutline.model_validate(item) for item in value.get("goals", [])]
+        # Reuse CycleDraft's validator at the application boundary; the adapter
+        # returns only candidate DTOs and cannot activate anything.
+        return goals
+
+    async def enrich_goal_contract(
+        self,
+        plan: Plan,
+        goal: Goal,
+        capabilities: Sequence[Capability],
+    ) -> GoalContract:
+        proposal = next(
+            (
+                cycle
+                for cycle in plan.cycles
+                if cycle.status.value == "active"
+            ),
+            None,
+        )
+        collector = ArtifactCollector()
+        readers = {
+            "read_project_spec": lambda: json.dumps({"project_id": plan.project_id}),
+            "read_project_plan": lambda: plan.model_dump_json(),
+            "read_repository_context": lambda: json.dumps(
+                {"availability": "adapter_context_only"}
+            ),
+            "read_approved_intent": lambda: json.dumps(
+                {"intent_proposal_id": proposal.intent_proposal_id if proposal else None}
+            ),
+            "read_active_goal": lambda: goal.model_dump_json(),
+            "read_prior_evidence": lambda: json.dumps(
+                proposal.evidence_refs if proposal else []
+            ),
+        }
+        tools = build_tool_profile(
+            ReasoningPurpose.GOAL_ENRICHMENT,
+            readers,
+            SUBMIT_GOAL_CONTRACT_SCHEMA,
+            collector.submit,
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Freeze a complete GoalContract for the active goal. Every goal "
+                    "criterion must map to atomic ordered tasks. Use TDD for new "
+                    "behavior, characterization for preserving behavior, and "
+                    "executable_check where RED is meaningless. Submit exactly once."
+                ),
+            },
+        ]
+        result = await run_tool_session(
+            self._client,
+            messages,
+            tools,
+            max_turns=self._enrich_max_turns,
+            allow_plain_reply=False,
+        )
+        await self._emit_usage(plan, "goal_enrichment", result)
+        value = dict(collector.value or result.submit_args)
+        value["id"] = goal.id
+        value["frozen_at"] = datetime.min.replace(tzinfo=timezone.utc)
+        for position, task in enumerate(value.get("tasks", [])):
+            task["id"] = new_id()
+            task["position"] = position
+            task["revision"] = 1
+        return GoalContract.model_validate(value)
 
 
 def _only_capability_errors(errors: list[str]) -> bool:

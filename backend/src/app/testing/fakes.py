@@ -9,10 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from src.domain.aggregates.planner_orchestrator import (
-    Plan,
-    WORKER_CLAIMABLE_PHASES,
-)
+from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
 from src.domain.entities.task import Task
@@ -24,6 +21,7 @@ from src.domain.events.base import DomainEvent
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
 
+from src.app.testing.execution_records import InMemoryExecutionRecordRepository
 from src.app.ports import (
     AgentEventSink,
     ChatMessage,
@@ -86,6 +84,12 @@ class InMemoryPlanRepository:
             raise StaleVersionError(plan.id, plan.version, current.version)
         self._store[plan.id] = plan.model_copy(deep=True)
 
+    def find_by_project_id(self, project_id: str) -> str | None:
+        matches = [plan.id for plan in self._store.values() if plan.project_id == project_id]
+        if len(matches) > 1:
+            raise RuntimeError("multiple plans bound to one project")
+        return matches[0] if matches else None
+
     # --- request_id idempotency ---
     def find_by_request_id(self, request_id: str) -> str | None:
         return self._requests.get(request_id)
@@ -97,15 +101,12 @@ class InMemoryPlanRepository:
     def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None:
         now = self._clock.now()
         for plan in self._store.values():
-            if plan.phase not in WORKER_CLAIMABLE_PHASES:
-                continue  # gates + conversational phases are invisible to workers
-            if (
-                plan.planning_retry_not_before is not None
-                and plan.planning_retry_not_before > now
-            ):
+            if plan.status.value != "running" or plan.project_id is None:
+                continue
+            if plan.planning_retry_not_before is not None and plan.planning_retry_not_before > now:
                 continue  # planning-phase backoff gate armed: not yet claimable
-            if plan.paused:
-                continue  # human pause gate armed: not claimable
+            if plan.paused or plan.pause_requested:
+                continue
             claim = self._claims.get(plan.id)
             if claim is not None and claim.expires_at > now:
                 continue  # live lease (even our own): not claimable
@@ -120,9 +121,7 @@ class InMemoryPlanRepository:
     def heartbeat(self, plan_id: str, worker_id: str) -> None:
         claim = self._claims.get(plan_id)
         if claim is not None and claim.worker_id == worker_id:
-            claim.expires_at = self._clock.now() + timedelta(
-                seconds=claim.lease_seconds
-            )
+            claim.expires_at = self._clock.now() + timedelta(seconds=claim.lease_seconds)
 
     def release(self, plan_id: str, worker_id: str) -> None:
         claim = self._claims.get(plan_id)
@@ -152,18 +151,27 @@ class InMemoryOutbox:
 
 # ---- in-memory unit of work (transaction boundary) ----
 class InMemoryUnitOfWork:
-    def __init__(self, repo: InMemoryPlanRepository, outbox: InMemoryOutbox) -> None:
+    def __init__(
+        self,
+        repo: InMemoryPlanRepository,
+        outbox: InMemoryOutbox,
+        executions: InMemoryExecutionRecordRepository | None = None,
+    ) -> None:
         self.plans = repo
         self.outbox = outbox
+        self.executions = executions or InMemoryExecutionRecordRepository()
 
     def __enter__(self) -> "InMemoryUnitOfWork":
+        self.executions._begin()
         return self
 
     def __exit__(self, *exc: object) -> None:
         if exc[0] is None:
-            self.outbox._commit()  # state + events commit together
+            self.executions._commit()
+            self.outbox._commit()  # state + execution identity + events commit
         else:
-            self.outbox._rollback()  # rollback discards staged events
+            self.executions._rollback()
+            self.outbox._rollback()  # rollback discards staged records/events
 
 
 # ---- in-memory chat store (conversation history) ----
@@ -226,15 +234,37 @@ class InMemoryCapabilityRepository:
 @dataclass
 class _Handle:
     path: str = "/tmp/shared"
+    base_ref: str | None = None
 
 
 class NoOpWorkspace:
     def __init__(self) -> None:
+        self.begun: list[tuple[str, str, int]] = []
         self.committed: list[str] = []
         self.discarded: list[str] = []
 
-    async def begin(self, plan_id: str, task_id: str, attempt: int) -> _Handle:
+    async def begin(
+        self,
+        plan_id: str,
+        task_id: str,
+        attempt: int,
+        *,
+        cycle_id: str | None = None,
+        goal_id: str | None = None,
+        run_id: str | None = None,
+        base_ref: str | None = None,
+    ) -> _Handle:
+        self.begun.append((plan_id, task_id, attempt))
         return _Handle()
+
+    async def snapshot(self, handle: _Handle) -> str:
+        return "noop-snapshot"
+
+    async def checkpoint(self, handle: _Handle) -> str:
+        return "noop-checkpoint"
+
+    async def merge_goal(self, plan_id: str, cycle_id: str, goal_id: str) -> str:
+        return "noop-goal-merge"
 
     async def commit(self, handle: _Handle) -> None:
         self.committed.append(handle.path)
@@ -274,6 +304,7 @@ class DummyAgentRunner:
     def __init__(self, script: dict[str, DummyBehavior] | None = None) -> None:
         self.script = script or {}
         self.calls: dict[str, int] = {}
+        self.idempotency_keys: list[str] = []
 
     async def run(
         self,
@@ -285,6 +316,7 @@ class DummyAgentRunner:
         workspace: WorkspaceHandle,
     ) -> TaskResult:
         self.calls[task.id] = self.calls.get(task.id, 0) + 1
+        self.idempotency_keys.append(idempotency_key)
         b = self.script.get(task.id, DummyBehavior())
 
         for i in range(b.emit_events):
@@ -311,6 +343,7 @@ __all__ = [
     "FakeClock",
     "InMemoryPlanRepository",
     "InMemoryOutbox",
+    "InMemoryExecutionRecordRepository",
     "InMemoryUnitOfWork",
     "InMemoryAgentRepository",
     "InMemoryCapabilityRepository",

@@ -38,7 +38,7 @@ def test_one_real_converse_turn():
     reasoner = OpenAIReasoner(
         client, [Capability(id="backend", name="Backend", description="")]
     )
-    plan = Plan(id="smoke", brief="a tiny hello-world API", phase=PlanPhase.DISCOVERY)
+    plan = Plan(project_id="project-1", id="smoke", brief="a tiny hello-world API", phase=PlanPhase.DISCOVERY)
 
     reply = asyncio.run(
         reasoner.converse(

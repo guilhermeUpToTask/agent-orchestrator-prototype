@@ -113,12 +113,432 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Plans-Get Plan"
+                  "$ref": "#/components/schemas/PlanDetailResponse"
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/intent": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Propose Intent Route",
+        "operationId": "plans-propose_intent_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentProposalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plans-Propose Intent Route"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Revise Intent Route",
+        "operationId": "plans-revise_intent_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentProposalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plans-Revise Intent Route"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Cancel Intent Route",
+        "operationId": "plans-cancel_intent_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/intent/approve": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Approve Intent Route",
+        "operationId": "plans-approve_intent_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/cycle-draft": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Submit Cycle Draft Route",
+        "operationId": "plans-submit_cycle_draft_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CycleDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plans-Submit Cycle Draft Route"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Revise Cycle Draft Route",
+        "operationId": "plans-revise_cycle_draft_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CycleDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plans-Revise Cycle Draft Route"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Cancel Cycle Draft Route",
+        "operationId": "plans-cancel_cycle_draft_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/cycle-draft/approve": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Activate Cycle Route",
+        "operationId": "plans-activate_cycle_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plans-Activate Cycle Route"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/publication": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Publish Cycle Route",
+        "operationId": "plans-publish_cycle_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -250,6 +670,52 @@
             }
           }
         ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/retry": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Retry Blocked Task",
+        "description": "Retry only the selected failed task; resume remains a separate command.",
+        "operationId": "plans-retry_blocked_task",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryTaskRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -2744,6 +3210,44 @@
   },
   "components": {
     "schemas": {
+      "ActiveRunResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "attempt_number": {
+            "type": "integer",
+            "title": "Attempt Number"
+          },
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "attempt_id",
+          "attempt_number",
+          "goal_id",
+          "task_id",
+          "started_at"
+        ],
+        "title": "ActiveRunResponse"
+      },
       "AgentBody": {
         "properties": {
           "name": {
@@ -2780,7 +3284,8 @@
               "max_backoff_seconds": 60.0,
               "non_retryable_kinds": [
                 "auth_error",
-                "token_limit"
+                "token_limit",
+                "verification_error"
               ]
             }
           },
@@ -3064,13 +3569,45 @@
           "brief": {
             "type": "string",
             "title": "Brief"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
           }
         },
         "type": "object",
         "required": [
-          "brief"
+          "brief",
+          "project_id"
         ],
         "title": "CreatePlanRequest"
+      },
+      "CycleDraftRequest": {
+        "properties": {
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/GoalOutline"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "unfinished_source_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfinished Source Treatment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goals"
+        ],
+        "title": "CycleDraftRequest"
       },
       "DefaultAgentResponse": {
         "properties": {
@@ -3225,10 +3762,46 @@
           "token_limit",
           "auth_error",
           "timeout",
-          "tool_error"
+          "tool_error",
+          "verification_error"
         ],
         "title": "FailureKind",
         "description": "Typed classification of a task failure. Produced by the agent runner,\nconsumed by RetryPolicy.should_retry \u2014 a checked classification, not string\nmatching (DESIGN_NOTES #2)."
+      },
+      "GoalOutline": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Depends On"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "objective",
+          "position"
+        ],
+        "title": "GoalOutline"
       },
       "HTTPValidationError": {
         "properties": {
@@ -3283,6 +3856,58 @@
           "name"
         ],
         "title": "IAModel"
+      },
+      "IntentProposalRequest": {
+        "properties": {
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope",
+            "default": []
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Constraints",
+            "default": []
+          },
+          "exclusions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Exclusions",
+            "default": []
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProposalKind",
+            "default": "initial"
+          },
+          "planner_session_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planner Session Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "objective"
+        ],
+        "title": "IntentProposalRequest"
       },
       "LlmMetrics": {
         "properties": {
@@ -3445,6 +4070,16 @@
         ],
         "title": "NewTaskBody"
       },
+      "OutputDisposition": {
+        "type": "string",
+        "enum": [
+          "open_pr",
+          "merge",
+          "retain_branch",
+          "discard"
+        ],
+        "title": "OutputDisposition"
+      },
       "PauseRequest": {
         "properties": {
           "reason": {
@@ -3474,6 +4109,259 @@
           "plan_id"
         ],
         "title": "PlanCreatedResponse"
+      },
+      "PlanDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "brief": {
+            "type": "string",
+            "title": "Brief"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_reason": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Status Reason"
+          },
+          "activity": {
+            "type": "string",
+            "title": "Activity"
+          },
+          "current_goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Goal Id"
+          },
+          "current_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Task Id"
+          },
+          "tdd_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdd Stage"
+          },
+          "legal_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Legal Actions"
+          },
+          "pause_requested": {
+            "type": "boolean",
+            "title": "Pause Requested"
+          },
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "active_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_cycle": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Cycle"
+          },
+          "pending_gate": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Gate"
+          },
+          "block": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block"
+          },
+          "goals": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "cycles": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Cycles"
+          },
+          "intent_proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Proposal"
+          },
+          "cycle_draft": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cycle Draft"
+          },
+          "legacy_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Phase"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "iteration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "brief",
+          "version",
+          "status",
+          "status_reason",
+          "activity",
+          "current_goal_id",
+          "current_task_id",
+          "tdd_stage",
+          "legal_actions",
+          "pause_requested",
+          "paused",
+          "paused_reason",
+          "active_run",
+          "active_cycle",
+          "pending_gate",
+          "block",
+          "goals",
+          "cycles",
+          "intent_proposal",
+          "cycle_draft"
+        ],
+        "title": "PlanDetailResponse"
       },
       "ProjectBody": {
         "properties": {
@@ -3529,6 +4417,14 @@
         ],
         "title": "ProjectDefinition"
       },
+      "ProposalKind": {
+        "type": "string",
+        "enum": [
+          "initial",
+          "replan"
+        ],
+        "title": "ProposalKind"
+      },
       "ProviderCreateBody": {
         "properties": {
           "name": {
@@ -3580,6 +4476,39 @@
           "base_url"
         ],
         "title": "ProviderUpdateBody"
+      },
+      "PublicationRequest": {
+        "properties": {
+          "gate_id": {
+            "type": "string",
+            "title": "Gate Id"
+          },
+          "subject_revision": {
+            "type": "integer",
+            "title": "Subject Revision"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/OutputDisposition"
+          },
+          "output_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gate_id",
+          "subject_revision",
+          "disposition"
+        ],
+        "title": "PublicationRequest"
       },
       "ReasonerStatusResponse": {
         "properties": {
@@ -3685,13 +4614,50 @@
             "title": "Non Retryable Kinds",
             "default": [
               "auth_error",
-              "token_limit"
+              "token_limit",
+              "verification_error"
             ]
           }
         },
         "type": "object",
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
+      },
+      "RetryTaskRequest": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "task_id"
+        ],
+        "title": "RetryTaskRequest"
+      },
+      "ReviewDecisionRequest": {
+        "properties": {
+          "gate_id": {
+            "type": "string",
+            "title": "Gate Id"
+          },
+          "subject_revision": {
+            "type": "integer",
+            "title": "Subject Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gate_id",
+          "subject_revision"
+        ],
+        "title": "ReviewDecisionRequest"
       },
       "RunnerAgentStatus": {
         "properties": {

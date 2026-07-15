@@ -18,7 +18,10 @@ never selected, so it never churns.
 This function is transport-agnostic: the real worker entrypoint wraps it with the
 actual sleep/claim cadence; tests drive it directly.
 """
+
 from __future__ import annotations
+
+import asyncio
 
 from src.app.handlers.base import PhaseHandler
 from src.app.ports import (
@@ -27,9 +30,38 @@ from src.app.ports import (
     Clock,
     UnitOfWork,
     Workspace,
+    VerificationExecutor,
 )
 from src.app.use_cases.advance_plan import advance_plan
+from collections.abc import Awaitable
+
 from src.domain.repositories.agent_repo import AgentRepository
+
+
+async def _advance_with_heartbeats(
+    plan_id: str,
+    worker_id: str,
+    lease_seconds: int,
+    heartbeat_interval_seconds: float,
+    uow: UnitOfWork,
+    advance: Awaitable[str],
+) -> str:
+    """Renew the plan lease while one atomic action is still running."""
+    task = asyncio.ensure_future(advance)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=heartbeat_interval_seconds)
+            if task in done:
+                return await task
+            uow.plans.heartbeat(plan_id, worker_id)
+    except BaseException:
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        raise
 
 
 async def drive_plan(
@@ -43,6 +75,9 @@ async def drive_plan(
     worker_id: str,
     max_steps: int = 10_000,
     planning_handler: PhaseHandler | None = None,
+    lease_seconds: int = 60,
+    heartbeat_interval_seconds: float | None = None,
+    verifier: VerificationExecutor | None = None,
 ) -> tuple[str, int]:
     """Advance one plan until it stops making progress. Returns (terminal signal,
     units advanced) — the signal is 'paused' | 'not_ready' | 'done' | 'failed';
@@ -51,13 +86,32 @@ async def drive_plan(
     'not_ready' means the plan has work but everything is backing off — the worker
     releases it and a later tick re-checks (the durable retry gate decides when)."""
     signal = "continue"
+    heartbeat_interval_seconds = (
+        max(1.0, lease_seconds / 3)
+        if heartbeat_interval_seconds is None
+        else heartbeat_interval_seconds
+    )
     progressed = 0
     while signal == "continue" and progressed < max_steps:
-        signal = await advance_plan(
-            plan_id, uow, runner, agents, workspace, event_sink, clock,
-            planning_handler,
+        signal = await _advance_with_heartbeats(
+            plan_id,
+            worker_id,
+            lease_seconds,
+            heartbeat_interval_seconds,
+            uow,
+            advance_plan(
+                plan_id,
+                uow,
+                runner,
+                agents,
+                workspace,
+                event_sink,
+                clock,
+                planning_handler,
+                verifier,
+            ),
         )
-        uow.plans.heartbeat(plan_id, worker_id)   # renew lease while alive
+        uow.plans.heartbeat(plan_id, worker_id)
         if signal == "continue":
             progressed += 1
     return signal, progressed
@@ -73,6 +127,7 @@ async def worker_tick(
     worker_id: str,
     lease_seconds: int = 60,
     planning_handler: PhaseHandler | None = None,
+    verifier: VerificationExecutor | None = None,
 ) -> bool:
     """One claim-and-drive cycle. Returns True only if actual work ADVANCED —
     not merely because a plan was claimed. A claim that immediately came back
@@ -84,8 +139,17 @@ async def worker_tick(
         return False
     try:
         signal, progressed = await drive_plan(
-            plan.id, uow, runner, agents, workspace, event_sink, clock, worker_id,
+            plan.id,
+            uow,
+            runner,
+            agents,
+            workspace,
+            event_sink,
+            clock,
+            worker_id,
             planning_handler=planning_handler,
+            verifier=verifier,
+            lease_seconds=lease_seconds,
         )
     finally:
         uow.plans.release(plan.id, worker_id)  # free on pause/done/fail/crash

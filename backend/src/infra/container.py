@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.app.ports import AgentRunner, Clock, Reasoner
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
+from src.infra.db.observation_repository import SqliteObservationRepository
 from src.infra.db.reference_repos import (
     SqliteAgentRepository,
     SqliteCapabilityRepository,
@@ -42,9 +43,13 @@ from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
-from src.infra.git.workspace import GitBranchWorkspace
+from src.infra.git.project_workspace import (
+    ProjectRoutingWorkspace,
+    ProjectWorkspaceResolver,
+)
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
+from src.infra.runtime.verification_executor import LocalVerificationExecutor
 
 
 class AppContainer:
@@ -108,11 +113,12 @@ class AppContainer:
 
     # --- Stage 5: execution adapters ---
     @cached_property
-    def workspace(self) -> GitBranchWorkspace:
-        repo_dir = Path(
-            os.environ.get("PROJECT_REPO_DIR", str(self.orchestrator_home / "workspace-repo"))
-        )
-        return GitBranchWorkspace(repo_dir)
+    def workspace_resolver(self) -> ProjectWorkspaceResolver:
+        return ProjectWorkspaceResolver(self.project_repo, self.orchestrator_home)
+
+    @cached_property
+    def workspace(self) -> ProjectRoutingWorkspace:
+        return ProjectRoutingWorkspace(self.new_unit_of_work, self.workspace_resolver)
 
     @cached_property
     def agent_event_sink(self) -> SqliteAgentEventSink:
@@ -121,6 +127,10 @@ class AppContainer:
     @cached_property
     def agent_event_reader(self) -> SqliteAgentEventReader:
         return SqliteAgentEventReader(self.session_factory)
+
+    @cached_property
+    def observation_repository(self) -> SqliteObservationRepository:
+        return SqliteObservationRepository(self.session_factory, self.clock)
 
     @cached_property
     def chat_store(self) -> SqliteChatRepository:
@@ -141,6 +151,10 @@ class AppContainer:
             lambda: self.secret_store,
         )
 
+    @cached_property
+    def verification_executor(self) -> LocalVerificationExecutor:
+        return LocalVerificationExecutor(self.clock)
+
     # --- Stage 6: the planning reasoner ---
     @cached_property
     def reasoner(self) -> Reasoner:
@@ -154,5 +168,5 @@ class AppContainer:
             self.model_repo,
             lambda: self.secret_store,
             self.capability_repo,
-            self.agent_event_sink,
+            self.observation_repository,
         )

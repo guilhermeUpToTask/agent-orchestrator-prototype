@@ -37,6 +37,7 @@ def make_plan(tasks_per_goal=1, n_goals=1, retry_max=3):
             Goal(id=f"g{gi}", name=f"g{gi}", position=gi, description="", tasks=tasks)
         )
     return Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,

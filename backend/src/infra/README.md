@@ -27,7 +27,9 @@ infra/
 │   │                   (claim_one_unit / heartbeat / release — own short sessions,
 │   │                   called OUTSIDE the UoW by the worker loop).
 │   ├── outbox.py       Staged rows on the UoW's live session (the txn IS the staging).
-│   ├── agent_event_sink.py  Best-effort telemetry writes, INSERT OR IGNORE dedup.
+│   ├── observation_repository.py Typed append-only observations with provenance,
+│   │                   quality, correlation, and conflict-detecting idempotency.
+│   ├── agent_event_sink.py  Legacy best-effort events, marked `legacy_unknown`.
 │   ├── chat_repository.py   Per-plan conversation, own short transactions.
 │   ├── reference_repos.py   Catalog CRUD (agents/capabilities/providers/models/projects)
 │   │                   + ConfigStore. Integrity: delete-guards (ReferencedEntityInUseError),

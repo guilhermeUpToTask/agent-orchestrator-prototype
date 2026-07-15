@@ -9,31 +9,35 @@ Use cases and phase handlers that orchestrate the domain. This layer **decides W
 > transaction and calls `uow.plans.save` / `uow.outbox.add`.
 > The **infrastructure** actually writes to SQLite, behind the ports.
 
-The aggregate never saves itself; the use case never mutates an aggregate field directly (it calls the aggregate's guarded methods). Every write follows one shape: `plan.bump_version()` → `uow.outbox.add(event)` → `uow.plans.save(plan)`, all inside one `with uow:` block.
+The aggregate never saves itself; the use case never mutates an aggregate field directly (it calls the aggregate's guarded methods). Aggregate writes follow one shape: `plan.bump_version()` → `uow.outbox.add(event)` → `uow.plans.save(plan)`, all inside one `with uow:` block. Execution run/attempt records join that transaction; operational observations use an independent append repository and never mutate aggregate state.
 
 ## Folder map
 
 ```
 app/
+├── execution_records.py     Transactional logical-run/invocation identity.
+├── observations.py          Runtime-neutral evidence, provenance, quality, typed payloads.
 ├── ports.py                 App-specific contracts (TaskFailed, Outbox, UnitOfWork,
 │                            ChatStore) + re-exports of the five DOMAIN ports
 │                            (Reasoner, AgentRunner, Workspace, AgentEventSink, Clock)
 │                            so use cases/adapters/tests keep one import path.
-├── handlers/                One concern per phase group (see below):
+├── handlers/                One concern per derived activity group:
 │   ├── base.py              Signal enum + the PhaseHandler protocol
 │   ├── execution_handler.py RUNNING — the pull-scan loop + crash choreography
-│   ├── planning_handler.py  ARCHITECTURE (passthrough) + ENRICHING (JIT)
-│   └── gate_handler.py      the gates — returns PAUSED unconditionally
+│   ├── planning_handler.py  CycleDraft architecture + GoalContract JIT enrichment
+│   └── gate_handler.py      legacy compatibility gates
 ├── use_cases/
-│   ├── advance_plan.py      PlanDispatcher — thin phase→handler router (one unit of work)
+│   ├── advance_plan.py      deterministic status/artifact→handler router
 │   ├── run_worker.py        worker_tick / drive_plan — claim → advance loop → release
-│   ├── create_plan.py       brief → persisted plan; idempotent on request_id
+│   ├── create_plan.py       project-bound long-lived plan; idempotent on request_id
+│   ├── cyclic_planning.py   intent/draft review, activation, publication
 │   ├── conversation.py      discovery_message / replanning_message — the chat-driven
 │   │                        phases (multi-turn with commit)
 │   ├── control.py           the gate commands: approve · finish · replan-from-review
 │   ├── request_replan.py    mid-RUNNING entry to REPLANNING (state machinery only)
 │   └── apply_edit.py        surgical structural edits (≠ request_replan)
-└── testing/fakes.py         in-memory doubles: InMemoryPlanRepository (CAS + lease
+└── testing/                 in-memory execution/observation repositories plus fakes:
+    └── fakes.py             InMemoryPlanRepository (CAS + lease
                              semantics identical to SQLite), DummyAgentRunner
                              (scripted per task id, shared failure taxonomy),
                              InMemoryChatStore, FakeClock — the whole loop runs with
@@ -43,15 +47,12 @@ app/
 
 ## The dispatcher + handlers (advance_plan)
 
-`advance_plan` routes on `plan.phase` and returns a `Signal` to the worker loop — it replaced the old god-function so task execution, planning, and gates can't disturb each other:
-
-| Phase | Handler | Signal behavior |
-|---|---|---|
-| RUNNING | `ExecutionHandler` | CONTINUE per unit; NOT_READY when everything backs off; PAUSED into REVIEW |
-| ARCHITECTURE / ENRICHING | `PlanningHandler` | passthrough / one-goal-JIT, CONTINUE per checkpoint |
-| DISCOVERY / REPLANNING | (never worker-driven) | PAUSED — defensive; the claim predicate hides these |
-| AWAITING_REVIEW / REVIEW | `GateHandler` | PAUSED **unconditionally** (the old conditional check was the verified gate-spin bug) |
-| DONE / FAILED | terminal | DONE / FAILED |
+`advance_plan` first uses root status and open cyclic artifacts. An approved
+intent routes to CycleDraft architecture; an active cycle routes a task-less
+head goal to GoalContract enrichment and otherwise routes to strict-sequential
+execution. Gates, blocks, pauses, and pause requests release the claim. The
+legacy `PlanPhase` table is reached only for compatibility plans with no
+active cycle.
 
 ## The crash-safety choreography (ExecutionHandler)
 

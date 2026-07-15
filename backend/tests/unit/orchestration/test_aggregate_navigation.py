@@ -52,7 +52,7 @@ def goal(gid, pos, tasks, status=Status.PENDING, deps=None):
 
 
 def exec_plan(goals):
-    return Plan(id="p", brief="b", phase=PlanPhase.RUNNING, goals=goals)
+    return Plan(project_id="project-1", id="p", brief="b", phase=PlanPhase.RUNNING, goals=goals)
 
 
 # ===== NAVIGATION: ordering =====
@@ -190,21 +190,20 @@ def test_reopen_discovery_clears_pause_gate():
     assert not p.paused and p.paused_reason is None
 
 
-def test_failed_task_pause_policy_is_recoverable():
-    """Un-freeze #3: a terminal task failure pauses the plan (goal stays open,
-    phase stays RUNNING); resume() is the manual retry — the FAILED task returns
-    to PENDING with a fresh attempt budget."""
+def test_failed_task_pause_policy_requires_targeted_retry():
     p = exec_plan([goal("g1", 0, [task(0)])])
     p.start_task("g1", "t0")
     p.fail_task("g1", "t0", "boom")
     p.pause("task t0 failed")
     assert p.paused and p.phase == PlanPhase.RUNNING
 
-    retried = p.resume()
-    assert retried == ["t0"]
+    absolute_attempt = p.goals[0].tasks[0].attempt
+    p.retry_task("g1", "t0", datetime(2026, 7, 14, tzinfo=timezone.utc))
+    p.resume()
     assert not p.paused and p.paused_reason is None
     t = p.goals[0].tasks[0]
-    assert t.status == Status.PENDING and t.attempt == 0 and t.result is None
+    assert t.status == Status.PENDING
+    assert t.attempt == absolute_attempt and t.cycle_attempt == 0
 
 
 # ===== FULL retry cycle through the aggregate =====
@@ -303,7 +302,7 @@ def test_bind_agents_records_fallbacks():
             ),
         ],
     )
-    p = Plan(id="p", brief="b", goals=[g])
+    p = Plan(project_id="project-1", id="p", brief="b", goals=[g])
     fell_back = p.bind_agents([a], "default")
     assert p.goals[0].tasks[0].agent_id == "a1"
     assert p.goals[0].tasks[1].agent_id == "default"
@@ -312,15 +311,15 @@ def test_bind_agents_records_fallbacks():
 
 # ===== FACTORIES =====
 def test_factory_create_and_birth_invariant():
-    p = PlanFactory.create("build x")
+    p = PlanFactory.create("build x", "project-1")
     assert p.phase == PlanPhase.DISCOVERY and p.version == 0 and p.brief == "build x"
     assert p.iteration == 1
     with pytest.raises(EmptyPlanError):
-        PlanFactory.create("  ")
+        PlanFactory.create("  ", "project-1")
 
 
 def test_factory_reconstruct_roundtrip():
-    p = PlanFactory.create("build x")
+    p = PlanFactory.create("build x", "project-1")
     g = goal("g1", 0, [task(0)])
     p.goals.append(g)
     restored = PlanFactory.reconstruct(p.model_dump())

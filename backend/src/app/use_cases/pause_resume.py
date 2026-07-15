@@ -1,41 +1,57 @@
-"""pause/resume — the human pause gate and the manual retry (un-freeze #3).
+"""Manual availability controls and targeted retry."""
 
-Pause arms Plan.paused, an availability flag on the claim predicate (the same
-durable-gate pattern as the planning backoff): the worker stops claiming the
-plan at the next unit boundary — an in-flight attempt still finalizes — and
-goals/tasks become manually editable while the gate holds. Resume clears the
-gate and requeues failed work (decision #17's manual retry): every FAILED task
-in a non-terminal goal returns to PENDING with a fresh attempt budget.
-
-The auto-pause twin lives in the ExecutionHandler: a terminal task failure
-pauses the plan in the finalize transaction and emits PlanPaused(auto=True).
-"""
 from __future__ import annotations
 
-from src.domain.events.outbox import PlanPaused, PlanResumed
+from src.domain.events.outbox import PauseRequested, PlanPaused, PlanResumed, TaskRetried
 
-from src.app.ports import UnitOfWork
+from src.app.ports import Clock, UnitOfWork
 
 
 def pause_plan(plan_id: str, uow: UnitOfWork, reason: str | None = None) -> None:
-    """Human pause command. Idempotent: pausing an already-paused plan is a
-    no-op (no state bump, no event)."""
     with uow:
         plan = uow.plans.get(plan_id)
-        if plan.paused:
+        if plan.paused or plan.pause_requested:
             return
-        plan.pause(reason)
+        active_action = bool(uow.executions.list_open_attempts(plan_id))
+        plan.request_pause(active_action, reason)
         plan.bump_version()
-        uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=False))
+        if active_action:
+            uow.outbox.add(PauseRequested(plan_id=plan_id, reason=reason))
+        else:
+            uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=False))
         uow.plans.save(plan)
 
 
 def resume_plan(plan_id: str, uow: UnitOfWork) -> None:
-    """Human resume command = the manual retry. Raises InvalidTransitionError
-    (422) when the plan is not paused."""
+    """Remove only the manual pause; retry/backoff state is untouched."""
     with uow:
         plan = uow.plans.get(plan_id)
-        retried = plan.resume()
+        plan.resume()
         plan.bump_version()
-        uow.outbox.add(PlanResumed(plan_id=plan_id, retried_task_ids=retried))
+        uow.outbox.add(PlanResumed(plan_id=plan_id, retried_task_ids=[]))
+        uow.plans.save(plan)
+
+
+def retry_task(
+    plan_id: str,
+    goal_id: str,
+    task_id: str,
+    uow: UnitOfWork,
+    clock: Clock,
+) -> None:
+    """Reset policy budget only for the selected failed task."""
+    with uow:
+        plan = uow.plans.get(plan_id)
+        plan.retry_task(goal_id, task_id, clock.now())
+        plan.bump_version()
+        task = plan._task(plan._goal(goal_id), task_id)
+        uow.outbox.add(
+            TaskRetried(
+                plan_id=plan_id,
+                goal_id=goal_id,
+                task_id=task_id,
+                retry_cycle=task.retry_cycle,
+                next_attempt_number=task.attempt + 1,
+            )
+        )
         uow.plans.save(plan)

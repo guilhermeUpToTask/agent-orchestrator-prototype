@@ -103,7 +103,8 @@ agent-orchestrator/
 │   │   │                   #   ports/ (Reasoner/AgentRunner/Workspace/EventSink/Clock)
 │   │   ├── app/            # Use cases + handlers (Execution/Gate/Planning), ports.py
 │   │   │                   #   (TaskFailed/Outbox/UnitOfWork/ChatStore + domain re-exports),
-│   │   │                   #   run_worker loop, conversation turns, testing/fakes.py
+│   │   │                   #   execution/observation records, run_worker loop,
+│   │   │                   #   conversation turns, transactional testing fakes
 │   │   ├── infra/          # SQLite (UoW/plan repo/outbox/chat/reference/secrets), git
 │   │   │                   #   workspace, CLI agent runners + taxonomy, reasoner/
 │   │   │                   #   (stub + OpenAIReasoner + runtime/ tool loop + factory),
@@ -112,8 +113,8 @@ agent-orchestrator/
 │   │                       #   outbox relay, security, request logging
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
-│   ├── alembic/            # migration chain (0001_core, 0002_reference, 0003_chat,
-│   │                       #   0004_agent_runtime, 0005_plan_backoff, 0006_pause_and_telemetry)
+│   ├── alembic/            # migration chain (0001_core through
+│   │                       #   0008_typed_observations; one linear head)
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
 ├── docs/                   # system documentation:
 │   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,
