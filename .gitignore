@@ -75,6 +75,9 @@ coverage.xml
 # Logs
 *.log
 
+# Local SQLite runtime snapshots
+*.db
+
 # IDEs and editors
 .vscode/
 .idea/
