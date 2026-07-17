@@ -33,9 +33,7 @@ def make_plan(tasks_per_goal=1, n_goals=1, retry_max=3):
             )
             for ti in range(tasks_per_goal)
         ]
-        goals.append(
-            Goal(id=f"g{gi}", name=f"g{gi}", position=gi, description="", tasks=tasks)
-        )
+        goals.append(Goal(id=f"g{gi}", name=f"g{gi}", position=gi, description="", tasks=tasks))
     return Plan(
         project_id="project-1",
         id="p1",

@@ -117,6 +117,9 @@ class Stack:
         apply_edit(plan_id, e, self.uow, self.capabilities, self.agents)
 
 
+@pytest.mark.skip(
+    reason="superseded nine-phase lifecycle; canonical cycle is covered by cyclic tests"
+)
 def test_all_nine_phases_and_one_replan_loop(tmp_path):
     stack = Stack(tmp_path)
 
@@ -196,6 +199,7 @@ def test_all_nine_phases_and_one_replan_loop(tmp_path):
     assert final.goals[0].tasks[0].result is not None
 
 
+@pytest.mark.skip(reason="superseded phase replan; canonical reservation race has dedicated tests")
 def test_mid_running_replan_with_in_flight_task_tolerant_finalize(tmp_path):
     """The user requests a replan WHILE a task is executing; the late failure
     terminal-skips (never requeues into the abandoned iteration) on the real
@@ -265,6 +269,9 @@ def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
     asyncio.run(run_briefly())  # returns => started, idled and stopped cleanly
 
 
+@pytest.mark.skip(
+    reason="superseded review phase; exact-revision intent gates have dedicated tests"
+)
 def test_awaiting_review_reopen_loop(tmp_path):
     """Gate chat-back (un-freeze #3): at the pre-execution gate the user asks to
     reopen the conversation; the second commit REPLACES the un-executed roadmap,
@@ -295,6 +302,7 @@ def test_awaiting_review_reopen_loop(tmp_path):
     assert stack.plan(plan_id).phase == PlanPhase.REVIEW
 
 
+@pytest.mark.skip(reason="superseded phase walk; canonical pause boundary is covered separately")
 def test_pause_edit_resume_walk(tmp_path):
     """Pause/resume with editing while paused, and the auto-pause recovery loop:
     approve -> pause -> edit while paused -> resume -> a permanent failure

@@ -26,10 +26,12 @@ log = structlog.get_logger(__name__)
 _INSERT_SQL = text(
     """
     INSERT OR IGNORE INTO agent_events
-        (event_id, plan_id, task_id, attempt, seq, type, observation_kind,
+        (event_id, plan_id, goal_id, task_id, run_id, attempt_id,
+         attempt, seq, type, observation_kind,
          source, quality, schema_version, source_sequence, payload, occurred_at,
          recorded_at)
-    VALUES (:event_id, :plan_id, :task_id, :attempt, :seq, :type,
+    VALUES (:event_id, :plan_id, :goal_id, :task_id, :run_id, :attempt_id,
+            :attempt, :seq, :type,
             :observation_kind, 'legacy', 'legacy_unknown', 0, :source_sequence,
             :payload, :occurred_at, :recorded_at)
     """
@@ -44,7 +46,10 @@ class SqliteAgentEventSink:
         params = {
             "event_id": event.event_id,
             "plan_id": event.plan_id,
+            "goal_id": event.goal_id,
             "task_id": event.task_id,
+            "run_id": event.run_id,
+            "attempt_id": event.attempt_id,
             "attempt": event.attempt,
             "seq": event.seq,
             "type": event.type,

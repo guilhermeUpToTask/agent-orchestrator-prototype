@@ -11,13 +11,15 @@ from pathlib import Path
 import pytest
 
 from src.app.ports import TaskFailed
+from src.app.runtime_failures import safe_runtime_tail
 from src.app.testing.fakes import CollectingEventSink
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.runtime.cli_runner import CliAgentRunner
-from src.infra.runtime.taxonomy import classify_failure
+from src.infra.runtime.pi_protocol import parse_pi_events
+from src.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 pytestmark = pytest.mark.integration
 
@@ -84,7 +86,12 @@ def test_success_returns_result_and_emits_events(tmp_path):
     result, sink = run(ScriptedCliRunner(cli), tmp_path)
     assert result.status == "success"
     assert "did the work" in result.output
-    assert [e.type for e in sink.events] == ["agent.started", "agent.finished"]
+    assert [e.type for e in sink.events] == [
+        "agent.started",
+        "runtime.output",
+        "agent.finished",
+    ]
+    assert sink.events[1].payload["chunk"] == "did the work"
     assert all(e.task_id == "t1" and e.attempt == 1 for e in sink.events)
 
 
@@ -164,3 +171,33 @@ def test_classifier_terminal_kinds_align_with_retry_policy():
     assert policy.should_retry(1, classify_failure("ECONNRESET"))
     assert policy.should_retry(1, classify_failure("", timed_out=True))
     assert policy.should_retry(1, classify_failure("mystery explosion"))
+
+
+def test_nvidia_resource_exhausted_normalizes_retry_evidence_without_secrets():
+    failure = normalize_failure(
+        stderr=(
+            "NVIDIA NIM ResourceExhausted RESOURCE_EXHAUSTED; retry-after: 90s; "
+            "api_key=sk-abcdefghijklmnop Authorization: Bearer token-secret"
+        ),
+        runtime="pi",
+        provider_id="nvidia",
+        model_id="nvidia:nemotron",
+        exit_code=1,
+    )
+    assert failure.kind == FailureKind.RATE_LIMIT
+    assert failure.provider_code == "RESOURCE_EXHAUSTED"
+    assert failure.retry_after_seconds == 90
+    assert failure.retryable
+    assert "sk-" not in failure.safe_message
+    assert "token-secret" not in failure.stderr_tail
+
+
+def test_pi_events_are_allowlisted_and_prompt_fields_are_dropped():
+    events = parse_pi_events(
+        '{"type":"model.usage","payload":{"total_tokens":7,'
+        '"input_tokens":5,"prompt":"private","api_key":"secret"}}\n'
+        '{"type":"unknown","payload":{"total_tokens":99}}\n'
+        "not json"
+    )
+    assert events == [("model.usage", {"input_tokens": 5, "total_tokens": 7})]
+    assert "secret" not in safe_runtime_tail("api_key=secret Bearer opaque-token")

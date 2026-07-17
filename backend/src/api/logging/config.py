@@ -10,6 +10,7 @@ Single logger configuration for the API process. Two cross-cutting guarantees:
 
 Set ``LOG_JSON=0`` for human-readable console logs in dev (default is JSON).
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,11 +25,27 @@ from src.api.middleware.request_logging import get_request_id
 # Field names whose values must never be logged in clear text.
 _SENSITIVE_KEYS: frozenset[str] = frozenset(
     {
-        "password", "passwd", "secret", "token", "api_key", "apikey",
-        "authorization", "auth", "cookie", "session", "access_token",
-        "refresh_token", "github_token", "anthropic_api_key", "openai_api_key",
-        "gemini_api_key", "openrouter_api_key", "master_key", "plaintext",
-        "ciphertext", "wrapped_key",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "authorization",
+        "auth",
+        "cookie",
+        "session",
+        "access_token",
+        "refresh_token",
+        "github_token",
+        "anthropic_api_key",
+        "openai_api_key",
+        "gemini_api_key",
+        "openrouter_api_key",
+        "master_key",
+        "plaintext",
+        "ciphertext",
+        "wrapped_key",
     }
 )
 _MASK = "***"
@@ -70,9 +87,7 @@ def configure_logging() -> None:
     """Configure structlog for the API process (idempotent)."""
     json_output = os.environ.get("LOG_JSON", "1") != "0"
     renderer: Any = (
-        structlog.processors.JSONRenderer()
-        if json_output
-        else structlog.dev.ConsoleRenderer()
+        structlog.processors.JSONRenderer() if json_output else structlog.dev.ConsoleRenderer()
     )
     structlog.configure(
         processors=[

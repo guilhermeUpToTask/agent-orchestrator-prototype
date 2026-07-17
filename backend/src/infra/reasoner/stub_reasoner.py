@@ -24,6 +24,7 @@ WITHOUT tasks — the ENRICHING JIT step populates those.
 enrich_goal() returns one deterministic task per goal:
     implement: <goal name>   (description "[enriched] ...")
 """
+
 from __future__ import annotations
 
 import re
@@ -45,6 +46,7 @@ from src.domain.factories.identity import new_id
 from src.domain.ports.reasoner_port import (
     ChatMessage,
     ConversationMode,
+    IntentCandidate,
     ReasonerReply,
 )
 
@@ -115,20 +117,29 @@ class StubReasoner:
         mode: ConversationMode,
     ) -> ReasonerReply:
         ask = _ASK_RE.search(message)
-        if ask:
-            # deterministic multi-turn hook: echo the question, commit nothing
-            return ReasonerReply(message=ask.group(1).strip(), goals=None)
+        if ask or not history:
+            question = (
+                ask.group(1).strip()
+                if ask
+                else "What observable acceptance result should define success?"
+            )
+            return ReasonerReply(
+                message=(
+                    f"Normalized brief\n{message.strip() or plan.brief}\n\n"
+                    "Safe assumptions\n- Existing project configuration remains authoritative.\n\n"
+                    f"Unresolved questions\n- {question}\n\n"
+                    "Waiting for your answers."
+                )
+            )
 
-        if mode == "discovery":
-            source = f"{plan.brief}\n{message}".strip()
-            fallback = "deliver the brief"
-        else:
-            source = message
-            fallback = f"iteration-{plan.iteration + 1} re-plan"
-        goals = _parse_goals(source, fallback_name=fallback)
+        objective = message.strip() or plan.brief
         return ReasonerReply(
-            message=f"Committing {len(goals)} goal(s) to the roadmap.",
-            goals=goals,
+            message="Intent proposal is ready for your review.",
+            intent=IntentCandidate(
+                normalized_brief=plan.brief,
+                objective=objective,
+                assumptions=["Existing project configuration remains authoritative."],
+            ),
         )
 
     async def enrich_goal(

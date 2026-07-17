@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
+from src.app.execution_records import PlanningOperation, PlanningOperationStatus
+from src.app.ports import ChatMessage
 from src.app.use_cases import control
 from src.app.use_cases.apply_edit import (
     AddTask,
@@ -27,7 +29,8 @@ from src.app.use_cases.apply_edit import (
     apply_edit,
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
-from src.app.use_cases.create_plan import create_plan
+from src.app.use_cases.create_plan import open_project_plan
+from src.app.use_cases.bind_project import bind_legacy_project
 from src.app.use_cases.cyclic_planning import (
     activate_cycle,
     approve_intent,
@@ -39,12 +42,23 @@ from src.app.use_cases.cyclic_planning import (
     revise_intent,
     submit_cycle_draft as submit_cycle_draft_use_case,
 )
-from src.app.use_cases.pause_resume import pause_plan, resume_plan, retry_task
+from src.app.use_cases.pause_resume import (
+    pause_plan,
+    resume_plan,
+    retry_planning_stage,
+    retry_task,
+)
 from src.app.use_cases.request_replan import request_replan
+from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
+    Cycle,
+    CycleDraft,
     GoalOutline,
+    IntentProposal,
     OutputDisposition,
+    PlanBlock,
     ProposalKind,
+    ReviewGate,
 )
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
@@ -60,8 +74,19 @@ class CreatePlanRequest(BaseModel):
     project_id: str
 
 
+class ProjectBindingRequest(BaseModel):
+    project_id: str
+
+
 class PlanCreatedResponse(BaseModel):
     plan_id: str
+    created: bool
+    opened_existing: bool
+    brief_preserved: bool
+    discovery_operation_id: str | None
+    discovery_status: str | None
+    discovery_reply: str | None
+    discovery_error: str | None
 
 
 class ActiveRunResponse(BaseModel):
@@ -89,13 +114,15 @@ class PlanDetailResponse(BaseModel):
     paused: bool
     paused_reason: str | None
     active_run: ActiveRunResponse | None
-    active_cycle: dict[str, Any] | None
-    pending_gate: dict[str, Any] | None
-    block: dict[str, Any] | None
-    goals: list[dict[str, Any]]
-    cycles: list[dict[str, Any]]
-    intent_proposal: dict[str, Any] | None
-    cycle_draft: dict[str, Any] | None
+    planning_operation: dict[str, Any] | None
+    planning_progress: str | None
+    active_cycle: Cycle | None
+    pending_gate: ReviewGate | None
+    block: PlanBlock | None
+    goals: list[Goal]
+    cycles: list[Cycle]
+    intent_proposal: IntentProposal | None
+    cycle_draft: CycleDraft | None
     legacy_phase: str | None = None
     phase: str | None = None
     iteration: int | None = None
@@ -138,6 +165,9 @@ class MessageResponse(BaseModel):
     reply: str
     committed: bool
     phase: str
+    operation_id: str
+    operation_status: str
+    error: str | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -145,6 +175,70 @@ class ChatMessageResponse(BaseModel):
     content: str
     created_at: str
     meta: dict[str, Any]
+
+
+class PlanningOperationResponse(BaseModel):
+    id: str
+    purpose: str
+    target_goal_id: str | None
+    status: str
+    created_at: str
+    updated_at: str
+    started_at: str | None
+    completed_at: str | None
+    last_liveness_at: str | None
+    model_request_count: int
+    tool_turn_count: int
+    runtime: str | None
+    provider_id: str | None
+    model_id: str | None
+    failure_kind: str | None
+    retry_at: str | None
+    safe_message: str | None
+
+
+class ExecutionAttemptResponse(BaseModel):
+    id: str
+    number: int
+    task_attempt: int
+    status: str
+    started_at: str
+    completed_at: str | None
+    last_liveness_at: str | None
+    timeout_seconds: int | None
+    runtime: str | None
+    provider_id: str | None
+    model_id: str | None
+    failure_kind: str | None
+    provider_code: str | None
+    retryable: bool | None
+    retry_at: str | None
+    limit_scope: str | None
+    exit_code: int | None
+    safe_message: str | None
+    stdout_tail: str
+    stderr_tail: str
+
+
+class ExecutionRunTimelineResponse(BaseModel):
+    id: str
+    goal_id: str
+    task_id: str
+    status: str
+    started_at: str
+    completed_at: str | None
+    attempts: list[ExecutionAttemptResponse]
+
+
+class TaskExecutionTimelineResponse(BaseModel):
+    goal_id: str
+    task_id: str
+    runs: list[ExecutionRunTimelineResponse]
+
+
+class AttemptTimelineResponse(BaseModel):
+    planning_operations: list[PlanningOperationResponse]
+    tasks: list[TaskExecutionTimelineResponse]
 
 
 class NewTaskBody(BaseModel):
@@ -234,16 +328,128 @@ def _to_edit(body: EditRequest) -> Edit:
 
 
 # ---- routes ----
+@router.post("/{plan_id}/project-binding", status_code=204)
+def bind_project_route(
+    plan_id: str,
+    body: ProjectBindingRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    bind_legacy_project(
+        plan_id,
+        body.project_id,
+        container.new_unit_of_work(),
+        container.project_repo,
+        container.clock,
+    )
+
+
 @router.post("", response_model=PlanCreatedResponse, status_code=201)
-def create(
+async def create(
     body: CreatePlanRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     container: AppContainer = Depends(get_container),
 ) -> PlanCreatedResponse:
     request_id = idempotency_key or str(uuid.uuid4())
     container.project_repo.get(body.project_id)
-    plan_id = create_plan(body.brief, body.project_id, request_id, container.new_unit_of_work())
-    return PlanCreatedResponse(plan_id=plan_id)
+    opened = open_project_plan(
+        body.brief,
+        body.project_id,
+        request_id,
+        container.new_unit_of_work(),
+    )
+    if opened.request_replayed:
+        with container.new_unit_of_work() as uow:
+            active = uow.executions.find_active_planning_operation(
+                opened.plan_id, "intent_discovery"
+            ) or uow.executions.find_active_planning_operation(opened.plan_id, "replan_discovery")
+            operations = uow.executions.list_planning_operations(opened.plan_id)
+            operation = active or (operations[-1] if operations else None)
+        return PlanCreatedResponse(
+            plan_id=opened.plan_id,
+            created=False,
+            opened_existing=True,
+            brief_preserved=True,
+            discovery_operation_id=(operation.id if operation else None),
+            discovery_status=(operation.status.value if operation else None),
+            discovery_reply=None,
+            discovery_error=None,
+        )
+
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(opened.plan_id)
+        replan = plan.active_cycle is not None
+    try:
+        result = await (
+            replanning_message(
+                opened.plan_id,
+                body.brief,
+                container.new_unit_of_work(),
+                container.reasoner,
+                container.chat_store,
+                container.clock,
+            )
+            if replan
+            else discovery_message(
+                opened.plan_id,
+                body.brief,
+                container.new_unit_of_work(),
+                container.reasoner,
+                container.chat_store,
+                container.clock,
+            )
+        )
+    except InvalidEditError as exc:
+        now = container.clock.now()
+        operation = PlanningOperation(
+            id=str(uuid.uuid4()),
+            plan_id=opened.plan_id,
+            purpose=("replan_discovery" if replan else "intent_discovery"),
+            status=PlanningOperationStatus.FAILED,
+            created_at=now,
+            updated_at=now,
+            started_at=now,
+            completed_at=now,
+            last_liveness_at=now,
+            failure_kind="planning_conflict",
+            safe_message=str(exc)[:500],
+        )
+        with container.new_unit_of_work() as uow:
+            uow.executions.add_planning_operation(operation)
+        container.chat_store.append(
+            opened.plan_id,
+            ChatMessage(
+                role="user",
+                content=body.brief,
+                created_at=now,
+                meta={
+                    "submitted_brief": True,
+                    "applied": False,
+                    "planning_operation_id": operation.id,
+                    "planning_status": operation.status.value,
+                },
+            ),
+        )
+        return PlanCreatedResponse(
+            plan_id=opened.plan_id,
+            created=opened.created,
+            opened_existing=not opened.created,
+            brief_preserved=True,
+            discovery_operation_id=operation.id,
+            discovery_status=operation.status.value,
+            discovery_reply=None,
+            discovery_error=operation.safe_message,
+        )
+
+    return PlanCreatedResponse(
+        plan_id=opened.plan_id,
+        created=opened.created,
+        opened_existing=not opened.created,
+        brief_preserved=True,
+        discovery_operation_id=result.operation_id,
+        discovery_status=result.operation_status.value,
+        discovery_reply=result.reply,
+        discovery_error=result.error,
+    )
 
 
 @router.get("")
@@ -257,6 +463,7 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
     with uow:
         plan = uow.plans.get(plan_id)
         open_attempts = uow.executions.list_open_attempts(plan_id)
+        planning_operations = uow.executions.list_planning_operations(plan_id)
     latest = max(open_attempts, key=lambda attempt: attempt.number, default=None)
     cycle = plan.active_cycle
     goals = cycle.goals if cycle is not None else plan.goals
@@ -274,6 +481,31 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         if current_goal is not None
         else None
     )
+    planning_operation = planning_operations[-1] if planning_operations else None
+    goal_position = (
+        next(
+            (
+                index
+                for index, goal in enumerate(sorted(goals, key=lambda item: item.position), 1)
+                if current_goal is not None and goal.id == current_goal.id
+            ),
+            None,
+        )
+        if goals
+        else None
+    )
+    planning_progress = None
+    if planning_operation is not None and planning_operation.status in {
+        PlanningOperationStatus.QUEUED,
+        PlanningOperationStatus.STARTED,
+        PlanningOperationStatus.BACKING_OFF,
+    }:
+        if planning_operation.purpose == "goal_contract" and goal_position is not None:
+            planning_progress = f"Generating tasks for goal {goal_position} of {len(goals)}"
+        elif planning_operation.purpose == "cycle_architecture":
+            planning_progress = "Generating the cycle roadmap"
+        else:
+            planning_progress = "Analyzing the brief"
     return PlanDetailResponse(
         id=plan.id,
         project_id=plan.project_id,
@@ -301,30 +533,140 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
             if latest is not None
             else None
         ),
-        active_cycle=cycle.model_dump(mode="json") if cycle is not None else None,
+        planning_operation=(
+            {
+                "id": planning_operation.id,
+                "purpose": planning_operation.purpose,
+                "target_goal_id": planning_operation.target_goal_id,
+                "status": planning_operation.status.value,
+                "updated_at": planning_operation.updated_at.isoformat(),
+                "retry_at": (
+                    planning_operation.retry_at.isoformat()
+                    if planning_operation.retry_at is not None
+                    else None
+                ),
+                "safe_message": planning_operation.safe_message,
+            }
+            if planning_operation is not None
+            else None
+        ),
+        planning_progress=planning_progress,
+        active_cycle=cycle,
         pending_gate=(
-            plan.review_gate.model_dump(mode="json")
+            plan.review_gate
             if plan.review_gate is not None and plan.review_gate.unresolved
             else None
         ),
-        block=(
-            plan.block.model_dump(mode="json")
-            if plan.block is not None and plan.block.active
-            else None
-        ),
-        goals=[goal.model_dump(mode="json") for goal in goals],
-        cycles=[item.model_dump(mode="json") for item in plan.cycles],
-        intent_proposal=(
-            plan.intent_proposal.model_dump(mode="json")
-            if plan.intent_proposal is not None
-            else None
-        ),
-        cycle_draft=(
-            plan.cycle_draft.model_dump(mode="json") if plan.cycle_draft is not None else None
-        ),
+        block=(plan.block if plan.block is not None and plan.block.active else None),
+        goals=goals,
+        cycles=plan.cycles,
+        intent_proposal=plan.intent_proposal,
+        cycle_draft=plan.cycle_draft,
         legacy_phase=plan.legacy_phase,
         phase=plan.phase.value,
         iteration=plan.iteration,
+    )
+
+
+@router.get("/{plan_id}/attempts", response_model=AttemptTimelineResponse)
+def attempt_timeline(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> AttemptTimelineResponse:
+    """Durable task -> run -> attempt history, hydrated before live SSE."""
+    with container.new_unit_of_work() as uow:
+        uow.plans.get(plan_id)
+        runs = uow.executions.list_runs(plan_id)
+        attempts = uow.executions.list_attempts(plan_id)
+        operations = uow.executions.list_planning_operations(plan_id)
+
+    attempts_by_run: dict[str, list] = {}
+    for attempt in attempts:
+        attempts_by_run.setdefault(attempt.run_id, []).append(attempt)
+    runs_by_task: dict[tuple[str, str], list] = {}
+    for run in runs:
+        runs_by_task.setdefault((run.goal_id, run.task_id), []).append(run)
+
+    return AttemptTimelineResponse(
+        planning_operations=[
+            PlanningOperationResponse(
+                id=item.id,
+                purpose=item.purpose,
+                target_goal_id=item.target_goal_id,
+                status=item.status.value,
+                created_at=item.created_at.isoformat(),
+                updated_at=item.updated_at.isoformat(),
+                started_at=item.started_at.isoformat() if item.started_at else None,
+                completed_at=item.completed_at.isoformat() if item.completed_at else None,
+                last_liveness_at=(
+                    item.last_liveness_at.isoformat() if item.last_liveness_at else None
+                ),
+                model_request_count=item.model_request_count,
+                tool_turn_count=item.tool_turn_count,
+                runtime=item.runtime,
+                provider_id=item.provider_id,
+                model_id=item.model_id,
+                failure_kind=item.failure_kind,
+                retry_at=item.retry_at.isoformat() if item.retry_at else None,
+                safe_message=item.safe_message,
+            )
+            for item in operations
+        ],
+        tasks=[
+            TaskExecutionTimelineResponse(
+                goal_id=goal_id,
+                task_id=task_id,
+                runs=[
+                    ExecutionRunTimelineResponse(
+                        id=run.id,
+                        goal_id=run.goal_id,
+                        task_id=run.task_id,
+                        status=run.status.value,
+                        started_at=run.started_at.isoformat(),
+                        completed_at=(run.completed_at.isoformat() if run.completed_at else None),
+                        attempts=[
+                            ExecutionAttemptResponse(
+                                id=attempt.id,
+                                number=attempt.number,
+                                task_attempt=attempt.task_attempt,
+                                status=attempt.status.value,
+                                started_at=attempt.started_at.isoformat(),
+                                completed_at=(
+                                    attempt.completed_at.isoformat()
+                                    if attempt.completed_at
+                                    else None
+                                ),
+                                last_liveness_at=(
+                                    attempt.last_liveness_at.isoformat()
+                                    if attempt.last_liveness_at
+                                    else None
+                                ),
+                                timeout_seconds=attempt.timeout_seconds,
+                                runtime=attempt.runtime,
+                                provider_id=attempt.provider_id,
+                                model_id=attempt.model_id,
+                                failure_kind=attempt.failure_kind,
+                                provider_code=attempt.provider_code,
+                                retryable=attempt.retryable,
+                                retry_at=(
+                                    attempt.retry_at.isoformat() if attempt.retry_at else None
+                                ),
+                                limit_scope=(
+                                    attempt.limit_scope.value if attempt.limit_scope else None
+                                ),
+                                exit_code=attempt.exit_code,
+                                safe_message=attempt.safe_message,
+                                stdout_tail=attempt.stdout_tail,
+                                stderr_tail=attempt.stderr_tail,
+                            )
+                            for attempt in attempts_by_run.get(run.id, [])
+                        ],
+                    )
+                    for run in task_runs
+                ],
+            )
+            for (goal_id, task_id), task_runs in runs_by_task.items()
+        ],
     )
 
 
@@ -503,8 +845,11 @@ def pause(
 
 @router.post("/{plan_id}/resume", status_code=204)
 def resume(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
-    """Clear the pause gate and requeue failed work (the manual retry): FAILED
-    tasks return to PENDING with a fresh attempt budget. 422 when not paused."""
+    """Remove only the manual pause. Retry/backoff state is untouched.
+
+    A failed task must be retried with the targeted retry command. 422 when the
+    plan is not manually paused.
+    """
     resume_plan(plan_id, container.new_unit_of_work())
 
 
@@ -526,6 +871,20 @@ def retry_blocked_task(
         body.task_id,
         container.new_unit_of_work(),
         container.clock,
+    )
+
+
+@router.post("/{plan_id}/retry-stage", status_code=204)
+def retry_blocked_planning_stage(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retry a blocked reasoner stage or agent binding after registry repair."""
+    retry_planning_stage(
+        plan_id,
+        container.new_unit_of_work(),
+        container.clock,
+        container.agent_repo,
     )
 
 
@@ -576,7 +935,14 @@ async def discovery(
         container.chat_store,
         container.clock,
     )
-    return MessageResponse(reply=result.reply, committed=result.committed, phase=result.phase.value)
+    return MessageResponse(
+        reply=result.reply,
+        committed=result.committed,
+        phase=result.phase.value,
+        operation_id=result.operation_id,
+        operation_status=result.operation_status.value,
+        error=result.error,
+    )
 
 
 @router.post("/{plan_id}/replanning/message", response_model=MessageResponse)
@@ -595,7 +961,14 @@ async def replanning(
         container.chat_store,
         container.clock,
     )
-    return MessageResponse(reply=result.reply, committed=result.committed, phase=result.phase.value)
+    return MessageResponse(
+        reply=result.reply,
+        committed=result.committed,
+        phase=result.phase.value,
+        operation_id=result.operation_id,
+        operation_status=result.operation_status.value,
+        error=result.error,
+    )
 
 
 class AgentEventResponse(BaseModel):

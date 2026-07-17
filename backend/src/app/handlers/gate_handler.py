@@ -9,6 +9,7 @@ at a gate not listed in pause_after spun the worker loop to max_steps.)
 Gates are also not worker-claimable (the claim predicate excludes them), so this
 handler is a defensive backstop for direct advance calls, not the normal path.
 """
+
 from __future__ import annotations
 
 from src.domain.aggregates.planner_orchestrator import Plan

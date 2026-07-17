@@ -8,6 +8,7 @@ returns ``{"accepted": true, ...}``; returning ``{"accepted": false,
 tools and handler exceptions become ``{"error": ...}`` results — the model
 sees its mistake and corrects; the loop never crashes on a bad call.
 """
+
 from __future__ import annotations
 
 import json

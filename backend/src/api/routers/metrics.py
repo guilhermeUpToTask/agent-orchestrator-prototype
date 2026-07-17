@@ -7,6 +7,7 @@ usage (from the reasoner's llm.call rows) and agent run/failure counts grouped b
 FailureKind — so a rate-limit storm is one number, not a scroll through the feed.
 Always 200; token-guarded like the other control-plane status endpoints.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -23,12 +24,25 @@ router = APIRouter(
 )
 
 
-class LlmMetrics(BaseModel):
+class CoverageMetrics(BaseModel):
+    observations: int
+    reported: int
+    estimated: int
+    unavailable: int
+    legacy_unknown: int
+
+
+class UsageScopeMetrics(BaseModel):
     sessions: int
     calls: int
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    coverage: CoverageMetrics
+
+
+class LlmMetrics(UsageScopeMetrics):
+    scopes: dict[str, UsageScopeMetrics]
 
 
 class AgentMetrics(BaseModel):
@@ -36,6 +50,8 @@ class AgentMetrics(BaseModel):
     finished: int
     failed: int
     failures_by_kind: dict[str, int]
+    source: str
+    quality: str
 
 
 class MetricsResponse(BaseModel):

@@ -6,6 +6,7 @@ from the environment otherwise). Endpoints that mutate plan state take a FRESH
 UnitOfWork per request — sync routers run in the threadpool and the UoW is not
 thread-safe, so sharing one across requests would interleave transactions.
 """
+
 from __future__ import annotations
 
 import threading

@@ -14,6 +14,7 @@ Consumers: `/api/runner/status` reports the results to the settings UI, and
 the worker logs a startup warning in agent_runner.mode=real when something is
 missing. dry-run needs none of these — nothing here ever blocks startup.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -83,9 +84,7 @@ def _probe_binary(
             is_runtime=is_runtime,
         )
     try:
-        out = subprocess.run(
-            [binary, version_flag], capture_output=True, text=True, timeout=5
-        )
+        out = subprocess.run([binary, version_flag], capture_output=True, text=True, timeout=5)
         raw = (out.stdout or out.stderr).strip()
         message = raw.splitlines()[0][:100] if raw else f"{binary} found"
         return DepResult(

@@ -4,6 +4,8 @@ and two-tier config."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -39,6 +41,46 @@ def test_health(client):
     assert response.json()["status"] == "ok"
 
 
+def test_quarantined_legacy_plan_can_bind_a_project_over_http(client):
+    from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from src.domain.entities.planning_artifacts import PlanBlock, PlanStatus
+
+    container = dependencies.get_container()
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    plan = Plan(
+        id="legacy-plan",
+        brief="migrated",
+        project_id=None,
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.BLOCKED,
+        legacy_mapped_status=PlanStatus.RUNNING,
+        block=PlanBlock(
+            id="project-binding:legacy-plan",
+            kind="project_binding",
+            explanation="Select the project that owns this migrated plan.",
+            stage="migration",
+            legal_resolutions=["bind_project"],
+            created_at=now,
+        ),
+    )
+    with container.new_unit_of_work() as uow:
+        uow.plans.save(plan)
+
+    response = client.post(
+        "/api/plans/legacy-plan/project-binding",
+        json={"project_id": "project-1"},
+    )
+
+    assert response.status_code == 204
+    with container.new_unit_of_work() as uow:
+        rebound = uow.plans.get("legacy-plan")
+    assert rebound.project_id == "project-1"
+    assert rebound.status == PlanStatus.RUNNING
+    assert rebound.block is not None
+    assert rebound.block.resolution == "bind_project"
+    assert rebound.block.resolved_at is not None
+
+
 def test_plan_lifecycle_over_http(client):
     # create (idempotent on the Idempotency-Key header)
     created = client.post(
@@ -47,7 +89,10 @@ def test_plan_lifecycle_over_http(client):
         headers={"Idempotency-Key": "req-1"},
     )
     assert created.status_code == 201
-    plan_id = created.json()["plan_id"]
+    created_body = created.json()
+    plan_id = created_body["plan_id"]
+    assert created_body["brief_preserved"] is True
+    assert created_body["discovery_status"] == "waiting_for_user"
     again = client.post(
         "/api/plans",
         json={"brief": "goal: G1\ntask: t one", "project_id": "project-1"},
@@ -67,29 +112,33 @@ def test_plan_lifecycle_over_http(client):
         json={"message": "ask: which database should we use?"},
     )
     assert ask.status_code == 200
-    assert ask.json() == {
-        "reply": "which database should we use?",
-        "committed": False,
-        "phase": "discovery",
-    }
+    ask_body = ask.json()
+    assert ask_body["committed"] is False
+    assert ask_body["operation_status"] == "waiting_for_user"
+    assert "which database should we use?" in ask_body["reply"]
     assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "discovery"
 
-    # the commit turn -> ARCHITECTURE
+    # the commit turn proposes intent and opens its version-bound review gate
     turn = client.post(f"/api/plans/{plan_id}/discovery/message", json={"message": ""})
     assert turn.status_code == 200
     body = turn.json()
     assert body["committed"] is True
-    assert body["phase"] == "architecture"
-    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "architecture"
+    assert body["operation_status"] == "committed"
+    detail = client.get(f"/api/plans/{plan_id}").json()
+    assert detail["phase"] == "discovery"
+    assert detail["pending_gate"]["subject_type"] == "intent"
 
     # chat history: user/assistant alternation, insertion order, commit meta
     history = client.get(f"/api/plans/{plan_id}/chat").json()
     assert [(m["role"], m["meta"].get("committed")) for m in history] == [
+        ("user", None),  # automatically submitted brief
+        ("assistant", False),
         ("user", None),
         ("assistant", False),
         ("user", None),
         ("assistant", True),
     ]
+    assert history[0]["meta"]["submitted_brief"] is True
     assert client.get("/api/plans/ghost/chat").status_code == 404
 
 
@@ -243,27 +292,61 @@ def test_cyclic_plan_review_edits_activation_and_publication(client):
     assert final["phase"] not in {"done", "failed"}
 
 
-def _plan_at_awaiting_review(client) -> str:
-    """Drive a stub plan discovery->architecture->enriching->awaiting_review by
-    committing a roadmap then advancing the worker phases synchronously."""
+def _plan_with_enriched_active_goal(client) -> str:
+    """Drive intent -> roadmap approval -> one head-goal JIT contract."""
     from src.api import dependencies
     from src.app.use_cases.advance_plan import advance_plan
     from src.app.handlers.planning_handler import PlanningHandler
 
-    # a default agent is needed for the enrich->bind step
+    for capability_id in ("implementation", "test_authoring"):
+        client.post(
+            "/api/capabilities",
+            json={
+                "id": capability_id,
+                "name": capability_id,
+                "description": "",
+                "tools": [],
+            },
+        )
+    # Cyclic contracts bind both roles through mandatory capabilities.
     agent_id = client.post(
         "/api/agents",
-        json={"name": "A", "role": "implementer", "model_role": "smart"},
+        json={
+            "name": "A",
+            "role": "implementer",
+            "model_role": "smart",
+            "capability_ids": ["implementation"],
+        },
     ).json()["id"]
     client.post(f"/api/agents/{agent_id}/default")
+    client.post(
+        "/api/agents",
+        json={
+            "name": "Test author",
+            "role": "test_author",
+            "model_role": "smart",
+            "capability_ids": ["test_authoring"],
+        },
+    )
 
     plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()[
         "plan_id"
     ]
-    # commit a two-goal roadmap through discovery
+    # The create call already persisted the first waiting discovery turn.
     client.post(
         f"/api/plans/{plan_id}/discovery/message",
-        json={"message": "goal: G1\ntask: t one\ngoal: G2\ntask: t two"},
+        json={"message": "Deliver a verified API"},
+    )
+    intent_gate = client.get(f"/api/plans/{plan_id}").json()["pending_gate"]
+    assert (
+        client.post(
+            f"/api/plans/{plan_id}/intent/approve",
+            json={
+                "gate_id": intent_gate["id"],
+                "subject_revision": intent_gate["subject_revision"],
+            },
+        ).status_code
+        == 204
     )
     container = dependencies.get_container()
     import asyncio
@@ -274,32 +357,56 @@ def _plan_at_awaiting_review(client) -> str:
         container.capability_repo,
         container.clock,
     )
-    for _ in range(10):
-        phase = client.get(f"/api/plans/{plan_id}").json()["phase"]
-        if phase == "awaiting_review":
-            break
-        asyncio.run(
-            advance_plan(
-                plan_id,
-                container.new_unit_of_work(),
-                container.agent_runner,
-                container.agent_repo,
-                container.workspace,
-                container.agent_event_sink,
-                container.clock,
-                handler,
-            )
+    # Worker generates the roadmap and pauses at its review gate.
+    asyncio.run(
+        advance_plan(
+            plan_id,
+            container.new_unit_of_work(),
+            container.agent_runner,
+            container.agent_repo,
+            container.workspace,
+            container.agent_event_sink,
+            container.clock,
+            handler,
         )
+    )
+    draft_gate = client.get(f"/api/plans/{plan_id}").json()["pending_gate"]
+    assert (
+        client.post(
+            f"/api/plans/{plan_id}/cycle-draft/approve",
+            json={
+                "gate_id": draft_gate["id"],
+                "subject_revision": draft_gate["subject_revision"],
+            },
+        ).status_code
+        == 201
+    )
+    # One more worker unit persists only the current head goal's contract/tasks.
+    asyncio.run(
+        advance_plan(
+            plan_id,
+            container.new_unit_of_work(),
+            container.agent_runner,
+            container.agent_repo,
+            container.workspace,
+            container.agent_event_sink,
+            container.clock,
+            handler,
+        )
+    )
     return plan_id
 
 
 def test_pause_resume_and_edit_over_http(client):
-    plan_id = _plan_at_awaiting_review(client)
-    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == "awaiting_review"
+    plan_id = _plan_with_enriched_active_goal(client)
+    detail = client.get(f"/api/plans/{plan_id}").json()
+    assert detail["status"] == "running", detail["block"]
+    assert client.post(f"/api/plans/{plan_id}/pause", json={"reason": "hold"}).status_code == 204
+    assert client.get(f"/api/plans/{plan_id}").json()["paused"] is True
     goals = client.get(f"/api/plans/{plan_id}").json()["goals"]
     g1 = goals[0]["id"]
 
-    # edit at the pre-execution gate (goals are PENDING): update_goal + update_task
+    # Paused head-goal work is editable without enriching later goals.
     assert (
         client.post(
             f"/api/plans/{plan_id}/edits",
@@ -324,29 +431,95 @@ def test_pause_resume_and_edit_over_http(client):
     assert refreshed["goals"][0]["name"] == "G1 renamed"
     assert refreshed["goals"][0]["tasks"][0]["name"] == "t renamed"
 
-    # remove_goal strips it from the roadmap
-    g2 = refreshed["goals"][1]["id"]
-    assert (
-        client.post(
-            f"/api/plans/{plan_id}/edits",
-            json={"type": "remove_goal", "goal_id": g2},
-        ).status_code
-        == 204
-    )
-    assert len(client.get(f"/api/plans/{plan_id}").json()["goals"]) == 1
-
-    # pause is rejected at a gate (not a worker-claimable phase)
-    bad_pause = client.post(f"/api/plans/{plan_id}/pause")
-    assert bad_pause.status_code == 422
-    assert bad_pause.json()["error"]["code"] == "INVALID_TRANSITION"
-
-    # approve -> RUNNING, then pause is allowed; resume when not paused is 422
-    assert client.post(f"/api/plans/{plan_id}/approve").status_code == 204
-    assert client.post(f"/api/plans/{plan_id}/pause", json={"reason": "hold"}).status_code == 204
-    assert client.get(f"/api/plans/{plan_id}").json()["paused"] is True
+    # Resume clears only the pause gate; a second resume is rejected.
     assert client.post(f"/api/plans/{plan_id}/resume").status_code == 204
     assert client.get(f"/api/plans/{plan_id}").json()["paused"] is False
     assert client.post(f"/api/plans/{plan_id}/resume").status_code == 422
+
+
+def test_blocked_task_retry_over_http(client):
+    plan_id = _plan_with_enriched_active_goal(client)
+
+    from src.domain.entities.planning_artifacts import PlanBlock
+    from src.domain.factories.identity import new_id
+    from src.domain.value_objects.lifecycle import FailureKind
+
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(plan_id)
+        assert plan.active_cycle is not None
+        goal = plan.active_cycle.goals[0]
+        task = goal.tasks[0]
+        task.fail("terminal authentication failure", FailureKind.AUTH_ERROR)
+        plan.open_block(
+            PlanBlock(
+                id=new_id(),
+                kind="execution_failure",
+                explanation="terminal authentication failure",
+                stage=task.tdd_stage,
+                goal_id=goal.id,
+                task_id=task.id,
+                task_revision=task.revision,
+                legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+                created_at=container.clock.now(),
+            )
+        )
+        plan.bump_version()
+        uow.plans.save(plan)
+
+    blocked = client.get(f"/api/plans/{plan_id}").json()
+    assert blocked["status"] == "blocked"
+    assert blocked["block"]["legal_resolutions"] == [
+        "retry_stage",
+        "edit_task",
+        "start_replan",
+    ]
+    goal_id = blocked["block"]["goal_id"]
+    task_id = blocked["block"]["task_id"]
+
+    response = client.post(
+        f"/api/plans/{plan_id}/retry",
+        json={"goal_id": goal_id, "task_id": task_id},
+    )
+    assert response.status_code == 204
+    recovered = client.get(f"/api/plans/{plan_id}").json()
+    assert recovered["status"] == "running"
+    assert recovered["block"] is None
+    retried = recovered["goals"][0]["tasks"][0]
+    assert retried["status"] == "pending"
+    assert retried["retry_cycle"] == 1
+
+
+def test_blocked_planning_stage_retry_over_http(client):
+    plan_id = _plan_with_enriched_active_goal(client)
+
+    from datetime import timedelta
+
+    from src.domain.entities.planning_artifacts import PlanBlock
+    from src.domain.factories.identity import new_id
+
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(plan_id)
+        plan.planning_attempts = 3
+        plan.planning_retry_not_before = container.clock.now() + timedelta(hours=1)
+        plan.open_block(
+            PlanBlock(
+                id=new_id(),
+                kind="reasoner_failure",
+                explanation="planner unavailable",
+                stage="goal_enrichment",
+                legal_resolutions=["retry_stage", "start_replan"],
+                created_at=container.clock.now(),
+            )
+        )
+        plan.bump_version()
+        uow.plans.save(plan)
+
+    assert client.post(f"/api/plans/{plan_id}/retry-stage").status_code == 204
+    recovered = client.get(f"/api/plans/{plan_id}").json()
+    assert recovered["status"] == "running"
+    assert recovered["block"] is None
 
 
 def test_pause_unknown_plan_404(client):
@@ -426,63 +599,111 @@ def test_metrics_endpoint(client):
     plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()[
         "plan_id"
     ]
-    _seed_agent_events(
-        [
-            {
-                "plan_id": plan_id,
-                "task_id": None,
-                "attempt": 0,
-                "seq": 0,
-                "type": "llm.call",
-                "payload": {
-                    "llm_calls": "2",
-                    "prompt_tokens": "30",
-                    "completion_tokens": "13",
-                    "total_tokens": "43",
-                },
-            },
-            {
-                "plan_id": plan_id,
-                "task_id": "t1",
-                "attempt": 1,
-                "seq": 0,
-                "type": "agent.started",
-                "payload": {"runtime": "pi"},
-            },
-            {
-                "plan_id": plan_id,
-                "task_id": "t1",
-                "attempt": 1,
-                "seq": 1,
-                "type": "agent.failed",
-                "payload": {"kind": "rate_limit"},
-            },
-            {
-                "plan_id": plan_id,
-                "task_id": "t2",
-                "attempt": 1,
-                "seq": 1,
-                "type": "agent.failed",
-                "payload": {"kind": "rate_limit"},
-            },
-        ]
+    import asyncio
+    from uuid import uuid4
+    from src.api import dependencies
+    from src.app.execution_records import (
+        ExecutionAttempt,
+        ExecutionAttemptStatus,
+        ExecutionRun,
+        ExecutionRunStatus,
     )
+    from src.app.observations import (
+        ModelUsagePayload,
+        ObservationCorrelation,
+        ObservationKind,
+        ObservationQuality,
+        ObservationSource,
+        TelemetryObservation,
+    )
+    from src.app.runtime_failures import RuntimeFailure
+    from src.domain.value_objects.lifecycle import FailureKind
+
+    container = dependencies.get_container()
+    asyncio.run(
+        container.observation_repository.append(
+            TelemetryObservation(
+                correlation=ObservationCorrelation(plan_id=plan_id),
+                observed_at=container.clock.now(),
+                source=ObservationSource.PROVIDER,
+                quality=ObservationQuality.REPORTED,
+                kind=ObservationKind.MODEL_USAGE,
+                payload=ModelUsagePayload(
+                    model_request_count=2,
+                    turn_count=2,
+                    input_tokens=30,
+                    output_tokens=13,
+                    reasoning_tokens=None,
+                    cached_tokens=None,
+                    total_tokens=43,
+                    context="discovery",
+                ),
+            )
+        )
+    )
+    with container.new_unit_of_work() as uow:
+        for index in range(2):
+            run_id = str(uuid4())
+            attempt_id = str(uuid4())
+            uow.executions.add_run(
+                ExecutionRun(
+                    id=run_id,
+                    plan_id=plan_id,
+                    goal_id="g1",
+                    task_id=f"t{index + 1}",
+                    status=ExecutionRunStatus.RUNNING,
+                    started_at=container.clock.now(),
+                )
+            )
+            uow.executions.add_attempt(
+                ExecutionAttempt(
+                    id=attempt_id,
+                    run_id=run_id,
+                    plan_id=plan_id,
+                    goal_id="g1",
+                    task_id=f"t{index + 1}",
+                    number=1,
+                    task_attempt=1,
+                    status=ExecutionAttemptStatus.RUNNING,
+                    started_at=container.clock.now(),
+                )
+            )
+            uow.executions.finalize_attempt(
+                attempt_id,
+                attempt_status=ExecutionAttemptStatus.FAILED,
+                run_status=ExecutionRunStatus.FAILED,
+                completed_at=container.clock.now(),
+                failure=RuntimeFailure(
+                    kind=FailureKind.RATE_LIMIT,
+                    safe_message="capacity",
+                    retryable=True,
+                ),
+            )
 
     body = client.get("/api/metrics").json()
-    assert body["llm"] == {
-        "sessions": 1,
-        "calls": 2,
-        "prompt_tokens": 30,
-        "completion_tokens": 13,
-        "total_tokens": 43,
-    }
-    assert body["agent"]["runs"] == 1
+    assert body["llm"]["scopes"]["planner"]["total_tokens"] == 43
+    assert body["llm"]["scopes"]["child"]["total_tokens"] is None
+    assert body["llm"]["coverage"]["reported"] == 1
+    assert body["agent"]["runs"] == 2
     assert body["agent"]["failed"] == 2
     assert body["agent"]["failures_by_kind"]["rate_limit"] == 2
 
+    timeline = client.get(f"/api/plans/{plan_id}/attempts")
+    assert timeline.status_code == 200
+    timeline_body = timeline.json()
+    assert [task["task_id"] for task in timeline_body["tasks"]] == ["t1", "t2"]
+    attempts = [
+        attempt
+        for task in timeline_body["tasks"]
+        for run in task["runs"]
+        for attempt in run["attempts"]
+    ]
+    assert all(attempt["failure_kind"] == "rate_limit" for attempt in attempts)
+    assert all(attempt["safe_message"] == "capacity" for attempt in attempts)
+
     # per-plan filter narrows the same way (unknown plan -> zeros)
     empty = client.get("/api/metrics?plan_id=ghost").json()
-    assert empty["llm"]["total_tokens"] == 0
+    assert empty["llm"]["total_tokens"] is None
 
 
 def test_error_mapping_table(client):

@@ -8,6 +8,7 @@ the secret store (stub/dry-run works without a master key) — secret
 existence/decryption is still only checked when the reasoner is built at
 process start.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

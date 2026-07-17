@@ -180,6 +180,20 @@ class ExecutionAttemptTable(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     started_at: Mapped[str] = mapped_column(String, nullable=False)
     completed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_liveness_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    runtime: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    retryable: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    limit_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    safe_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stdout_tail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stderr_tail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -196,6 +210,69 @@ class ExecutionAttemptTable(Base):
         Index("ix_execution_attempts_open", "status", "started_at"),
         Index("ix_execution_attempts_run", "run_id", "number"),
     )
+
+
+class PlanningOperationTable(Base):
+    __tablename__ = "planning_operations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    target_goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_liveness_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    tool_turn_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    runtime: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    retry_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    safe_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'started', 'waiting_for_user', 'committed', "
+            "'failed', 'backing_off')",
+            name="ck_planning_operations_status",
+        ),
+        Index("ix_planning_operations_plan", "plan_id", "created_at", "id"),
+        Index(
+            "ix_planning_operations_active",
+            "plan_id",
+            "purpose",
+            "target_goal_id",
+            "status",
+        ),
+    )
+
+
+class RuntimeCircuitTable(Base):
+    __tablename__ = "runtime_circuits"
+
+    runtime: Mapped[str] = mapped_column(String, primary_key=True)
+    provider_id: Mapped[str] = mapped_column(String, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String, primary_key=True)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[str] = mapped_column(String, nullable=False)
+    retry_at: Mapped[str] = mapped_column(String, nullable=False)
+    last_failure_kind: Mapped[str] = mapped_column(String, nullable=False)
+    safe_message: Mapped[str] = mapped_column(Text, nullable=False)
+    manual_intervention: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    __table_args__ = (Index("ix_runtime_circuits_retry", "retry_at"),)
 
 
 # ---------------------------------------------------------------------------

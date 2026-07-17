@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,30 +11,88 @@ from urllib.parse import unquote, urlparse
 
 from src.app.ports import UnitOfWork, WorkspaceHandle
 from src.domain.entities.project_definition import ProjectDefinition
+from src.domain.repositories.project_repo import ProjectRepository
 from src.infra.git.workspace import GitBranchWorkspace
-from src.infra.db.reference_repos import SqliteProjectRepository
+
+
+@dataclass(frozen=True)
+class _CachedWorkspace:
+    identity: tuple[str | None, str, str]
+    workspace: GitBranchWorkspace
 
 
 class ProjectWorkspaceResolver:
     def __init__(
         self,
-        projects: SqliteProjectRepository,
+        projects: ProjectRepository,
         orchestrator_home: Path,
     ) -> None:
         self._projects = projects
         self._home = orchestrator_home
-        self._cache: dict[str, GitBranchWorkspace] = {}
+        self._cache: dict[str, _CachedWorkspace] = {}
 
     def resolve(self, project_id: str) -> GitBranchWorkspace:
-        existing = self._cache.get(project_id)
-        if existing is not None:
-            return existing
         project = self._projects.get(project_id)
         repo = self._repository_path(project)
         self._materialize_remote(project, repo)
-        workspace = GitBranchWorkspace(repo)
-        self._cache[project_id] = workspace
+        default_branch = self._default_branch(repo)
+        identity = (project.repo_url, str(repo), default_branch)
+        existing = self._cache.get(project_id)
+        if existing is not None and existing.identity == identity:
+            return existing.workspace
+        workspace = GitBranchWorkspace(repo, default_branch=default_branch)
+        self._cache[project_id] = _CachedWorkspace(identity, workspace)
         return workspace
+
+    def workspaces(self) -> list[tuple[str, GitBranchWorkspace]]:
+        """Return local workspace adapters without cloning remote repositories."""
+        workspaces: list[tuple[str, GitBranchWorkspace]] = []
+        for project in self._projects.list():
+            repo = self._repository_path(project)
+            default_branch = self._default_branch(repo)
+            identity = (project.repo_url, str(repo), default_branch)
+            cached = self._cache.get(project.id)
+            if cached is None or cached.identity != identity:
+                cached = _CachedWorkspace(
+                    identity,
+                    GitBranchWorkspace(repo, default_branch=default_branch),
+                )
+                self._cache[project.id] = cached
+            workspaces.append((project.id, cached.workspace))
+        return workspaces
+
+    @staticmethod
+    def _default_branch(repo: Path) -> str:
+        if not (repo / ".git").exists():
+            return "main"
+        probes = (
+            ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+            ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        )
+        for args in probes:
+            result = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().removeprefix("origin/")
+        branches = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        if len(branches) == 1:
+            return branches[0]
+        raise ValueError(f"cannot determine default branch for repository {repo}")
 
     def _repository_path(self, project: ProjectDefinition) -> Path:
         if project.repo_url:
@@ -42,6 +101,8 @@ class ProjectWorkspaceResolver:
                 return Path(unquote(parsed.path))
             if parsed.scheme == "":
                 return Path(project.repo_url).expanduser().resolve()
+            repository_identity = hashlib.sha256(project.repo_url.encode()).hexdigest()[:16]
+            return self._home / "projects" / project.id / "repos" / repository_identity
         return self._home / "projects" / project.id / "repo"
 
     def _materialize_remote(self, project: ProjectDefinition, destination: Path) -> None:
@@ -127,9 +188,7 @@ class ProjectRoutingWorkspace:
             plan = uow.plans.get(plan_id)
         if plan.project_id is None:
             raise ValueError(f"plan {plan_id} has no project binding")
-        return await self._resolver.resolve(plan.project_id).merge_goal(
-            plan_id, cycle_id, goal_id
-        )
+        return await self._resolver.resolve(plan.project_id).merge_goal(plan_id, cycle_id, goal_id)
 
     async def commit(self, handle: WorkspaceHandle) -> None:
         if not isinstance(handle, RoutedWorkspaceHandle):
@@ -140,3 +199,13 @@ class ProjectRoutingWorkspace:
         if not isinstance(handle, RoutedWorkspaceHandle):
             raise TypeError("workspace handle was not project-routed")
         await handle.workspace.discard(handle.delegate)
+
+    async def prune(self) -> None:
+        for _project_id, workspace in self._resolver.workspaces():
+            await workspace.prune()
+
+    async def audit(self) -> dict[str, dict[str, list[str]]]:
+        return {
+            project_id: await workspace.audit()
+            for project_id, workspace in self._resolver.workspaces()
+        }

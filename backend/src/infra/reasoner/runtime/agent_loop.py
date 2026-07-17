@@ -14,6 +14,7 @@ stop where a submit was required) raises a TRANSIENT ReasonerError — the
 worker logs it, backs off, and the lease lets any worker retry from persisted
 state.
 """
+
 from __future__ import annotations
 
 import json

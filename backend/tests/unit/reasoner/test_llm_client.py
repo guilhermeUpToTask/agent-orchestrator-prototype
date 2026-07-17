@@ -2,6 +2,7 @@
 fail-fast, the empty-choices in-band error guard, tolerant tool-arg parsing.
 The OpenAI SDK is stubbed at the AsyncOpenAI client attribute level — no
 network, no provider."""
+
 from __future__ import annotations
 
 import asyncio
@@ -28,9 +29,7 @@ def make_client(responses, temperature=0.2, max_retries=3):
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    client = OpenAIChatClient(
-        api_key="k", model="m", max_retries=max_retries, sleep=fake_sleep
-    )
+    client = OpenAIChatClient(api_key="k", model="m", max_retries=max_retries, sleep=fake_sleep)
     calls: list[dict] = []
 
     async def fake_create(**kwargs):
@@ -68,17 +67,16 @@ def api_error(message, status_code=None):
     return err
 
 
-TOOLS = [
-    ToolSpec(
-        name="t", description="d", input_schema={"type": "object"}, handler=lambda a: ""
-    )
-]
+TOOLS = [ToolSpec(name="t", description="d", input_schema={"type": "object"}, handler=lambda a: "")]
 
 
 def test_transient_error_retries_with_exponential_backoff():
     client, sleeps, calls = make_client(
-        [api_error("rate limited"), api_error("rate limited"),
-         response_with(assistant_message("ok"))]
+        [
+            api_error("rate limited"),
+            api_error("rate limited"),
+            response_with(assistant_message("ok")),
+        ]
     )
     turn = asyncio.run(client.complete([{"role": "user", "content": "x"}], TOOLS))
     assert turn.text == "ok"
@@ -87,9 +85,7 @@ def test_transient_error_retries_with_exponential_backoff():
 
 
 def test_permanent_error_fails_fast_without_retry():
-    client, sleeps, calls = make_client(
-        [api_error("no tool use here", status_code=404)]
-    )
+    client, sleeps, calls = make_client([api_error("no tool use here", status_code=404)])
     with pytest.raises(ReasonerError) as err:
         asyncio.run(client.complete([], TOOLS))
     assert err.value.transient is False
@@ -98,12 +94,8 @@ def test_permanent_error_fails_fast_without_retry():
 
 
 def test_empty_choices_is_transient_and_retried():
-    in_band_error = SimpleNamespace(
-        choices=None, error={"message": "out of credits", "code": 402}
-    )
-    client, sleeps, _ = make_client(
-        [in_band_error, response_with(assistant_message("recovered"))]
-    )
+    in_band_error = SimpleNamespace(choices=None, error={"message": "out of credits", "code": 402})
+    client, sleeps, _ = make_client([in_band_error, response_with(assistant_message("recovered"))])
     turn = asyncio.run(client.complete([], TOOLS))
     assert turn.text == "recovered"
     assert sleeps == [1.0]
@@ -124,9 +116,7 @@ def test_malformed_tool_arguments_parse_to_empty_dict():
         id="c1",
         function=SimpleNamespace(name="t", arguments="{not json"),
     )
-    client, _, _ = make_client(
-        [response_with(assistant_message(None, [tool_call]))]
-    )
+    client, _, _ = make_client([response_with(assistant_message(None, [tool_call]))])
     turn = asyncio.run(client.complete([], TOOLS))
     assert turn.tool_calls[0].arguments == {}
 
@@ -165,8 +155,6 @@ def test_tool_arguments_json_but_not_object_coerce_to_empty_dict():
         id="c1",
         function=SimpleNamespace(name="t", arguments=json.dumps([1, 2])),
     )
-    client, _, _ = make_client(
-        [response_with(assistant_message(None, [tool_call]))]
-    )
+    client, _, _ = make_client([response_with(assistant_message(None, [tool_call]))])
     turn = asyncio.run(client.complete([], TOOLS))
     assert turn.tool_calls[0].arguments == {}

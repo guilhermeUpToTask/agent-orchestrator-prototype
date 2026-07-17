@@ -192,9 +192,7 @@ def test_first_task_succeeds_second_permanently_fails_pauses():
 
 
 def test_backoff_policy_schedule_and_cap():
-    rp = RetryPolicy(
-        initial_backoff_seconds=10, backoff_multiplier=10, max_backoff_seconds=15
-    )
+    rp = RetryPolicy(initial_backoff_seconds=10, backoff_multiplier=10, max_backoff_seconds=15)
     assert rp.backoff_for(1) == 0.0  # first try, no backoff
     assert rp.backoff_for(2) == 10.0  # first retry -> initial
     assert rp.backoff_for(3) == 15.0  # 100 capped to 15
@@ -257,9 +255,7 @@ def test_check_before_act_does_not_emit_duplicate_taskstarted():
     t = Task(id="t0", name="t", position=0, description="", agent_id="a1")
     t.status = Status.RUNNING
     t.result = TaskResult.success("recovered")
-    g = Goal(
-        id="g1", name="g1", position=0, description="", status=Status.RUNNING, tasks=[t]
-    )
+    g = Goal(id="g1", name="g1", position=0, description="", status=Status.RUNNING, tasks=[t])
     p = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[g])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
     asyncio.run(drive(repo, uow, runner, agents, ws, sink, clock))

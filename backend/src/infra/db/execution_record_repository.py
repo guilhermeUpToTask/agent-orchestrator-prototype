@@ -12,8 +12,26 @@ from sqlalchemy.orm import Session
 from src.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
+    PlanningOperation,
+    PlanningOperationStatus,
+    RuntimeCircuit,
     ExecutionRun,
     ExecutionRunStatus,
+)
+from src.app.runtime_failures import LimitScope, RuntimeFailure
+
+_RUN_COLUMNS = "id, plan_id, goal_id, task_id, status, started_at, completed_at"
+_ATTEMPT_COLUMNS = (
+    "id, run_id, plan_id, goal_id, task_id, number, task_attempt, status, "
+    "started_at, completed_at, last_liveness_at, timeout_seconds, runtime, "
+    "provider_id, model_id, failure_kind, provider_code, retryable, retry_at, "
+    "limit_scope, exit_code, safe_message, stdout_tail, stderr_tail"
+)
+_PLANNING_COLUMNS = (
+    "id, plan_id, purpose, target_goal_id, status, created_at, updated_at, "
+    "started_at, completed_at, last_liveness_at, model_request_count, "
+    "tool_turn_count, runtime, provider_id, model_id, failure_kind, retry_at, "
+    "safe_message"
 )
 
 
@@ -47,6 +65,44 @@ def _attempt(row: object) -> ExecutionAttempt:
         status=ExecutionAttemptStatus(str(values[7])),  # type: ignore[index]
         started_at=datetime.fromisoformat(str(values[8])),  # type: ignore[index]
         completed_at=_dt(values[9]),  # type: ignore[index]
+        last_liveness_at=_dt(values[10]),  # type: ignore[index]
+        timeout_seconds=(None if values[11] is None else int(values[11])),  # type: ignore[index]
+        runtime=(None if values[12] is None else str(values[12])),  # type: ignore[index]
+        provider_id=(None if values[13] is None else str(values[13])),  # type: ignore[index]
+        model_id=(None if values[14] is None else str(values[14])),  # type: ignore[index]
+        failure_kind=(None if values[15] is None else str(values[15])),  # type: ignore[index]
+        provider_code=(None if values[16] is None else str(values[16])),  # type: ignore[index]
+        retryable=(None if values[17] is None else bool(values[17])),  # type: ignore[index]
+        retry_at=_dt(values[18]),  # type: ignore[index]
+        limit_scope=(None if values[19] is None else LimitScope(str(values[19]))),  # type: ignore[index]
+        exit_code=(None if values[20] is None else int(values[20])),  # type: ignore[index]
+        safe_message=(None if values[21] is None else str(values[21])),  # type: ignore[index]
+        stdout_tail=str(values[22] or ""),  # type: ignore[index]
+        stderr_tail=str(values[23] or ""),  # type: ignore[index]
+    )
+
+
+def _planning(row: object) -> PlanningOperation:
+    values = row
+    return PlanningOperation(
+        id=str(values[0]),  # type: ignore[index]
+        plan_id=str(values[1]),  # type: ignore[index]
+        purpose=str(values[2]),  # type: ignore[index]
+        target_goal_id=(None if values[3] is None else str(values[3])),  # type: ignore[index]
+        status=PlanningOperationStatus(str(values[4])),  # type: ignore[index]
+        created_at=datetime.fromisoformat(str(values[5])),  # type: ignore[index]
+        updated_at=datetime.fromisoformat(str(values[6])),  # type: ignore[index]
+        started_at=_dt(values[7]),  # type: ignore[index]
+        completed_at=_dt(values[8]),  # type: ignore[index]
+        last_liveness_at=_dt(values[9]),  # type: ignore[index]
+        model_request_count=int(values[10]),  # type: ignore[index]
+        tool_turn_count=int(values[11]),  # type: ignore[index]
+        runtime=(None if values[12] is None else str(values[12])),  # type: ignore[index]
+        provider_id=(None if values[13] is None else str(values[13])),  # type: ignore[index]
+        model_id=(None if values[14] is None else str(values[14])),  # type: ignore[index]
+        failure_kind=(None if values[15] is None else str(values[15])),  # type: ignore[index]
+        retry_at=_dt(values[16]),  # type: ignore[index]
+        safe_message=(None if values[17] is None else str(values[17])),  # type: ignore[index]
     )
 
 
@@ -74,7 +130,7 @@ class SqliteExecutionRecordRepository:
             self._bound()
             .execute(
                 text(
-                    "SELECT id, plan_id, goal_id, task_id, status, started_at, completed_at "
+                    f"SELECT {_RUN_COLUMNS} "
                     "FROM execution_runs "
                     "WHERE plan_id = :plan_id AND goal_id = :goal_id AND task_id = :task_id "
                     "AND status IN ('running', 'retrying') "
@@ -124,9 +180,11 @@ class SqliteExecutionRecordRepository:
             text(
                 "INSERT INTO execution_attempts "
                 "(id, run_id, plan_id, goal_id, task_id, number, task_attempt, "
-                "status, started_at, completed_at) "
+                "status, started_at, completed_at, last_liveness_at, timeout_seconds, "
+                "runtime, provider_id, model_id) "
                 "VALUES (:id, :run_id, :plan_id, :goal_id, :task_id, :number, "
-                ":task_attempt, :status, :started_at, :completed_at)"
+                ":task_attempt, :status, :started_at, :completed_at, "
+                ":last_liveness_at, :timeout_seconds, :runtime, :provider_id, :model_id)"
             ),
             {
                 "id": attempt.id,
@@ -141,6 +199,15 @@ class SqliteExecutionRecordRepository:
                 "completed_at": (
                     attempt.completed_at.isoformat() if attempt.completed_at else None
                 ),
+                "last_liveness_at": (
+                    attempt.last_liveness_at.isoformat()
+                    if attempt.last_liveness_at
+                    else attempt.started_at.isoformat()
+                ),
+                "timeout_seconds": attempt.timeout_seconds,
+                "runtime": attempt.runtime,
+                "provider_id": attempt.provider_id,
+                "model_id": attempt.model_id,
             },
         )
 
@@ -162,6 +229,10 @@ class SqliteExecutionRecordRepository:
         attempt_status: ExecutionAttemptStatus,
         run_status: ExecutionRunStatus,
         completed_at: datetime,
+        failure: RuntimeFailure | None = None,
+        retry_at: datetime | None = None,
+        stdout_tail: str = "",
+        stderr_tail: str = "",
     ) -> None:
         session = self._bound()
         row = session.execute(
@@ -175,12 +246,30 @@ class SqliteExecutionRecordRepository:
             session.execute(
                 text(
                     "UPDATE execution_attempts SET status = :status, "
-                    "completed_at = :completed_at WHERE id = :id"
+                    "completed_at = :completed_at, last_liveness_at = :completed_at, "
+                    "failure_kind = :failure_kind, provider_code = :provider_code, "
+                    "retryable = :retryable, retry_at = :retry_at, "
+                    "limit_scope = :limit_scope, exit_code = :exit_code, "
+                    "safe_message = :safe_message, stdout_tail = :stdout_tail, "
+                    "stderr_tail = :stderr_tail WHERE id = :id"
                 ),
                 {
                     "id": attempt_id,
                     "status": attempt_status.value,
                     "completed_at": completed_at.isoformat(),
+                    "failure_kind": failure.kind.value if failure else None,
+                    "provider_code": failure.provider_code if failure else None,
+                    "retryable": int(failure.retryable) if failure else None,
+                    "retry_at": retry_at.isoformat() if retry_at else None,
+                    "limit_scope": (
+                        failure.limit_scope.value
+                        if failure and failure.limit_scope is not None
+                        else None
+                    ),
+                    "exit_code": failure.exit_code if failure else None,
+                    "safe_message": failure.safe_message if failure else None,
+                    "stdout_tail": (failure.stdout_tail if failure else stdout_tail[-2_000:]),
+                    "stderr_tail": (failure.stderr_tail if failure else stderr_tail[-2_000:]),
                 },
             )
         elif existing_status != attempt_status.value:
@@ -204,10 +293,7 @@ class SqliteExecutionRecordRepository:
         row = (
             self._bound()
             .execute(
-                text(
-                    "SELECT id, plan_id, goal_id, task_id, status, started_at, completed_at "
-                    "FROM execution_runs WHERE id = :id"
-                ),
+                text(f"SELECT {_RUN_COLUMNS} FROM execution_runs WHERE id = :id"),
                 {"id": run_id},
             )
             .one_or_none()
@@ -220,10 +306,7 @@ class SqliteExecutionRecordRepository:
         row = (
             self._bound()
             .execute(
-                text(
-                    "SELECT id, run_id, plan_id, goal_id, task_id, number, task_attempt, "
-                    "status, started_at, completed_at FROM execution_attempts WHERE id = :id"
-                ),
+                text(f"SELECT {_ATTEMPT_COLUMNS} FROM execution_attempts WHERE id = :id"),
                 {"id": attempt_id},
             )
             .one_or_none()
@@ -242,8 +325,7 @@ class SqliteExecutionRecordRepository:
             self._bound()
             .execute(
                 text(
-                    "SELECT id, run_id, plan_id, goal_id, task_id, number, task_attempt, "
-                    f"status, started_at, completed_at FROM execution_attempts {where} "
+                    f"SELECT {_ATTEMPT_COLUMNS} FROM execution_attempts {where} "
                     "ORDER BY started_at, id"
                 ),
                 params,
@@ -251,3 +333,193 @@ class SqliteExecutionRecordRepository:
             .all()
         )
         return [_attempt(row) for row in rows]
+
+    def list_runs(self, plan_id: str) -> list[ExecutionRun]:
+        rows = (
+            self._bound()
+            .execute(
+                text(
+                    f"SELECT {_RUN_COLUMNS} FROM execution_runs "
+                    "WHERE plan_id = :plan_id ORDER BY started_at, id"
+                ),
+                {"plan_id": plan_id},
+            )
+            .all()
+        )
+        return [_run(row) for row in rows]
+
+    def list_attempts(self, plan_id: str) -> list[ExecutionAttempt]:
+        rows = (
+            self._bound()
+            .execute(
+                text(
+                    f"SELECT {_ATTEMPT_COLUMNS} FROM execution_attempts "
+                    "WHERE plan_id = :plan_id ORDER BY started_at, id"
+                ),
+                {"plan_id": plan_id},
+            )
+            .all()
+        )
+        return [_attempt(row) for row in rows]
+
+    def add_planning_operation(self, operation: PlanningOperation) -> None:
+        self._bound().execute(
+            text(
+                "INSERT INTO planning_operations "
+                "(id, plan_id, purpose, target_goal_id, status, created_at, "
+                "updated_at, started_at, completed_at, last_liveness_at, "
+                "model_request_count, tool_turn_count, runtime, provider_id, "
+                "model_id, failure_kind, retry_at, safe_message) VALUES "
+                "(:id, :plan_id, :purpose, :target_goal_id, :status, :created_at, "
+                ":updated_at, :started_at, :completed_at, :last_liveness_at, "
+                ":model_request_count, :tool_turn_count, :runtime, :provider_id, "
+                ":model_id, :failure_kind, :retry_at, :safe_message)"
+            ),
+            self._planning_params(operation),
+        )
+
+    def update_planning_operation(self, operation: PlanningOperation) -> None:
+        result: CursorResult[Any] = self._bound().execute(  # type: ignore[assignment]
+            text(
+                "UPDATE planning_operations SET status=:status, updated_at=:updated_at, "
+                "started_at=:started_at, completed_at=:completed_at, "
+                "last_liveness_at=:last_liveness_at, "
+                "model_request_count=:model_request_count, tool_turn_count=:tool_turn_count, "
+                "runtime=:runtime, provider_id=:provider_id, model_id=:model_id, "
+                "failure_kind=:failure_kind, retry_at=:retry_at, "
+                "safe_message=:safe_message WHERE id=:id"
+            ),
+            self._planning_params(operation),
+        )
+        if result.rowcount != 1:
+            raise KeyError(operation.id)
+
+    @staticmethod
+    def _planning_params(operation: PlanningOperation) -> dict[str, Any]:
+        return {
+            "id": operation.id,
+            "plan_id": operation.plan_id,
+            "purpose": operation.purpose,
+            "target_goal_id": operation.target_goal_id,
+            "status": operation.status.value,
+            "created_at": operation.created_at.isoformat(),
+            "updated_at": operation.updated_at.isoformat(),
+            "started_at": operation.started_at.isoformat() if operation.started_at else None,
+            "completed_at": (
+                operation.completed_at.isoformat() if operation.completed_at else None
+            ),
+            "last_liveness_at": (
+                operation.last_liveness_at.isoformat() if operation.last_liveness_at else None
+            ),
+            "model_request_count": operation.model_request_count,
+            "tool_turn_count": operation.tool_turn_count,
+            "runtime": operation.runtime,
+            "provider_id": operation.provider_id,
+            "model_id": operation.model_id,
+            "failure_kind": operation.failure_kind,
+            "retry_at": operation.retry_at.isoformat() if operation.retry_at else None,
+            "safe_message": operation.safe_message,
+        }
+
+    def find_active_planning_operation(
+        self, plan_id: str, purpose: str, target_goal_id: str | None = None
+    ) -> PlanningOperation | None:
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    f"SELECT {_PLANNING_COLUMNS} FROM planning_operations "
+                    "WHERE plan_id=:plan_id AND purpose=:purpose "
+                    "AND target_goal_id IS :target_goal_id "
+                    "AND status IN ('queued', 'started', 'waiting_for_user', 'backing_off') "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1"
+                ),
+                {
+                    "plan_id": plan_id,
+                    "purpose": purpose,
+                    "target_goal_id": target_goal_id,
+                },
+            )
+            .one_or_none()
+        )
+        return None if row is None else _planning(row)
+
+    def list_planning_operations(self, plan_id: str) -> list[PlanningOperation]:
+        rows = (
+            self._bound()
+            .execute(
+                text(
+                    f"SELECT {_PLANNING_COLUMNS} FROM planning_operations "
+                    "WHERE plan_id=:plan_id ORDER BY created_at, id"
+                ),
+                {"plan_id": plan_id},
+            )
+            .all()
+        )
+        return [_planning(row) for row in rows]
+
+    def get_runtime_circuit(
+        self, runtime: str, provider_id: str, model_id: str
+    ) -> RuntimeCircuit | None:
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT runtime, provider_id, model_id, failure_count, opened_at, "
+                    "retry_at, last_failure_kind, safe_message, manual_intervention "
+                    "FROM runtime_circuits WHERE runtime=:runtime "
+                    "AND provider_id=:provider_id AND model_id=:model_id"
+                ),
+                {"runtime": runtime, "provider_id": provider_id, "model_id": model_id},
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return RuntimeCircuit(
+            runtime=str(row[0]),
+            provider_id=str(row[1]),
+            model_id=str(row[2]),
+            failure_count=int(row[3]),
+            opened_at=datetime.fromisoformat(str(row[4])),
+            retry_at=datetime.fromisoformat(str(row[5])),
+            last_failure_kind=str(row[6]),
+            safe_message=str(row[7]),
+            manual_intervention=bool(row[8]),
+        )
+
+    def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
+        self._bound().execute(
+            text(
+                "INSERT INTO runtime_circuits "
+                "(runtime, provider_id, model_id, failure_count, opened_at, retry_at, "
+                "last_failure_kind, safe_message, manual_intervention) VALUES "
+                "(:runtime, :provider_id, :model_id, :failure_count, :opened_at, "
+                ":retry_at, :last_failure_kind, :safe_message, :manual_intervention) "
+                "ON CONFLICT(runtime, provider_id, model_id) DO UPDATE SET "
+                "failure_count=excluded.failure_count, opened_at=excluded.opened_at, "
+                "retry_at=excluded.retry_at, last_failure_kind=excluded.last_failure_kind, "
+                "safe_message=excluded.safe_message, "
+                "manual_intervention=excluded.manual_intervention"
+            ),
+            {
+                "runtime": circuit.runtime,
+                "provider_id": circuit.provider_id,
+                "model_id": circuit.model_id,
+                "failure_count": circuit.failure_count,
+                "opened_at": circuit.opened_at.isoformat(),
+                "retry_at": circuit.retry_at.isoformat(),
+                "last_failure_kind": circuit.last_failure_kind,
+                "safe_message": circuit.safe_message,
+                "manual_intervention": int(circuit.manual_intervention),
+            },
+        )
+
+    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None:
+        self._bound().execute(
+            text(
+                "DELETE FROM runtime_circuits WHERE runtime=:runtime "
+                "AND provider_id=:provider_id AND model_id=:model_id"
+            ),
+            {"runtime": runtime, "provider_id": provider_id, "model_id": model_id},
+        )

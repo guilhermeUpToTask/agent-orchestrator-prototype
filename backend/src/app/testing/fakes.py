@@ -123,6 +123,10 @@ class InMemoryPlanRepository:
         if claim is not None and claim.worker_id == worker_id:
             claim.expires_at = self._clock.now() + timedelta(seconds=claim.lease_seconds)
 
+    def is_claim_live(self, plan_id: str) -> bool:
+        claim = self._claims.get(plan_id)
+        return claim is not None and claim.expires_at > self._clock.now()
+
     def release(self, plan_id: str, worker_id: str) -> None:
         claim = self._claims.get(plan_id)
         if claim is not None and claim.worker_id == worker_id:
@@ -271,6 +275,12 @@ class NoOpWorkspace:
 
     async def discard(self, handle: _Handle) -> None:
         self.discarded.append(handle.path)
+
+    async def prune(self) -> None:
+        pass
+
+    async def audit(self) -> dict[str, list[str]]:
+        return {"worktrees": [], "branches": []}
 
 
 # ---- collecting event sink ----

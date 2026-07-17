@@ -96,3 +96,9 @@ def test_worker_architects_then_jit_enriches_with_role_bindings() -> None:
         "test_author": "test-author",
         "implementer": "implementer",
     }
+    operations = uow.executions.list_planning_operations(plan.id)
+    by_purpose = {operation.purpose: operation for operation in operations}
+    assert set(by_purpose) == {"cycle_architecture", "goal_contract"}
+    assert by_purpose["cycle_architecture"].target_goal_id is None
+    assert by_purpose["goal_contract"].target_goal_id == goal.id
+    assert all(operation.status.value == "committed" for operation in operations)

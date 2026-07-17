@@ -1,18 +1,16 @@
 """
 src/infra/reasoner/openai_reasoner.py — the real Reasoner (OpenAI-compatible).
 
-Implements the two-method domain port on the runtime package's agent loop:
+Implements the purpose-specific domain port on the runtime package's agent loop:
 
   converse    — system + persisted history replayed as PLAIN user/assistant
                 text (never provider transcripts: immune to dangling tool
                 calls and provider switches) + the phase prompt. One terminal
-                tool: submit_goals. A plain-text reply IS the question turn
-                (goals=None); the submit is the roadmap commit.
-  enrich_goal — one terminal tool (submit_tasks), plain replies disallowed,
-                short budget. Unknown capability ids come back as
-                {accepted:false, errors} so the model self-corrects; after
-                repeated rejections the final submit is accepted with unknown
-                ids filtered out (logged) rather than failing the session.
+                tool: submit_intent_proposal. A plain-text reply keeps discovery
+                waiting; a valid submit opens the exact-revision intent gate.
+  architect_cycle — submit_cycle_draft with stable keys and dependencies.
+  enrich_goal_contract — submit_goal_contract for the head goal only.
+  enrich_goal — quarantined compatibility tool for legacy plans.
 
 Handlers RE-VALIDATE everything (provider schema enforcement is never
 trusted) and build the domain objects with new_id() and position=index.
@@ -48,6 +46,7 @@ from src.domain.factories.identity import new_id
 from src.domain.ports.reasoner_port import (
     ChatMessage,
     ConversationMode,
+    IntentCandidate,
     ReasonerReply,
 )
 from src.infra.reasoner.runtime.agent_loop import SessionResult, run_tool_session
@@ -91,30 +90,6 @@ _TASK_ITEM_SCHEMA: dict[str, Any] = {
     "required": ["name", "description"],
 }
 
-SUBMIT_GOALS_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "goals": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "tasks": {
-                        "type": "array",
-                        "items": _TASK_ITEM_SCHEMA,
-                        "description": "optional pre-populated tasks",
-                    },
-                },
-                "required": ["name", "description"],
-            },
-        }
-    },
-    "required": ["goals"],
-}
-
 SUBMIT_TASKS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {"tasks": {"type": "array", "minItems": 1, "items": _TASK_ITEM_SCHEMA}},
@@ -141,6 +116,28 @@ SUBMIT_CYCLE_DRAFT_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["goals"],
+}
+
+SUBMIT_INTENT_PROPOSAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "normalized_brief": {"type": "string"},
+        "objective": {"type": "string"},
+        "scope": {"type": "array", "items": {"type": "string"}},
+        "constraints": {"type": "array", "items": {"type": "string"}},
+        "exclusions": {"type": "array", "items": {"type": "string"}},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "unresolved_questions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "normalized_brief",
+        "objective",
+        "scope",
+        "constraints",
+        "exclusions",
+        "assumptions",
+        "unresolved_questions",
+    ],
 }
 
 _CRITERION_SCHEMA: dict[str, Any] = {
@@ -364,83 +361,51 @@ class OpenAIReasoner:
             messages.append({"role": msg.role, "content": msg.content})
         messages.append({"role": "user", "content": message or "(proceed)"})
 
-        known_caps = {c.id for c in self._default_caps}
-        state: dict[str, Any] = {"rejections": 0}
-
-        def handle_submit_goals(args: dict[str, Any]) -> str:
-            errors: list[str] = []
-            goals_raw = args.get("goals")
-            if not isinstance(goals_raw, list) or not goals_raw:
-                return _rejected(["'goals' must be a non-empty array"])
-            for gi, goal_raw in enumerate(goals_raw):
-                where = f"goals[{gi}]"
-                if not isinstance(goal_raw, dict):
-                    errors.append(f"{where}: must be an object")
-                    continue
-                if not isinstance(goal_raw.get("name"), str) or not goal_raw["name"].strip():
-                    errors.append(f"{where}: 'name' must be a non-empty string")
-                if not isinstance(goal_raw.get("description"), str):
-                    errors.append(f"{where}: 'description' must be a string")
-                tasks_raw = goal_raw.get("tasks", [])
-                if not isinstance(tasks_raw, list):
-                    errors.append(f"{where}: 'tasks' must be an array when present")
-                    continue
-                for ti, task_raw in enumerate(tasks_raw):
-                    errors.extend(_validate_task_item(task_raw, f"{where}.tasks[{ti}]", known_caps))
-            if errors and _only_capability_errors(errors):
-                state["rejections"] += 1
-                if state["rejections"] <= MAX_CAPABILITY_REJECTIONS:
-                    return _rejected(errors)
-                return _accepted()  # final: accept, filter unknown ids on build
-            if errors:
-                return _rejected(errors)
-            return _accepted()
-
-        submit_goals = ToolSpec(
-            name="submit_goals",
-            description=(
-                "Commit the agreed goal roadmap (ordered). Call exactly once, "
-                "when the direction is clear."
+        collector = ArtifactCollector()
+        readers = {
+            "read_project_spec": lambda: json.dumps({"project_id": plan.project_id}),
+            "read_project_plan": lambda: plan.model_dump_json(),
+            "read_repository_context": lambda: json.dumps({"availability": "adapter_context_only"}),
+            "read_conversation": lambda: json.dumps(
+                [
+                    {"role": item.role, "content": item.content}
+                    for item in list(history)[-MAX_HISTORY_MESSAGES:]
+                ]
             ),
-            input_schema=SUBMIT_GOALS_SCHEMA,
-            handler=handle_submit_goals,
-            terminal=True,
+        }
+        tools = build_tool_profile(
+            ReasoningPurpose.INTENT_DISCOVERY,
+            readers,
+            SUBMIT_INTENT_PROPOSAL_SCHEMA,
+            collector.submit,
         )
 
         result = await run_tool_session(
             self._client,
             messages,
-            [submit_goals],
+            tools,
             max_turns=self._converse_max_turns,
             allow_plain_reply=True,
         )
         await self._emit_usage(plan, mode, result)
 
         if not result.submitted:
-            return ReasonerReply(message=result.text, goals=None)
-
-        goals = self._build_goals(result.submit_args, known_caps)
-        reply_text = result.text or (f"Committing {len(goals)} goal(s) to the roadmap.")
-        return ReasonerReply(message=reply_text, goals=goals)
-
-    def _build_goals(self, args: dict[str, Any], known_caps: set[str]) -> list[Goal]:
-        goals: list[Goal] = []
-        for gi, goal_raw in enumerate(args["goals"]):
-            tasks = [
-                _build_task(task_raw, ti, known_caps)
-                for ti, task_raw in enumerate(goal_raw.get("tasks", []))
-                if isinstance(task_raw, dict)
-            ]
-            goals.append(
-                Goal(
-                    id=new_id(),
-                    name=str(goal_raw["name"]).strip(),
-                    position=gi,
-                    description=str(goal_raw.get("description", "")),
-                    tasks=tasks,
-                )
+            return ReasonerReply(
+                message=result.text,
+                model_request_count=result.llm_calls,
+                tool_turn_count=result.turns,
             )
-        return goals
+
+        candidate = IntentCandidate.model_validate(collector.value or result.submit_args)
+        if candidate.unresolved_questions:
+            raise ValueError("submitted intent cannot retain unresolved questions")
+        reply_text = result.text or "Intent proposal is ready for your review."
+        return ReasonerReply(
+            message=reply_text,
+            intent=candidate,
+            model_request_count=result.llm_calls,
+            tool_turn_count=result.turns,
+        )
 
     # ---- enrich_goal ----------------------------------------------------
     async def enrich_goal(
@@ -505,9 +470,7 @@ class OpenAIReasoner:
         readers = {
             "read_project_spec": lambda: json.dumps({"project_id": plan.project_id}),
             "read_project_plan": lambda: plan.model_dump_json(),
-            "read_repository_context": lambda: json.dumps(
-                {"availability": "adapter_context_only"}
-            ),
+            "read_repository_context": lambda: json.dumps({"availability": "adapter_context_only"}),
             "read_approved_intent": lambda: proposal.model_dump_json(),
             "read_prior_evidence": lambda: json.dumps(
                 [cycle.evidence_refs for cycle in plan.cycles]
@@ -519,6 +482,14 @@ class OpenAIReasoner:
             SUBMIT_CYCLE_DRAFT_SCHEMA,
             collector.submit,
         )
+        source_instruction = (
+            " This is a replan. Read the project plan and prior evidence before "
+            "submitting. Treat DONE goals and tasks as locked history: do not "
+            "recreate or redo them. Account only for unfinished source work and "
+            "the newly approved intent in the replacement cycle."
+            if proposal.source_cycle_id is not None
+            else ""
+        )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -527,7 +498,7 @@ class OpenAIReasoner:
                     "Generate one ordered CycleDraft for the approved intent. "
                     "Use stable local goal keys and only real dependency keys; "
                     "strict execution order is represented by position, not fake edges. "
-                    "Submit it with submit_cycle_draft."
+                    f"{source_instruction} Submit it with submit_cycle_draft."
                 ),
             },
         ]
@@ -552,27 +523,19 @@ class OpenAIReasoner:
         capabilities: Sequence[Capability],
     ) -> GoalContract:
         proposal = next(
-            (
-                cycle
-                for cycle in plan.cycles
-                if cycle.status.value == "active"
-            ),
+            (cycle for cycle in plan.cycles if cycle.status.value == "active"),
             None,
         )
         collector = ArtifactCollector()
         readers = {
             "read_project_spec": lambda: json.dumps({"project_id": plan.project_id}),
             "read_project_plan": lambda: plan.model_dump_json(),
-            "read_repository_context": lambda: json.dumps(
-                {"availability": "adapter_context_only"}
-            ),
+            "read_repository_context": lambda: json.dumps({"availability": "adapter_context_only"}),
             "read_approved_intent": lambda: json.dumps(
                 {"intent_proposal_id": proposal.intent_proposal_id if proposal else None}
             ),
             "read_active_goal": lambda: goal.model_dump_json(),
-            "read_prior_evidence": lambda: json.dumps(
-                proposal.evidence_refs if proposal else []
-            ),
+            "read_prior_evidence": lambda: json.dumps(proposal.evidence_refs if proposal else []),
         }
         tools = build_tool_profile(
             ReasoningPurpose.GOAL_ENRICHMENT,

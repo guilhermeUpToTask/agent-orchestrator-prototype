@@ -11,8 +11,10 @@ Metrics are computed in SQLite via json_extract over the stringified payload
 store). Token counts live in llm.call rows; run/failure counts in the runner's
 agent.started / agent.failed rows.
 """
+
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import text
@@ -57,6 +59,20 @@ _METRICS_FAILURE_KINDS_SQL = """
     GROUP BY kind
 """
 
+_USAGE_EVIDENCE_SQL = """
+    SELECT task_id, source, quality, payload
+    FROM agent_events
+    WHERE observation_kind = 'model.usage' {plan_clause}
+    ORDER BY id
+"""
+
+_ATTEMPT_METRICS_SQL = """
+    SELECT status, failure_kind, COUNT(*)
+    FROM execution_attempts
+    WHERE 1 = 1 {plan_clause}
+    GROUP BY status, failure_kind
+"""
+
 
 class SqliteAgentEventReader:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -81,9 +97,7 @@ class SqliteAgentEventReader:
         if before_id is not None:
             before_clause = "AND id < :before_id"
             params["before_id"] = before_id
-        sql = text(
-            _LIST_SQL.format(task_clause=task_clause, before_clause=before_clause)
-        )
+        sql = text(_LIST_SQL.format(task_clause=task_clause, before_clause=before_clause))
         with self._sf() as session:
             rows = session.execute(sql, params).all()
         return [
@@ -102,39 +116,78 @@ class SqliteAgentEventReader:
         ]
 
     def metrics(self, plan_id: str | None = None) -> dict[str, Any]:
-        """Global (or per-plan) roll-up: LLM sessions/tokens, agent run counts,
-        and failures grouped by kind (rate_limit visibility)."""
+        """Truthful usage and attempt roll-up with provenance and coverage.
+
+        Missing provider usage remains unavailable (None), never synthetic zero.
+        Planner and child-agent evidence are separate; combined is an explicit
+        aggregate over the evidence that actually exists.
+        """
         plan_clause = "AND plan_id = :plan_id" if plan_id else ""
         params = {"plan_id": plan_id} if plan_id else {}
         with self._sf() as session:
-            llm = session.execute(
-                text(_METRICS_LLM_SQL.format(plan_clause=plan_clause)), params
-            ).one()
-            runs: dict[str, int] = {
-                str(r[0]): int(r[1])
-                for r in session.execute(
-                    text(_METRICS_RUNS_SQL.format(plan_clause=plan_clause)), params
-                ).all()
+            usage_rows = session.execute(
+                text(_USAGE_EVIDENCE_SQL.format(plan_clause=plan_clause)), params
+            ).all()
+            attempt_rows = session.execute(
+                text(_ATTEMPT_METRICS_SQL.format(plan_clause=plan_clause)), params
+            ).all()
+
+        def empty_scope() -> dict[str, Any]:
+            return {
+                "sessions": 0,
+                "calls": 0,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+                "coverage": {
+                    "observations": 0,
+                    "reported": 0,
+                    "estimated": 0,
+                    "unavailable": 0,
+                    "legacy_unknown": 0,
+                },
             }
-            failures: dict[str, int] = {
-                str(r[0]): int(r[1])
-                for r in session.execute(
-                    text(_METRICS_FAILURE_KINDS_SQL.format(plan_clause=plan_clause)),
-                    params,
-                ).all()
-            }
+
+        scopes = {"planner": empty_scope(), "child": empty_scope(), "combined": empty_scope()}
+        for task_id, _source, quality, payload_raw in usage_rows:
+            payload = json.loads(str(payload_raw))
+            scope_name = "child" if task_id is not None else "planner"
+            for name in (scope_name, "combined"):
+                scope = scopes[name]
+                scope["sessions"] += 1
+                scope["calls"] += int(payload.get("llm_calls") or 0)
+                scope["coverage"]["observations"] += 1
+                scope["coverage"][str(quality)] = scope["coverage"].get(str(quality), 0) + 1
+                for field, payload_key in (
+                    ("prompt_tokens", "prompt_tokens"),
+                    ("completion_tokens", "completion_tokens"),
+                    ("total_tokens", "total_tokens"),
+                ):
+                    raw = payload.get(payload_key)
+                    if raw is not None:
+                        scope[field] = (scope[field] or 0) + int(raw)
+
+        attempts = 0
+        finished = 0
+        failed = 0
+        failures: dict[str, int] = {}
+        for status, failure_kind, count_raw in attempt_rows:
+            count = int(count_raw)
+            attempts += count
+            if str(status) in {"succeeded", "failed", "abandoned"}:
+                finished += count
+            if str(status) == "failed":
+                failed += count
+                kind = str(failure_kind or "unknown")
+                failures[kind] = failures.get(kind, 0) + count
         return {
-            "llm": {
-                "sessions": int(llm[0]),
-                "calls": int(llm[1]),
-                "prompt_tokens": int(llm[2]),
-                "completion_tokens": int(llm[3]),
-                "total_tokens": int(llm[4]),
-            },
+            "llm": {**scopes["combined"], "scopes": scopes},
             "agent": {
-                "runs": runs.get("agent.started", 0),
-                "finished": runs.get("agent.finished", 0),
-                "failed": runs.get("agent.failed", 0),
+                "runs": attempts,
+                "finished": finished,
+                "failed": failed,
                 "failures_by_kind": failures,
+                "source": "execution_ledger",
+                "quality": "exact",
             },
         }

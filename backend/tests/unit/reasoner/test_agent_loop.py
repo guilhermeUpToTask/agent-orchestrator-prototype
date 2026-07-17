@@ -1,5 +1,6 @@
 """The tool-calling agent loop: terminal accept, {accepted:false}
 self-correction, plain-reply semantics, budget exhaustion, malformed calls."""
+
 from __future__ import annotations
 
 import asyncio
@@ -51,9 +52,7 @@ def test_rejected_submit_feeds_errors_back_and_model_corrects():
             return json.dumps({"accepted": False, "errors": ["n must be >= 1"]})
         return json.dumps({"accepted": True})
 
-    client = FakeLLMClient(
-        [tool_turn("submit", {"n": 0}), tool_turn("submit", {"n": 3}, "call-2")]
-    )
+    client = FakeLLMClient([tool_turn("submit", {"n": 0}), tool_turn("submit", {"n": 3}, "call-2")])
     result, messages = run(client, [submit_tool(handler)])
 
     assert result.submitted is True and result.submit_args == {"n": 3}
@@ -87,9 +86,7 @@ def test_budget_exhaustion_raises_transient():
     def rejecting(args):
         return json.dumps({"accepted": False, "errors": ["still wrong"]})
 
-    client = FakeLLMClient(
-        [tool_turn("submit", {}, f"c{i}") for i in range(3)]
-    )
+    client = FakeLLMClient([tool_turn("submit", {}, f"c{i}") for i in range(3)])
     with pytest.raises(ReasonerError) as err:
         run(client, [submit_tool(rejecting)], max_turns=3)
     assert err.value.transient is True
@@ -127,12 +124,8 @@ def test_non_terminal_tool_result_feeds_back_and_loop_continues():
         input_schema={"type": "object"},
         handler=lambda args: json.dumps({"found": ["a", "b"]}),
     )
-    client = FakeLLMClient(
-        [tool_turn("lookup", {}, "c1"), tool_turn("submit", {}, "c2")]
-    )
+    client = FakeLLMClient([tool_turn("lookup", {}, "c1"), tool_turn("submit", {}, "c2")])
     result, messages = run(client, [submit_tool(), catalog])
 
     assert result.submitted is True and result.turns == 2
-    assert any(
-        m["role"] == "tool" and "found" in m["content"] for m in messages
-    )
+    assert any(m["role"] == "tool" and "found" in m["content"] for m in messages)

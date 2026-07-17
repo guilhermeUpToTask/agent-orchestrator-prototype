@@ -1,18 +1,11 @@
 """The reasoner port: the planning LLM behind the phase machine.
 
-Two methods, matching the two places an LLM actually plans:
+Four purpose-specific content transforms implement the cyclic flow:
 
-  converse    — DISCOVERY / REPLANNING chat. Multi-turn: each user message is
-                one call; a reply without goals keeps the conversation open, a
-                reply WITH goals is the roadmap commit that moves the plan into
-                ARCHITECTURE (the caller owns the transaction + transition).
-  enrich_goal — the ENRICHING JIT step: break ONE goal into a small ordered set
-                of plain executable tasks (capability ids from the catalog).
-
-ARCHITECTURE deliberately has no method: discovery commits the user-agreed
-roadmap itself, so an autonomous re-structuring pass is redundant for the
-prototype — the phase is a no-LLM passthrough in the PlanningHandler (that
-handler is the seam if a real structuring pass returns).
+  converse             — normalize a brief and propose one IntentCandidate.
+  architect_cycle      — turn an approved intent into a stable-key GoalOutline DAG.
+  enrich_goal_contract — freeze the head goal's contract and executable tasks JIT.
+  enrich_goal          — quarantined compatibility transform for legacy plans only.
 
 Adapters (StubReasoner, the OpenAI-compatible reasoner) implement it; the
 conversation use cases and the PlanningHandler own the transactions and the
@@ -22,7 +15,7 @@ phase transitions — the reasoner reads, never persists.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, Sequence, runtime_checkable
+from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -46,15 +39,30 @@ class ChatMessage(BaseModel):
     role: ChatRole
     content: str
     created_at: datetime
-    meta: dict[str, str | bool | int] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class IntentCandidate(BaseModel):
+    """Reasoner-produced DTO; application code assigns identity and review state."""
+
+    normalized_brief: str
+    objective: str
+    scope: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
 
 
 class ReasonerReply(BaseModel):
-    """One converse() turn. goals=None means "still conversing" (the message is
-    a question/reply to show the user); a goal list is the roadmap commit."""
+    """One conversation turn. Intent is the canonical commit artifact; goals is
+    retained only for reading/quarantining pre-cyclic compatibility traffic."""
 
     message: str
     goals: list[Goal] | None = None
+    intent: IntentCandidate | None = None
+    model_request_count: int = 0
+    tool_turn_count: int = 0
 
 
 @runtime_checkable

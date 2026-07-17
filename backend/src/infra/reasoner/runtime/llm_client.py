@@ -10,6 +10,7 @@ dispatch and message history belong to agent_loop.py.
 AsyncOpenAI is used because the reasoner runs inside the worker's event loop;
 the sync SDK would block the whole worker between turns.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -97,9 +98,7 @@ class OpenAIChatClient:
                 args = {}
             if not isinstance(args, dict):
                 args = {}
-            tool_calls.append(
-                ToolCall(id=tc.id, name=tc.function.name, arguments=args)
-            )
+            tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
 
         return AssistantTurn(
             text=msg.content or "",

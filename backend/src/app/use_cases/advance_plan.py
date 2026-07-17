@@ -57,9 +57,7 @@ class PlanDispatcher:
         planning_handler: PhaseHandler | None = None,
         verifier: VerificationExecutor | None = None,
     ) -> None:
-        self._execution = ExecutionHandler(
-            runner, agents, workspace, event_sink, clock, verifier
-        )
+        self._execution = ExecutionHandler(runner, agents, workspace, event_sink, clock, verifier)
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)
 

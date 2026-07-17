@@ -4,6 +4,7 @@ Infra-local on purpose: nothing in domain/app touches secrets; the domain holds
 only the opaque ``api_key_ref`` string. The plaintext is never held here and is
 resolved exclusively by the secret store adapter.
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, field_validator

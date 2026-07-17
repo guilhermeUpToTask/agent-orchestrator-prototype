@@ -8,9 +8,13 @@ from datetime import datetime
 from src.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
+    PlanningOperation,
+    PlanningOperationStatus,
+    RuntimeCircuit,
     ExecutionRun,
     ExecutionRunStatus,
 )
+from src.app.runtime_failures import RuntimeFailure
 
 
 class InMemoryExecutionRecordRepository:
@@ -19,25 +23,42 @@ class InMemoryExecutionRecordRepository:
     def __init__(self) -> None:
         self._runs: dict[str, ExecutionRun] = {}
         self._attempts: dict[str, ExecutionAttempt] = {}
+        self._planning: dict[str, PlanningOperation] = {}
+        self._circuits: dict[tuple[str, str, str], RuntimeCircuit] = {}
         self._tx_runs: dict[str, ExecutionRun] | None = None
         self._tx_attempts: dict[str, ExecutionAttempt] | None = None
+        self._tx_planning: dict[str, PlanningOperation] | None = None
+        self._tx_circuits: dict[tuple[str, str, str], RuntimeCircuit] | None = None
 
     def _begin(self) -> None:
         if self._tx_runs is not None:
             raise RuntimeError("execution record transactions cannot be nested")
         self._tx_runs = dict(self._runs)
         self._tx_attempts = dict(self._attempts)
+        self._tx_planning = dict(self._planning)
+        self._tx_circuits = dict(self._circuits)
 
     def _commit(self) -> None:
-        assert self._tx_runs is not None and self._tx_attempts is not None
+        assert (
+            self._tx_runs is not None
+            and self._tx_attempts is not None
+            and self._tx_planning is not None
+            and self._tx_circuits is not None
+        )
         self._runs = self._tx_runs
         self._attempts = self._tx_attempts
+        self._planning = self._tx_planning
+        self._circuits = self._tx_circuits
         self._tx_runs = None
         self._tx_attempts = None
+        self._tx_planning = None
+        self._tx_circuits = None
 
     def _rollback(self) -> None:
         self._tx_runs = None
         self._tx_attempts = None
+        self._tx_planning = None
+        self._tx_circuits = None
 
     def _bound(
         self,
@@ -113,6 +134,10 @@ class InMemoryExecutionRecordRepository:
         attempt_status: ExecutionAttemptStatus,
         run_status: ExecutionRunStatus,
         completed_at: datetime,
+        failure: RuntimeFailure | None = None,
+        retry_at: datetime | None = None,
+        stdout_tail: str = "",
+        stderr_tail: str = "",
     ) -> None:
         runs, attempts = self._bound()
         attempt = attempts.get(attempt_id)
@@ -120,7 +145,19 @@ class InMemoryExecutionRecordRepository:
             raise KeyError(attempt_id)
         if attempt.status == ExecutionAttemptStatus.RUNNING:
             attempts[attempt_id] = replace(
-                attempt, status=attempt_status, completed_at=completed_at
+                attempt,
+                status=attempt_status,
+                completed_at=completed_at,
+                last_liveness_at=completed_at,
+                failure_kind=(failure.kind.value if failure else None),
+                provider_code=(failure.provider_code if failure else None),
+                retryable=(failure.retryable if failure else None),
+                retry_at=retry_at,
+                limit_scope=(failure.limit_scope if failure else None),
+                exit_code=(failure.exit_code if failure else None),
+                safe_message=(failure.safe_message if failure else None),
+                stdout_tail=(failure.stdout_tail if failure else stdout_tail[-2_000:]),
+                stderr_tail=(failure.stderr_tail if failure else stderr_tail[-2_000:]),
             )
         elif attempt.status != attempt_status:
             raise RuntimeError(
@@ -156,3 +193,82 @@ class InMemoryExecutionRecordRepository:
             ),
             key=lambda attempt: (attempt.started_at, attempt.id),
         )
+
+    def list_runs(self, plan_id: str) -> list[ExecutionRun]:
+        runs = self._runs if self._tx_runs is None else self._tx_runs
+        return sorted(
+            (run for run in runs.values() if run.plan_id == plan_id),
+            key=lambda run: (run.started_at, run.id),
+        )
+
+    def list_attempts(self, plan_id: str) -> list[ExecutionAttempt]:
+        attempts = self._attempts if self._tx_attempts is None else self._tx_attempts
+        return sorted(
+            (attempt for attempt in attempts.values() if attempt.plan_id == plan_id),
+            key=lambda attempt: (attempt.started_at, attempt.id),
+        )
+
+    def _planning_bound(self) -> dict[str, PlanningOperation]:
+        if self._tx_planning is None:
+            raise RuntimeError(
+                "InMemoryExecutionRecordRepository used outside a UnitOfWork transaction"
+            )
+        return self._tx_planning
+
+    def _circuits_bound(self) -> dict[tuple[str, str, str], RuntimeCircuit]:
+        if self._tx_circuits is None:
+            raise RuntimeError(
+                "InMemoryExecutionRecordRepository used outside a UnitOfWork transaction"
+            )
+        return self._tx_circuits
+
+    def add_planning_operation(self, operation: PlanningOperation) -> None:
+        operations = self._planning_bound()
+        if operation.id in operations:
+            raise RuntimeError(f"duplicate planning operation {operation.id!r}")
+        operations[operation.id] = operation
+
+    def update_planning_operation(self, operation: PlanningOperation) -> None:
+        operations = self._planning_bound()
+        if operation.id not in operations:
+            raise KeyError(operation.id)
+        operations[operation.id] = operation
+
+    def find_active_planning_operation(
+        self, plan_id: str, purpose: str, target_goal_id: str | None = None
+    ) -> PlanningOperation | None:
+        operations = self._planning if self._tx_planning is None else self._tx_planning
+        active = [
+            operation
+            for operation in operations.values()
+            if operation.plan_id == plan_id
+            and operation.purpose == purpose
+            and operation.target_goal_id == target_goal_id
+            and operation.status
+            in {
+                PlanningOperationStatus.QUEUED,
+                PlanningOperationStatus.STARTED,
+                PlanningOperationStatus.WAITING_FOR_USER,
+                PlanningOperationStatus.BACKING_OFF,
+            }
+        ]
+        return max(active, key=lambda operation: (operation.created_at, operation.id), default=None)
+
+    def list_planning_operations(self, plan_id: str) -> list[PlanningOperation]:
+        operations = self._planning if self._tx_planning is None else self._tx_planning
+        return sorted(
+            (operation for operation in operations.values() if operation.plan_id == plan_id),
+            key=lambda operation: (operation.created_at, operation.id),
+        )
+
+    def get_runtime_circuit(
+        self, runtime: str, provider_id: str, model_id: str
+    ) -> RuntimeCircuit | None:
+        circuits = self._circuits if self._tx_circuits is None else self._tx_circuits
+        return circuits.get((runtime, provider_id, model_id))
+
+    def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
+        self._circuits_bound()[(circuit.runtime, circuit.provider_id, circuit.model_id)] = circuit
+
+    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None:
+        self._circuits_bound().pop((runtime, provider_id, model_id), None)

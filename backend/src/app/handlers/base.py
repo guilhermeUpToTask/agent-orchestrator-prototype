@@ -7,6 +7,7 @@ the human gates — instead of one god-function branching on everything.
 
 Adding a phase = adding/extending a handler, never touching the others.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -20,11 +21,11 @@ from src.app.ports import UnitOfWork
 class Signal(str, Enum):
     """What one advance step tells the worker loop to do next."""
 
-    CONTINUE = "continue"      # made progress; loop again immediately
-    NOT_READY = "not_ready"    # work remains but backing off; release & re-check later
-    PAUSED = "paused"          # waiting on a human gate; release until resumed
-    DONE = "done"             # plan complete (terminal)
-    FAILED = "failed"          # plan halted by failure (terminal)
+    CONTINUE = "continue"  # made progress; loop again immediately
+    NOT_READY = "not_ready"  # work remains but backing off; release & re-check later
+    PAUSED = "paused"  # waiting on a human gate; release until resumed
+    DONE = "done"  # plan complete (terminal)
+    FAILED = "failed"  # plan halted by failure (terminal)
 
 
 class PhaseHandler(Protocol):

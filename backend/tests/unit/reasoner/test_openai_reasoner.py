@@ -8,6 +8,8 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
@@ -60,65 +62,56 @@ def test_history_replays_as_plain_text_turns():
     assert sent[4] == {"role": "user", "content": "sqlite"}
 
 
-def test_submit_goals_commits_roadmap_with_ids_and_positions():
+def intent_args(**overrides):
+    values = {
+        "normalized_brief": "Build a small API service.",
+        "objective": "Ship a maintainable API service.",
+        "scope": ["HTTP API"],
+        "constraints": ["SQLite"],
+        "exclusions": ["mobile client"],
+        "assumptions": ["single tenant"],
+        "unresolved_questions": [],
+    }
+    values.update(overrides)
+    return values
+
+
+def test_submit_intent_returns_normalized_review_candidate():
     client = FakeLLMClient(
         [
             tool_turn(
-                "submit_goals",
-                {
-                    "goals": [
-                        {
-                            "name": "API",
-                            "description": "build it",
-                            "tasks": [
-                                {
-                                    "name": "scaffold",
-                                    "description": "make the app",
-                                    "required_capabilities": ["backend"],
-                                }
-                            ],
-                        },
-                        {"name": "Docs", "description": "write them"},
-                    ]
-                },
+                "submit_intent_proposal",
+                intent_args(),
             )
         ]
     )
     reply = converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
 
-    assert reply.goals is not None
-    g1, g2 = reply.goals
-    assert (g1.name, g1.position) == ("API", 0)
-    assert (g2.name, g2.position) == ("Docs", 1)
-    assert g1.id and g2.id and g1.id != g2.id
-    (t1,) = g1.tasks
-    assert (t1.name, t1.position, t1.required_capabilities) == (
-        "scaffold",
-        0,
-        ["backend"],
-    )
-    assert g2.tasks == []  # task-less goal flows to the ENRICHING JIT
-    assert "2 goal(s)" in reply.message
+    assert reply.goals is None
+    assert reply.intent is not None
+    assert reply.intent.normalized_brief == "Build a small API service."
+    assert reply.intent.constraints == ["SQLite"]
+    assert reply.intent.assumptions == ["single tenant"]
+    assert client.calls[0]["tool_names"] == [
+        "read_project_spec",
+        "read_project_plan",
+        "read_repository_context",
+        "read_conversation",
+        "submit_intent_proposal",
+    ]
 
 
-def test_invalid_submit_feeds_errors_back_then_commits():
+def test_submitted_intent_cannot_retain_unresolved_questions():
     client = FakeLLMClient(
         [
-            tool_turn("submit_goals", {"goals": []}, "c1"),
             tool_turn(
-                "submit_goals",
-                {"goals": [{"name": "API", "description": "d"}]},
-                "c2",
+                "submit_intent_proposal",
+                intent_args(unresolved_questions=["Which region?"]),
             ),
         ]
     )
-    reply = converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
-
-    assert reply.goals is not None and len(reply.goals) == 1
-    # the rejection reached the model as a tool message
-    second_call = client.calls[1]["messages"]
-    rejections = [m for m in second_call if m.get("role") == "tool" and "non-empty" in m["content"]]
-    assert rejections
+    with pytest.raises(ValueError, match="unresolved questions"):
+        converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
 
 
 def test_enrich_goal_builds_ordered_tasks():
@@ -222,6 +215,43 @@ def test_cycle_architecture_uses_only_architecture_profile_tools():
     assert "submit_goal_contract" not in client.calls[0]["tool_names"]
 
 
+def test_replan_cycle_architecture_requires_source_plan_accounting():
+    plan = make_plan()
+    plan.intent_proposal = IntentProposal(
+        id="intent-2",
+        kind=ProposalKind.REPLAN,
+        base_plan_version=0,
+        source_cycle_id="cycle-source",
+        objective="retry only the failed migration",
+        approved_at=T0,
+    )
+    client = FakeLLMClient(
+        [
+            tool_turn(
+                "submit_cycle_draft",
+                {
+                    "goals": [
+                        {
+                            "key": "migration-retry",
+                            "name": "Retry migration",
+                            "objective": "retry only failed work",
+                            "position": 0,
+                            "depends_on": [],
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+
+    asyncio.run(OpenAIReasoner(client, CAPS).architect_cycle(plan))
+
+    prompt = client.calls[0]["messages"][1]["content"]
+    assert "This is a replan" in prompt
+    assert "Read the project plan and prior evidence" in prompt
+    assert "do not recreate or redo" in prompt
+
+
 def test_goal_enrichment_uses_only_contract_profile_tools():
     plan = make_plan(PlanPhase.RUNNING)
     goal = Goal(id="g1", name="API", position=0, description="ship API")
@@ -241,15 +271,11 @@ def test_goal_enrichment_uses_only_contract_profile_tools():
                 "submit_goal_contract",
                 {
                     "objective": "ship API",
-                    "acceptance_criteria": [
-                        {"id": "g-1", "description": "API works"}
-                    ],
+                    "acceptance_criteria": [{"id": "g-1", "description": "API works"}],
                     "tasks": [
                         {
                             "objective": "build API",
-                            "acceptance_criteria": [
-                                {"id": "t-1", "description": "endpoint works"}
-                            ],
+                            "acceptance_criteria": [{"id": "t-1", "description": "endpoint works"}],
                             "goal_criterion_ids": ["g-1"],
                             "allowed_scope": ["backend/"],
                             "forbidden_scope": ["frontend/"],
@@ -264,9 +290,7 @@ def test_goal_enrichment_uses_only_contract_profile_tools():
             )
         ]
     )
-    contract = asyncio.run(
-        OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS)
-    )
+    contract = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
 
     assert contract.tasks[0].verification_strategy.value == "tdd"
     assert client.calls[0]["tool_names"] == [
@@ -288,10 +312,9 @@ def test_converse_records_reported_usage_with_provenance():
 
     client = FakeLLMClient(
         [
-            # first submit is rejected (empty goals) -> session continues
             tool_turn(
-                "submit_goals",
-                {"goals": []},
+                "read_conversation",
+                {},
                 "c1",
                 usage={
                     "prompt_tokens": 10,
@@ -300,8 +323,8 @@ def test_converse_records_reported_usage_with_provenance():
                 },
             ),
             tool_turn(
-                "submit_goals",
-                {"goals": [{"name": "G", "description": "d"}]},
+                "submit_intent_proposal",
+                intent_args(),
                 "c2",
                 usage={"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28},
             ),
@@ -315,9 +338,9 @@ def test_converse_records_reported_usage_with_provenance():
         provider="provider-x",
     )
 
-    # a rejected submit then an accepted one: 2 model calls, usage summed
+    # one read-tool turn then an accepted submit: 2 model calls, usage summed
     reply = converse(reasoner, make_plan(), [], "go")
-    assert reply.goals is not None
+    assert reply.intent is not None
 
     (stored,) = repository.observations
     observation = stored.observation

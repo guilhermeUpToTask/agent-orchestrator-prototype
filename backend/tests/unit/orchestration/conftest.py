@@ -2,6 +2,7 @@
 against the in-memory fakes AND (as -m integration) the real SQLite
 UnitOfWork/repository/outbox. Same tests, same FakeClock/dummy runner — only
 the persistence boundary changes."""
+
 from __future__ import annotations
 
 import itertools
@@ -13,9 +14,7 @@ from tests.support import Env, make_memory_env, make_sqlite_env
 _counter = itertools.count()
 
 
-@pytest.fixture(
-    params=["memory", pytest.param("sqlite", marks=pytest.mark.integration)]
-)
+@pytest.fixture(params=["memory", pytest.param("sqlite", marks=pytest.mark.integration)])
 def env_factory(request, tmp_path):
     def build(script=None, agents=None, default_agent_id="a1") -> Env:
         if request.param == "memory":

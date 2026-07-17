@@ -28,11 +28,13 @@ from abc import ABC, abstractmethod
 import structlog
 
 from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
+from src.app.runtime_failures import safe_runtime_tail
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.value_objects.tasks_vos import TaskResult
-from src.infra.runtime.taxonomy import classify_failure
+from src.infra.runtime.taxonomy import classify_failure, normalize_failure
+from src.infra.runtime.pi_protocol import parse_pi_events
 
 log = structlog.get_logger(__name__)
 
@@ -78,8 +80,16 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
 class CliAgentRunner(ABC):
     """Base for one-shot CLI agent subprocesses."""
 
-    def __init__(self, timeout_seconds: int = 600) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int = 600,
+        *,
+        provider_id: str | None = None,
+        model_id: str | None = None,
+    ) -> None:
         self._timeout = timeout_seconds
+        self._provider_id = provider_id
+        self._model_id = model_id
 
     @property
     @abstractmethod
@@ -100,17 +110,29 @@ class CliAgentRunner(ABC):
         event_sink: AgentEventSink,
         workspace: WorkspaceHandle,
     ) -> TaskResult:
-        plan_id = idempotency_key.split(":")[0]
+        parts = idempotency_key.split(":")
+        plan_id = parts[0]
+        goal_id = parts[1] if len(parts) == 6 else None
+        run_id = parts[3] if len(parts) == 6 else None
+        attempt_id = parts[5] if len(parts) == 6 else None
+        attempt_number = int(parts[4]) if len(parts) == 6 else task.attempt
         prompt = build_task_prompt(task, spec)
 
         await event_sink.emit(
             AgentEvent(
                 plan_id=plan_id,
+                goal_id=goal_id,
+                run_id=run_id,
+                attempt_id=attempt_id,
                 task_id=task.id,
-                attempt=task.attempt,
+                attempt=attempt_number,
                 seq=0,
                 type="agent.started",
-                payload={"runtime": self.log_prefix, "cwd": workspace.path},
+                payload={
+                    "runtime": self.log_prefix,
+                    "provider_id": self._provider_id or "",
+                    "model_id": self._model_id or "",
+                },
             )
         )
         started = time.monotonic()
@@ -125,29 +147,74 @@ class CliAgentRunner(ABC):
             await event_sink.emit(
                 AgentEvent(
                     plan_id=plan_id,
+                    goal_id=goal_id,
+                    run_id=run_id,
+                    attempt_id=attempt_id,
                     task_id=task.id,
-                    attempt=task.attempt,
+                    attempt=attempt_number,
                     seq=1,
                     type="agent.failed",
                     payload={
                         "kind": exc.kind.value if exc.kind else "unknown",
                         "reason": exc.reason[:500],
+                        "runtime": exc.failure.runtime or self.log_prefix,
+                        "provider_id": exc.failure.provider_id or "",
+                        "model_id": exc.failure.model_id or "",
+                        "provider_code": exc.failure.provider_code or "",
+                        "retryable": str(exc.failure.retryable).lower(),
+                        "retry_after_seconds": (
+                            str(exc.failure.retry_after_seconds)
+                            if exc.failure.retry_after_seconds is not None
+                            else ""
+                        ),
+                        "limit_scope": (
+                            exc.failure.limit_scope.value
+                            if exc.failure.limit_scope is not None
+                            else ""
+                        ),
+                        "exit_code": (
+                            str(exc.failure.exit_code) if exc.failure.exit_code is not None else ""
+                        ),
                     },
                 )
             )
             raise
         elapsed = round(time.monotonic() - started, 2)
+        seq = 1
+        for event_type, payload in self._events_from_output(result.output):
+            await event_sink.emit(
+                AgentEvent(
+                    plan_id=plan_id,
+                    goal_id=goal_id,
+                    run_id=run_id,
+                    attempt_id=attempt_id,
+                    task_id=task.id,
+                    attempt=attempt_number,
+                    seq=seq,
+                    type=event_type,
+                    payload=payload,
+                )
+            )
+            seq += 1
         await event_sink.emit(
             AgentEvent(
                 plan_id=plan_id,
+                goal_id=goal_id,
+                run_id=run_id,
+                attempt_id=attempt_id,
                 task_id=task.id,
-                attempt=task.attempt,
-                seq=1,
+                attempt=attempt_number,
+                seq=seq,
                 type="agent.finished",
                 payload={"elapsed_seconds": str(elapsed)},
             )
         )
         return result
+
+    def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
+        if not output:
+            return []
+        return [("runtime.output", {"chunk": safe_runtime_tail(output, 1_000)})]
 
     def _terminate_process_group(self, proc: subprocess.Popen[str]) -> None:
         """Terminate and reap every process owned by this invocation."""
@@ -182,9 +249,14 @@ class CliAgentRunner(ABC):
                 start_new_session=True,
             )
         except FileNotFoundError as exc:
+            failure = normalize_failure(
+                stderr=str(exc),
+                runtime=self.log_prefix,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+            )
             raise TaskFailed(
-                f"{self.log_prefix} CLI not found: {cmd[0]!r}",
-                classify_failure(str(exc)),
+                f"{self.log_prefix} CLI not found: {cmd[0]!r}", failure=failure
             ) from exc
 
         timed_out = False
@@ -193,9 +265,15 @@ class CliAgentRunner(ABC):
         except subprocess.TimeoutExpired as exc:
             timed_out = True
             self._terminate_process_group(proc)
+            failure = normalize_failure(
+                timed_out=True,
+                runtime=self.log_prefix,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+            )
             raise TaskFailed(
                 f"{self.log_prefix} timed out after {self._timeout}s",
-                classify_failure("", timed_out=True),
+                failure=failure,
             ) from exc
         finally:
             if not timed_out:
@@ -205,15 +283,22 @@ class CliAgentRunner(ABC):
         if proc.returncode != 0:
             output = f"{stdout}\n{stderr}"
             kind = classify_failure(output)
+            failure = normalize_failure(
+                stdout=stdout,
+                stderr=stderr,
+                runtime=self.log_prefix,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+                exit_code=proc.returncode,
+            )
             log.warning(
                 f"{self.log_prefix}.failed",
                 exit_code=proc.returncode,
                 kind=kind.value,
             )
             raise TaskFailed(
-                f"{self.log_prefix} exited {proc.returncode}: "
-                f"{stderr.strip()[-500:] or stdout.strip()[-500:]}",
-                kind,
+                failure.safe_message,
+                failure=failure,
             )
 
         log.info(f"{self.log_prefix}.finished", exit_code=0)
@@ -241,6 +326,8 @@ class PiAgentRunner(CliAgentRunner):
         backend: str = "anthropic",
         extra_flags: list[str] | None = None,
         timeout_seconds: int = 600,
+        provider_id: str | None = None,
+        model_id: str | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -248,7 +335,7 @@ class PiAgentRunner(CliAgentRunner):
             )
         if not api_key:
             raise ValueError(f"PiAgentRunner requires an api_key for backend '{backend}'")
-        super().__init__(timeout_seconds)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
         self._api_key = api_key
         self._model = model
         self._backend = backend
@@ -264,6 +351,10 @@ class PiAgentRunner(CliAgentRunner):
     def _env(self) -> dict[str, str]:
         return {**os.environ, PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
 
+    def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
+        structured = parse_pi_events(output)
+        return structured or super()._events_from_output(output)
+
 
 class ClaudeCodeRunner(CliAgentRunner):
     """Runs `claude --dangerously-skip-permissions -p "<prompt>"`."""
@@ -274,8 +365,10 @@ class ClaudeCodeRunner(CliAgentRunner):
         model: str | None = None,
         extra_flags: list[str] | None = None,
         timeout_seconds: int = 600,
+        provider_id: str | None = None,
+        model_id: str | None = None,
     ) -> None:
-        super().__init__(timeout_seconds)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []
@@ -303,8 +396,10 @@ class GeminiRunner(CliAgentRunner):
         model: str,
         extra_flags: list[str] | None = None,
         timeout_seconds: int = 600,
+        provider_id: str | None = None,
+        model_id: str | None = None,
     ) -> None:
-        super().__init__(timeout_seconds)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []

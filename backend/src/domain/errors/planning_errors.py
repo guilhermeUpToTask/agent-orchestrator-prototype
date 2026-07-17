@@ -17,9 +17,7 @@ class PlanNotFoundError(DomainError):
 
     def __init__(self, plan_id: str) -> None:
         self.plan_id = plan_id
-        super().__init__(
-            f"Plan '{plan_id}' not found.", context={"plan_id": plan_id}
-        )
+        super().__init__(f"Plan '{plan_id}' not found.", context={"plan_id": plan_id})
 
 
 class InvalidEditError(DomainError):

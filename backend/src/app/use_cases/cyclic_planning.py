@@ -247,9 +247,7 @@ def revise_cycle_draft(
         )
         plan.revise_cycle_draft(draft, gate, clock.now())
         plan.bump_version()
-        uow.outbox.add(
-            CycleDrafted(plan_id=plan.id, draft_id=draft.id, revision=draft.revision)
-        )
+        uow.outbox.add(CycleDrafted(plan_id=plan.id, draft_id=draft.id, revision=draft.revision))
         uow.outbox.add(
             ReviewGateOpened(
                 plan_id=plan.id,

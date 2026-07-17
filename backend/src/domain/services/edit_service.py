@@ -169,6 +169,10 @@ def update_goal(
                 raise InvalidEditError(f"unknown goal id '{dep}' in depends_on")
         if goal_id in depends_on:
             raise InvalidEditError(f"goal '{goal_id}' cannot depend on itself")
+        positions = {item.id: item.position for item in goals}
+        later = sorted(dep for dep in depends_on if positions[dep] >= goal.position)
+        if later:
+            raise InvalidEditError(f"dependencies for goal '{goal_id}' must precede it: {later}")
         _assert_acyclic(goals, goal_id, depends_on)
         goal.depends_on = list(depends_on)
 

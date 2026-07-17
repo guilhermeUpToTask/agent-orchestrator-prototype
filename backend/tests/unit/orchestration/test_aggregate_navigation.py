@@ -215,9 +215,7 @@ def test_retry_cycle_requeue_then_succeed():
     p.requeue_task("g1", "t0")
     p.start_task("g1", "t0")  # attempts 2
     p.complete_task("g1", "t0", TaskResult.success("ok"))
-    assert (
-        p.goals[0].tasks[0].status == Status.DONE and p.goals[0].tasks[0].attempt == 2
-    )
+    assert p.goals[0].tasks[0].status == Status.DONE and p.goals[0].tasks[0].attempt == 2
 
 
 def test_retry_exhaustion_becomes_terminal():

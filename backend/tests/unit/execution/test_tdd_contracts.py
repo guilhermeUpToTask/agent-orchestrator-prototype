@@ -145,6 +145,15 @@ def test_role_resolution_never_falls_back_without_role_capability() -> None:
         resolve_role_agent(RunRole.TEST_AUTHOR, ["python"], repository)
 
 
+def test_role_resolution_does_not_require_a_default_agent() -> None:
+    repository = InMemoryAgentRepository(
+        [agent("tests", ["test_authoring", "python"])],
+        default_id=None,
+    )
+
+    assert resolve_role_agent(RunRole.TEST_AUTHOR, ["python"], repository).id == "tests"
+
+
 def test_protected_test_and_scope_enforcement(tmp_path) -> None:
     protected = tmp_path / "tests" / "test_behavior.py"
     protected.parent.mkdir()
@@ -167,3 +176,31 @@ def test_protected_test_and_scope_enforcement(tmp_path) -> None:
     assert any("bypass marker" in reason for reason in rejected.reasons)
     assert any("forbidden path" in reason for reason in rejected.reasons)
     assert any("configuration changed" in reason for reason in rejected.reasons)
+
+
+def test_repository_root_scope_accepts_normal_relative_paths(tmp_path) -> None:
+    protected = tmp_path / "tests" / "test_behavior.py"
+    protected.parent.mkdir()
+    protected.write_text("def test_behavior():\n    assert True\n")
+    frozen = bundle("tests/test_behavior.py", sha256_file(protected))
+    contract = task_contract(allowed_scope=["."], forbidden_scope=[".git/"])
+
+    accepted = validate_candidate(tmp_path, contract, frozen, ["src/app.py"])
+    rejected = validate_candidate(tmp_path, contract, frozen, [".git/config"])
+
+    assert accepted.accepted
+    assert not rejected.accepted
+    assert rejected.reasons == ("forbidden path changed: .git/config",)
+
+
+def test_dot_prefixed_scope_does_not_match_a_non_dot_directory(tmp_path) -> None:
+    protected = tmp_path / "tests" / "test_behavior.py"
+    protected.parent.mkdir()
+    protected.write_text("def test_behavior():\n    assert True\n")
+    frozen = bundle("tests/test_behavior.py", sha256_file(protected))
+    contract = task_contract(allowed_scope=[".config/"])
+
+    result = validate_candidate(tmp_path, contract, frozen, ["config/settings.json"])
+
+    assert not result.accepted
+    assert result.reasons == ("path outside allowed scope: config/settings.json",)

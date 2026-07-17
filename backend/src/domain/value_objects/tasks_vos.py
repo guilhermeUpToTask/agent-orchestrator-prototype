@@ -44,6 +44,4 @@ class TaskResult(BaseModel):
     def failure(
         cls, reason: str, kind: FailureKind | None = None, output: str = ""
     ) -> "TaskResult":
-        return cls(
-            status="failure", output=output, failure_reason=reason, failure_kind=kind
-        )
+        return cls(status="failure", output=output, failure_reason=reason, failure_kind=kind)

@@ -74,6 +74,12 @@ class WritingRunner:
         return TaskResult.success("agent claimed success")
 
 
+class DeletingTestRunner:
+    async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
+        (Path(workspace.path) / "tests" / "test_existing.py").unlink()
+        return TaskResult.success("deleted a test")
+
+
 def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
     repo_dir = tmp_path / "repo"
     workspace = GitBranchWorkspace(repo_dir)
@@ -86,9 +92,7 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
         id="task-1",
         position=0,
         objective="implement feature",
-        acceptance_criteria=[
-            ContractCriterion(id="t-1", description="feature file is ready")
-        ],
+        acceptance_criteria=[ContractCriterion(id="t-1", description="feature file is ready")],
         goal_criterion_ids=["g-1"],
         allowed_scope=["feature.txt"],
         forbidden_scope=["tests/"],
@@ -158,10 +162,13 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
     task_after_red = after_red.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert task_after_red.test_bundle is not None
     assert task_after_red.tdd_stage == "implementation"
-    assert subprocess.run(
-        ["git", "-C", str(repo_dir), "show", "cycle/cycle-1:tests/test_feature.py"],
-        capture_output=True,
-    ).returncode != 0
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "show", "cycle/cycle-1:tests/test_feature.py"],
+            capture_output=True,
+        ).returncode
+        != 0
+    )
 
     # Implementer starts from the authoritative test commit. Its self-report is
     # ignored; independent pytest evidence is what completes and merges the task.
@@ -185,3 +192,112 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
     assert _git(repo_dir, "show", "cycle/cycle-1:feature.txt") == "ready"
     completed_goal = plans.get(plan.id).active_cycle.goals[0]  # type: ignore[union-attr]
     assert completed_goal.status.value == "done"
+
+
+def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
+    repo_dir = tmp_path / "repo"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(repo_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tests = repo_dir / "tests"
+    tests.mkdir()
+    (tests / "test_existing.py").write_text("def test_existing():\n    assert True\n")
+    _git(repo_dir, "add", "tests/test_existing.py")
+    _git(
+        repo_dir,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "-m",
+        "existing test",
+    )
+
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    criterion = ContractCriterion(id="g-1", description="existing behavior remains")
+    contract = TaskContract(
+        id="task-1",
+        position=0,
+        objective="preserve behavior",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="checked")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["."],
+        forbidden_scope=[".git/"],
+        verification_commands=["git diff --check"],
+        verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+    )
+    task = Task(
+        id="task-1",
+        name="preserve behavior",
+        position=0,
+        description="preserve behavior",
+        contract=contract,
+        role_agent_ids={
+            "test_author": "test-author",
+            "implementer": "implementer",
+        },
+    )
+    goal = Goal(
+        id="goal-1",
+        name="goal",
+        position=0,
+        description="goal",
+        tasks=[task],
+        contract=GoalContract(
+            id="goal-1",
+            objective="goal",
+            acceptance_criteria=[criterion],
+            tasks=[contract],
+            frozen_at=NOW,
+        ),
+    )
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="brief",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                goals=[goal],
+                started_at=NOW,
+            )
+        ],
+    )
+    plans.add(plan)
+    agents = InMemoryAgentRepository(
+        [
+            _agent("test-author", "test_authoring"),
+            _agent("implementer", "implementation"),
+        ],
+        default_id="implementer",
+    )
+    handler = ExecutionHandler(
+        DeletingTestRunner(),
+        agents,
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    signal = asyncio.run(handler.handle(plan.id, plan, uow))
+
+    assert signal.value == "paused"
+    blocked = plans.get(plan.id)
+    assert blocked.status == PlanStatus.BLOCKED
+    assert blocked.block is not None
+    assert blocked.block.kind == "execution_failure"
+    assert "deleted or renamed" in blocked.block.explanation
+    failed_task = blocked.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert failed_task.status.value == "failed"
+    assert uow.executions.list_open_attempts(plan.id) == []

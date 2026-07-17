@@ -120,6 +120,13 @@ class GitBranchWorkspace:
         assert isinstance(handle, GitWorkspaceHandle)
         await asyncio.to_thread(self._discard_sync, handle)
 
+    async def prune(self) -> None:
+        """Remove only stale worktree metadata; never delete live branches."""
+        await asyncio.to_thread(self._prune_sync)
+
+    async def audit(self) -> dict[str, list[str]]:
+        return await asyncio.to_thread(self._audit_sync)
+
     # ---- sync internals (worker thread) ----
     def _ensure_repo(self) -> None:
         if not (self._repo / ".git").exists():
@@ -128,6 +135,25 @@ class GitBranchWorkspace:
             _git(self._repo, "checkout", "-B", self._default_branch)
             _git(self._repo, "commit", "--allow-empty", "-m", "chore: initial commit")
             log.info("workspace.repo_seeded", repo=str(self._repo))
+
+    def _prune_sync(self) -> None:
+        if (self._repo / ".git").exists():
+            _git(self._repo, "worktree", "prune")
+
+    def _audit_sync(self) -> dict[str, list[str]]:
+        if not (self._repo / ".git").exists():
+            return {"worktrees": [], "branches": []}
+        worktrees = _git(self._repo, "worktree", "list", "--porcelain").splitlines()
+        branches = _git(
+            self._repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads/plan",
+            "refs/heads/cycle",
+            "refs/heads/goal",
+            "refs/heads/task",
+        ).splitlines()
+        return {"worktrees": worktrees, "branches": branches}
 
     def _begin_sync(
         self,
@@ -301,3 +327,9 @@ class LocalDirWorkspace:
 
     async def discard(self, handle: WorkspaceHandle) -> None:
         pass
+
+    async def prune(self) -> None:
+        pass
+
+    async def audit(self) -> dict[str, list[str]]:
+        return {"worktrees": [], "branches": []}

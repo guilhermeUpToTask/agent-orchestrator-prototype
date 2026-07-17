@@ -1,9 +1,10 @@
 """The human pause gate + the manual retry (un-freeze #3), on both backends via
 env_factory: the claim predicate must skip a paused plan identically on the fake
 and the real SQLite, the auto-pause must land in the same transaction as the
-terminal task failure, and resume must requeue failed work with a fresh budget
-(bypassing should_retry).
+terminal task failure, while resume and targeted retry remain separate commands.
+A human retry bypasses should_retry and starts a fresh policy cycle for one task.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -13,21 +14,31 @@ import pytest
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import (
+    Cycle,
+    PlanBlock,
+    PlanStatus,
+)
 from src.domain.entities.task import Task
 from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind, Status
 
-from src.app.testing.fakes import DummyBehavior
+from src.app.execution_records import RuntimeCircuit
+from src.app.testing.fakes import DummyBehavior, InMemoryCapabilityRepository
+from src.app.use_cases.apply_edit import UpdateTask, apply_edit
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.control import finish_review
-from src.app.use_cases.pause_resume import pause_plan, resume_plan, retry_task
+from src.app.use_cases.pause_resume import (
+    pause_plan,
+    resume_plan,
+    retry_planning_stage,
+    retry_task,
+)
 
 
 def task(tid: str, position: int, **kwargs) -> Task:
-    return Task(
-        id=tid, name=tid, position=position, description="", agent_id="a1", **kwargs
-    )
+    return Task(id=tid, name=tid, position=position, description="", agent_id="a1", **kwargs)
 
 
 def running_plan(tasks: list[Task] | None = None, retry_max: int = 3) -> Plan:
@@ -128,9 +139,7 @@ def test_resume_unpaused_raises_invalid_transition(env_factory):
 def test_resume_changes_availability_only(env_factory):
     env = env_factory()
     failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
-    gated = task(
-        "t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300)
-    )
+    gated = task("t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300))
     plan = running_plan(tasks=[failed, gated])
     plan.goals[0].status = Status.RUNNING
     plan.paused = True
@@ -150,9 +159,7 @@ def test_resume_changes_availability_only(env_factory):
 def test_targeted_retry_preserves_absolute_attempt_and_unrelated_gates(env_factory):
     env = env_factory()
     failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
-    gated = task(
-        "t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300)
-    )
+    gated = task("t1", 1, retry_not_before=env.clock.now() + timedelta(seconds=300))
     plan = running_plan(tasks=[failed, gated])
     plan.goals[0].status = Status.RUNNING
     plan.paused = True
@@ -168,10 +175,215 @@ def test_targeted_retry_preserves_absolute_attempt_and_unrelated_gates(env_facto
     assert env.outbox_types() == ["TaskRetried"]
 
 
+def test_blocked_targeted_retry_resolves_only_the_selected_task(env_factory):
+    env = env_factory()
+    failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
+    goal = Goal(
+        id="g1",
+        name="g1",
+        position=0,
+        description="",
+        status=Status.RUNNING,
+        tasks=[failed],
+    )
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-1",
+        draft_id="draft-1",
+        goals=[goal],
+        started_at=env.clock.now(),
+    )
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        status=PlanStatus.BLOCKED,
+        cycles=[cycle],
+        block=PlanBlock(
+            id="block-1",
+            kind="execution_failure",
+            explanation="failed",
+            stage="implementation",
+            goal_id="g1",
+            task_id="t0",
+            legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+            created_at=env.clock.now(),
+        ),
+    )
+    env.seed(plan)
+
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
+
+    stored = env.stored("p1")
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.block is not None and stored.block.resolution == "retry_stage"
+    retried = stored.active_cycle.goals[0].tasks[0]
+    assert retried.status == Status.PENDING
+    assert retried.attempt == 3 and retried.retry_cycle == 1
+    assert env.outbox_types() == ["TaskRetried", "BlockResolved"]
+
+
+def test_blocked_task_can_be_edited_then_continued_without_double_retry(env_factory):
+    env = env_factory()
+    failed = task("t0", 0, status=Status.FAILED, attempt=3, cycle_attempt=3)
+    goal = Goal(
+        id="g1",
+        name="g1",
+        position=0,
+        description="",
+        status=Status.RUNNING,
+        tasks=[failed],
+    )
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        status=PlanStatus.BLOCKED,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                goals=[goal],
+                started_at=env.clock.now(),
+            )
+        ],
+        block=PlanBlock(
+            id="block-1",
+            kind="execution_failure",
+            explanation="failed",
+            stage="implementation",
+            goal_id="g1",
+            task_id="t0",
+            legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+            created_at=env.clock.now(),
+        ),
+    )
+    env.seed(plan)
+
+    apply_edit(
+        "p1",
+        UpdateTask(goal_id="g1", task_id="t0", name="corrected task"),
+        env.uow,
+        InMemoryCapabilityRepository(),
+        env.agents,
+    )
+    edited = env.stored("p1").active_cycle.goals[0].tasks[0]
+    assert edited.status == Status.PENDING
+    assert edited.revision == 2
+
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
+
+    stored = env.stored("p1")
+    continued = stored.active_cycle.goals[0].tasks[0]
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.block is not None and stored.block.resolution == "edit_task"
+    assert continued.status == Status.PENDING
+    assert continued.retry_cycle == 0
+    assert env.outbox_types() == ["BlockResolved"]
+
+
+def test_provider_wait_and_retry_clears_the_runtime_circuit(env_factory):
+    env = env_factory()
+    failed = task("t0", 0, status=Status.FAILED)
+    goal = Goal(
+        id="g1",
+        name="g1",
+        position=0,
+        description="",
+        status=Status.RUNNING,
+        tasks=[failed],
+    )
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-1",
+        draft_id="draft-1",
+        goals=[goal],
+        started_at=env.clock.now(),
+    )
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        status=PlanStatus.BLOCKED,
+        cycles=[cycle],
+        block=PlanBlock(
+            id="block-1",
+            kind="provider_capacity",
+            explanation="quota",
+            stage="implementation",
+            goal_id="g1",
+            task_id="t0",
+            legal_resolutions=["wait_and_retry", "edit_task", "start_replan"],
+            evidence_refs=["runtime-circuit://pi/provider/model"],
+            created_at=env.clock.now(),
+        ),
+    )
+    env.seed(plan)
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id="provider",
+                model_id="model",
+                failure_count=3,
+                opened_at=env.clock.now(),
+                retry_at=env.clock.now() + timedelta(hours=1),
+                last_failure_kind="rate_limit",
+                safe_message="quota",
+                manual_intervention=True,
+            )
+        )
+
+    retry_task("p1", "g1", "t0", env.uow, env.clock)
+
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "provider", "model")
+    assert circuit is None
+    stored = env.stored("p1")
+    assert stored.block is not None and stored.block.resolution == "wait_and_retry"
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+
+
+def test_retry_planning_stage_resolves_reasoner_block(env_factory):
+    env = env_factory()
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        status=PlanStatus.BLOCKED,
+        planning_attempts=3,
+        planning_retry_not_before=env.clock.now() + timedelta(hours=1),
+        block=PlanBlock(
+            id="block-1",
+            kind="reasoner_failure",
+            explanation="planner unavailable",
+            stage="cycle_architecture",
+            legal_resolutions=["retry_stage", "start_replan"],
+            created_at=env.clock.now(),
+        ),
+    )
+    env.seed(plan)
+
+    retry_planning_stage("p1", env.uow, env.clock, env.agents)
+
+    stored = env.stored("p1")
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.planning_attempts == 0
+    assert stored.planning_retry_not_before is None
+    assert stored.block is not None and stored.block.resolution == "retry_stage"
+    assert env.outbox_types() == ["BlockResolved"]
+
+
 def test_resume_preserves_planning_backoff_gate(env_factory):
     env = env_factory()
-    plan = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.ENRICHING,
-                goals=[Goal(id="g1", name="g1", position=0, description="")])
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.ENRICHING,
+        goals=[Goal(id="g1", name="g1", position=0, description="")],
+    )
     plan.record_planning_retry(env.clock.now() + timedelta(seconds=300))
     plan.pause("operator pause")
     env.seed(plan)
@@ -188,8 +400,11 @@ def test_resume_retry_bypasses_should_retry_for_auth_error(env_factory):
     """AUTH_ERROR is non-retryable for the policy, but the HUMAN retry resets the
     budget: after resume the task runs again despite the terminal kind."""
     env = env_factory(
-        {"t0": DummyBehavior(always_fail=True, fail_kind=FailureKind.AUTH_ERROR,
-                             fail_reason="key rejected")}
+        {
+            "t0": DummyBehavior(
+                always_fail=True, fail_kind=FailureKind.AUTH_ERROR, fail_reason="key rejected"
+            )
+        }
     )
     env.seed(running_plan(retry_max=5))
 
@@ -247,9 +462,7 @@ def test_human_pause_survives_an_in_flight_terminal_failure(env_factory):
 
     env = env_factory()
     env.seed(running_plan(retry_max=1))  # one attempt, then terminal
-    env.runner = PauseMidRun(
-        {"t0": DummyBehavior(always_fail=True, fail_reason="boom")}, env.uow
-    )
+    env.runner = PauseMidRun({"t0": DummyBehavior(always_fail=True, fail_reason="boom")}, env.uow)
     env.args = (env.uow, env.runner, env.agents, env.ws, env.sink, env.clock)
 
     sig = asyncio.run(advance_plan("p1", *env.args))
@@ -269,9 +482,7 @@ def test_pause_then_resume_completes_to_review(env_factory):
     """Full recovery walk: exhaust -> auto-pause -> human fixes the cause ->
     resume (fresh budget) -> the task succeeds -> RUNNING exhausts into REVIEW
     -> finish -> DONE."""
-    env = env_factory(
-        {"t0": DummyBehavior(always_fail=True, fail_reason="rate limited")}
-    )
+    env = env_factory({"t0": DummyBehavior(always_fail=True, fail_reason="rate limited")})
     env.seed(running_plan(retry_max=2))
 
     assert asyncio.run(drive(env)) == "paused"

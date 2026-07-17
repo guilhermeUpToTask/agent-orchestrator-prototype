@@ -8,9 +8,7 @@ class GoalNotFoundError(DomainError):
 
     def __init__(self, goal_id: str) -> None:
         self.goal_id = goal_id
-        super().__init__(
-            f"Goal '{goal_id}' not found in plan.", context={"goal_id": goal_id}
-        )
+        super().__init__(f"Goal '{goal_id}' not found in plan.", context={"goal_id": goal_id})
 
 
 class TaskNotFoundError(DomainError):

@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from src.app.testing.fakes import FakeClock
+from src.domain.entities.project_definition import ProjectDefinition
+from src.infra.git.project_workspace import ProjectWorkspaceResolver
 from src.infra.git.workspace import GitBranchWorkspace, LocalDirWorkspace
 from src.infra.runtime.verification_executor import LocalVerificationExecutor
 
@@ -21,6 +23,38 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def _init_repo(repo: Path, branch: str) -> None:
+    subprocess.run(
+        ["git", "init", "-b", branch, str(repo)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _git(
+        repo,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+    )
+
+
+class MutableProjects:
+    def __init__(self, project: ProjectDefinition) -> None:
+        self.project = project
+
+    def get(self, project_id: str) -> ProjectDefinition:
+        assert project_id == self.project.id
+        return self.project
+
+    def list(self) -> list[ProjectDefinition]:
+        return [self.project]
 
 
 @pytest.fixture
@@ -160,3 +194,91 @@ def test_changed_paths_include_agent_commits_since_task_base(repo):
         return paths
 
     assert asyncio.run(flow()) == ["committed.py", "dirty.py"]
+
+
+def test_workspace_prune_and_audit_keep_live_refs_visible(repo):
+    ws = GitBranchWorkspace(repo)
+
+    async def flow():
+        handle = await ws.begin("p1", "t1", 1)
+        before = await ws.audit()
+        await ws.discard(handle)
+        await ws.prune()
+        after = await ws.audit()
+        return before, after, handle
+
+    before, after, handle = asyncio.run(flow())
+    assert "plan/p1" in before["branches"]
+    assert "task/t1/a1" in before["branches"]
+    assert any(handle.path in row for row in before["worktrees"])
+    assert "plan/p1" in after["branches"]
+    assert "task/t1/a1" not in after["branches"]
+    assert not any(handle.path in row for row in after["worktrees"])
+
+
+def test_project_resolver_uses_the_repository_default_branch(tmp_path):
+    repo = tmp_path / "trunk-repo"
+    _init_repo(repo, "trunk")
+    projects = MutableProjects(
+        ProjectDefinition(id="project-1", name="Project", repo_url=str(repo))
+    )
+    workspace = ProjectWorkspaceResolver(projects, tmp_path).resolve("project-1")
+
+    async def flow():
+        handle = await workspace.begin(
+            "plan-1",
+            "task-1",
+            1,
+            cycle_id="cycle-1",
+            goal_id="goal-1",
+            run_id="run-1",
+        )
+        await workspace.discard(handle)
+
+    asyncio.run(flow())
+
+    assert _git(repo, "rev-parse", "cycle/cycle-1") == _git(repo, "rev-parse", "trunk")
+
+
+def test_project_resolver_rebuilds_cache_after_repo_url_changes(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _init_repo(first, "trunk")
+    _init_repo(second, "stable")
+    projects = MutableProjects(
+        ProjectDefinition(id="project-1", name="Project", repo_url=str(first))
+    )
+    resolver = ProjectWorkspaceResolver(projects, tmp_path)
+    first_workspace = resolver.resolve("project-1")
+
+    async def run_in(workspace, plan_id):
+        handle = await workspace.begin(plan_id, "task-1", 1)
+        await workspace.discard(handle)
+
+    asyncio.run(run_in(first_workspace, "plan-first"))
+    projects.project = projects.project.model_copy(update={"repo_url": str(second)})
+    second_workspace = resolver.resolve("project-1")
+    asyncio.run(run_in(second_workspace, "plan-second"))
+
+    assert second_workspace is not first_workspace
+    assert _git(first, "branch", "--list", "plan/plan-second") == ""
+    assert _git(second, "branch", "--list", "plan/plan-second") == "plan/plan-second"
+
+
+def test_remote_repo_url_changes_use_distinct_clone_destinations(tmp_path):
+    projects = MutableProjects(
+        ProjectDefinition(
+            id="project-1",
+            name="Project",
+            repo_url="https://git.example.test/one.git",
+        )
+    )
+    resolver = ProjectWorkspaceResolver(projects, tmp_path)
+    first = resolver._repository_path(projects.project)
+    projects.project = projects.project.model_copy(
+        update={"repo_url": "https://git.example.test/two.git"}
+    )
+    second = resolver._repository_path(projects.project)
+
+    assert first != second
+    assert first.parent == second.parent

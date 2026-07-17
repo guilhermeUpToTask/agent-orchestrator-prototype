@@ -10,6 +10,7 @@ This is the *only* module that decrypts. ``resolve()`` returns a ``SecretStr``;
 the single ``.get_secret_value()`` crossing in the whole codebase lives here.
 Master-key rotation re-wraps data keys (cheap) without touching ciphertext.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,8 +42,8 @@ def load_master_key() -> bytes:
     if not raw:
         raise InfrastructureError(
             f"{MASTER_KEY_ENV} is not set. Generate one with "
-            "`python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\"` and export it.",
+            '`python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"` and export it.',
             code="MASTER_KEY_MISSING",
         )
     try:
@@ -71,6 +72,7 @@ class SqliteSecretStore:
                 existing.wrapped_key = wrapped_key
             else:
                 s.add(SecretTable(uri=ref.uri, ciphertext=ciphertext, wrapped_key=wrapped_key))
+
         run_in_session(self._sf, _op)
         log.info("secret.stored", uri=ref.uri)
 
@@ -104,4 +106,5 @@ class SqliteSecretStore:
     def delete(self, ref: SecretRef) -> None:
         def _op(s: Session) -> None:
             s.execute(delete(SecretTable).where(SecretTable.uri == ref.uri))
+
         run_in_session(self._sf, _op)

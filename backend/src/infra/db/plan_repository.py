@@ -93,15 +93,15 @@ class SqlitePlanRepository:
 
     def _bound(self) -> Session:
         if self._session is None:
-            raise RuntimeError(
-                "SqlitePlanRepository used outside a UnitOfWork transaction"
-            )
+            raise RuntimeError("SqlitePlanRepository used outside a UnitOfWork transaction")
         return self._session
 
     def get(self, plan_id: str) -> Plan:
-        row = self._bound().execute(
-            text("SELECT data FROM plans WHERE id = :id"), {"id": plan_id}
-        ).one_or_none()
+        row = (
+            self._bound()
+            .execute(text("SELECT data FROM plans WHERE id = :id"), {"id": plan_id})
+            .one_or_none()
+        )
         if row is None:
             raise PlanNotFoundError(plan_id)
         return PlanFactory.reconstruct(json.loads(row[0]))
@@ -135,25 +135,30 @@ class SqlitePlanRepository:
             raise StaleVersionError(plan.id, plan.version, int(stored))
 
     def find_by_project_id(self, project_id: str) -> str | None:
-        row = self._bound().execute(
-            text("SELECT id FROM plans WHERE project_id = :project_id"),
-            {"project_id": project_id},
-        ).one_or_none()
+        row = (
+            self._bound()
+            .execute(
+                text("SELECT id FROM plans WHERE project_id = :project_id"),
+                {"project_id": project_id},
+            )
+            .one_or_none()
+        )
         return None if row is None else str(row[0])
 
     def find_by_request_id(self, request_id: str) -> str | None:
-        row = self._bound().execute(
-            text("SELECT plan_id FROM plan_requests WHERE request_id = :rid"),
-            {"rid": request_id},
-        ).one_or_none()
+        row = (
+            self._bound()
+            .execute(
+                text("SELECT plan_id FROM plan_requests WHERE request_id = :rid"),
+                {"rid": request_id},
+            )
+            .one_or_none()
+        )
         return None if row is None else str(row[0])
 
     def bind_request_id(self, request_id: str, plan_id: str) -> None:
         self._bound().execute(
-            text(
-                "INSERT OR IGNORE INTO plan_requests (request_id, plan_id)"
-                " VALUES (:rid, :pid)"
-            ),
+            text("INSERT OR IGNORE INTO plan_requests (request_id, plan_id) VALUES (:rid, :pid)"),
             {"rid": request_id, "pid": plan_id},
         )
 
@@ -184,6 +189,21 @@ class SqlitePlanRepository:
                 {"plan_id": plan_id, "worker_id": worker_id, "now_epoch": now_epoch},
             ),
         )
+
+    def is_claim_live(self, plan_id: str) -> bool:
+        now_epoch = int(self._clock.now().timestamp())
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT 1 FROM plans WHERE id = :plan_id "
+                    "AND claimed_by IS NOT NULL AND lease_expires_at > :now_epoch"
+                ),
+                {"plan_id": plan_id, "now_epoch": now_epoch},
+            )
+            .one_or_none()
+        )
+        return row is not None
 
     def release(self, plan_id: str, worker_id: str) -> None:
         run_in_session(

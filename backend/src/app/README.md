@@ -62,17 +62,17 @@ The rules every change here must preserve — each one answers a specific crash:
 2. **Two-transaction write** — txn1 marks RUNNING + persists + outbox; the agent side effect runs OUTSIDE any transaction; txn2 re-reads, re-guards, persists the outcome.
 3. **No live aggregate refs across transaction boundaries** — txn1 snapshots plain values into the frozen `_Unit`; finalize re-reads fresh (real SQLite detaches objects on commit).
 4. **Tolerant finalize** — if the plan left RUNNING mid-flight (replan), a late failure terminal-skips (never requeues into an abandoned iteration); a late success lands as harmless history.
-5. **Durable backoff gate** — requeue sets `retry_not_before = now + backoff`; the scan honors it; it survives crashes and never blocks other ready work.
+5. **Durable backoff + circuit gate** — requeue persists `retry_not_before`; provider/model circuits honor Retry-After and block the strict head without dispatching later work.
 6. **Retry-vs-terminal is a domain decision** — `RetryPolicy.should_retry(attempt, kind)` on the shared `FailureKind` taxonomy.
 7. **Agent resolved before RUNNING** — a missing agent fails fast, never strands a RUNNING task.
 
 ## The conversational phases (conversation.py)
 
-Per message turn: guard phase on a fresh read → persist the USER message BEFORE the LLM call (own short chat txn — it survives reasoner crashes) → `reasoner.converse(...)` outside any txn → no goals = append the reply, phase unchanged; goals = re-open the plan txn, RE-GUARD (a racing human command wins), commit goals + phase + `PhaseAdvanced` atomically. Chat is display history; the plan transaction is truth — neither can roll the other back.
+Per message turn: persist the USER/submitted-brief card and a STARTED planning operation before the LLM call → `reasoner.converse(...)` outside any txn → questions keep the operation WAITING_FOR_USER; a normalized intent opens an exact-revision intent gate and commits the operation. Chat is display history; the plan/artifact transaction is truth.
 
 ## The worker loop (run_worker.py)
 
-`worker_tick`: claim (lease) → `drive_plan` (`while signal == CONTINUE: advance; heartbeat`) → release in `finally`. The tick returns **progress, not claiming** — a claim that yields zero steps returns False so the caller sleeps (the verified spin fix). Crash recovery is the lease: a dead worker's plan is reclaimed by any worker from persisted state.
+Worker startup reconciles stale operational attempts against live claims, prunes stale worktree metadata, and audits refs. Then `worker_tick`: claim → `drive_plan` with mid-action heartbeats → release in `finally`. Domain recovery remains lease-driven; reconciliation corrects evidence rows only.
 
 ## Deep dives
 

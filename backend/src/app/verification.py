@@ -34,6 +34,21 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _matches_scope(path: str, scope: str) -> bool:
+    """Match repository-relative paths without treating `.` as a literal prefix."""
+    scope_value = scope.replace("\\", "/")
+    if scope_value in {"", ".", "./"}:
+        return True
+    normalized_path = path.replace("\\", "/")
+    while normalized_path.startswith("./"):
+        normalized_path = normalized_path[2:]
+    while scope_value.startswith("./"):
+        scope_value = scope_value[2:]
+    normalized_path = normalized_path.strip("/")
+    normalized_scope = scope_value.strip("/")
+    return normalized_path == normalized_scope or normalized_path.startswith(f"{normalized_scope}/")
+
+
 def validate_candidate(
     root: Path,
     contract: TaskContract,
@@ -75,9 +90,9 @@ def validate_candidate(
             continue
         if Path(changed_path).name in config_names:
             reasons.append(f"verification configuration changed: {changed_path}")
-        if forbidden and any(changed_path.startswith(prefix) for prefix in forbidden):
+        if forbidden and any(_matches_scope(changed_path, prefix) for prefix in forbidden):
             reasons.append(f"forbidden path changed: {changed_path}")
-        if allowed and not any(changed_path.startswith(prefix) for prefix in allowed):
+        if allowed and not any(_matches_scope(changed_path, prefix) for prefix in allowed):
             reasons.append(f"path outside allowed scope: {changed_path}")
 
     return CandidateValidation(not reasons, tuple(dict.fromkeys(reasons)))

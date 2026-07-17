@@ -7,6 +7,7 @@ is unset the control plane is open (local dev); when set, every control-plane
 request must present it via ``Authorization: Bearer <token>`` or ``X-API-Token``.
 Failures raise the shared taxonomy (-> 401), never a bare framework error.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,8 +28,6 @@ def require_api_token(
         return  # open in local dev
     provided = x_api_token
     if not provided and authorization and authorization.startswith("Bearer "):
-        provided = authorization[len("Bearer "):].strip()
+        provided = authorization[len("Bearer ") :].strip()
     if provided != expected:
-        raise UnauthorizedError(
-            "Missing or invalid API token", code="INVALID_API_TOKEN"
-        )
+        raise UnauthorizedError("Missing or invalid API token", code="INVALID_API_TOKEN")

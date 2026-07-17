@@ -8,9 +8,7 @@ class ModelNotFoundError(DomainError):
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
-        super().__init__(
-            f"Model '{model_id}' not found.", context={"model_id": model_id}
-        )
+        super().__init__(f"Model '{model_id}' not found.", context={"model_id": model_id})
 
 
 class ModelProviderNotFoundError(DomainError):

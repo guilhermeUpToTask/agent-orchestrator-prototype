@@ -96,7 +96,7 @@ class BlockResolved(DomainEvent):
 class PlanPaused(DomainEvent):
     """The plan's pause gate was armed. auto=True means the system paused itself
     — a task exhausted its retry budget or failed non-retryably — and needs
-    human attention (edit while paused, then resume); auto=False is a human
+    human attention (edit and retry while paused, then resume); auto=False is a human
     pause command."""
 
     reason: str | None = None
@@ -104,8 +104,10 @@ class PlanPaused(DomainEvent):
 
 
 class PlanResumed(DomainEvent):
-    """Human resume: the pause gate cleared and FAILED tasks were requeued with
-    a fresh attempt budget (the manual retry, decision #17)."""
+    """Human resume released only the manual pause gate.
+
+    Targeted task retry is represented separately by TaskRetried.
+    """
 
     retried_task_ids: list[str] = []
 

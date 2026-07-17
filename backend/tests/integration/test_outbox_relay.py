@@ -179,13 +179,14 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
             client.post(f"/api/plans/{plan_id}/discovery/message", json={"message": ""})
             deadline = time.time() + 5
             while time.time() < deadline:
-                if any(t == "PhaseAdvanced" for t, _ in received):
+                if any(t == "IntentProposed" for t, _ in received):
                     break
                 time.sleep(0.05)
         finally:
             get_broker().publish = original  # type: ignore
         dependencies.set_container(None)  # type: ignore[arg-type]
 
-    phase_events = [p for t, p in received if t == "PhaseAdvanced"]
-    assert phase_events and phase_events[0]["to_phase"] == "architecture"
-    assert json.dumps(phase_events[0])  # payload is JSON-serializable
+    intent_events = [p for t, p in received if t == "IntentProposed"]
+    assert intent_events and intent_events[0]["plan_id"] == plan_id
+    assert intent_events[0]["proposal_id"]
+    assert json.dumps(intent_events[0])  # payload is JSON-serializable

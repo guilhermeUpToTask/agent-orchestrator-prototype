@@ -228,3 +228,64 @@ def test_cyclic_migration_maps_legacy_phases_then_quarantines_unbound_rows(tmp_p
         assert data["brief"] == "preserved"
         assert data["block"]["kind"] == "project_binding"
         assert data["block"]["legal_resolutions"] == ["bind_project"]
+
+
+def test_operational_recovery_migration_backfills_open_attempt_liveness(tmp_path):
+    url = f"sqlite:///{tmp_path / 'operational-recovery.db'}"
+    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "0009_cyclic_project_plan")
+
+    engine = create_engine(url)
+    now = "2026-07-15T00:00:00+00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO projects (id, name, repo_url) VALUES ('project-1', 'project-1', NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO plans "
+                "(id, project_id, version, phase, status, iteration, data, paused, "
+                "pause_requested, created_at, updated_at) "
+                "VALUES ('p1', 'project-1', 1, 'running', 'running', 1, '{}', 0, 0, :now, :now)"
+            ),
+            {"now": now},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO execution_runs "
+                "(id, plan_id, goal_id, task_id, status, started_at) "
+                "VALUES ('run-1', 'p1', 'g1', 't1', 'running', :now)"
+            ),
+            {"now": now},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO execution_attempts "
+                "(id, run_id, plan_id, goal_id, task_id, number, task_attempt, status, started_at) "
+                "VALUES ('attempt-1', 'run-1', 'p1', 'g1', 't1', 1, 1, 'running', :now)"
+            ),
+            {"now": now},
+        )
+
+    command.upgrade(cfg, "head")
+
+    tables = set(inspect(engine).get_table_names())
+    assert {"planning_operations", "runtime_circuits"}.issubset(tables)
+    assert {
+        "last_liveness_at",
+        "runtime",
+        "provider_id",
+        "model_id",
+        "failure_kind",
+        "retry_at",
+        "safe_message",
+    }.issubset(_columns(engine, "execution_attempts"))
+    with engine.connect() as connection:
+        liveness = connection.execute(
+            text("SELECT last_liveness_at FROM execution_attempts WHERE id = 'attempt-1'")
+        ).scalar_one()
+    assert liveness == now

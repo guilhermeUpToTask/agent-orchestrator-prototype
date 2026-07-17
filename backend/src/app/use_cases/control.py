@@ -7,6 +7,7 @@
 All version-CAS guarded. The phase guards live on the aggregate (guarded named
 transitions), so a command against the wrong phase raises InvalidTransitionError.
 """
+
 from __future__ import annotations
 
 from src.domain.aggregates.planner_orchestrator import PlanPhase

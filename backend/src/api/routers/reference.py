@@ -9,6 +9,7 @@ only the `api_key_ref` URI is ever stored or returned. No route echoes a key.
 All routes are token-guarded (require_api_token — open when no token is
 configured, i.e. local dev).
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -35,6 +36,7 @@ router = APIRouter(dependencies=[Depends(require_api_token)], tags=["reference"]
 # Capabilities
 # ---------------------------------------------------------------------------
 
+
 @router.get("/capabilities")
 def list_capabilities(
     container: AppContainer = Depends(get_container),
@@ -60,15 +62,14 @@ def update_capability(
 
 
 @router.delete("/capabilities/{capability_id}", status_code=204)
-def delete_capability(
-    capability_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_capability(capability_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.capability_repo.delete(capability_id)
 
 
 # ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
+
 
 class AgentBody(BaseModel):
     name: str
@@ -90,8 +91,7 @@ def _to_spec(agent_id: str, body: AgentBody, container: AppContainer) -> AgentSp
     # flag incomplete bindings.
     if body.runtime_type.strip().lower() not in RUNTIME_TYPES:
         raise InfrastructureError(
-            f"runtime_type '{body.runtime_type}' — valid values are "
-            f"{', '.join(RUNTIME_TYPES)}.",
+            f"runtime_type '{body.runtime_type}' — valid values are {', '.join(RUNTIME_TYPES)}.",
             code=AGENT_RUNNER_CONFIG_INVALID,
         )
     if body.provider_id:
@@ -135,9 +135,7 @@ def get_default_agent(
 
 
 @router.post("/agents", status_code=201)
-def create_agent(
-    body: AgentBody, container: AppContainer = Depends(get_container)
-) -> AgentSpec:
+def create_agent(body: AgentBody, container: AppContainer = Depends(get_container)) -> AgentSpec:
     spec = _to_spec(new_id(), body, container)
     container.agent_repo.add(spec)
     return spec
@@ -153,22 +151,19 @@ def update_agent(
 
 
 @router.delete("/agents/{agent_id}", status_code=204)
-def delete_agent(
-    agent_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_agent(agent_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.agent_repo.delete(agent_id)
 
 
 @router.post("/agents/{agent_id}/default", status_code=204)
-def set_default_agent(
-    agent_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def set_default_agent(agent_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.agent_repo.set_default(agent_id)
 
 
 # ---------------------------------------------------------------------------
 # Providers & models
 # ---------------------------------------------------------------------------
+
 
 class ProviderCreateBody(BaseModel):
     name: str
@@ -222,9 +217,7 @@ def update_provider(
 
 
 @router.delete("/providers/{provider_id}", status_code=204)
-def delete_provider(
-    provider_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_provider(provider_id: str, container: AppContainer = Depends(get_container)) -> None:
     provider = container.provider_repo.get(provider_id)
     container.provider_repo.delete(provider_id)
     container.secret_store.delete(SecretRef(uri=provider.api_key_ref))
@@ -258,15 +251,14 @@ def update_model(
 
 
 @router.delete("/models/{model_id}", status_code=204)
-def delete_model(
-    model_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_model(model_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.model_repo.delete(model_id)
 
 
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+
 
 class ProjectBody(BaseModel):
     name: str
@@ -299,7 +291,5 @@ def update_project(
 
 
 @router.delete("/projects/{project_id}", status_code=204)
-def delete_project(
-    project_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_project(project_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.project_repo.delete(project_id)

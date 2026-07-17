@@ -18,6 +18,7 @@ substring scan over the plan JSON documents (LIKE) — coarse but fail-safe
 (false positives block a delete; false negatives are impossible for the exact
 quoted-id patterns used).
 """
+
 from __future__ import annotations
 
 import json
@@ -69,6 +70,7 @@ def _referenced_by_active_plan(session: Session, quoted_fragment: str) -> bool:
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------
+
 
 def _capability_from_row(row: CapabilityTable) -> Capability:
     return Capability(
@@ -122,10 +124,7 @@ class SqliteCapabilityRepository:
             if row is None:
                 raise CapabilityNotFoundError(capability_id)
             agent_refs = s.execute(
-                text(
-                    "SELECT agent_id FROM agent_capabilities"
-                    " WHERE capability_id = :cid LIMIT 1"
-                ),
+                text("SELECT agent_id FROM agent_capabilities WHERE capability_id = :cid LIMIT 1"),
                 {"cid": capability_id},
             ).one_or_none()
             if agent_refs is not None:
@@ -133,9 +132,7 @@ class SqliteCapabilityRepository:
                     "Capability", capability_id, f"agent '{agent_refs[0]}'"
                 )
             if _referenced_by_active_plan(s, f'"{capability_id}"'):
-                raise ReferencedEntityInUseError(
-                    "Capability", capability_id, "a non-terminal plan"
-                )
+                raise ReferencedEntityInUseError("Capability", capability_id, "a non-terminal plan")
             s.delete(row)
 
         run_in_session(self._sf, _op)
@@ -149,6 +146,7 @@ class SqliteCapabilityRepository:
 # ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
+
 
 class SqliteAgentRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -244,9 +242,7 @@ class SqliteAgentRepository:
             if row is None:
                 raise AgentNotFoundError(agent_id)
             if _referenced_by_active_plan(s, f'"agent_id":"{agent_id}"'):
-                raise ReferencedEntityInUseError(
-                    "Agent", agent_id, "a non-terminal plan"
-                )
+                raise ReferencedEntityInUseError("Agent", agent_id, "a non-terminal plan")
             s.delete(row)  # agent_capabilities rows cascade
 
         run_in_session(self._sf, _op)
@@ -292,6 +288,7 @@ class SqliteAgentRepository:
 # Models & providers (provider owns its models: cascade down, guard up)
 # ---------------------------------------------------------------------------
 
+
 def _model_from_row(row: ModelTable) -> IAModel:
     return IAModel(id=row.id, provider_id=row.provider_id, name=row.name)
 
@@ -304,17 +301,13 @@ def _guard_model_in_use(s: Session, model_id: str) -> None:
         {"mid": model_id},
     ).one_or_none()
     if ref is not None:
-        raise ReferencedEntityInUseError(
-            "Model", model_id, f"config '{ref[0]}/{ref[1]}'"
-        )
+        raise ReferencedEntityInUseError("Model", model_id, f"config '{ref[0]}/{ref[1]}'")
     agent_ref = s.execute(
         text("SELECT id FROM agents WHERE model_id = :mid LIMIT 1"),
         {"mid": model_id},
     ).one_or_none()
     if agent_ref is not None:
-        raise ReferencedEntityInUseError(
-            "Model", model_id, f"agent '{agent_ref[0]}'"
-        )
+        raise ReferencedEntityInUseError("Model", model_id, f"agent '{agent_ref[0]}'")
 
 
 class SqliteModelRepository:
@@ -334,9 +327,7 @@ class SqliteModelRepository:
                 raise EntityAlreadyExistsError("Model", model.id)
             if s.get(ProviderTable, model.provider_id) is None:
                 raise ModelProviderNotFoundError(model.provider_id)
-            s.add(
-                ModelTable(id=model.id, provider_id=model.provider_id, name=model.name)
-            )
+            s.add(ModelTable(id=model.id, provider_id=model.provider_id, name=model.name))
 
         run_in_session(self._sf, _op)
 
@@ -400,8 +391,7 @@ class SqliteModelProviderRepository:
         s.flush()  # provider row must exist before model rows hit its FK (no ORM
         # relationship() -> the unit of work won't order these inserts itself)
         existing = {
-            r.id: r
-            for r in s.query(ModelTable).filter(ModelTable.provider_id == provider.id)
+            r.id: r for r in s.query(ModelTable).filter(ModelTable.provider_id == provider.id)
         }
         wanted = {m.id: m for m in provider.models}
         for gone_id in existing.keys() - wanted.keys():
@@ -410,11 +400,7 @@ class SqliteModelProviderRepository:
         for model in provider.models:
             row = existing.get(model.id)
             if row is None:
-                s.add(
-                    ModelTable(
-                        id=model.id, provider_id=provider.id, name=model.name
-                    )
-                )
+                s.add(ModelTable(id=model.id, provider_id=provider.id, name=model.name))
             else:
                 row.name = model.name
 
@@ -464,12 +450,8 @@ class SqliteModelProviderRepository:
                 {"pid": provider_id},
             ).one_or_none()
             if agent_ref is not None:
-                raise ReferencedEntityInUseError(
-                    "Provider", provider_id, f"agent '{agent_ref[0]}'"
-                )
-            for model_row in s.query(ModelTable).filter(
-                ModelTable.provider_id == provider_id
-            ):
+                raise ReferencedEntityInUseError("Provider", provider_id, f"agent '{agent_ref[0]}'")
+            for model_row in s.query(ModelTable).filter(ModelTable.provider_id == provider_id):
                 _guard_model_in_use(s, model_row.id)
             s.delete(row)  # models cascade via FK
 
@@ -484,6 +466,7 @@ class SqliteModelProviderRepository:
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+
 
 class SqliteProjectRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -500,11 +483,7 @@ class SqliteProjectRepository:
         def _op(s: Session) -> None:
             if s.get(ProjectTable, project.id) is not None:
                 raise EntityAlreadyExistsError("Project", project.id)
-            s.add(
-                ProjectTable(
-                    id=project.id, name=project.name, repo_url=project.repo_url
-                )
-            )
+            s.add(ProjectTable(id=project.id, name=project.name, repo_url=project.repo_url))
 
         run_in_session(self._sf, _op)
 
@@ -529,15 +508,13 @@ class SqliteProjectRepository:
     def list(self) -> list[ProjectDefinition]:
         with self._sf() as s:
             rows = s.query(ProjectTable).order_by(ProjectTable.id).all()
-            return [
-                ProjectDefinition(id=r.id, name=r.name, repo_url=r.repo_url)
-                for r in rows
-            ]
+            return [ProjectDefinition(id=r.id, name=r.name, repo_url=r.repo_url) for r in rows]
 
 
 # ---------------------------------------------------------------------------
 # Two-tier config (scope = 'orchestrator' | <project_id>)
 # ---------------------------------------------------------------------------
+
 
 class SqliteConfigStore:
     ORCHESTRATOR_SCOPE = "orchestrator"

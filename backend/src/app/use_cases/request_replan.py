@@ -10,6 +10,7 @@ via the conversation use cases (roadmap Phase 2.5 wires the reasoning content).
 This is distinct from apply_edit: apply_edit is the surgical manual edit;
 request_replan is the holistic conversational re-plan.
 """
+
 from __future__ import annotations
 
 from src.domain.events.outbox import ReplanRequested

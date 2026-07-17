@@ -217,3 +217,27 @@ def test_cycle_draft_rejects_duplicate_unknown_self_and_cyclic_dependencies(goal
             base_plan_version=0,
             goals=goals,
         )
+
+
+def test_cycle_draft_rejects_dependency_on_a_later_goal() -> None:
+    with pytest.raises(ValidationError, match="dependencies must precede"):
+        CycleDraft(
+            id="draft",
+            intent_proposal_id="intent",
+            base_plan_version=0,
+            goals=[
+                GoalOutline(
+                    key="first",
+                    name="First",
+                    objective="first",
+                    position=0,
+                    depends_on=["later"],
+                ),
+                GoalOutline(
+                    key="later",
+                    name="Later",
+                    objective="later",
+                    position=1,
+                ),
+            ],
+        )

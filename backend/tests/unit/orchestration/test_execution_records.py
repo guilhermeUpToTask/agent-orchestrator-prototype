@@ -11,11 +11,14 @@ from src.app.execution_records import ExecutionAttemptStatus, ExecutionRunStatus
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.pause_resume import resume_plan, retry_task
+from src.app.use_cases.reconcile_runtime import reconcile_stale_attempts
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
 from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind, Status
+from tests.support import make_agent_spec
 
 
 def _plan(*, max_attempts: int = 3) -> Plan:
@@ -155,6 +158,34 @@ def test_unexpected_runtime_crash_leaves_discoverable_open_attempt(env_factory, 
     assert "TaskStarted" in env.outbox_types()
 
 
+def test_startup_reconciliation_respects_live_lease_then_abandons_stale_attempt(
+    env_factory, monkeypatch
+):
+    env = env_factory()
+    env.seed(_plan())
+
+    async def crash(*args, **kwargs):
+        raise RuntimeError("worker died")
+
+    monkeypatch.setattr(env.runner, "run", crash)
+    with pytest.raises(RuntimeError, match="worker died"):
+        asyncio.run(advance_plan("p1", *env.args))
+
+    claimed = env.uow.plans.claim_one_unit("live-worker", lease_seconds=60)
+    assert claimed is not None and claimed.id == "p1"
+    assert reconcile_stale_attempts(env.uow, env.clock) == []
+
+    env.uow.plans.release("p1", "live-worker")
+    reconciled = reconcile_stale_attempts(env.uow, env.clock)
+    assert len(reconciled) == 1
+    with env.uow:
+        attempt = env.uow.executions.get_attempt(reconciled[0])
+        run = env.uow.executions.get_run(attempt.run_id)
+    assert attempt.status == ExecutionAttemptStatus.ABANDONED
+    assert run.status == ExecutionRunStatus.ABANDONED
+    assert env.stored("p1").goals[0].tasks[0].status == Status.RUNNING
+
+
 def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, monkeypatch):
     env = env_factory()
     env.seed(_plan())
@@ -172,3 +203,69 @@ def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, mon
         assert env.uow.executions.list_open_attempts("p1") == []
     assert env.stored("p1").goals[0].tasks[0].status == Status.PENDING
     assert "TaskStarted" not in env.outbox_types()
+
+
+def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="NVIDIA ResourceExhausted",
+            )
+        },
+        agents=[agent],
+    )
+    plan = _plan(max_attempts=2)
+    plan.retry_policy = RetryPolicy(
+        max_attempts=2,
+        initial_backoff_seconds=1,
+        max_backoff_seconds=1,
+        jitter_ratio=0,
+    )
+    plan.status = PlanStatus.RUNNING
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-1",
+            draft_id="draft-1",
+            status=CycleStatus.ACTIVE,
+            started_at=env.clock.now(),
+            goals=[
+                Goal(
+                    id="g1",
+                    name="g1",
+                    position=0,
+                    description="",
+                    tasks=[
+                        Task(id="t1", name="t1", position=0, description="", agent_id="a1"),
+                        Task(id="t2", name="t2", position=1, description="", agent_id="a1"),
+                    ],
+                )
+            ],
+        )
+    ]
+    env.seed(plan)
+
+    assert asyncio.run(advance_plan("p1", *env.args)) == "continue"
+    assert asyncio.run(advance_plan("p1", *env.args)) == "not_ready"
+    assert env.runner.calls == {"t1": 1}
+
+    env.clock.advance(2)
+    assert asyncio.run(advance_plan("p1", *env.args)) == "paused"
+    stored = env.stored("p1")
+    assert stored.block is not None and stored.block.kind == "provider_capacity"
+    assert stored.block.legal_resolutions == [
+        "wait_and_retry",
+        "edit_task",
+        "start_replan",
+    ]
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
+    assert env.runner.calls == {"t1": 2}
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
+    assert circuit is not None and circuit.manual_intervention

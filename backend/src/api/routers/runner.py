@@ -8,6 +8,7 @@ an invalid config is the query's answer, not an error. It never touches the
 secret store (dry-run works without a master key) — secret existence/
 decryption is still only checked when a task actually runs.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -66,9 +67,7 @@ def runner_status(
 
     agents: list[RunnerAgentStatus] = []
     for spec in container.agent_repo.list():
-        binding = validate_agent_binding(
-            spec, container.provider_repo, container.model_repo
-        )
+        binding = validate_agent_binding(spec, container.provider_repo, container.model_repo)
         agents.append(
             RunnerAgentStatus(
                 agent_id=spec.id,

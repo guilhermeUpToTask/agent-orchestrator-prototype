@@ -115,9 +115,8 @@ class Plan(BaseModel):
 
     # Human pause gate (un-freeze #3): an availability flag on the claim predicate
     # (the same durable-gate pattern as planning_retry_not_before), NOT a phase —
-    # the nine-phase enum stays frozen. Armed by a human pause command or by the
-    # auto-pause that replaced terminal goal failure; cleared by resume() (which
-    # doubles as the manual retry) and by the phase-changing human commands.
+    # the legacy phase projection remains unchanged. Armed by a human pause command;
+    # cleared by resume(), which is intentionally separate from targeted retry.
     paused: bool = False
     paused_reason: str | None = None
 
@@ -311,25 +310,99 @@ class Plan(BaseModel):
             else PlanStatus.IDLE
         )
 
-    def retry_task(self, goal_id: str, task_id: str, resolved_at: datetime) -> None:
-        """Retry exactly one failed task; absolute attempt identity is preserved."""
+    def retry_task(self, goal_id: str, task_id: str, resolved_at: datetime) -> str | None:
+        """Retry exactly one failed task; absolute attempt identity is preserved.
+
+        Return the block resolution when retrying from a structured block. A
+        legacy paused plan has no block and therefore returns None; callers must
+        still issue the separate resume command to release its pause gate.
+        """
         blocked = self.block is not None and self.block.active
         if not self.paused and not blocked:
             raise InvalidTransitionError("Plan", self.id, self.status.value, "retry")
+        resolution: str | None = None
         if blocked and (
             self.block is None
             or self.block.goal_id != goal_id
             or self.block.task_id != task_id
-            or "retry_stage" not in self.block.legal_resolutions
+            or not {"retry_stage", "wait_and_retry"}.intersection(self.block.legal_resolutions)
         ):
             raise InvalidEditError("retry does not target the active plan block")
-        goal = self._goal(goal_id)
-        self._task(goal, task_id).retry()
         if blocked:
             assert self.block is not None
-            self.block.resolution = "retry_stage"
+            resolution = (
+                "wait_and_retry"
+                if "wait_and_retry" in self.block.legal_resolutions
+                else "retry_stage"
+            )
+        goal = self._goal(goal_id)
+        task = self._task(goal, task_id)
+        edited_pending = bool(
+            blocked
+            and task.status == Status.PENDING
+            and self.block is not None
+            and "edit_task" in self.block.legal_resolutions
+        )
+        if edited_pending:
+            resolution = "edit_task"
+        else:
+            task.retry()
+        if blocked:
+            assert self.block is not None
+            self.block.resolution = resolution
             self.block.resolved_at = resolved_at
             self.status = PlanStatus.RUNNING
+        return resolution
+
+    def retry_planning_stage(self, resolved_at: datetime) -> None:
+        """Resolve a cyclic reasoner failure and requeue the same planning stage."""
+        if (
+            self.block is None
+            or not self.block.active
+            or self.block.kind != "reasoner_failure"
+            or "retry_stage" not in self.block.legal_resolutions
+        ):
+            raise InvalidEditError("plan is not blocked on a retryable planning stage")
+        self.block.resolution = "retry_stage"
+        self.block.resolved_at = resolved_at
+        self.clear_planning_retry()
+        self.status = PlanStatus.RUNNING
+
+    def retry_agent_binding(
+        self,
+        goal_id: str,
+        role_agent_ids_by_task: dict[str, dict[str, str]],
+        resolved_at: datetime,
+    ) -> None:
+        """Atomically bind every frozen task after the user repairs the registry."""
+        block = self.block
+        if (
+            block is None
+            or not block.active
+            or block.kind != "agent_capability"
+            or block.goal_id != goal_id
+            or "retry_stage" not in block.legal_resolutions
+        ):
+            raise InvalidEditError("plan is not blocked on retryable agent binding")
+        goal = self._goal(goal_id)
+        expected_task_ids = {task.id for task in goal.tasks}
+        if not expected_task_ids or set(role_agent_ids_by_task) != expected_task_ids:
+            raise InvalidEditError("agent bindings must cover every frozen task")
+        required_roles = {"test_author", "implementer"}
+        for task in goal.tasks:
+            binding = role_agent_ids_by_task[task.id]
+            if not required_roles.issubset(binding) or any(
+                not binding[role] for role in required_roles
+            ):
+                raise InvalidEditError("each task requires test-author and implementer bindings")
+
+        for task in goal.tasks:
+            task.role_agent_ids = dict(role_agent_ids_by_task[task.id])
+            task.agent_id = task.role_agent_ids["implementer"]
+        block.resolution = "retry_stage"
+        block.resolved_at = resolved_at
+        self.clear_planning_retry()
+        self._set_phase(PlanPhase.RUNNING)
 
     # ---- worker-driven planning retry gate (un-freeze 2026-07-08) ----
     def record_planning_retry(self, not_before: datetime | None) -> None:
@@ -527,7 +600,6 @@ class Plan(BaseModel):
                 "resume",
                 "start_replan",
                 "edit_pending_work",
-                "cancel_cycle",
             ]
         if self.status == PlanStatus.IDLE or (
             self.status == PlanStatus.WAITING

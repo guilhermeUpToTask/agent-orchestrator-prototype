@@ -6,7 +6,7 @@ from enum import Enum
 
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.repositories.agent_repo import AgentRepository
-from src.domain.services.capability_matching import match_agent
+from src.domain.services.capability_matching import matching_agent_id
 
 
 class RunRole(str, Enum):
@@ -30,7 +30,22 @@ def resolve_role_agent(
     """Use the configured registry; a role capability is mandatory, never defaulted."""
     required = [_ROLE_CAPABILITY[role], *required_capabilities]
     catalog = agents.list()
-    agent_id, used_default = match_agent(required, catalog, agents.default_agent_id())
-    if used_default:
+    agent_id = matching_agent_id(required, catalog)
+    if agent_id is None:
         raise ValueError(f"no configured agent covers {role.value}: {sorted(set(required))}")
     return agents.get(agent_id)
+
+
+def resolve_task_role_agents(
+    required_capabilities: list[str],
+    agents: AgentRepository,
+) -> dict[str, str]:
+    """Resolve the mandatory TDD roles from the live user-managed registry."""
+    return {
+        RunRole.TEST_AUTHOR.value: resolve_role_agent(
+            RunRole.TEST_AUTHOR, required_capabilities, agents
+        ).id,
+        RunRole.IMPLEMENTER.value: resolve_role_agent(
+            RunRole.IMPLEMENTER, required_capabilities, agents
+        ).id,
+    }

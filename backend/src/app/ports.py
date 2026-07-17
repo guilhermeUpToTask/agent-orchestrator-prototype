@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from src.app.execution_records import ExecutionRecordRepository
+from src.app.runtime_failures import RuntimeFailure
 from src.domain.events.base import DomainEvent
 from src.domain.ports import (
     AgentEventSink,
@@ -81,10 +82,24 @@ class TaskFailed(Exception):
     `reason` plus a typed `kind` (the shared failure taxonomy) that the domain
     RetryPolicy classifies (retryable vs terminal)."""
 
-    def __init__(self, reason: str, kind: FailureKind | None = None) -> None:
-        self.reason = reason
-        self.kind = kind
-        super().__init__(reason)
+    def __init__(
+        self,
+        reason: str,
+        kind: FailureKind | None = None,
+        *,
+        failure: RuntimeFailure | None = None,
+    ) -> None:
+        resolved_kind = failure.kind if failure is not None else kind
+        if failure is None:
+            failure = RuntimeFailure(
+                kind=resolved_kind or FailureKind.TOOL_ERROR,
+                safe_message=reason[:500],
+                retryable=(resolved_kind not in {FailureKind.AUTH_ERROR, FailureKind.TOKEN_LIMIT}),
+            )
+        self.failure = failure
+        self.reason = failure.safe_message
+        self.kind = failure.kind
+        super().__init__(self.reason)
 
 
 class ReasonerUnavailable(Exception):

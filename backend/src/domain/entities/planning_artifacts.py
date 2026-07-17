@@ -80,6 +80,17 @@ class PlanBlock(BaseModel):
     resolved_at: datetime | None = None
     resolution: str | None = None
 
+    @model_validator(mode="after")
+    def add_agent_binding_retry_for_legacy_blocks(self) -> "PlanBlock":
+        """Older agent-capability blocks predate executable registry recovery."""
+        if (
+            self.kind == "agent_capability"
+            and self.active
+            and "retry_stage" not in self.legal_resolutions
+        ):
+            self.legal_resolutions = ["retry_stage", *self.legal_resolutions]
+        return self
+
     @property
     def active(self) -> bool:
         return self.resolved_at is None
@@ -125,15 +136,21 @@ class CycleDraft(BaseModel):
         if len(keys) != len(set(keys)):
             raise ValueError("cycle draft goal keys must be unique")
         known = set(keys)
+        positions = {goal.key: goal.position for goal in self.goals}
         graph: dict[str, list[str]] = {}
         for goal in self.goals:
             if goal.key in goal.depends_on:
                 raise ValueError(f"goal '{goal.key}' cannot depend on itself")
             unknown = sorted(set(goal.depends_on) - known)
             if unknown:
-                raise ValueError(
-                    f"goal '{goal.key}' has unknown dependencies: {unknown}"
-                )
+                raise ValueError(f"goal '{goal.key}' has unknown dependencies: {unknown}")
+            later = sorted(
+                dependency
+                for dependency in goal.depends_on
+                if positions[dependency] >= goal.position
+            )
+            if later:
+                raise ValueError(f"goal '{goal.key}' dependencies must precede it: {later}")
             graph[goal.key] = list(goal.depends_on)
 
         visiting: set[str] = set()
