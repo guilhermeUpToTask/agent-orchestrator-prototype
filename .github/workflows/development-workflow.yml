@@ -1,0 +1,58 @@
+name: Development workflow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/scripts/**"
+      - "docs/development.md"
+      - ".github/workflows/development-workflow.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/scripts/**"
+      - "docs/development.md"
+      - ".github/workflows/development-workflow.yml"
+
+concurrency:
+  group: development-workflow-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Shell interface smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Parse development entry point
+        run: bash -n backend/scripts/dev.sh backend/scripts/start_api_and_worker.sh backend/scripts/reseed_openrouter_key.sh
+
+      - name: Exercise documented interfaces
+        run: |
+          bash backend/scripts/dev.sh --help
+          bash backend/scripts/dev.sh doctor --help
+          bash backend/scripts/dev.sh setup --help
+          bash backend/scripts/dev.sh seed --help
+          bash backend/scripts/dev.sh start --help
+          bash backend/scripts/dev.sh check --help
+          bash backend/scripts/start_api_and_worker.sh --help
+          bash backend/scripts/reseed_openrouter_key.sh --help
+
+      - name: Reject unsafe parameter combinations
+        run: |
+          if bash backend/scripts/dev.sh start --no-env --no-migrate --port 0; then
+            echo "start unexpectedly accepted an invalid port" >&2
+            exit 1
+          fi
+          if bash backend/scripts/dev.sh seed --no-env --provider openrouter; then
+            echo "seed unexpectedly accepted a missing model" >&2
+            exit 1
+          fi
+          if bash backend/scripts/dev.sh check --backend-only --frontend-only; then
+            echo "check unexpectedly accepted conflicting surfaces" >&2
