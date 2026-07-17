@@ -17,11 +17,11 @@ flowchart TB
     end
 
     subgraph shellparts["PlanShell layout"]
-        rail["LifecycleRail<br/>9-phase stepper"]
+        rail["LifecycleRail<br/>status · gate · block controls"]
         view["Overview | Goals | Agents | Activity<br/>(+ StaleNotice when the stream drops)"]
         dock["ConsoleDock<br/>live agent.event log"]
         chat["ChatPanel<br/>discovery / replanning turns"]
-        gate["GatePanel<br/>the two gate dialogs"]
+        gate["GatePanel<br/>versioned artifact review dialogs"]
     end
 
     subgraph settingsparts["Settings sections (full CRUD)"]
@@ -33,9 +33,9 @@ flowchart TB
 ```
 
 - **GoalsView** renders the goal/task tree as a two-level dagre-laid-out flow graph (`lib/layout.ts`): goal group nodes containing task nodes with status badges.
-- **GatePanel** is where the human gates live: AWAITING_REVIEW → an inline **RoadmapEditor** (rename/add/remove goals & tasks via `POST /edits` — the first real call sites of `useApplyEdit`), then approve, or "request changes" (`POST /review/reopen` → reopens the chat, next commit replaces the roadmap); REVIEW → finish or replan.
-- **LifecycleRail** carries the pause controls: a **Pause** button in the worker-driven phases, an amber **paused card** (any phase) with **Resume** (= the manual retry), and a red dead-end card for terminal `failed`. `PlanPaused`/`PlanResumed` SSE events toast and invalidate.
-- **DetailPanel** is editable at the gate or while paused (rename/description via `update_task`, delete via `remove_task`, agent rebind via `rebind_task_agent`, mirroring the backend guards) and shows a durable per-task **Agent log** from `GET /plans/{id}/agent-events`.
+- **GatePanel** renders the version-bound intent and cycle-draft artifacts before approval. Operators can revise the replan objective, scope, constraints, exclusions, unfinished-source treatment, and proposed goals; the cycle draft is shown beside the locked source cycle so completed work and carry-over decisions are visible before activation.
+- **LifecycleRail** renders backend `status`, `status_reason`, gates, blocks, and legal actions. **Resume** releases only a manual pause. Failed tasks and structured blocks expose targeted **Retry**, provider-capacity **Clear & retry**, planning-stage retry, and **Edit failed task** controls. Replan starts with an explicit operator objective instead of silently resubmitting the original brief.
+- **DetailPanel** is editable at a legacy gate, during a manual pause, or for the task targeted by a structured `edit_task` block. It exposes task-level retry when legal and shows a durable per-task **Agent log** from `GET /plans/{id}/agent-events`.
 - **ConsoleDock** colors the live feed by severity (`agent.failed` red, `agent.finished` green, `llm.call` purple) and can filter to the selected task; plan-scoped `llm.call` rows show a `plan` badge.
 - **Activity** carries a **metrics strip** (`GET /api/metrics`, polled): LLM sessions/calls/tokens and agent run/failure counts, with rate-limited failures highlighted.
 - **ChatPanel** is enabled only in the conversational phases; a send POSTs the message and appends the reply from the HTTP body (`MessageResponse{reply, committed, phase}`) — it does not wait on SSE. History hydrates from `GET /plans/{id}/chat`.
@@ -60,7 +60,7 @@ The division of labor that keeps this simple:
 
 ## Type generation
 
-`npm run generate:api` exports the backend's OpenAPI schema (`backend/scripts/export_openapi.py`) and runs `openapi-ts` into `src/types/generated/`. Operation IDs are stable (`plans-create`) via the backend's `generate_unique_id_function`. One exception is hand-maintained: the **plan detail read model** (the full aggregate document returned by `GET /plans/{id}`) is declared in `src/types/ui.ts` — keep it in sync with the domain when the aggregate changes.
+`npm run generate:api` exports the backend's OpenAPI schema (`backend/scripts/export_openapi.py`) and runs `openapi-ts` into `src/types/generated/`. Operation IDs are stable (`plans-create`) via the backend's `generate_unique_id_function`. The plan-detail response is now typed in FastAPI, including cycles, proposals, drafts, gates, and blocks, so OpenAPI exposes its nested contract. `src/types/ui.ts` composes those transport facts into the view model and must remain aligned with generated fields.
 
 ## Conventions
 

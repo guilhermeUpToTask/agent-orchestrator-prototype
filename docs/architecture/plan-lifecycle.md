@@ -43,7 +43,9 @@ transition rules.
 2. An exact-revision `ReviewGate` allows approve, edit, or cancel.
 3. Approval makes architecture worker-claimable.
 4. The architecture reasoner submits an ordered `CycleDraft` with stable
-   local goal keys and real dependency keys.
+   local goal keys and real dependency keys. Every dependency must precede its
+   dependent by stable position; forward edges are rejected before activation
+   because position is the scheduling barrier.
 5. A second exact-revision gate allows approve, edit, or cancel.
 6. Approval validates the base plan version, maps local dependency keys to
    generated goal ids, and atomically activates a finite `Cycle`.
@@ -76,7 +78,9 @@ Submission handlers collect DTOs only. Application services re-read, validate,
 mutate the aggregate, and persist state plus domain events in one UoW/outbox
 transaction. Test-author and implementer bindings resolve through the existing
 `AgentSpec` registry using mandatory `test_authoring` and `implementation`
-capabilities.
+capabilities. Agents and their advertised capabilities remain user-managed at
+runtime; role resolution never requires a default agent when an explicit match
+exists.
 
 ## Pause, retry, and failure
 
@@ -88,7 +92,23 @@ immediately.
 `resume()` only removes a manual pause. It never retries work, rewinds
 identity, clears backoff, or resolves a block. Targeted retry names one failed
 task; if it matches an active execution block it resolves only that block and
-starts a new retry-policy cycle while preserving absolute attempt identity.
+starts a new retry-policy cycle while preserving absolute attempt identity. A matching
+provider-capacity retry also clears only the referenced runtime/provider/model
+circuit. A reasoner block uses the separate planning-stage retry command, which
+resolves that block and clears its durable planning backoff.
+
+An agent-capability block uses the same operator command after registry repair:
+the application resolves every frozen task against the live registry outside
+the plan transaction, then atomically binds all tasks and resolves the block.
+If any role remains uncovered, no task binding or plan state changes.
+
+Every advertised block resolution is executable. `edit_task` opens only the
+blocked task for semantic correction; saving the edit invalidates its
+revision-bound evidence, and continuing resolves the block without consuming a
+second retry transition. `start_replan` opens a new versioned intent proposal.
+The source cycle remains visible and immutable while the proposal and side-by-side
+CycleDraft are reviewed. Completed source work is supplied to the reasoner and
+must not be recreated; activation alone supersedes the source cycle.
 
 Transient failures arm durable backoff. Exhausted or permanent cyclic failures
 open a `PlanBlock` with stage, goal/task/revision/run identity, evidence
@@ -113,5 +133,8 @@ Migration 0009 records the honest phase-derived status in
 `legacy_mapped_status` but quarantines every unbound legacy row as BLOCKED
 with an operator-visible `project_binding` block. Because the released schema
 contains no authoritative plan-to-project relation, no project id is guessed.
-After an explicit operator binding, the recorded mapped status can be restored.
-Historical goals/tasks and phase data remain readable.
+An operator restores the plan through
+`POST /api/plans/{plan_id}/project-binding`; the command verifies the project,
+binds the immutable identity, resolves the block, restores the recorded mapped
+status, and writes `BlockResolved` in the same transaction. Historical
+goals/tasks and phase data remain readable.

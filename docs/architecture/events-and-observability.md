@@ -19,7 +19,7 @@ The split is deliberate: losing telemetry must never roll back plan state, and p
 
 `execution_runs` and `execution_attempts` are current operational lifecycle rows, not domain events and not best-effort telemetry. Transaction 1 creates or reuses a logical run and creates the concrete invocation attempt in the same UoW as `TaskStarted` and the task state change. A retryable failure closes the attempt as FAILED and leaves the run RETRYING; success, terminal failure, or tolerant abandonment closes both. Unexpected exceptions leave a RUNNING attempt that recovery tooling can query later.
 
-This ledger supplies stable `run_id`/`attempt_id` correlation and a task-lifetime monotonic attempt number even though `Task.attempt` remains a resettable retry-policy counter. It has no relay or public endpoint and does not replace `agent_events`. Revision `0008_typed_observations` adds nullable correlation columns to the observation stream; plan-scoped reasoner usage is typed now, while task-runtime producers are connected in Phase 3.
+This ledger supplies stable `run_id`/`attempt_id` correlation and a task-lifetime monotonic attempt number. `GET /api/plans/{id}/attempts` exposes planning operations and task → run → attempt history for HTTP hydration before SSE. It does not replace `agent_events`; correlated runtime events supplement the durable ledger.
 
 ## Delivery: the outbox relay → SSE
 
@@ -68,17 +68,65 @@ The contract, end to end:
 | What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
 | The full state of one plan | `GET /api/plans/{id}` — the entire aggregate document |
 | What's happening right now | `GET /api/events` SSE — domain events + live agent start/finish |
-| Which invocations are incomplete after a crash? | Internal `ExecutionRecordRepository.list_open_attempts` (recovery seam; no public endpoint yet) |
+| Which planning/runtime operations ran or failed? | `GET /api/plans/{id}/attempts` — planning operations plus task → run → attempt evidence, including liveness, provider/model, retry and safe bounded output |
 | Is the runtime wired correctly? | `GET /api/runner/status` (mode, per-agent binding validity, binary probes) · `GET /api/reasoner/status` |
 | What did the user and reasoner say? | `GET /api/plans/{id}/chat` |
 | A plan's agent/reasoner telemetry history | `GET /api/plans/{id}/agent-events?task_id=&limit=` — durable, most-recent-first, optionally per task (the console/DetailPanel live tail plus reload-survivable history) |
-| LLM token spend + agent run/failure counts | `GET /api/metrics?plan_id=` — sessions/calls/tokens and failures grouped by `FailureKind` (rate-limit visibility), aggregated over `agent_events` via `json_extract` |
+| LLM token spend + agent run/failure counts | `GET /api/metrics?plan_id=` — planner/child/combined scopes, reported/estimated/unavailable coverage, and exact attempt failures grouped by kind |
+| Offline evidence for every plan and execution run | <code>python backend/scripts/export_plan_runs.py --format bundle --output-dir DIR</code> — an atomic, hashed JSON/JSONL snapshot with telemetry, metrics, comparisons, insights, and execution summaries |
+| Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan |
 
 **Reasoner usage observations:** `OpenAIChatClient` reads provider `response.usage`; `run_tool_session` sums it across turns; `OpenAIReasoner` appends one plan-scoped, provider-sourced `model.usage` observation per successful session. The physical row retains legacy `type=llm.call` so the existing relay, history endpoint, and metrics query continue working. Reported counters use quality `reported`; omitted provider usage is stored as nullable counters with quality `unavailable` and reason `provider_did_not_report_usage`, never fabricated as zero in the canonical record. Observation failure is logged and isolated from planning. Failed sessions and CLI-agent usage remain uncovered.
 
-**Compatibility caveat:** `GET /api/metrics` is still the legacy roll-up and uses SQL `COALESCE`; it can display unavailable token usage as zero. Policy and future coverage-aware reporting must read typed observations, not this endpoint.
+`GET /api/metrics` reads typed `model.usage` observations. Missing counters remain unavailable rather than becoming zero; source, quality, and coverage counts make reported versus estimated data explicit. Pi builds that emit NDJSON contribute an allowlisted tool/step/usage vocabulary. Providers that do not report usage, run→Git reporting, and retention remain coverage gaps rather than fabricated facts.
 
-**Known blind spots** (scheduled in [ROADMAP.md](../../ROADMAP.md) "Next"): there is no attempt-history API; CLI runtime events still use the resettable domain attempt counter and `legacy_unknown` quality; failed sessions, CLI-agent tokens, tool calls, failed stdout beyond `reason[-500:]`, worker liveness, run→Git reporting, retention, and recovery reconciliation remain unavailable.
+## Offline read-only export
+
+<code>backend/scripts/export_plan_runs.py</code> and
+<code>backend/scripts/snapshot_current_plan.py</code> are deliberately outside
+<code>src/</code>. The exporter core has no imports from application, domain,
+runtime, SQLAlchemy, API, or worker code. It opens SQLite with URI
+<code>mode=ro</code>, enables <code>query_only</code>, and reads all included
+tables in one transaction so a live WAL database produces one consistent
+snapshot. It never calls an API or constructs <code>AppContainer</code>; writes
+are limited to stdout or explicit report paths.
+
+The versioned single JSON report contains every selected plan row and aggregate;
+planning operations; logical execution runs with attempts and correlated
+<code>agent_events</code>; plan-scoped or unassigned telemetry; outbox events;
+chat; referenced circuits; truthful usage/attempt metrics; execution summaries;
+and labelled insights. Correlation tries explicit <code>run_id</code>, then
+<code>attempt_id</code>, then a unique
+<code>(goal_id, task_id, attempt number)</code> legacy match. The export records
+the method, and ambiguous evidence stays unassigned.
+
+<code>--format bundle --output-dir DIR</code> atomically publishes a timestamped
+directory. Its manifest records source/totals plus SHA-256 and record counts for
+separate JSONL plan, operation, run, attempt, telemetry, summary, metric, insight,
+event, chat, and circuit streams. Catalog and comparison documents remain JSON. A
+failed write removes the temporary directory instead of exposing a partial bundle.
+
+The sanitized catalog contains only entries referenced by selected plan evidence.
+Providers expose <code>id</code>/<code>name</code>; models expose
+<code>id</code>/<code>provider_id</code>/<code>name</code>; agents expose
+identity, role, runtime/model binding, default status, and capability IDs.
+Provider base URLs and API-key references plus agent instructions and retry
+configuration are named in the redaction policy but never exported. Catalog values
+are current reference data, not immutable historical bindings.
+
+Comparisons group planning operations and attempts by runtime/provider/model,
+including outcome, retries, failure kinds, request/tool counts, and duration
+distributions. Duration is explicitly end-to-end orchestrator wall-clock evidence,
+not provider HTTP latency. Usage comparisons use provider/model identity reported
+by telemetry rather than guessing from mutable catalogs. Attempts do not persist
+<code>agent_id</code>, so the exporter does not claim historical
+agent-performance attribution.
+
+The snapshot CLI reuses this exact core. <code>--plan-id</code> selects directly;
+<code>--project-id</code> uses the one-plan-per-project invariant. Without a
+selector it chooses the sole plan or sole non-idle plan and fails on ambiguity.
+Stored plan content, chat, safe messages, and bounded stdout/stderr tails remain
+project-sensitive even though secrets and unrelated catalogs are excluded.
 
 ## Secrets hygiene
 

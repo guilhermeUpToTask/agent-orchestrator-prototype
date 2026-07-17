@@ -46,6 +46,6 @@ bolt a queue on top.
   (the driver model): conversational phases and human gates are never claimed.
 - The worker tick reports *progress*, not *claiming* — a claim that yields only
   `not_ready`/`paused` sleeps instead of spinning.
-- Heartbeats happen between units (never mid-agent-run), so `lease_seconds` must
-  exceed the longest expected single task run until mid-run heartbeats land
-  (roadmap Phase 3).
+- Historical release behavior used heartbeats only between units. Decision 45
+  amends this: active planning/execution actions now renew at one-third of the
+  lease interval, while startup reconciliation respects every live claim.

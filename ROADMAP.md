@@ -119,6 +119,14 @@ Take these up only when real usage demonstrates the need.
 18. **CI pipeline** [MRF 5] — per-PR: unit + integration + dummy e2e + ruff/mypy; nightly/merge-only: the paid real-model smoke. The split matters — don't burn money per push.
 19. **Frontend E2E (Playwright)** [MRF 5, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack. The archived plan targets the *old* API and needs rewriting against `/api/plans/{id}/…`; its environment lessons (webServer boot, sandbox SIGTERM, poll-don't-race-SSE) still apply.
 20. **Unified telemetry store** [MRF 4.4] — one queryable persistence for outbox + agent_events + API request logs. Build on the existing two streams; **no second event system**.
+21. **Registry-defined execution profiles and coverage preflight** [LIVE] — let
+    users create stable execution-role profiles and capability policies in the
+    registry instead of keeping the TDD role vocabulary in `_ROLE_CAPABILITY`.
+    Contracts should reference versioned role/profile ids; the settings UI should
+    show a role × task-capability coverage matrix; cycle review should warn about
+    uncovered combinations before enrichment; and registry edits should expose
+    their impact on active and future contracts without silently rebinding work.
+    Preserve explicit role capability checks and transactional retry binding.
 
 ## Deferred features — shelved with designed seams [LEG]
 

@@ -68,41 +68,27 @@ flowchart LR
 
 ## How a plan flows
 
-The plan lifecycle is a nine-phase state machine. Three different drivers advance it — **your chat messages**, **the worker**, and **your explicit gate commands** — and each phase belongs to exactly one driver. Phases the worker cannot advance are simply invisible to it (the claim predicate excludes them), so nothing ever spins waiting for input.
+Each project owns one long-lived plan. Finite work lives in cycles, and the root reports `running | paused | waiting | blocked | idle`; it never terminates. Chat proposes intent, the worker plans and executes one strict head goal at a time, and exact-revision human gates approve intent, roadmap, and publication.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> DISCOVERY : POST /api/plans (brief)
-
-    DISCOVERY --> ARCHITECTURE : 💬 chat turn commits the roadmap
-    ARCHITECTURE --> ENRICHING : ⚙️ passthrough (checkpoint)
-    ENRICHING --> AWAITING_REVIEW : ⚙️ every goal has tasks,<br/>agents bound
-    AWAITING_REVIEW --> RUNNING : ✋ approve
-    RUNNING --> REVIEW : ⚙️ all goals terminal
-    REVIEW --> DONE : ✋ finish
-    REVIEW --> REPLANNING : ✋ replan
-    RUNNING --> REPLANNING : ✋ mid-run replan<br/>(skips pending work)
-    REPLANNING --> ARCHITECTURE : 💬 chat turn commits<br/>the new goal set<br/>(iteration += 1)
-    RUNNING --> FAILED : ⚙️ a goal exhausts retries
-    DONE --> [*]
-    FAILED --> [*]
-
-    note right of DISCOVERY
-        💬 chat-driven (multi-turn)
-        ⚙️ worker-driven (claimable)
-        ✋ human gate command
-    end note
+flowchart LR
+    brief["Create/open project plan<br/>submit brief"] --> intent["IntentProposal<br/>review gate"]
+    intent -->|approve| draft["CycleDraft roadmap<br/>review gate"]
+    draft -->|approve| jit["Head GoalContract<br/>+ tasks JIT"]
+    jit --> execute["Execute + verify<br/>one head goal"]
+    execute -->|more goals| jit
+    execute --> publication["Publication gate<br/>open PR · merge · retain · discard"]
+    publication --> idle["Project plan IDLE<br/>ready for next intent"]
 ```
 
 Key mechanics, each explained in depth in [`docs/architecture/`](docs/architecture/):
 
-- **Multi-turn discovery with commit** — each chat message is one reasoner turn; a reply *without* goals keeps the conversation open, a reply *with* goals is the roadmap commit. Your messages are persisted before the LLM is called, so they survive a reasoner crash.
-- **ARCHITECTURE is a deliberate no-LLM passthrough** — the conversation already committed the user-agreed roadmap; the phase remains as a crash checkpoint and as the seam for a future autonomous structuring pass.
-- **ENRICHING is just-in-time** — one task-less goal per worker step is broken into 1..N plain tasks; a goal that already has tasks is never re-enriched, so a crash resumes exactly where it stopped.
-- **Execution is a pull-scan** — "what runs next" is *derived* by re-scanning statuses every step (`next_action`); there is no stored cursor to desync. Failed tasks retry with durable exponential backoff; `token_limit`/`auth_error` failures are terminal immediately.
-- **The replan loop is append-only** — completed goals are never touched; they stay as history *and* as context for the next iteration's conversation.
-- **Every task attempt runs in a git worktree** on `task/<task_id>/a<attempt>`, branched off `plan/<plan_id>`. Success `--no-ff`-merges into the plan branch; failure deletes the worktree and branch — a failed attempt leaves zero trace. `main` is never touched.
+- **Project-aware discovery** — create or reopen the project's sole plan; the submitted brief is persisted before the reasoner call and visible in chat. A normalized intent either asks focused questions or opens an exact-revision review gate.
+- **Cyclic JIT planning** — approved intent becomes a stable-key/dependency roadmap. Only the earliest goal receives a frozen contract and tasks; a crash resumes from durable artifacts and planning-operation records.
+- **Strict execution + verification** — the head goal is an ordering barrier. Task candidates are independently verified before goal/cycle promotion, and no later task runs past backoff or a block.
+- **Provider-aware recovery** — normalized failures honor Retry-After, use jittered durable backoff, and persist runtime/provider/model circuits. Exhaustion opens a structured block with legal recovery actions.
+- **Truthful operations** — the console hydrates task → run → attempt history over HTTP before SSE. Metrics distinguish planner, child, and combined usage and never turn unavailable counters into zero.
+- **Git staging follows ownership** — task/run → goal → cycle branches; only verified work promotes upward, and publication records exactly one output disposition.
 
 ## Quick start (dry-run, no API key)
 
@@ -126,14 +112,14 @@ npm install && npm run dev                     # http://localhost:5173
 
 > **After every pull, re-run `python -m src.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
 
-Create a plan in the UI and drive it with the stub reasoner's deterministic chat grammar:
+Create/open a project plan in the UI, submit a brief, then drive the stub reasoner's deterministic discovery grammar:
 
 | You type | What happens |
 |---|---|
 | `ask: anything` | The reasoner replies with a question — the conversation stays open |
-| `goal: Build the API`<br>`task: scaffold FastAPI [caps: backend]`<br>`goal: Add tests` | The roadmap commits: listed goals (with optional pre-seeded tasks) → ARCHITECTURE → ENRICHING fills task-less goals → AWAITING_REVIEW |
+| any concrete brief | The reasoner normalizes it into an intent proposal for review; approval lets the worker draft the cycle roadmap |
 
-Then **approve** → watch tasks execute live (the dry-run runner simulates work, including realistic failures) → **finish**, or **replan** to loop another iteration.
+Approve the intent and roadmap, watch JIT goal execution live, then choose the publication disposition. The same project plan returns to idle for the next cycle.
 
 ## Going real
 
@@ -198,6 +184,61 @@ Entry point: `python -m src.infra.cli.main` (or `orchestrate` once installed). A
 | `config get\|set\|list [scope]` | Read/write the two-tier config store (scope `orchestrator` or a project id) |
 | `plan list` / `plan show <id>` | Inspect plans from the terminal |
 
+### Offline plan-run export
+
+<code>backend/scripts/export_plan_runs.py</code> is a standalone, read-only
+reporting tool; it is not registered with the API, worker, application container,
+or domain. From the repository root, write the backwards-compatible complete JSON
+snapshot:
+
+~~~bash
+python backend/scripts/export_plan_runs.py \
+  --output plan-runs.json \
+  --pretty
+~~~
+
+For streaming analysis, write an atomic timestamped bundle under an explicit
+operator-owned directory:
+
+~~~bash
+python backend/scripts/export_plan_runs.py \
+  --format bundle \
+  --output-dir ~/.orchestrator/exports/plan-runs
+~~~
+
+The bundle contains a hashed <code>manifest.json</code>, sanitized referenced
+<code>catalog.json</code>, <code>comparisons.json</code>, and separate JSONL
+streams for plans, planning operations, runs, attempts, telemetry, summaries,
+metrics, insights, domain events, chat, and runtime circuits.
+Provider/model/runtime comparisons report outcomes, retries, failure kinds, token
+coverage, and end-to-end operation duration. Duration is not claimed as provider
+HTTP latency because that measurement is not persisted.
+
+For a focused debugging capture, reuse the same exporter core:
+
+~~~bash
+python backend/scripts/snapshot_current_plan.py \
+  --project-id PROJECT_ID \
+  --output current-plan.json \
+  --pretty
+~~~
+
+<code>--plan-id</code> selects an exact plan. With no selector, the snapshot
+command chooses the sole plan or sole non-idle plan; it fails with candidate IDs
+when selection is ambiguous. Both commands read
+<code>$ORCHESTRATOR_HOME/orchestrator.db</code> by default and accept
+<code>--db PATH</code>. JSON remains on stdout unless an output is explicit.
+SQLite is opened with <code>mode=ro</code>,
+<code>PRAGMA query_only=ON</code>, and one snapshot transaction.
+
+Reports include plan state, operations, attempts, correlated and unassigned
+telemetry, truthful metrics, labelled insights, execution summaries, domain
+events, chat context, and current referenced catalog labels. Catalog projection is
+field-allowlisted: API-key references, provider base URLs, agent instructions, and
+retry configuration are never exported; unrelated catalog entries are omitted.
+Plan/chat/runtime evidence can still be project-sensitive, so handle exports
+accordingly.
+
 ## Configuration
 
 **Environment variables** — read *only* in the composition root (`backend/src/infra/container.py`) and the API server:
@@ -227,10 +268,11 @@ Thin routers map 1:1 onto use cases; domain errors bubble to one code→status t
 
 | Route | Purpose |
 |---|---|
-| `POST /api/plans` (+ `Idempotency-Key`) | Create a plan from a brief → DISCOVERY |
-| `POST /api/plans/{id}/discovery/message` · `/replanning/message` | One chat turn → `{reply, committed, phase}`; the reply travels in the HTTP body, never SSE |
-| `GET /api/plans/{id}` · `/chat` | The full plan document · persisted conversation |
-| `POST /api/plans/{id}/approve` · `/review/finish` · `/review/replan` · `/replan` | The gate commands (and the mid-RUNNING replan) |
+| `POST /api/plans` (+ `Idempotency-Key`) | Create or reopen the project's long-lived plan and automatically analyze the submitted brief |
+| `POST /api/plans/{id}/discovery/message` · `/replanning/message` | Persisted brief/chat turn → questions or a normalized intent proposal |
+| `GET /api/plans/{id}` · `/chat` · `/attempts` | Aggregate/status/progress · persisted conversation · planning/task/run/attempt timeline |
+| `/intent` · `/intent/approve` · `/cycle-draft` · `/cycle-draft/approve` · `/publication` | Versioned artifact review and publication commands |
+| `POST /api/plans/{id}/pause` · `/resume` · `/retry` | Graceful pause, resume-only, and targeted retry/block recovery |
 | `POST /api/plans/{id}/edits` | Surgical structural edits (add/remove/reorder tasks, requirements, agent rebind) |
 | `/api/agents · /capabilities · /providers · /models · /projects` | Reference-data CRUD (delete-guarded against live references) |
 | `GET /api/reasoner/status` · `/api/runner/status` | Config validity, bindings, binary probes |
@@ -256,6 +298,11 @@ release-please turns the resulting squash-merge history into versioned releases.
 See [`docs/git-flow.md`](docs/git-flow.md) for branch names, commit conventions,
 hotfixes, and the release process.
 
+Use [`backend/scripts/dev.sh`](backend/scripts/dev.sh) as the structured local
+entry point for preflight, locked setup, stub or explicit-provider seeding,
+supervised startup, and CI-parity checks. Its parameter and security contract is
+documented in [`docs/development.md`](docs/development.md).
+
 Repository-aware Codex workflows are bundled in
 [`plugins/agent-orchestrator-codex/`](plugins/agent-orchestrator-codex/). Install
 that local plugin in Codex to use its seven skills, deterministic helper tools,
@@ -276,6 +323,7 @@ codex plugin add agent-orchestrator-codex@personal
 | [`docs/README.md`](docs/README.md) | Index of all documentation |
 | [`docs/architecture/`](docs/architecture/) | Per-subsystem deep dives with diagrams: overview, plan lifecycle, execution model, events/observability, data model, frontend, known issues |
 | [`docs/decisions/`](docs/decisions/) | ADRs and the consolidated decision log (why things are the way they are) |
+| [`docs/development.md`](docs/development.md) | Parameterized local setup, seeding, startup, and verification workflow |
 | [`docs/legacy/pre-refactor-backend.md`](docs/legacy/pre-refactor-backend.md) | Features the old backend had (PR gate, project spec governance, decision gate, …) preserved for reintroduction analysis |
 | [`docs/history/`](docs/history/) | Archived planning documents and debugging analyses — the project's paper trail |
 | [`ROADMAP.md`](ROADMAP.md) | Everything designed or planned but not yet implemented, prioritized |

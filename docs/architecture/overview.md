@@ -4,7 +4,7 @@
 
 ## The system in one paragraph
 
-Two long-running processes share one SQLite file. The **API process** hosts thin FastAPI routers (each mapping 1:1 onto an application use case), an SSE broker, and a background **outbox relay** thread that turns committed database rows into live events. The **worker process** runs a claim-and-drive loop: it leases a plan that needs autonomous work, advances it one unit at a time through phase handlers, and releases it when the plan pauses at a human gate, backs off, or finishes. All coordination between the two processes happens **through the database** — a per-plan lease for ownership, a version CAS for write safety, and a transactional outbox for events. There is no message broker, no in-process coordinator threads, and no reconciler: what isn't ready is simply never selected.
+Two long-running processes share one SQLite file. The **API process** hosts thin FastAPI routers, an SSE broker, and an **outbox relay**. The **worker process** runs a claim-and-drive loop with mid-action lease heartbeats. All coordination happens **through the database** — lease, version CAS, transactional outbox, and durable operational ledgers. There is no message broker or in-process coordinator thread. At worker startup, lease-safe reconciliation closes stale RUNNING attempt rows only when their plan has no live claim; navigation itself remains lease + pull-scan driven.
 
 ## Process topology
 
@@ -21,14 +21,14 @@ flowchart TB
 
     subgraph workerproc["Worker process — orchestrate worker start"]
         direction TB
-        tick["run_worker_forever<br/><i>src/infra/worker/main.py</i><br/>tick → sleep 1s on no progress"]
+        tick["startup reconcile + workspace prune/audit<br/>run_worker_forever<br/><i>src/infra/worker/main.py</i>"]
         dispatch["PlanDispatcher<br/><i>src/app/use_cases/advance_plan.py</i>"]
         handlers["ExecutionHandler · PlanningHandler · GateHandler<br/><i>src/app/handlers/</i>"]
         adapters["Reasoner (stub/LLM) · AgentRunner (dry-run/CLI) · GitBranchWorkspace"]
         tick --> dispatch --> handlers --> adapters
     end
 
-    db[("SQLite — WAL, synchronous=FULL<br/><i>~/.orchestrator/orchestrator.db</i><br/>plans + lease · execution runs/attempts ·<br/>outbox · agent_events · chat · catalogs · config · secrets")]
+    db[("SQLite — WAL, synchronous=FULL<br/><i>~/.orchestrator/orchestrator.db</i><br/>plans + lease · execution/planning operations · circuits ·<br/>outbox · agent_events · chat · catalogs · config · secrets")]
 
     browser["Browser<br/>React dashboard"]
     repo[("Project git repo<br/><i>PROJECT_REPO_DIR</i>")]
@@ -48,7 +48,7 @@ flowchart TB
 
 Why this shape:
 
-- **The DB is the only rendezvous.** A dead worker needs no supervisor cleanup — its lease expires and any other worker's next claim resumes the plan from persisted state. The pre-refactor system's task-manager/reconciler/goal-orchestrator threads are all gone; their jobs are absorbed by the lease + the pull-scan (see [decision log](../decisions/decision-log.md)).
+- **The DB is the only rendezvous.** A dead worker's lease expires and another worker resumes persisted domain state. Startup reconciliation repairs only stale operational rows; it never invents task outcomes. The pre-refactor continuous coordinator threads remain gone (see [decision log](../decisions/decision-log.md)).
 - **Routers never publish events.** Mutations write outbox rows inside the state transaction; only the relay talks to the broker. This is what makes event delivery *transactional with state* — an event exists iff its state change committed.
 - **Side effects live outside transactions.** LLM calls and agent subprocesses run with no transaction open; finalize steps re-read and re-guard. No transaction ever spans a network call.
 
