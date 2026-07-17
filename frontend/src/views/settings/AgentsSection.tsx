@@ -42,9 +42,10 @@ const RUNTIME_TYPES = [
 
 const RETRY_DEFAULTS: Required<RetryPolicy> = {
   max_attempts: 3,
-  initial_backoff_seconds: 2.0,
+  initial_backoff_seconds: 30.0,
   backoff_multiplier: 2.0,
-  max_backoff_seconds: 60.0,
+  max_backoff_seconds: 900.0,
+  jitter_ratio: 0.2,
   non_retryable_kinds: [],
 };
 

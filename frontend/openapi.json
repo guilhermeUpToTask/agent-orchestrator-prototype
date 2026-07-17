@@ -6,6 +6,51 @@
     "version": "0.3.0"
   },
   "paths": {
+    "/api/plans/{plan_id}/project-binding": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Bind Project Route",
+        "operationId": "plans-bind_project_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans": {
       "post": {
         "tags": [
@@ -114,6 +159,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PlanDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/attempts": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Attempt Timeline",
+        "description": "Durable task -> run -> attempt history, hydrated before live SSE.",
+        "operationId": "plans-attempt_timeline",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptTimelineResponse"
                 }
               }
             }
@@ -657,7 +745,7 @@
           "plans"
         ],
         "summary": "Resume",
-        "description": "Clear the pause gate and requeue failed work (the manual retry): FAILED\ntasks return to PENDING with a fresh attempt budget. 422 when not paused.",
+        "description": "Remove only the manual pause. Retry/backoff state is untouched.\n\nA failed task must be retried with the targeted retry command. 422 when the\nplan is not manually paused.",
         "operationId": "plans-resume",
         "parameters": [
           {
@@ -716,6 +804,42 @@
             }
           }
         },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/retry-stage": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Retry Blocked Planning Stage",
+        "description": "Retry a blocked reasoner stage or agent binding after registry repair.",
+        "operationId": "plans-retry_blocked_planning_stage",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -3279,9 +3403,10 @@
             "$ref": "#/components/schemas/RetryPolicy",
             "default": {
               "max_attempts": 3,
-              "initial_backoff_seconds": 2.0,
+              "initial_backoff_seconds": 30.0,
               "backoff_multiplier": 2.0,
-              "max_backoff_seconds": 60.0,
+              "max_backoff_seconds": 900.0,
+              "jitter_ratio": 0.2,
               "non_retryable_kinds": [
                 "auth_error",
                 "token_limit",
@@ -3406,6 +3531,14 @@
             },
             "type": "object",
             "title": "Failures By Kind"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "quality": {
+            "type": "string",
+            "title": "Quality"
           }
         },
         "type": "object",
@@ -3413,7 +3546,9 @@
           "runs",
           "finished",
           "failed",
-          "failures_by_kind"
+          "failures_by_kind",
+          "source",
+          "quality"
         ],
         "title": "AgentMetrics"
       },
@@ -3490,6 +3625,30 @@
         "title": "AgentSpec",
         "description": "Definition of an agent: who it is, what it can do, how it retries,\nand which runtime executes it.\n\n`role` is the agent's functional job in the orchestration (e.g. \"test_writer\",\n\"implementer\", \"reviewer\"). `model_role` is an indirection key into the\nprovider/model catalog naming a model *tier* (e.g. \"cheap\", \"smart\",\n\"long_context\") resolved to a concrete IAModel at runtime \u2014 so swapping the\nmodel behind a tier does not require touching every agent that uses it.\n\nRuntime resolution (deliberate Phase-0 un-freeze, 2026-07-05): the agent\nregistry is the authority on which runtime an agent resolves to \u2014\n`runtime_type` picks the CLI runtime (or the dry-run dummy), and\n`provider_id`/`model_id` point into the providers/models catalog for the\ncredentials and model string. Infra validates the wiring; the entity only\ncarries it."
       },
+      "AttemptTimelineResponse": {
+        "properties": {
+          "planning_operations": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningOperationResponse"
+            },
+            "type": "array",
+            "title": "Planning Operations"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskExecutionTimelineResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "planning_operations",
+          "tasks"
+        ],
+        "title": "AttemptTimelineResponse"
+      },
       "Capability": {
         "properties": {
           "id": {
@@ -3564,6 +3723,57 @@
         ],
         "title": "ConfigValue"
       },
+      "ContractCriterion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "description"
+        ],
+        "title": "ContractCriterion"
+      },
+      "CoverageMetrics": {
+        "properties": {
+          "observations": {
+            "type": "integer",
+            "title": "Observations"
+          },
+          "reported": {
+            "type": "integer",
+            "title": "Reported"
+          },
+          "estimated": {
+            "type": "integer",
+            "title": "Estimated"
+          },
+          "unavailable": {
+            "type": "integer",
+            "title": "Unavailable"
+          },
+          "legacy_unknown": {
+            "type": "integer",
+            "title": "Legacy Unknown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "observations",
+          "reported",
+          "estimated",
+          "unavailable",
+          "legacy_unknown"
+        ],
+        "title": "CoverageMetrics"
+      },
       "CreatePlanRequest": {
         "properties": {
           "brief": {
@@ -3581,6 +3791,192 @@
           "project_id"
         ],
         "title": "CreatePlanRequest"
+      },
+      "Cycle": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "intent_proposal_id": {
+            "type": "string",
+            "title": "Intent Proposal Id"
+          },
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CycleStatus",
+            "default": "active"
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/Goal"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "superseded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Refs"
+          },
+          "output_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutputDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "intent_proposal_id",
+          "draft_id",
+          "started_at"
+        ],
+        "title": "Cycle"
+      },
+      "CycleDraft": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "intent_proposal_id": {
+            "type": "string",
+            "title": "Intent Proposal Id"
+          },
+          "base_plan_version": {
+            "type": "integer",
+            "title": "Base Plan Version"
+          },
+          "source_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Cycle Id"
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/GoalOutline"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 1
+          },
+          "unfinished_source_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfinished Source Treatment"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "intent_proposal_id",
+          "base_plan_version",
+          "goals"
+        ],
+        "title": "CycleDraft"
       },
       "CycleDraftRequest": {
         "properties": {
@@ -3608,6 +4004,16 @@
           "goals"
         ],
         "title": "CycleDraftRequest"
+      },
+      "CycleStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "completed",
+          "superseded",
+          "cancelled"
+        ],
+        "title": "CycleStatus"
       },
       "DefaultAgentResponse": {
         "properties": {
@@ -3754,6 +4160,258 @@
         "title": "EditRequest",
         "description": "One structural edit. `type` selects the operation; the other fields are\nper-type (validated in _to_edit so a bad combination 422s, not 500s)."
       },
+      "ExecutionAttemptResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "task_attempt": {
+            "type": "integer",
+            "title": "Task Attempt"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "last_liveness_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Liveness At"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
+          "provider_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Code"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retryable"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "limit_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Scope"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "safe_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Message"
+          },
+          "stdout_tail": {
+            "type": "string",
+            "title": "Stdout Tail"
+          },
+          "stderr_tail": {
+            "type": "string",
+            "title": "Stderr Tail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "task_attempt",
+          "status",
+          "started_at",
+          "completed_at",
+          "last_liveness_at",
+          "timeout_seconds",
+          "runtime",
+          "provider_id",
+          "model_id",
+          "failure_kind",
+          "provider_code",
+          "retryable",
+          "retry_at",
+          "limit_scope",
+          "exit_code",
+          "safe_message",
+          "stdout_tail",
+          "stderr_tail"
+        ],
+        "title": "ExecutionAttemptResponse"
+      },
+      "ExecutionRunTimelineResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionAttemptResponse"
+            },
+            "type": "array",
+            "title": "Attempts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "goal_id",
+          "task_id",
+          "status",
+          "started_at",
+          "completed_at",
+          "attempts"
+        ],
+        "title": "ExecutionRunTimelineResponse"
+      },
       "FailureKind": {
         "type": "string",
         "enum": [
@@ -3767,6 +4425,119 @@
         ],
         "title": "FailureKind",
         "description": "Typed classification of a task failure. Produced by the agent runner,\nconsumed by RetryPolicy.should_retry \u2014 a checked classification, not string\nmatching (DESIGN_NOTES #2)."
+      },
+      "Goal": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status",
+            "default": "pending"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            },
+            "type": "array",
+            "title": "Tasks",
+            "default": []
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Depends On",
+            "default": []
+          },
+          "contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "position",
+          "description"
+        ],
+        "title": "Goal",
+        "description": "Phase-level chunk owning an ordered task list. Guarded self-transitions,\ncalled only by the Plan. `depends_on` is the DAG seam (unused in a chain)."
+      },
+      "GoalContract": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "acceptance_criteria": {
+            "items": {
+              "$ref": "#/components/schemas/ContractCriterion"
+            },
+            "type": "array",
+            "title": "Acceptance Criteria"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskContract"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "cross_task_integration_criterion_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cross Task Integration Criterion Ids"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities"
+          },
+          "frozen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Frozen At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "objective",
+          "acceptance_criteria",
+          "tasks",
+          "frozen_at"
+        ],
+        "title": "GoalContract"
       },
       "GoalOutline": {
         "properties": {
@@ -3857,6 +4628,105 @@
         ],
         "title": "IAModel"
       },
+      "IntentProposal": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProposalKind"
+          },
+          "base_plan_version": {
+            "type": "integer",
+            "title": "Base Plan Version"
+          },
+          "source_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Cycle Id"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Constraints"
+          },
+          "exclusions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Exclusions"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 1
+          },
+          "planner_session_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planner Session Ref"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "base_plan_version",
+          "objective"
+        ],
+        "title": "IntentProposal"
+      },
       "IntentProposalRequest": {
         "properties": {
           "objective": {
@@ -3920,16 +4790,47 @@
             "title": "Calls"
           },
           "prompt_tokens": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Prompt Tokens"
           },
           "completion_tokens": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Completion Tokens"
           },
           "total_tokens": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Total Tokens"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageMetrics"
+          },
+          "scopes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UsageScopeMetrics"
+            },
+            "type": "object",
+            "title": "Scopes"
           }
         },
         "type": "object",
@@ -3938,7 +4839,9 @@
           "calls",
           "prompt_tokens",
           "completion_tokens",
-          "total_tokens"
+          "total_tokens",
+          "coverage",
+          "scopes"
         ],
         "title": "LlmMetrics"
       },
@@ -3968,13 +4871,34 @@
           "phase": {
             "type": "string",
             "title": "Phase"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "operation_status": {
+            "type": "string",
+            "title": "Operation Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           }
         },
         "type": "object",
         "required": [
           "reply",
           "committed",
-          "phase"
+          "phase",
+          "operation_id",
+          "operation_status"
         ],
         "title": "MessageResponse",
         "description": "One conversation turn: the assistant reply, whether the roadmap was\ncommitted, and the (possibly advanced) phase."
@@ -4097,16 +5021,194 @@
         "type": "object",
         "title": "PauseRequest"
       },
+      "PlanBlock": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "task_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Revision"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Refs"
+          },
+          "legal_resolutions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Legal Resolutions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "explanation",
+          "stage",
+          "created_at"
+        ],
+        "title": "PlanBlock"
+      },
       "PlanCreatedResponse": {
         "properties": {
           "plan_id": {
             "type": "string",
             "title": "Plan Id"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          },
+          "opened_existing": {
+            "type": "boolean",
+            "title": "Opened Existing"
+          },
+          "brief_preserved": {
+            "type": "boolean",
+            "title": "Brief Preserved"
+          },
+          "discovery_operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Operation Id"
+          },
+          "discovery_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Status"
+          },
+          "discovery_reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Reply"
+          },
+          "discovery_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Error"
           }
         },
         "type": "object",
         "required": [
-          "plan_id"
+          "plan_id",
+          "created",
+          "opened_existing",
+          "brief_preserved",
+          "discovery_operation_id",
+          "discovery_status",
+          "discovery_reply",
+          "discovery_error"
         ],
         "title": "PlanCreatedResponse"
       },
@@ -4226,7 +5328,7 @@
               }
             ]
           },
-          "active_cycle": {
+          "planning_operation": {
             "anyOf": [
               {
                 "additionalProperties": true,
@@ -4236,44 +5338,59 @@
                 "type": "null"
               }
             ],
-            "title": "Active Cycle"
+            "title": "Planning Operation"
+          },
+          "planning_progress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Progress"
+          },
+          "active_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pending_gate": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/ReviewGate"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Pending Gate"
+            ]
           },
           "block": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PlanBlock"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Block"
+            ]
           },
           "goals": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/Goal"
             },
             "type": "array",
             "title": "Goals"
           },
           "cycles": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/Cycle"
             },
             "type": "array",
             "title": "Cycles"
@@ -4281,26 +5398,22 @@
           "intent_proposal": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/IntentProposal"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Intent Proposal"
+            ]
           },
           "cycle_draft": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/CycleDraft"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Cycle Draft"
+            ]
           },
           "legacy_phase": {
             "anyOf": [
@@ -4353,6 +5466,8 @@
           "paused",
           "paused_reason",
           "active_run",
+          "planning_operation",
+          "planning_progress",
           "active_cycle",
           "pending_gate",
           "block",
@@ -4362,6 +5477,182 @@
           "cycle_draft"
         ],
         "title": "PlanDetailResponse"
+      },
+      "PlanningOperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "target_goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Goal Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "last_liveness_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Liveness At"
+          },
+          "model_request_count": {
+            "type": "integer",
+            "title": "Model Request Count"
+          },
+          "tool_turn_count": {
+            "type": "integer",
+            "title": "Tool Turn Count"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "safe_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "target_goal_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "completed_at",
+          "last_liveness_at",
+          "model_request_count",
+          "tool_turn_count",
+          "runtime",
+          "provider_id",
+          "model_id",
+          "failure_kind",
+          "retry_at",
+          "safe_message"
+        ],
+        "title": "PlanningOperationResponse"
+      },
+      "ProjectBindingRequest": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "title": "ProjectBindingRequest"
       },
       "ProjectBody": {
         "properties": {
@@ -4593,7 +5884,7 @@
           "initial_backoff_seconds": {
             "type": "number",
             "title": "Initial Backoff Seconds",
-            "default": 2.0
+            "default": 30.0
           },
           "backoff_multiplier": {
             "type": "number",
@@ -4603,7 +5894,12 @@
           "max_backoff_seconds": {
             "type": "number",
             "title": "Max Backoff Seconds",
-            "default": 60.0
+            "default": 900.0
+          },
+          "jitter_ratio": {
+            "type": "number",
+            "title": "Jitter Ratio",
+            "default": 0.2
           },
           "non_retryable_kinds": {
             "items": {
@@ -4658,6 +5954,118 @@
           "subject_revision"
         ],
         "title": "ReviewDecisionRequest"
+      },
+      "ReviewGate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "subject_type": {
+            "$ref": "#/components/schemas/ReviewSubjectType"
+          },
+          "subject_id": {
+            "type": "string",
+            "title": "Subject Id"
+          },
+          "subject_revision": {
+            "type": "integer",
+            "title": "Subject Revision"
+          },
+          "allowed_decisions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Decisions"
+          },
+          "continuation": {
+            "type": "string",
+            "title": "Continuation"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invalidated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject_type",
+          "subject_id",
+          "subject_revision",
+          "allowed_decisions",
+          "continuation"
+        ],
+        "title": "ReviewGate"
+      },
+      "ReviewResolution": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "resolved_at"
+        ],
+        "title": "ReviewResolution"
+      },
+      "ReviewSubjectType": {
+        "type": "string",
+        "enum": [
+          "intent",
+          "cycle_draft",
+          "cycle_completion"
+        ],
+        "title": "ReviewSubjectType"
       },
       "RunnerAgentStatus": {
         "properties": {
@@ -4831,6 +6239,476 @@
         ],
         "title": "RunnerStatusResponse"
       },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "done",
+          "skipped",
+          "failed"
+        ],
+        "title": "Status",
+        "description": "Lifecycle state shared by goals and tasks. str-based so comparisons and JSON\nserialization are natural (task.status == Status.DONE works)."
+      },
+      "Task": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities",
+            "default": []
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "role_agent_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Role Agent Ids",
+            "default": {}
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status",
+            "default": "pending"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt",
+            "default": 0
+          },
+          "retry_cycle": {
+            "type": "integer",
+            "title": "Retry Cycle",
+            "default": 0
+          },
+          "cycle_attempt": {
+            "type": "integer",
+            "title": "Cycle Attempt",
+            "default": 0
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 1
+          },
+          "contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "test_bundle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TestBundle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationEvidence"
+            },
+            "type": "array",
+            "title": "Verification Evidence",
+            "default": []
+          },
+          "reopen_count": {
+            "type": "integer",
+            "title": "Reopen Count",
+            "default": 0
+          },
+          "retry_not_before": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Not Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "position",
+          "description"
+        ],
+        "title": "Task"
+      },
+      "TaskContract": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 1
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "acceptance_criteria": {
+            "items": {
+              "$ref": "#/components/schemas/ContractCriterion"
+            },
+            "type": "array",
+            "title": "Acceptance Criteria"
+          },
+          "goal_criterion_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goal Criterion Ids"
+          },
+          "allowed_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Scope"
+          },
+          "forbidden_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Scope"
+          },
+          "verification_commands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Verification Commands"
+          },
+          "verification_strategy": {
+            "$ref": "#/components/schemas/VerificationStrategy"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "objective",
+          "acceptance_criteria",
+          "goal_criterion_ids",
+          "allowed_scope",
+          "verification_commands",
+          "verification_strategy"
+        ],
+        "title": "TaskContract"
+      },
+      "TaskExecutionTimelineResponse": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionRunTimelineResponse"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "task_id",
+          "runs"
+        ],
+        "title": "TaskExecutionTimelineResponse"
+      },
+      "TaskResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ],
+            "title": "Status"
+          },
+          "output": {
+            "type": "string",
+            "title": "Output"
+          },
+          "artifacts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Artifacts",
+            "default": {}
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "output"
+        ],
+        "title": "TaskResult",
+        "description": "Typed output of a task run, and the idempotency record: if set, the work\nalready happened and must not re-execute.\n\nDesign: `status` and `output` are ALWAYS present (always assertable in tests);\n`artifacts` is the flexible per-task-type payload (a code task stores\nfiles_changed, a research task stores sources) so we don't force one rigid\nschema across all task types. This structure is the seam that makes\norchestration deterministically testable: tests fabricate TaskResults by hand,\nproduction builds them from the agent \u2014 the orchestration treats both identically."
+      },
+      "TestBundle": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "task_revision": {
+            "type": "integer",
+            "title": "Task Revision"
+          },
+          "test_commit_sha": {
+            "type": "string",
+            "title": "Test Commit Sha"
+          },
+          "protected_file_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Protected File Hashes"
+          },
+          "criterion_to_tests": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Criterion To Tests"
+          },
+          "verification_strategy": {
+            "$ref": "#/components/schemas/VerificationStrategy"
+          },
+          "baseline_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Baseline Evidence Refs"
+          },
+          "red_or_baseline_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Red Or Baseline Evidence Refs"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TestBundleState",
+            "default": "frozen"
+          },
+          "frozen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Frozen At"
+          },
+          "invalidated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidated At"
+          },
+          "invalidation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidation Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "task_revision",
+          "test_commit_sha",
+          "protected_file_hashes",
+          "criterion_to_tests",
+          "verification_strategy",
+          "red_or_baseline_evidence_refs",
+          "frozen_at"
+        ],
+        "title": "TestBundle"
+      },
+      "TestBundleState": {
+        "type": "string",
+        "enum": [
+          "frozen",
+          "invalid"
+        ],
+        "title": "TestBundleState"
+      },
+      "UsageScopeMetrics": {
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageMetrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions",
+          "calls",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "coverage"
+        ],
+        "title": "UsageScopeMetrics"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -4870,6 +6748,104 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerificationEvidence": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "task_revision": {
+            "type": "integer",
+            "title": "Task Revision"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "candidate_commit_sha": {
+            "type": "string",
+            "title": "Candidate Commit Sha"
+          },
+          "test_commit_sha": {
+            "type": "string",
+            "title": "Test Commit Sha"
+          },
+          "exact_command": {
+            "type": "string",
+            "title": "Exact Command"
+          },
+          "exit_code": {
+            "type": "integer",
+            "title": "Exit Code"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finished At"
+          },
+          "bounded_output_ref": {
+            "type": "string",
+            "title": "Bounded Output Ref"
+          },
+          "verification_kind": {
+            "$ref": "#/components/schemas/VerificationKind"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "task_revision",
+          "run_id",
+          "candidate_commit_sha",
+          "test_commit_sha",
+          "exact_command",
+          "exit_code",
+          "started_at",
+          "finished_at",
+          "bounded_output_ref",
+          "verification_kind",
+          "accepted"
+        ],
+        "title": "VerificationEvidence"
+      },
+      "VerificationKind": {
+        "type": "string",
+        "enum": [
+          "baseline",
+          "red",
+          "characterization",
+          "executable_check",
+          "authoritative_test",
+          "regression",
+          "scope",
+          "branch_integrity",
+          "cleanup"
+        ],
+        "title": "VerificationKind"
+      },
+      "VerificationStrategy": {
+        "type": "string",
+        "enum": [
+          "tdd",
+          "characterization",
+          "executable_check"
+        ],
+        "title": "VerificationStrategy"
       }
     }
   }

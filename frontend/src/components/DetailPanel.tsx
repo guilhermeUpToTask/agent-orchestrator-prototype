@@ -1,8 +1,8 @@
 import React from 'react';
-import { Pencil, Trash2, X } from 'lucide-react';
+import { Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { usePlannerStore } from '../store/plannerStore';
-import { useAgentEvents, useAgents, useApplyEdit, usePlan } from '../lib/queries';
+import { useAgentEvents, useAgents, useApplyEdit, usePlan, useRetryTask } from '../lib/queries';
 import { tokens } from '../styles/tokens';
 import { StatusBadge } from './StatusBadge';
 import styles from './DetailPanel.module.css';
@@ -30,6 +30,7 @@ export function DetailPanel() {
   const { data: plan } = usePlan(planId || null);
   const { data: agents = [] } = useAgents();
   const applyEdit = useApplyEdit(planId);
+  const retryTask = useRetryTask(planId);
   const { data: taskEvents = [] } = useAgentEvents(
     planId || null,
     selectedTaskId ?? undefined,
@@ -55,10 +56,25 @@ export function DetailPanel() {
   // Editable exactly where the backend allows: at the pre-execution gate, or
   // while the plan is paused; and only a pending task (or a failed one while
   // paused). Mirrors edit_service guards so we don't offer a 422.
-  const editContext = plan?.phase === 'awaiting_review' || !!plan?.paused;
+  const blockTargetsTask = plan?.block?.task_id === task.id
+    && plan.block.goal_id === goal.id;
+  const blockedEdit = !!blockTargetsTask
+    && !!plan?.block?.legal_resolutions.includes("edit_task");
+  const editContext = plan?.phase === "awaiting_review" || !!plan?.paused || blockedEdit;
   const taskMutable =
-    task.status === 'pending' || (task.status === 'failed' && !!plan?.paused);
+    task.status === "pending"
+    || (task.status === "failed" && (!!plan?.paused || blockedEdit));
   const canEdit = editContext && taskMutable;
+  const canRetry = task.status === "failed" && (
+    !!plan?.paused
+    || (
+      !!blockTargetsTask
+      && (
+        !!plan?.block?.legal_resolutions.includes("retry_stage")
+        || !!plan?.block?.legal_resolutions.includes("wait_and_retry")
+      )
+    )
+  );
 
   const saveEdit = () => {
     if (name !== task.name || description !== task.description) {
@@ -90,6 +106,17 @@ export function DetailPanel() {
       <div className={styles.head}>
         <StatusBadge domain="status" value={task.status} />
         <div style={{ flex: 1 }} />
+        {canRetry && (
+          <button
+            onClick={() => retryTask.mutate({ goalId: goal.id, taskId: task.id })}
+            aria-label="Retry failed task"
+            title={plan?.paused ? "Retry task; Resume remains separate" : "Retry failed task"}
+            className={styles.close}
+            disabled={retryTask.isPending}
+          >
+            <RotateCcw size={14} aria-hidden />
+          </button>
+        )}
         {canEdit && !editing && (
           <button
             onClick={() => {

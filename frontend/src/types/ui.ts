@@ -1,10 +1,9 @@
 // src/types/ui.ts
-// UI-side types for the 9-phase orchestrator.
+// UI-side composition types for the cyclic ProjectPlan console.
 //
 // DTO shapes with OpenAPI schemas come from src/types/generated (npm run
-// generate:api). The plan DETAIL endpoint returns the aggregate document
-// (untyped `object` in the schema), so its read model is declared here by
-// hand — keep it in sync with backend/src/domain (Plan/Goal/Task).
+// generate:api). The detail view adds narrow status literals and UI conveniences
+// over that generated transport contract; keep these aligned with PlanDetailResponse.
 
 import type {
   AgentBody,
@@ -46,7 +45,7 @@ export type {
   RunnerStatusResponse,
 };
 
-// ─── The 9-phase machine ────────────────────────────────────────────────────
+// ─── Legacy phase compatibility + canonical root status ─────────────────────
 
 export type PlanPhase =
   | "discovery"
@@ -86,6 +85,10 @@ export interface Task {
   attempt: number;
   reopen_count: number;
   retry_not_before: string | null;
+  retry_cycle?: number;
+  cycle_attempt?: number;
+  revision?: number;
+  role_agent_ids?: Record<string, string>;
 }
 
 export interface Goal {
@@ -107,10 +110,73 @@ export interface PendingGate {
   continuation: string;
 }
 
-export interface ActiveCycle {
+export interface PlanBlock {
   id: string;
-  [key: string]: unknown;
+  kind: string;
+  explanation: string;
+  stage: string;
+  goal_id: string | null;
+  task_id: string | null;
+  task_revision: number | null;
+  run_id: string | null;
+  evidence_refs: string[];
+  legal_resolutions: string[];
+  created_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
 }
+
+export interface IntentProposal {
+  id: string;
+  kind: "initial" | "replan";
+  base_plan_version: number;
+  source_cycle_id: string | null;
+  objective: string;
+  scope: string[];
+  constraints: string[];
+  exclusions: string[];
+  revision: number;
+  planner_session_ref: string | null;
+  approved_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface GoalOutline {
+  key: string;
+  name: string;
+  objective: string;
+  position: number;
+  depends_on: string[];
+}
+
+export interface CycleDraft {
+  id: string;
+  intent_proposal_id: string;
+  base_plan_version: number;
+  source_cycle_id: string | null;
+  goals: GoalOutline[];
+  revision: number;
+  unfinished_source_treatment: string | null;
+  approved_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface Cycle {
+  id: string;
+  intent_proposal_id: string;
+  draft_id: string;
+  status: "active" | "completed" | "superseded" | "cancelled";
+  goals: Goal[];
+  started_at: string;
+  completed_at: string | null;
+  superseded_at: string | null;
+  cancelled_at: string | null;
+  evidence_refs: string[];
+  output_disposition: "open_pr" | "merge" | "retain_branch" | "discard" | null;
+  output_reference: string | null;
+}
+
+export type ActiveCycle = Cycle;
 
 export interface Plan {
   id: string;
@@ -131,9 +197,22 @@ export interface Plan {
     task_id: string;
     started_at: string;
   } | null;
+  planning_operation: {
+    id: string;
+    purpose: string;
+    target_goal_id: string | null;
+    status: string;
+    updated_at: string;
+    retry_at: string | null;
+    safe_message: string | null;
+  } | null;
+  planning_progress: string | null;
   active_cycle: ActiveCycle | null;
   pending_gate: PendingGate | null;
-  block: Record<string, unknown> | null;
+  block: PlanBlock | null;
+  cycles: Cycle[];
+  intent_proposal: IntentProposal | null;
+  cycle_draft: CycleDraft | null;
   brief: string;
   phase: PlanPhase;
   iteration: number;

@@ -7,8 +7,10 @@ import {
   Cpu,
   LayoutDashboard,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
+  RotateCcw,
   Target,
 } from 'lucide-react';
 import {
@@ -16,6 +18,8 @@ import {
   usePlan,
   useReplanMidRunning,
   useResumePlan,
+  useRetryPlanningStage,
+  useRetryTask,
   useStartIntent,
 } from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
@@ -30,17 +34,38 @@ export function LifecycleRail() {
   const { planId = '' } = useParams();
   const { data: plan, isLoading } = usePlan(planId || null);
   const setGateOpen = usePlannerStore((state) => state.setGateOpen);
+  const selectTask = usePlannerStore((state) => state.selectTask);
   const pausePlan = usePausePlan(planId);
   const resumePlan = useResumePlan(planId);
+  const retryTask = useRetryTask(planId);
+  const retryPlanningStage = useRetryPlanningStage(planId);
   const replan = useReplanMidRunning(planId);
   const startIntent = useStartIntent(planId, 'initial');
   const startReplan = useStartIntent(planId, 'replan');
   const base = `/plans/${encodeURIComponent(planId)}`;
+  const [replanOpen, setReplanOpen] = React.useState(false);
+  const [replanObjective, setReplanObjective] = React.useState("");
 
   const legal = new Set(plan?.legal_actions ?? []);
   const reason = plan?.status_reason.message;
   const gate = plan?.pending_gate;
   const block = plan?.block;
+  const failedTasks = plan?.goals.flatMap((goal) =>
+    goal.tasks
+      .filter((task) => task.status === "failed")
+      .map((task) => ({ goal, task })),
+  ) ?? [];
+  const blockCanRetry = !!block && (
+    block.legal_resolutions.includes("retry_stage")
+    || block.legal_resolutions.includes("wait_and_retry")
+  );
+  const retryBlockedWork = () => {
+    if (block?.goal_id && block.task_id) {
+      retryTask.mutate({ goalId: block.goal_id, taskId: block.task_id });
+    } else {
+      retryPlanningStage.mutate();
+    }
+  };
 
   return (
     <nav className={styles.rail} aria-label="Project plan lifecycle and navigation">
@@ -76,8 +101,7 @@ export function LifecycleRail() {
             <div className={styles.pausedCard} aria-live="polite">
               <div className={styles.gateTitle}>Pause requested</div>
               <p className={styles.cardBody}>
-                No new work can start. The current atomic action may finalize;
-                the plan will then become fully paused.
+                Pause requested; current attempt is still running. No new work will start.
               </p>
               {plan.active_run && (
                 <p className={styles.cardBody}>
@@ -95,15 +119,58 @@ export function LifecycleRail() {
               <p className={styles.cardBody}>
                 {reason ?? 'A permanent or exhausted failure requires an explicit resolution.'}
               </p>
-              {block && Array.isArray(block.legal_resolutions) && (
-                <p className={styles.cardBody}>
-                  Legal resolutions: {block.legal_resolutions.join(', ')}
-                </p>
+              {blockCanRetry && (
+                <button
+                  className={styles.gateBtn}
+                  onClick={retryBlockedWork}
+                  disabled={retryTask.isPending || retryPlanningStage.isPending}
+                >
+                  <RotateCcw size={12} aria-hidden />
+                  {block?.kind === "agent_capability"
+                    ? "Retry agent binding"
+                    : block?.legal_resolutions.includes("wait_and_retry")
+                      ? "Clear capacity gate & retry"
+                      : "Retry blocked work"}
+                </button>
+              )}
+              {block?.kind === "agent_capability" && (
+                <NavLink className={styles.secondaryBtn} to="/settings/agents">
+                  <Cpu size={12} aria-hidden /> Repair agent registry
+                </NavLink>
+              )}
+              {block?.legal_resolutions.includes("edit_task") && block.task_id && (
+                <button
+                  className={styles.secondaryBtn}
+                  onClick={() => selectTask(block.task_id)}
+                >
+                  <Pencil size={12} aria-hidden /> Edit failed task
+                </button>
               )}
             </div>
           )}
 
-          {plan.status === 'waiting' && gate && (
+          {plan.paused && failedTasks.length > 0 && (
+            <div className={styles.failedCard} role="status">
+              <div className={styles.failedTitle}>
+                <AlertTriangle size={13} aria-hidden /> Failed work
+              </div>
+              <p className={styles.cardBody}>
+                Retry selected tasks first, then Resume to release the manual pause.
+              </p>
+              {failedTasks.map(({ goal, task }) => (
+                <button
+                  key={task.id}
+                  className={styles.gateBtn}
+                  onClick={() => retryTask.mutate({ goalId: goal.id, taskId: task.id })}
+                  disabled={retryTask.isPending}
+                >
+                  <RotateCcw size={12} aria-hidden /> Retry {task.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {plan.status === "waiting" && gate && (
             <div className={styles.gateCard}>
               <div className={styles.gateTitle}>Review required</div>
               <p className={styles.cardBody}>
@@ -149,21 +216,62 @@ export function LifecycleRail() {
           {legal.has('start_intent') && (
             <button
               className={styles.gateBtn}
-              onClick={() => startIntent.mutate()}
+              onClick={() => startIntent.mutate(undefined)}
               disabled={startIntent.isPending}
             >
               <Play size={12} aria-hidden /> Start next cycle
             </button>
           )}
 
-          {legal.has('start_replan') && (
+          {legal.has("start_replan") && !replanOpen && (
             <button
               className={styles.secondaryBtn}
-              onClick={() => plan.active_cycle ? startReplan.mutate() : replan.mutate()}
-              disabled={plan.active_cycle ? startReplan.isPending : replan.isPending}
+              onClick={() => plan.active_cycle ? setReplanOpen(true) : replan.mutate()}
+              disabled={replan.isPending}
             >
-              <RefreshCw size={12} aria-hidden /> Start replan
+              <RefreshCw size={12} aria-hidden /> Propose replan
             </button>
+          )}
+
+          {replanOpen && plan.active_cycle && (
+            <div className={styles.replanComposer}>
+              <div className={styles.gateTitle}>Propose the next cycle</div>
+              <p className={styles.cardBody}>
+                Completed work stays locked as history. Describe only what should
+                change, be retried, or be added.
+              </p>
+              <textarea
+                className={styles.replanInput}
+                value={replanObjective}
+                onChange={(event) => setReplanObjective(event.target.value)}
+                placeholder="Example: retry the failed migration task, keep the completed API work, and add rollback verification."
+                rows={5}
+                autoFocus
+              />
+              <button
+                className={styles.gateBtn}
+                disabled={!replanObjective.trim() || startReplan.isPending}
+                onClick={() => startReplan.mutate(
+                  {
+                    objective: replanObjective.trim(),
+                    scope: [],
+                    constraints: ["Preserve completed source-cycle work"],
+                    exclusions: ["Redoing completed tasks"],
+                    kind: "replan",
+                  },
+                  { onSuccess: () => setReplanOpen(false) },
+                )}
+              >
+                <RefreshCw size={12} aria-hidden /> Review proposal
+              </button>
+              <button
+                className={styles.secondaryBtn}
+                onClick={() => setReplanOpen(false)}
+                disabled={startReplan.isPending}
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
       )}

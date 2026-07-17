@@ -34,14 +34,14 @@ function compact(payload: Record<string, unknown>): string {
 }
 
 /** A compact counter tile for the metrics strip. */
-function Metric({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
+function Metric({ label, value, warn }: { label: string; value: number | null; warn?: boolean }) {
   return (
     <div className={styles.metric}>
       <span
         className={styles.metricValue}
-        style={warn && value > 0 ? { color: tokens.red } : undefined}
+        style={warn && (value ?? 0) > 0 ? { color: tokens.red } : undefined}
       >
-        {value.toLocaleString()}
+        {value === null ? 'Unavailable' : value.toLocaleString()}
       </span>
       <span className={styles.metricLabel}>{label}</span>
     </div>
@@ -57,11 +57,16 @@ function MetricsStrip({ planId }: { planId?: string }) {
   const { data } = useMetrics(planId);
   if (!data) return null;
   const rateLimited = data.agent.failures_by_kind['rate_limit'] ?? 0;
+  const planner = data.llm.scopes.planner;
+  const child = data.llm.scopes.child;
   return (
     <div className={styles.metricsStrip}>
-      <Metric label="LLM sessions" value={data.llm.sessions} />
-      <Metric label="LLM calls" value={data.llm.calls} />
-      <Metric label="Tokens" value={data.llm.total_tokens} />
+      <Metric label="Planner calls" value={planner.calls} />
+      <Metric label="Planner tokens" value={planner.total_tokens} />
+      <Metric label="Child calls" value={child.calls} />
+      <Metric label="Child tokens" value={child.total_tokens} />
+      <Metric label="Combined tokens" value={data.llm.total_tokens} />
+      <Metric label="Usage unavailable" value={data.llm.coverage.unavailable} />
       <Metric label="Agent runs" value={data.agent.runs} />
       <Metric label="Failures" value={data.agent.failed} warn />
       <Metric label="Rate-limited" value={rateLimited} warn />

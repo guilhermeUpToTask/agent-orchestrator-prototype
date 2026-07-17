@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronRight, Plus } from 'lucide-react';
-import { useCreatePlan, usePlans, useProjects } from '../lib/queries';
+import { useCreatePlan, useCreateProject, usePlans, useProjects } from '../lib/queries';
 import { StatusBadge } from '../components/StatusBadge';
 import { Button, TextArea } from '../components/ui';
 import { tokens } from '../styles/tokens';
@@ -15,12 +15,15 @@ import styles from './Overview.module.css';
 export function PlansView() {
   const { data: plans = [], isLoading, error, refetch } = usePlans();
   const createPlan = useCreatePlan();
+  const createProject = useCreateProject();
   const { data: projects = [] } = useProjects();
   const navigate = useNavigate();
 
   const [composing, setComposing] = useState(false);
   const [brief, setBrief] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [repoUrl, setRepoUrl] = useState('');
 
   const submit = () => {
     const selectedProject = projectId || projects[0]?.id;
@@ -32,6 +35,20 @@ export function PlansView() {
         navigate(`/plans/${encodeURIComponent(plan_id)}`);
       },
     });
+  };
+
+  const createProjectInline = () => {
+    if (!projectName.trim() || createProject.isPending) return;
+    createProject.mutate(
+      { name: projectName.trim(), repo_url: repoUrl.trim() || null },
+      {
+        onSuccess: (project) => {
+          setProjectId(project.id);
+          setProjectName('');
+          setRepoUrl('');
+        },
+      },
+    );
   };
 
   if (error) {
@@ -55,7 +72,7 @@ export function PlansView() {
         <div className={styles.phaseTitleRow}>
           <h1 className={styles.phaseTitle}>Plans</h1>
           <Button variant="primary" onClick={() => setComposing((v) => !v)}>
-            <Plus size={14} aria-hidden /> New plan
+            <Plus size={14} aria-hidden /> Open project plan
           </Button>
         </div>
         <p className={styles.phaseGoal}>
@@ -65,19 +82,42 @@ export function PlansView() {
       </header>
 
       {composing && (
-        <section className={styles.section} aria-label="New plan">
-          <h2 className={styles.sectionTitle + ' label'}>New plan — the brief</h2>
+        <section className={styles.section} aria-label="Open project plan">
+          <h2 className={styles.sectionTitle + ' label'}>Open project plan — the brief</h2>
           <label className="label" htmlFor="new-plan-project">Project</label>
-          <select
-            id="new-plan-project"
-            value={projectId || projects[0]?.id || ""}
-            onChange={(event) => setProjectId(event.target.value)}
-            style={{ width: "100%", marginBottom: 8 }}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </select>
+          {projects.length > 0 ? (
+            <select
+              id="new-plan-project"
+              value={projectId || projects[0]?.id || ""}
+              onChange={(event) => setProjectId(event.target.value)}
+              style={{ width: "100%", marginBottom: 8 }}
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          ) : (
+            <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              <input
+                id="new-plan-project"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                placeholder="Project name"
+              />
+              <input
+                value={repoUrl}
+                onChange={(event) => setRepoUrl(event.target.value)}
+                placeholder="Repository URL (optional)"
+              />
+              <Button
+                onClick={createProjectInline}
+                disabled={!projectName.trim()}
+                pending={createProject.isPending}
+              >
+                Create project
+              </Button>
+            </div>
+          )}
           <TextArea
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
@@ -92,7 +132,7 @@ export function PlansView() {
               disabled={!brief.trim() || projects.length === 0}
               pending={createPlan.isPending}
             >
-              Create project plan
+              Create &amp; analyze brief
             </Button>
             <Button onClick={() => setComposing(false)}>Cancel</Button>
           </div>
@@ -108,7 +148,7 @@ export function PlansView() {
             ))}
           </div>
         ) : plans.length === 0 ? (
-          <p className={styles.empty}>No plans yet — create one to begin.</p>
+          <p className={styles.empty}>No project plans yet — open one to begin.</p>
         ) : (
           <ul className={styles.rows}>
             {plans.map((p) => (

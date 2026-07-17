@@ -38,6 +38,7 @@ import {
   deleteProject,
   deleteProvider,
   fetchAgentEvents,
+  fetchAttemptTimeline,
   fetchChat,
   fetchMetrics,
   fetchPlan,
@@ -60,6 +61,10 @@ import {
   replanFromReview,
   replanMidRunning,
   resumePlan,
+  retryPlanningStage,
+  retryTask,
+  reviseCycleDraft,
+  reviseIntent,
   sendDiscoveryMessage,
   sendReplanningMessage,
   setConfigKey,
@@ -69,7 +74,9 @@ import {
   updateCapability,
   updateProject,
   updateProvider,
+  type CycleDraftBody,
   type EditBody,
+  type IntentProposalBody,
   type SSEEvent,
 } from "./api";
 import { toast, errorDetail } from "./toast";
@@ -111,6 +118,7 @@ export const keys = {
   runnerStatus: ["runner-status"] as const,
   agentEvents: (planId: string, taskId?: string) =>
     ["agent-events", planId, taskId ?? "*"] as const,
+  attemptTimeline: (planId: string) => ["attempt-timeline", planId] as const,
   metrics: (planId?: string) => ["metrics", planId ?? "*"] as const,
 };
 
@@ -141,6 +149,15 @@ export function useAgentEvents(planId: string | null, taskId?: string) {
   return useQuery({
     queryKey: keys.agentEvents(planId ?? "", taskId),
     queryFn: () => fetchAgentEvents(planId as string, { taskId }),
+    enabled: !!planId,
+  });
+}
+
+/** Durable planning plus task -> run -> attempt history, loaded before SSE. */
+export function useAttemptTimeline(planId: string | null) {
+  return useQuery({
+    queryKey: keys.attemptTimeline(planId ?? ""),
+    queryFn: () => fetchAttemptTimeline(planId as string),
     enabled: !!planId,
   });
 }
@@ -269,16 +286,37 @@ export const useReopenReview = (planId: string) =>
 export const useResumePlan = (planId: string) =>
   usePlanCommand(planId, resumePlan, "Resume");
 
+export function useRetryTask(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, taskId }: { goalId: string; taskId: string }) =>
+      retryTask(planId, goalId, taskId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+      qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
+      toast.success("Task queued for retry");
+    },
+    onError: (err) => toast.error("Retry failed", errorDetail(err)),
+  });
+}
+
+export const useRetryPlanningStage = (planId: string) =>
+  usePlanCommand(planId, retryPlanningStage, "Retry planning stage");
+
 export function useStartIntent(
   planId: string,
   kind: "initial" | "replan",
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => {
+    mutationFn: (body?: IntentProposalBody) => {
       const plan = qc.getQueryData<Plan>(keys.plan(planId));
       if (!plan) throw new Error("Plan details are not loaded");
-      return proposeIntent(planId, {
+      if (kind === "replan" && !body?.objective.trim()) {
+        throw new Error("Describe what should change before starting a replan");
+      }
+      return proposeIntent(planId, body ?? {
         objective: plan.brief,
         scope: [],
         constraints: [],
@@ -291,6 +329,24 @@ export function useStartIntent(
       qc.invalidateQueries({ queryKey: keys.plans });
     },
     onError: (err) => toast.error("Start intent failed", errorDetail(err)),
+  });
+}
+
+export function useReviseIntent(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: IntentProposalBody) => reviseIntent(planId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
+    onError: (err) => toast.error("Intent revision failed", errorDetail(err)),
+  });
+}
+
+export function useReviseCycleDraft(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CycleDraftBody) => reviseCycleDraft(planId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
+    onError: (err) => toast.error("Cycle draft revision failed", errorDetail(err)),
   });
 }
 
@@ -546,6 +602,7 @@ const TASK_EVENTS = new Set([
   "TaskRequeued",
   "TaskFailedEvent",
   "TaskAbandoned",
+  "TaskRetried",
   "GoalCompleted",
   "GoalFailedEvent",
 ]);
@@ -564,7 +621,6 @@ const STATE_EVENTS = new Set([
   "TestBundleFrozen",
   "TaskVerificationAccepted",
   "TaskVerificationRejected",
-  "TaskRetried",
 ]);
 
 /**
@@ -600,6 +656,7 @@ export function useSSEBridge() {
         switch (event.type) {
           case "agent.event":
             appendAgentLog(payload);
+            qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
             break;
 
           case "PhaseAdvanced": {
@@ -650,7 +707,7 @@ export function useSSEBridge() {
             const reason = (payload.reason as string) ?? undefined;
             if (payload.auto) {
               // the system paused itself (a task exhausted its retries or failed
-              // non-retryably) — it needs a human to edit and resume
+              // non-retryably) — it needs a human to edit, retry, and then resume
               toast.error(
                 "Plan needs attention",
                 reason ?? "Paused after a failure.",
@@ -667,7 +724,7 @@ export function useSSEBridge() {
           }
 
           case "PlanResumed":
-            toast.info("Plan resumed", "Failed tasks were requeued for retry.");
+            toast.info("Plan resumed", "The manual pause gate was released.");
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
@@ -686,6 +743,7 @@ export function useSSEBridge() {
               [payload.task_id, payload.reason].filter(Boolean).join(" — "),
             );
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
             break;
 
           case "AgentFellBackToDefault":
@@ -700,6 +758,9 @@ export function useSSEBridge() {
             if (TASK_EVENTS.has(event.type) || STATE_EVENTS.has(event.type)) {
               qc.invalidateQueries({ queryKey: keys.plan(planId) });
               qc.invalidateQueries({ queryKey: keys.plans });
+              if (TASK_EVENTS.has(event.type)) {
+                qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
+              }
             }
             break;
         }

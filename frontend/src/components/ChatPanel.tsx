@@ -15,6 +15,7 @@ import type { ChatMessageResponse } from '../types/ui';
 function Bubble({ msg }: { msg: ChatMessageResponse }) {
   const isUser = msg.role === 'user';
   const committed = msg.meta?.committed === true;
+  const submittedBrief = msg.meta?.submitted_brief === true;
   const time = new Date(msg.created_at).toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -42,7 +43,12 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
           <span style={{
             fontSize: 8, fontFamily: tokens.fontMono, color: tokens.green,
             background: tokens.greenDim, padding: '1px 6px', borderRadius: 3,
-          }}>roadmap committed</span>
+          }}>intent ready for review</span>
+        )}
+        {submittedBrief && isUser && (
+          <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.accent }}>
+            submitted brief
+          </span>
         )}
       </div>
       <div style={{
@@ -57,7 +63,7 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
   );
 }
 
-function ThinkingBubble() {
+function ThinkingBubble({ label }: { label: string }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
@@ -67,7 +73,7 @@ function ThinkingBubble() {
       width: 'fit-content', animation: 'fadein 0.15s ease both',
     }}>
       <Loader2 size={12} color={tokens.purple} style={{ animation: 'spin 1s linear infinite' }} />
-      <span style={{ fontSize: 11, color: tokens.textMuted, fontFamily: tokens.fontMono }}>reasoning…</span>
+      <span style={{ fontSize: 11, color: tokens.textMuted, fontFamily: tokens.fontMono }}>{label}</span>
     </div>
   );
 }
@@ -98,7 +104,8 @@ export function ChatPanel() {
   }, [history.length, thinking]);
 
   const phase = plan?.phase ?? 'discovery';
-  const inputEnabled = phase === 'discovery' || phase === 'replanning';
+  const inputEnabled =
+    (phase === 'discovery' || phase === 'replanning') && !plan?.pending_gate;
 
   const send = useCallback(
     (text: string) => {
@@ -187,7 +194,7 @@ export function ChatPanel() {
           </span>
         )}
         {history.map((m, i) => <Bubble key={i} msg={m} />)}
-        {thinking && <ThinkingBubble />}
+        {thinking && <ThinkingBubble label={plan?.planning_progress ?? 'Analyzing brief…'} />}
         <div ref={endRef} />
       </div>
 

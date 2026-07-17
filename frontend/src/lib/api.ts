@@ -14,6 +14,9 @@ import type {
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  CycleDraft,
+  GoalOutline,
+  IntentProposal,
   DefaultAgentResponse,
   IaModel,
   MessageResponse,
@@ -80,12 +83,23 @@ export const createPlan = (
   brief: string,
   projectId: string,
   idempotencyKey: string,
-): Promise<{ plan_id: string }> =>
+): Promise<CreatePlanResponse> =>
   post(
     "/api/plans",
     { brief, project_id: projectId },
     { "Idempotency-Key": idempotencyKey },
   );
+
+export interface CreatePlanResponse {
+  plan_id: string;
+  created: boolean;
+  opened_existing: boolean;
+  brief_preserved: boolean;
+  discovery_operation_id: string | null;
+  discovery_status: string | null;
+  discovery_reply: string | null;
+  discovery_error: string | null;
+}
 
 /** Human approval at the pre-execution gate: AWAITING_REVIEW -> RUNNING. */
 export const approvePlan = (planId: string): Promise<void> =>
@@ -113,9 +127,22 @@ export const pausePlan = (planId: string, reason?: string): Promise<void> =>
     reason: reason ?? null,
   });
 
-/** Clear the pause gate and requeue failed work (the manual retry). */
+/** Remove only the manual pause; retry/backoff state is untouched. */
 export const resumePlan = (planId: string): Promise<void> =>
   post(`/api/plans/${encodeURIComponent(planId)}/resume`);
+
+export const retryTask = (
+  planId: string,
+  goalId: string,
+  taskId: string,
+): Promise<void> =>
+  post(`/api/plans/${enc(planId)}/retry`, {
+    goal_id: goalId,
+    task_id: taskId,
+  });
+
+export const retryPlanningStage = (planId: string): Promise<void> =>
+  post(`/api/plans/${enc(planId)}/retry-stage`);
 
 export interface IntentProposalBody {
   objective: string;
@@ -129,8 +156,14 @@ export interface IntentProposalBody {
 export const proposeIntent = (
   planId: string,
   body: IntentProposalBody,
-): Promise<Record<string, unknown>> =>
+): Promise<IntentProposal> =>
   post(`/api/plans/${enc(planId)}/intent`, body);
+
+export const reviseIntent = (
+  planId: string,
+  body: IntentProposalBody,
+): Promise<IntentProposal> =>
+  put(`/api/plans/${enc(planId)}/intent`, body);
 
 export const approveIntentGate = (
   planId: string,
@@ -144,6 +177,17 @@ export const approveIntentGate = (
 
 export const cancelIntent = (planId: string): Promise<void> =>
   del(`/api/plans/${enc(planId)}/intent`);
+
+export interface CycleDraftBody {
+  goals: GoalOutline[];
+  unfinished_source_treatment?: string | null;
+}
+
+export const reviseCycleDraft = (
+  planId: string,
+  body: CycleDraftBody,
+): Promise<CycleDraft> =>
+  put(`/api/plans/${enc(planId)}/cycle-draft`, body);
 
 export const activateCycle = (
   planId: string,
@@ -237,6 +281,67 @@ export interface AgentEventRow {
   occurred_at: string;
 }
 
+export interface PlanningOperationRow {
+  id: string;
+  purpose: string;
+  target_goal_id: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  last_liveness_at: string | null;
+  model_request_count: number;
+  tool_turn_count: number;
+  runtime: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  failure_kind: string | null;
+  retry_at: string | null;
+  safe_message: string | null;
+}
+
+export interface ExecutionAttemptRow {
+  id: string;
+  number: number;
+  task_attempt: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  last_liveness_at: string | null;
+  timeout_seconds: number | null;
+  runtime: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  failure_kind: string | null;
+  provider_code: string | null;
+  retryable: boolean | null;
+  retry_at: string | null;
+  limit_scope: string | null;
+  exit_code: number | null;
+  safe_message: string | null;
+  stdout_tail: string;
+  stderr_tail: string;
+}
+
+export interface ExecutionRunRow {
+  id: string;
+  goal_id: string;
+  task_id: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  attempts: ExecutionAttemptRow[];
+}
+
+export interface AttemptTimelineResponse {
+  planning_operations: PlanningOperationRow[];
+  tasks: Array<{ goal_id: string; task_id: string; runs: ExecutionRunRow[] }>;
+}
+
+export const fetchAttemptTimeline = (planId: string): Promise<AttemptTimelineResponse> =>
+  get(`/api/plans/${enc(planId)}/attempts`);
+
 /** A plan's fine-grained agent/reasoner telemetry history (most-recent first). */
 export const fetchAgentEvents = (
   planId: string,
@@ -253,16 +358,37 @@ export interface MetricsResponse {
   llm: {
     sessions: number;
     calls: number;
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
+    prompt_tokens: number | null;
+    completion_tokens: number | null;
+    total_tokens: number | null;
+    coverage: UsageCoverage;
+    scopes: Record<'planner' | 'child' | 'combined', UsageScopeMetrics>;
   };
   agent: {
     runs: number;
     finished: number;
     failed: number;
     failures_by_kind: Record<string, number>;
+    source: string;
+    quality: string;
   };
+}
+
+export interface UsageCoverage {
+  observations: number;
+  reported: number;
+  estimated: number;
+  unavailable: number;
+  legacy_unknown: number;
+}
+
+export interface UsageScopeMetrics {
+  sessions: number;
+  calls: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  coverage: UsageCoverage;
 }
 
 /** Global (or per-plan) telemetry roll-up: LLM tokens + agent run/failure counts. */

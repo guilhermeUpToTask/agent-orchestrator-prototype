@@ -58,7 +58,7 @@ export const PLAN_STATUS: Record<PlanStatus, StatusMeta> = {
   idle: { kind: "idle", label: "Idle", Icon: CircleDashed },
 };
 
-/** The 9-phase machine. Gates are amber — anything amber is your queue. */
+/** Legacy phase compatibility; canonical navigation uses PLAN_STATUS. */
 export const PLAN_PHASE: Record<PlanPhase, StatusMeta> = {
   discovery:       { kind: 'run',  label: 'Discovery',     Icon: Compass },
   replanning:      { kind: 'run',  label: 'Replanning',    Icon: RefreshCw },

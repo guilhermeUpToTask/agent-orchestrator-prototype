@@ -139,6 +139,14 @@ export type AgentMetrics = {
     failures_by_kind: {
         [key: string]: number;
     };
+    /**
+     * Source
+     */
+    source: string;
+    /**
+     * Quality
+     */
+    quality: string;
 };
 
 /**
@@ -201,6 +209,20 @@ export type AgentSpec = {
 };
 
 /**
+ * AttemptTimelineResponse
+ */
+export type AttemptTimelineResponse = {
+    /**
+     * Planning Operations
+     */
+    planning_operations: Array<PlanningOperationResponse>;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskExecutionTimelineResponse>;
+};
+
+/**
  * Capability
  *
  * A named capability an agent can satisfy, bundling the tools it implies.
@@ -259,6 +281,46 @@ export type ConfigValue = {
 };
 
 /**
+ * ContractCriterion
+ */
+export type ContractCriterion = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Description
+     */
+    description: string;
+};
+
+/**
+ * CoverageMetrics
+ */
+export type CoverageMetrics = {
+    /**
+     * Observations
+     */
+    observations: number;
+    /**
+     * Reported
+     */
+    reported: number;
+    /**
+     * Estimated
+     */
+    estimated: number;
+    /**
+     * Unavailable
+     */
+    unavailable: number;
+    /**
+     * Legacy Unknown
+     */
+    legacy_unknown: number;
+};
+
+/**
  * CreatePlanRequest
  */
 export type CreatePlanRequest = {
@@ -270,6 +332,96 @@ export type CreatePlanRequest = {
      * Project Id
      */
     project_id: string;
+};
+
+/**
+ * Cycle
+ */
+export type Cycle = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Intent Proposal Id
+     */
+    intent_proposal_id: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    status?: CycleStatus;
+    /**
+     * Goals
+     */
+    goals?: Array<Goal>;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at?: string | null;
+    /**
+     * Superseded At
+     */
+    superseded_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
+    /**
+     * Evidence Refs
+     */
+    evidence_refs?: Array<string>;
+    output_disposition?: OutputDisposition | null;
+    /**
+     * Output Reference
+     */
+    output_reference?: string | null;
+};
+
+/**
+ * CycleDraft
+ */
+export type CycleDraft = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Intent Proposal Id
+     */
+    intent_proposal_id: string;
+    /**
+     * Base Plan Version
+     */
+    base_plan_version: number;
+    /**
+     * Source Cycle Id
+     */
+    source_cycle_id?: string | null;
+    /**
+     * Goals
+     */
+    goals: Array<GoalOutline>;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Unfinished Source Treatment
+     */
+    unfinished_source_treatment?: string | null;
+    /**
+     * Approved At
+     */
+    approved_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
 };
 
 /**
@@ -285,6 +437,11 @@ export type CycleDraftRequest = {
      */
     unfinished_source_treatment?: string | null;
 };
+
+/**
+ * CycleStatus
+ */
+export type CycleStatus = 'active' | 'completed' | 'superseded' | 'cancelled';
 
 /**
  * DefaultAgentResponse
@@ -343,6 +500,126 @@ export type EditRequest = {
 };
 
 /**
+ * ExecutionAttemptResponse
+ */
+export type ExecutionAttemptResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Task Attempt
+     */
+    task_attempt: number;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Last Liveness At
+     */
+    last_liveness_at: string | null;
+    /**
+     * Timeout Seconds
+     */
+    timeout_seconds: number | null;
+    /**
+     * Runtime
+     */
+    runtime: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id: string | null;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Failure Kind
+     */
+    failure_kind: string | null;
+    /**
+     * Provider Code
+     */
+    provider_code: string | null;
+    /**
+     * Retryable
+     */
+    retryable: boolean | null;
+    /**
+     * Retry At
+     */
+    retry_at: string | null;
+    /**
+     * Limit Scope
+     */
+    limit_scope: string | null;
+    /**
+     * Exit Code
+     */
+    exit_code: number | null;
+    /**
+     * Safe Message
+     */
+    safe_message: string | null;
+    /**
+     * Stdout Tail
+     */
+    stdout_tail: string;
+    /**
+     * Stderr Tail
+     */
+    stderr_tail: string;
+};
+
+/**
+ * ExecutionRunTimelineResponse
+ */
+export type ExecutionRunTimelineResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Attempts
+     */
+    attempts: Array<ExecutionAttemptResponse>;
+};
+
+/**
  * FailureKind
  *
  * Typed classification of a task failure. Produced by the agent runner,
@@ -350,6 +627,75 @@ export type EditRequest = {
  * matching (DESIGN_NOTES #2).
  */
 export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error' | 'verification_error';
+
+/**
+ * Goal
+ *
+ * Phase-level chunk owning an ordered task list. Guarded self-transitions,
+ * called only by the Plan. `depends_on` is the DAG seam (unused in a chain).
+ */
+export type Goal = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Description
+     */
+    description: string;
+    status?: Status;
+    /**
+     * Tasks
+     */
+    tasks?: Array<Task>;
+    /**
+     * Depends On
+     */
+    depends_on?: Array<string>;
+    contract?: GoalContract | null;
+};
+
+/**
+ * GoalContract
+ */
+export type GoalContract = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Acceptance Criteria
+     */
+    acceptance_criteria: Array<ContractCriterion>;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskContract>;
+    /**
+     * Cross Task Integration Criterion Ids
+     */
+    cross_task_integration_criterion_ids?: Array<string>;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+    /**
+     * Frozen At
+     */
+    frozen_at: string;
+};
 
 /**
  * GoalOutline
@@ -420,6 +766,57 @@ export type IaModel = {
 };
 
 /**
+ * IntentProposal
+ */
+export type IntentProposal = {
+    /**
+     * Id
+     */
+    id: string;
+    kind: ProposalKind;
+    /**
+     * Base Plan Version
+     */
+    base_plan_version: number;
+    /**
+     * Source Cycle Id
+     */
+    source_cycle_id?: string | null;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Scope
+     */
+    scope?: Array<string>;
+    /**
+     * Constraints
+     */
+    constraints?: Array<string>;
+    /**
+     * Exclusions
+     */
+    exclusions?: Array<string>;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Planner Session Ref
+     */
+    planner_session_ref?: string | null;
+    /**
+     * Approved At
+     */
+    approved_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
+};
+
+/**
  * IntentProposalRequest
  */
 export type IntentProposalRequest = {
@@ -461,15 +858,22 @@ export type LlmMetrics = {
     /**
      * Prompt Tokens
      */
-    prompt_tokens: number;
+    prompt_tokens: number | null;
     /**
      * Completion Tokens
      */
-    completion_tokens: number;
+    completion_tokens: number | null;
     /**
      * Total Tokens
      */
-    total_tokens: number;
+    total_tokens: number | null;
+    coverage: CoverageMetrics;
+    /**
+     * Scopes
+     */
+    scopes: {
+        [key: string]: UsageScopeMetrics;
+    };
 };
 
 /**
@@ -501,6 +905,18 @@ export type MessageResponse = {
      * Phase
      */
     phase: string;
+    /**
+     * Operation Id
+     */
+    operation_id: string;
+    /**
+     * Operation Status
+     */
+    operation_status: string;
+    /**
+     * Error
+     */
+    error?: string | null;
 };
 
 /**
@@ -581,6 +997,64 @@ export type PauseRequest = {
 };
 
 /**
+ * PlanBlock
+ */
+export type PlanBlock = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Explanation
+     */
+    explanation: string;
+    /**
+     * Stage
+     */
+    stage: string;
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
+    /**
+     * Task Id
+     */
+    task_id?: string | null;
+    /**
+     * Task Revision
+     */
+    task_revision?: number | null;
+    /**
+     * Run Id
+     */
+    run_id?: string | null;
+    /**
+     * Evidence Refs
+     */
+    evidence_refs?: Array<string>;
+    /**
+     * Legal Resolutions
+     */
+    legal_resolutions?: Array<string>;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Resolved At
+     */
+    resolved_at?: string | null;
+    /**
+     * Resolution
+     */
+    resolution?: string | null;
+};
+
+/**
  * PlanCreatedResponse
  */
 export type PlanCreatedResponse = {
@@ -588,6 +1062,34 @@ export type PlanCreatedResponse = {
      * Plan Id
      */
     plan_id: string;
+    /**
+     * Created
+     */
+    created: boolean;
+    /**
+     * Opened Existing
+     */
+    opened_existing: boolean;
+    /**
+     * Brief Preserved
+     */
+    brief_preserved: boolean;
+    /**
+     * Discovery Operation Id
+     */
+    discovery_operation_id: string | null;
+    /**
+     * Discovery Status
+     */
+    discovery_status: string | null;
+    /**
+     * Discovery Reply
+     */
+    discovery_reply: string | null;
+    /**
+     * Discovery Error
+     */
+    discovery_error: string | null;
 };
 
 /**
@@ -654,47 +1156,28 @@ export type PlanDetailResponse = {
     paused_reason: string | null;
     active_run: ActiveRunResponse | null;
     /**
-     * Active Cycle
+     * Planning Operation
      */
-    active_cycle: {
+    planning_operation: {
         [key: string]: unknown;
     } | null;
     /**
-     * Pending Gate
+     * Planning Progress
      */
-    pending_gate: {
-        [key: string]: unknown;
-    } | null;
-    /**
-     * Block
-     */
-    block: {
-        [key: string]: unknown;
-    } | null;
+    planning_progress: string | null;
+    active_cycle: Cycle | null;
+    pending_gate: ReviewGate | null;
+    block: PlanBlock | null;
     /**
      * Goals
      */
-    goals: Array<{
-        [key: string]: unknown;
-    }>;
+    goals: Array<Goal>;
     /**
      * Cycles
      */
-    cycles: Array<{
-        [key: string]: unknown;
-    }>;
-    /**
-     * Intent Proposal
-     */
-    intent_proposal: {
-        [key: string]: unknown;
-    } | null;
-    /**
-     * Cycle Draft
-     */
-    cycle_draft: {
-        [key: string]: unknown;
-    } | null;
+    cycles: Array<Cycle>;
+    intent_proposal: IntentProposal | null;
+    cycle_draft: CycleDraft | null;
     /**
      * Legacy Phase
      */
@@ -707,6 +1190,90 @@ export type PlanDetailResponse = {
      * Iteration
      */
     iteration?: number | null;
+};
+
+/**
+ * PlanningOperationResponse
+ */
+export type PlanningOperationResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Purpose
+     */
+    purpose: string;
+    /**
+     * Target Goal Id
+     */
+    target_goal_id: string | null;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Started At
+     */
+    started_at: string | null;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Last Liveness At
+     */
+    last_liveness_at: string | null;
+    /**
+     * Model Request Count
+     */
+    model_request_count: number;
+    /**
+     * Tool Turn Count
+     */
+    tool_turn_count: number;
+    /**
+     * Runtime
+     */
+    runtime: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id: string | null;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Failure Kind
+     */
+    failure_kind: string | null;
+    /**
+     * Retry At
+     */
+    retry_at: string | null;
+    /**
+     * Safe Message
+     */
+    safe_message: string | null;
+};
+
+/**
+ * ProjectBindingRequest
+ */
+export type ProjectBindingRequest = {
+    /**
+     * Project Id
+     */
+    project_id: string;
 };
 
 /**
@@ -863,6 +1430,10 @@ export type RetryPolicy = {
      */
     max_backoff_seconds?: number;
     /**
+     * Jitter Ratio
+     */
+    jitter_ratio?: number;
+    /**
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
@@ -895,6 +1466,65 @@ export type ReviewDecisionRequest = {
      */
     subject_revision: number;
 };
+
+/**
+ * ReviewGate
+ */
+export type ReviewGate = {
+    /**
+     * Id
+     */
+    id: string;
+    subject_type: ReviewSubjectType;
+    /**
+     * Subject Id
+     */
+    subject_id: string;
+    /**
+     * Subject Revision
+     */
+    subject_revision: number;
+    /**
+     * Allowed Decisions
+     */
+    allowed_decisions: Array<string>;
+    /**
+     * Continuation
+     */
+    continuation: string;
+    resolution?: ReviewResolution | null;
+    /**
+     * Invalidated At
+     */
+    invalidated_at?: string | null;
+};
+
+/**
+ * ReviewResolution
+ */
+export type ReviewResolution = {
+    /**
+     * Decision
+     */
+    decision: string;
+    /**
+     * Resolved At
+     */
+    resolved_at: string;
+    /**
+     * Resolved By
+     */
+    resolved_by?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * ReviewSubjectType
+ */
+export type ReviewSubjectType = 'intent' | 'cycle_draft' | 'cycle_completion';
 
 /**
  * RunnerAgentStatus
@@ -995,6 +1625,272 @@ export type RunnerStatusResponse = {
 };
 
 /**
+ * Status
+ *
+ * Lifecycle state shared by goals and tasks. str-based so comparisons and JSON
+ * serialization are natural (task.status == Status.DONE works).
+ */
+export type Status = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+
+/**
+ * Task
+ */
+export type Task = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Description
+     */
+    description: string;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+    /**
+     * Agent Id
+     */
+    agent_id?: string | null;
+    /**
+     * Role Agent Ids
+     */
+    role_agent_ids?: {
+        [key: string]: string;
+    };
+    status?: Status;
+    result?: TaskResult | null;
+    /**
+     * Attempt
+     */
+    attempt?: number;
+    /**
+     * Retry Cycle
+     */
+    retry_cycle?: number;
+    /**
+     * Cycle Attempt
+     */
+    cycle_attempt?: number;
+    /**
+     * Revision
+     */
+    revision?: number;
+    contract?: TaskContract | null;
+    test_bundle?: TestBundle | null;
+    /**
+     * Verification Evidence
+     */
+    verification_evidence?: Array<VerificationEvidence>;
+    /**
+     * Reopen Count
+     */
+    reopen_count?: number;
+    /**
+     * Retry Not Before
+     */
+    retry_not_before?: string | null;
+};
+
+/**
+ * TaskContract
+ */
+export type TaskContract = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Acceptance Criteria
+     */
+    acceptance_criteria: Array<ContractCriterion>;
+    /**
+     * Goal Criterion Ids
+     */
+    goal_criterion_ids: Array<string>;
+    /**
+     * Allowed Scope
+     */
+    allowed_scope: Array<string>;
+    /**
+     * Forbidden Scope
+     */
+    forbidden_scope?: Array<string>;
+    /**
+     * Verification Commands
+     */
+    verification_commands: Array<string>;
+    verification_strategy: VerificationStrategy;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+};
+
+/**
+ * TaskExecutionTimelineResponse
+ */
+export type TaskExecutionTimelineResponse = {
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Runs
+     */
+    runs: Array<ExecutionRunTimelineResponse>;
+};
+
+/**
+ * TaskResult
+ *
+ * Typed output of a task run, and the idempotency record: if set, the work
+ * already happened and must not re-execute.
+ *
+ * Design: `status` and `output` are ALWAYS present (always assertable in tests);
+ * `artifacts` is the flexible per-task-type payload (a code task stores
+ * files_changed, a research task stores sources) so we don't force one rigid
+ * schema across all task types. This structure is the seam that makes
+ * orchestration deterministically testable: tests fabricate TaskResults by hand,
+ * production builds them from the agent — the orchestration treats both identically.
+ */
+export type TaskResult = {
+    /**
+     * Status
+     */
+    status: 'success' | 'failure';
+    /**
+     * Output
+     */
+    output: string;
+    /**
+     * Artifacts
+     */
+    artifacts?: {
+        [key: string]: string;
+    };
+    /**
+     * Failure Reason
+     */
+    failure_reason?: string | null;
+    failure_kind?: FailureKind | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * TestBundle
+ */
+export type TestBundle = {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Task Revision
+     */
+    task_revision: number;
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * Protected File Hashes
+     */
+    protected_file_hashes: {
+        [key: string]: string;
+    };
+    /**
+     * Criterion To Tests
+     */
+    criterion_to_tests: {
+        [key: string]: Array<string>;
+    };
+    verification_strategy: VerificationStrategy;
+    /**
+     * Baseline Evidence Refs
+     */
+    baseline_evidence_refs?: Array<string>;
+    /**
+     * Red Or Baseline Evidence Refs
+     */
+    red_or_baseline_evidence_refs: Array<string>;
+    state?: TestBundleState;
+    /**
+     * Frozen At
+     */
+    frozen_at: string;
+    /**
+     * Invalidated At
+     */
+    invalidated_at?: string | null;
+    /**
+     * Invalidation Reason
+     */
+    invalidation_reason?: string | null;
+};
+
+/**
+ * TestBundleState
+ */
+export type TestBundleState = 'frozen' | 'invalid';
+
+/**
+ * UsageScopeMetrics
+ */
+export type UsageScopeMetrics = {
+    /**
+     * Sessions
+     */
+    sessions: number;
+    /**
+     * Calls
+     */
+    calls: number;
+    /**
+     * Prompt Tokens
+     */
+    prompt_tokens: number | null;
+    /**
+     * Completion Tokens
+     */
+    completion_tokens: number | null;
+    /**
+     * Total Tokens
+     */
+    total_tokens: number | null;
+    coverage: CoverageMetrics;
+};
+
+/**
  * ValidationError
  */
 export type ValidationError = {
@@ -1021,6 +1917,101 @@ export type ValidationError = {
         [key: string]: unknown;
     };
 };
+
+/**
+ * VerificationEvidence
+ */
+export type VerificationEvidence = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Task Revision
+     */
+    task_revision: number;
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Candidate Commit Sha
+     */
+    candidate_commit_sha: string;
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * Exact Command
+     */
+    exact_command: string;
+    /**
+     * Exit Code
+     */
+    exit_code: number;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Finished At
+     */
+    finished_at: string;
+    /**
+     * Bounded Output Ref
+     */
+    bounded_output_ref: string;
+    verification_kind: VerificationKind;
+    /**
+     * Accepted
+     */
+    accepted: boolean;
+};
+
+/**
+ * VerificationKind
+ */
+export type VerificationKind = 'baseline' | 'red' | 'characterization' | 'executable_check' | 'authoritative_test' | 'regression' | 'scope' | 'branch_integrity' | 'cleanup';
+
+/**
+ * VerificationStrategy
+ */
+export type VerificationStrategy = 'tdd' | 'characterization' | 'executable_check';
+
+export type PlansBindProjectRouteData = {
+    body: ProjectBindingRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/project-binding';
+};
+
+export type PlansBindProjectRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansBindProjectRouteError = PlansBindProjectRouteErrors[keyof PlansBindProjectRouteErrors];
+
+export type PlansBindProjectRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansBindProjectRouteResponse = PlansBindProjectRouteResponses[keyof PlansBindProjectRouteResponses];
 
 export type PlansListPlansData = {
     body?: never;
@@ -1102,6 +2093,36 @@ export type PlansGetPlanResponses = {
 };
 
 export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
+
+export type PlansAttemptTimelineData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/attempts';
+};
+
+export type PlansAttemptTimelineErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptTimelineError = PlansAttemptTimelineErrors[keyof PlansAttemptTimelineErrors];
+
+export type PlansAttemptTimelineResponses = {
+    /**
+     * Successful Response
+     */
+    200: AttemptTimelineResponse;
+};
+
+export type PlansAttemptTimelineResponse = PlansAttemptTimelineResponses[keyof PlansAttemptTimelineResponses];
 
 export type PlansCancelIntentRouteData = {
     body?: never;
@@ -1515,6 +2536,36 @@ export type PlansRetryBlockedTaskResponses = {
 };
 
 export type PlansRetryBlockedTaskResponse = PlansRetryBlockedTaskResponses[keyof PlansRetryBlockedTaskResponses];
+
+export type PlansRetryBlockedPlanningStageData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/retry-stage';
+};
+
+export type PlansRetryBlockedPlanningStageErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansRetryBlockedPlanningStageError = PlansRetryBlockedPlanningStageErrors[keyof PlansRetryBlockedPlanningStageErrors];
+
+export type PlansRetryBlockedPlanningStageResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningStageResponses[keyof PlansRetryBlockedPlanningStageResponses];
 
 export type PlansApproveData = {
     body?: never;
