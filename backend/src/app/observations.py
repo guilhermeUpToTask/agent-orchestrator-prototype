@@ -35,6 +35,9 @@ class ObservationQuality(str, Enum):
 
 class ObservationKind(str, Enum):
     MODEL_USAGE = "model.usage"
+    PROCESS_STARTED = "process.started"
+    PROCESS_EXITED = "process.exited"
+    PROCESS_TIMED_OUT = "process.timed_out"
 
 
 @dataclass(frozen=True)
@@ -95,7 +98,22 @@ class ModelUsagePayload:
             raise ValueError("token counts cannot be negative")
 
 
-ObservationPayload = ModelUsagePayload
+@dataclass(frozen=True)
+class ProcessObservationPayload:
+    stdout_bytes: int = 0
+    stderr_bytes: int = 0
+    exit_code: int | None = None
+    duration_seconds: float | None = None
+    log_path: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.stdout_bytes < 0 or self.stderr_bytes < 0:
+            raise ValueError("process byte counts cannot be negative")
+        if self.duration_seconds is not None and self.duration_seconds < 0:
+            raise ValueError("process duration cannot be negative")
+
+
+ObservationPayload = ModelUsagePayload | ProcessObservationPayload
 
 
 @dataclass(frozen=True)
@@ -119,9 +137,19 @@ class TelemetryObservation:
             raise ValueError("unsupported observation schema version")
         if self.source_sequence is not None and self.source_sequence < 0:
             raise ValueError("source_sequence cannot be negative")
-        if self.kind is not ObservationKind.MODEL_USAGE:
-            raise ValueError(f"unsupported observation kind {self.kind!r}")
-
+        if self.kind is ObservationKind.MODEL_USAGE:
+            if not isinstance(self.payload, ModelUsagePayload):
+                raise ValueError("model usage requires a ModelUsagePayload")
+        elif not isinstance(self.payload, ProcessObservationPayload):
+            raise ValueError("process observations require a ProcessObservationPayload")
+        else:
+            if self.kind is ObservationKind.PROCESS_STARTED:
+                if self.payload.exit_code is not None or self.payload.duration_seconds is not None:
+                    raise ValueError("process.started cannot contain exit data")
+            elif self.kind in (ObservationKind.PROCESS_EXITED, ObservationKind.PROCESS_TIMED_OUT):
+                if self.payload.duration_seconds is None or self.payload.log_path is None:
+                    raise ValueError("process completion requires duration and log path")
+            return
         tokens = (
             self.payload.input_tokens,
             self.payload.output_tokens,

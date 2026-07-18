@@ -21,20 +21,26 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import signal
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import structlog
 
 from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
 from src.app.runtime_failures import safe_runtime_tail
+from src.app.observations import ProcessObservationPayload
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.value_objects.tasks_vos import TaskResult
 from src.infra.runtime.taxonomy import classify_failure, normalize_failure
 from src.infra.runtime.pi_protocol import parse_pi_events
+from src.infra.runtime.process_supervisor import (
+    attempt_log_path,
+    supervise_process,
+    terminate_process_group,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -86,10 +92,16 @@ class CliAgentRunner(ABC):
         *,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._provider_id = provider_id
         self._model_id = model_id
+        if orchestrator_home is None:
+            from src.infra.container import AppContainer
+
+            orchestrator_home = AppContainer.from_env().orchestrator_home
+        self._orchestrator_home = orchestrator_home
 
     @property
     @abstractmethod
@@ -217,36 +229,49 @@ class CliAgentRunner(ABC):
         return [("runtime.output", {"chunk": safe_runtime_tail(output, 1_000)})]
 
     def _terminate_process_group(self, proc: subprocess.Popen[str]) -> None:
-        """Terminate and reap every process owned by this invocation."""
-        try:
-            pgid = os.getpgid(proc.pid)
-        except ProcessLookupError:
-            return
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait(timeout=2)
+        terminate_process_group(proc)
 
     def _run_sync(self, prompt: str, cwd: str, execution_env: dict[str, str]) -> TaskResult:
         cmd = self._build_cmd(prompt)
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
         try:
-            proc = subprocess.Popen(
+            attempt_id = execution_env.get("ORCHESTRATOR_ATTEMPT_ID")
+            result = supervise_process(
                 cmd,
                 cwd=cwd,
                 env={**self._env(), **execution_env},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
+                timeout_seconds=self._timeout,
+                log_path=(
+                    attempt_log_path(self._orchestrator_home, attempt_id)
+                    if attempt_id is not None
+                    else None
+                ),
+                on_observation=lambda observation: log.info(
+                    "runtime.process_observation",
+                    kind=observation.kind.value,
+                    source=observation.source.value,
+                    payload=(
+                        {
+                            "stdout_bytes": observation.payload.stdout_bytes,
+                            "stderr_bytes": observation.payload.stderr_bytes,
+                            "exit_code": observation.payload.exit_code,
+                            "duration_seconds": observation.payload.duration_seconds,
+                            "log_path": observation.payload.log_path,
+                        }
+                        if isinstance(observation.payload, ProcessObservationPayload)
+                        else {}
+                    ),
+                ),
+                plan_id=execution_env.get("ORCHESTRATOR_PLAN_ID", "runtime"),
+                goal_id=execution_env.get("ORCHESTRATOR_GOAL_ID"),
+                task_id=execution_env.get("ORCHESTRATOR_TASK_ID"),
+                run_id=execution_env.get("ORCHESTRATOR_RUN_ID"),
+                attempt_id=execution_env.get("ORCHESTRATOR_ATTEMPT_ID"),
+                attempt_number=(
+                    int(execution_env["ORCHESTRATOR_ATTEMPT_NUMBER"])
+                    if "ORCHESTRATOR_ATTEMPT_NUMBER" in execution_env
+                    else None
+                ),
             )
         except FileNotFoundError as exc:
             failure = normalize_failure(
@@ -259,12 +284,7 @@ class CliAgentRunner(ABC):
                 f"{self.log_prefix} CLI not found: {cmd[0]!r}", failure=failure
             ) from exc
 
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(timeout=self._timeout)
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            self._terminate_process_group(proc)
+        if result.timed_out:
             failure = normalize_failure(
                 timed_out=True,
                 runtime=self.log_prefix,
@@ -274,13 +294,10 @@ class CliAgentRunner(ABC):
             raise TaskFailed(
                 f"{self.log_prefix} timed out after {self._timeout}s",
                 failure=failure,
-            ) from exc
-        finally:
-            if not timed_out:
-                # A successful top-level CLI may have left grandchildren behind.
-                self._terminate_process_group(proc)
+            )
 
-        if proc.returncode != 0:
+        stdout, stderr = result.stdout, result.stderr
+        if result.exit_code != 0:
             output = f"{stdout}\n{stderr}"
             kind = classify_failure(output)
             failure = normalize_failure(
@@ -289,22 +306,26 @@ class CliAgentRunner(ABC):
                 runtime=self.log_prefix,
                 provider_id=self._provider_id,
                 model_id=self._model_id,
-                exit_code=proc.returncode,
+                exit_code=result.exit_code,
             )
             log.warning(
                 f"{self.log_prefix}.failed",
-                exit_code=proc.returncode,
+                exit_code=result.exit_code,
                 kind=kind.value,
             )
-            raise TaskFailed(
-                failure.safe_message,
-                failure=failure,
-            )
+            raise TaskFailed(failure.safe_message, failure=failure)
 
-        log.info(f"{self.log_prefix}.finished", exit_code=0)
+        log.info(f"{self.log_prefix}.finished", exit_code=0, log_path=str(result.log_path))
         return TaskResult.success(
             stdout[-_OUTPUT_TAIL_CHARS:],
-            metadata={"runtime": self.log_prefix, "exit_code": "0", "cleanup": "complete"},
+            metadata={
+                "runtime": self.log_prefix,
+                "exit_code": "0",
+                "cleanup": "complete",
+                "log_path": str(result.log_path),
+                "stdout_bytes": str(result.stdout_bytes),
+                "stderr_bytes": str(result.stderr_bytes),
+            },
         )
 
 
@@ -328,6 +349,7 @@ class PiAgentRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -335,7 +357,7 @@ class PiAgentRunner(CliAgentRunner):
             )
         if not api_key:
             raise ValueError(f"PiAgentRunner requires an api_key for backend '{backend}'")
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._backend = backend
@@ -367,8 +389,9 @@ class ClaudeCodeRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []
@@ -398,8 +421,9 @@ class GeminiRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []

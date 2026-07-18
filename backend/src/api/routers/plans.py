@@ -7,9 +7,10 @@ errors bubble to the global mapping layer.
 from __future__ import annotations
 
 import uuid
+import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
@@ -64,6 +65,8 @@ from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.factories.identity import new_id
 from src.infra.container import AppContainer
+from src.infra.errors import AttemptNotFoundError
+from src.infra.runtime.process_supervisor import attempt_log_path
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -234,6 +237,17 @@ class TaskExecutionTimelineResponse(BaseModel):
     goal_id: str
     task_id: str
     runs: list[ExecutionRunTimelineResponse]
+
+
+class AttemptLogEntryResponse(BaseModel):
+    monotonic_seconds: float
+    stream: Literal["stdout", "stderr"]
+    text: str
+
+
+class AttemptLogResponse(BaseModel):
+    entries: list[AttemptLogEntryResponse]
+    truncated: bool
 
 
 class AttemptTimelineResponse(BaseModel):
@@ -969,6 +983,43 @@ async def replanning(
         operation_status=result.operation_status.value,
         error=result.error,
     )
+
+
+@router.get("/{plan_id}/attempts/{attempt_id}/log", response_model=AttemptLogResponse)
+def attempt_log(
+    plan_id: str,
+    attempt_id: str,
+    tail_lines: int = Query(default=200, ge=0, le=2000),
+    container: AppContainer = Depends(get_container),
+) -> AttemptLogResponse:
+    with container.new_unit_of_work() as uow:
+        try:
+            attempt = uow.executions.get_attempt(attempt_id)
+        except KeyError as exc:
+            raise AttemptNotFoundError(attempt_id) from exc
+        if attempt.plan_id != plan_id:
+            raise AttemptNotFoundError(attempt_id)
+
+    path = attempt_log_path(container.orchestrator_home, attempt_id)
+    if not path.exists():
+        return AttemptLogResponse(entries=[], truncated=False)
+
+    entries: list[AttemptLogEntryResponse] = []
+    truncated = False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return AttemptLogResponse(entries=[], truncated=False)
+    for line in lines:
+        try:
+            record = json.loads(line)
+            if record.get("truncated") is True:
+                truncated = True
+                continue
+            entries.append(AttemptLogEntryResponse.model_validate(record))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return AttemptLogResponse(entries=entries[-tail_lines:] if tail_lines else [], truncated=truncated)
 
 
 class AgentEventResponse(BaseModel):

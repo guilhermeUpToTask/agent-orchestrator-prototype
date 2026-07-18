@@ -147,6 +147,8 @@ class SqliteObservationRepository:
 
     async def append(self, observation: TelemetryObservation) -> bool:
         recorded_at = self._clock.now()
+        if not isinstance(observation.payload, ModelUsagePayload):
+            raise ValueError("process observations require the process repository extension")
         correlation = observation.correlation
         params = {
             "event_id": observation.observation_id,
