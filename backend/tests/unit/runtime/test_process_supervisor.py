@@ -139,6 +139,25 @@ def test_supervise_process_caps_log_and_inserts_truncation_marker(tmp_path: Path
     assert not any(t.rstrip().endswith("0") for t in text_payloads)
     assert any(t.rstrip().endswith(("18", "19")) for t in text_payloads)
 
+def test_supervise_process_bounds_retained_output_but_counts_all_bytes(tmp_path: Path) -> None:
+    script = "import sys\nfor i in range(20):\n    print('line-' + str(i) + ':' + 'x' * 100, flush=True)\n"
+    cap = 512
+
+    result = supervise_process(
+        [sys.executable, "-c", script],
+        cwd=str(tmp_path),
+        env=_env(),
+        timeout_seconds=10,
+        log_path=tmp_path / "bounded-output.jsonl",
+        log_cap_bytes=cap,
+    )
+
+    assert len(result.stdout.encode("utf-8")) <= cap
+    assert result.stdout_bytes > cap
+    assert result.stdout
+    assert all(line.startswith("line-") for line in result.stdout.splitlines())
+    assert "line-19:" in result.stdout
+
 
 def test_supervise_process_rejects_tiny_log_cap(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="log cap"):

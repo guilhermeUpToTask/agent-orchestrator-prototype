@@ -150,6 +150,7 @@ class AppContainer:
             self.model_repo,
             lambda: self.secret_store,
             self.orchestrator_home,
+            self.observation_repository,
         )
 
     @cached_property

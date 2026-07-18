@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from src.app.ports import TaskFailed
 from src.app.runtime_failures import safe_runtime_tail
 from src.app.testing.fakes import CollectingEventSink
+from src.app.testing.observations import InMemoryObservationRepository
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
@@ -27,8 +29,8 @@ pytestmark = pytest.mark.integration
 class ScriptedCliRunner(CliAgentRunner):
     """Runs an arbitrary executable — the test controls the CLI's behavior."""
 
-    def __init__(self, executable: str, timeout_seconds: int = 5) -> None:
-        super().__init__(timeout_seconds)
+    def __init__(self, executable: str, timeout_seconds: int = 5, observation_repository=None) -> None:
+        super().__init__(timeout_seconds, observation_repository=observation_repository)
         self._executable = executable
 
     @property
@@ -93,6 +95,36 @@ def test_success_returns_result_and_emits_events(tmp_path):
     ]
     assert sink.events[1].payload["chunk"] == "did the work"
     assert all(e.task_id == "t1" and e.attempt == 1 for e in sink.events)
+
+
+def test_process_observations_are_persisted_on_success(tmp_path):
+    cli = make_cli(tmp_path, 'echo "did the work"; exit 0')
+    repository = InMemoryObservationRepository(lambda: datetime.now(timezone.utc))
+
+    result, _ = run(ScriptedCliRunner(cli, observation_repository=repository), tmp_path)
+
+    assert result.status == "success"
+    assert [item.observation.kind.value for item in repository.observations] == [
+        "process.started",
+        "process.exited",
+    ]
+
+
+def test_process_observations_are_persisted_before_timeout_failure(tmp_path):
+    cli = make_cli(tmp_path, "sleep 10")
+    repository = InMemoryObservationRepository(lambda: datetime.now(timezone.utc))
+
+    with pytest.raises(TaskFailed) as exc_info:
+        run(
+            ScriptedCliRunner(cli, timeout_seconds=1, observation_repository=repository),
+            tmp_path,
+        )
+
+    assert exc_info.value.kind == FailureKind.TIMEOUT
+    assert [item.observation.kind.value for item in repository.observations] == [
+        "process.started",
+        "process.timed_out",
+    ]
 
 
 def test_execution_correlation_is_allowlisted_into_subprocess_env(tmp_path):
