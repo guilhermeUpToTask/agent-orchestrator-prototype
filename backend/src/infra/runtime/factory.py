@@ -41,6 +41,7 @@ from typing import Callable
 import structlog
 
 from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
+from src.app.observations import ObservationRepository
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.ia_model import IAModel
 from src.domain.entities.model_provider import ModelProvider
@@ -220,12 +221,14 @@ class CatalogAgentRunner:
         model_repo: SqliteModelRepository,
         secret_store: Callable[[], SqliteSecretStore],
         orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
     ) -> None:
         self._config_store = config_store
         self._provider_repo = provider_repo
         self._model_repo = model_repo
         self._secret_store = secret_store
         self._orchestrator_home = orchestrator_home
+        self._observation_repository = observation_repository
         self._dummy = DryRunAgentRunner()
 
     def _timeout_seconds(self) -> int:
@@ -258,7 +261,8 @@ class CatalogAgentRunner:
                 timeout_seconds=timeout,
                 provider_id=provider.id,
                 model_id=model.id,
-            orchestrator_home=self._orchestrator_home,
+                orchestrator_home=self._orchestrator_home,
+                observation_repository=self._observation_repository,
             )
         if runtime == "claude":
             return ClaudeCodeRunner(
@@ -268,6 +272,7 @@ class CatalogAgentRunner:
                 provider_id=provider.id,
                 model_id=model.id,
                 orchestrator_home=self._orchestrator_home,
+                observation_repository=self._observation_repository,
             )
         return GeminiRunner(
             api_key=api_key,
@@ -275,7 +280,8 @@ class CatalogAgentRunner:
             timeout_seconds=timeout,
             provider_id=provider.id,
             model_id=model.id,
-                orchestrator_home=self._orchestrator_home,
+            orchestrator_home=self._orchestrator_home,
+            observation_repository=self._observation_repository,
         )
 
     async def run(
@@ -318,6 +324,7 @@ def build_agent_runner(
     model_repo: SqliteModelRepository,
     secret_store: Callable[[], SqliteSecretStore],
     orchestrator_home: Path | None = None,
+    observation_repository: ObservationRepository | None = None,
 ) -> AgentRunner:
     """`secret_store` is a thunk: dry-run mode must never construct it (it
     fails closed on a missing master key, which dry-run does not have)."""
@@ -326,4 +333,11 @@ def build_agent_runner(
         raise _invalid(status.detail or "agent_runner.mode is invalid")
     if status.mode == "dry-run":
         return DryRunAgentRunner()
-    return CatalogAgentRunner(config_store, provider_repo, model_repo, secret_store, orchestrator_home)
+    return CatalogAgentRunner(
+        config_store,
+        provider_repo,
+        model_repo,
+        secret_store,
+        orchestrator_home,
+        observation_repository,
+    )

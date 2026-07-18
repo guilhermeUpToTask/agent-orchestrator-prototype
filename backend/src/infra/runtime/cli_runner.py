@@ -29,7 +29,7 @@ import structlog
 
 from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
 from src.app.runtime_failures import safe_runtime_tail
-from src.app.observations import ProcessObservationPayload
+from src.app.observations import ObservationRepository, ProcessObservationPayload, TelemetryObservation
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
@@ -93,10 +93,12 @@ class CliAgentRunner(ABC):
         provider_id: str | None = None,
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._provider_id = provider_id
         self._model_id = model_id
+        self._observation_repository = observation_repository
         if orchestrator_home is None:
             from src.infra.container import AppContainer
 
@@ -129,6 +131,7 @@ class CliAgentRunner(ABC):
         attempt_id = parts[5] if len(parts) == 6 else None
         attempt_number = int(parts[4]) if len(parts) == 6 else task.attempt
         prompt = build_task_prompt(task, spec)
+        observations: list[TelemetryObservation] = []
 
         await event_sink.emit(
             AgentEvent(
@@ -154,8 +157,10 @@ class CliAgentRunner(ABC):
                 prompt,
                 workspace.path,
                 correlation_env(idempotency_key),
+                observations,
             )
         except TaskFailed as exc:
+            await self._persist_observations(observations)
             await event_sink.emit(
                 AgentEvent(
                     plan_id=plan_id,
@@ -191,6 +196,7 @@ class CliAgentRunner(ABC):
                 )
             )
             raise
+        await self._persist_observations(observations)
         elapsed = round(time.monotonic() - started, 2)
         seq = 1
         for event_type, payload in self._events_from_output(result.output):
@@ -231,9 +237,47 @@ class CliAgentRunner(ABC):
     def _terminate_process_group(self, proc: subprocess.Popen[str]) -> None:
         terminate_process_group(proc)
 
-    def _run_sync(self, prompt: str, cwd: str, execution_env: dict[str, str]) -> TaskResult:
+    async def _persist_observations(self, observations: list[TelemetryObservation]) -> None:
+        if self._observation_repository is None:
+            return
+        for observation in observations:
+            try:
+                await self._observation_repository.append(observation)
+            except Exception:
+                log.warning(
+                    "runtime.process_observation_persist_failed",
+                    observation_id=observation.observation_id,
+                    exc_info=True,
+                )
+
+    def _run_sync(
+        self,
+        prompt: str,
+        cwd: str,
+        execution_env: dict[str, str],
+        observations: list[TelemetryObservation],
+    ) -> TaskResult:
         cmd = self._build_cmd(prompt)
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
+        def on_observation(observation: TelemetryObservation) -> None:
+            observations.append(observation)
+            log.info(
+                "runtime.process_observation",
+                kind=observation.kind.value,
+                source=observation.source.value,
+                payload=(
+                    {
+                        "stdout_bytes": observation.payload.stdout_bytes,
+                        "stderr_bytes": observation.payload.stderr_bytes,
+                        "exit_code": observation.payload.exit_code,
+                        "duration_seconds": observation.payload.duration_seconds,
+                        "log_path": observation.payload.log_path,
+                    }
+                    if isinstance(observation.payload, ProcessObservationPayload)
+                    else {}
+                ),
+            )
+
         try:
             attempt_id = execution_env.get("ORCHESTRATOR_ATTEMPT_ID")
             result = supervise_process(
@@ -246,22 +290,7 @@ class CliAgentRunner(ABC):
                     if attempt_id is not None
                     else None
                 ),
-                on_observation=lambda observation: log.info(
-                    "runtime.process_observation",
-                    kind=observation.kind.value,
-                    source=observation.source.value,
-                    payload=(
-                        {
-                            "stdout_bytes": observation.payload.stdout_bytes,
-                            "stderr_bytes": observation.payload.stderr_bytes,
-                            "exit_code": observation.payload.exit_code,
-                            "duration_seconds": observation.payload.duration_seconds,
-                            "log_path": observation.payload.log_path,
-                        }
-                        if isinstance(observation.payload, ProcessObservationPayload)
-                        else {}
-                    ),
-                ),
+                on_observation=on_observation,
                 plan_id=execution_env.get("ORCHESTRATOR_PLAN_ID", "runtime"),
                 goal_id=execution_env.get("ORCHESTRATOR_GOAL_ID"),
                 task_id=execution_env.get("ORCHESTRATOR_TASK_ID"),
@@ -350,6 +379,7 @@ class PiAgentRunner(CliAgentRunner):
         provider_id: str | None = None,
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -357,7 +387,13 @@ class PiAgentRunner(CliAgentRunner):
             )
         if not api_key:
             raise ValueError(f"PiAgentRunner requires an api_key for backend '{backend}'")
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
+        super().__init__(
+            timeout_seconds,
+            provider_id=provider_id,
+            model_id=model_id,
+            orchestrator_home=orchestrator_home,
+            observation_repository=observation_repository,
+        )
         self._api_key = api_key
         self._model = model
         self._backend = backend
@@ -390,8 +426,15 @@ class ClaudeCodeRunner(CliAgentRunner):
         provider_id: str | None = None,
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
+        super().__init__(
+            timeout_seconds,
+            provider_id=provider_id,
+            model_id=model_id,
+            orchestrator_home=orchestrator_home,
+            observation_repository=observation_repository,
+        )
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []
@@ -422,8 +465,15 @@ class GeminiRunner(CliAgentRunner):
         provider_id: str | None = None,
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
+        super().__init__(
+            timeout_seconds,
+            provider_id=provider_id,
+            model_id=model_id,
+            orchestrator_home=orchestrator_home,
+            observation_repository=observation_repository,
+        )
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []
