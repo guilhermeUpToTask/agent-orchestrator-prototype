@@ -61,6 +61,13 @@ The contract, end to end:
 - The API's `RequestLoggingMiddleware` binds a correlation id (`X-Request-ID`, also exposed to browsers) into a contextvar; the one error-mapping layer logs domain errors with their stable `code` and full stack traces for unhandled 500s — the client gets a generic envelope, never a trace.
 - The worker logs claim/drive/release transitions and warns at boot (real mode) about missing runtime binaries (`dependency_checker.py`).
 
+CLI runners read subprocess stdout and stderr incrementally through the shared
+`supervise_process()` supervisor. For attempts with a canonical `attempt_id`,
+the supervisor writes bounded JSONL records to
+`$ORCHESTRATOR_HOME/runtime-logs/<attempt_id>.jsonl` via `attempt_log_path()`;
+its process observations contain lifecycle metadata such as byte counts, exit
+code, duration, and log path, never raw output.
+
 ## What an operator can see today
 
 | Question | Answer surface |
@@ -72,6 +79,7 @@ The contract, end to end:
 | Is the runtime wired correctly? | `GET /api/runner/status` (mode, per-agent binding validity, binary probes) · `GET /api/reasoner/status` |
 | What did the user and reasoner say? | `GET /api/plans/{id}/chat` |
 | A plan's agent/reasoner telemetry history | `GET /api/plans/{id}/agent-events?task_id=&limit=` — durable, most-recent-first, optionally per task (the console/DetailPanel live tail plus reload-survivable history) |
+| What did a specific execution attempt write? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — ownership-checked bounded JSONL tail; returns an empty list until the attempt log exists (not a live SSE tail) |
 | LLM token spend + agent run/failure counts | `GET /api/metrics?plan_id=` — planner/child/combined scopes, reported/estimated/unavailable coverage, and exact attempt failures grouped by kind |
 | Offline evidence for every plan and execution run | <code>python backend/scripts/export_plan_runs.py --format bundle --output-dir DIR</code> — an atomic, hashed JSON/JSONL snapshot with telemetry, metrics, comparisons, insights, and execution summaries |
 | Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan |

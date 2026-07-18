@@ -128,7 +128,19 @@ While paused, goals/tasks are editable (`apply_edit` passes `plan.paused` to the
   the publication gate.
 - **`real`** — `CatalogAgentRunner` resolves **per task, per run** from the bound `AgentSpec`: `runtime_type` picks the CLI (`pi` → `pi --model … -p`, `claude` → `claude --dangerously-skip-permissions -p`, `gemini` → `gemini --yolo -p`), the provider row supplies the envelope-encrypted key (pi's backend env var derives from the provider id/name), the model row the model string. A broken binding raises terminal `TaskFailed(AUTH_ERROR)`; write-time referential checks return `AGENT_RUNNER_CONFIG_INVALID` → 422; `GET /api/runner/status` reports bindings and binary probes. Resolution per run means agent edits and key rotations apply without restarts — nothing caches a built runner.
 
-Subprocesses are blocking, hopped off the event loop via `asyncio.to_thread`; runners know **nothing** about retries or ordering — they are a pure "execute this task now" hand. The execution handler passes `plan:goal:task:run:number:attempt` as the additive idempotency key. CLI runners preserve legacy three-part keys and, for the canonical form, inject only `ORCHESTRATOR_PLAN_ID`, `ORCHESTRATOR_GOAL_ID`, `ORCHESTRATOR_TASK_ID`, `ORCHESTRATOR_RUN_ID`, `ORCHESTRATOR_ATTEMPT_NUMBER`, and `ORCHESTRATOR_ATTEMPT_ID` into the child environment. The task prompt is a markdown contract (`build_task_prompt`); project conventions belong in the workspace's `AGENTS.md`, not in the runner.
+Subprocesses are managed through the shared `supervise_process()` supervisor,
+which reads stdout and stderr incrementally rather than using one blocking
+`communicate()` call; the supervisor's timeout and process-group termination/
+reaping behavior remains in force. The synchronous subprocess work is still
+hopped off the event loop via `asyncio.to_thread`; runners know **nothing** about
+retries or ordering — they are a pure "execute this task now" hand. The
+execution handler passes `plan:goal:task:run:number:attempt` as the additive
+idempotency key. CLI runners preserve legacy three-part keys and, for the
+canonical form, inject only `ORCHESTRATOR_PLAN_ID`, `ORCHESTRATOR_GOAL_ID`,
+`ORCHESTRATOR_TASK_ID`, `ORCHESTRATOR_RUN_ID`, `ORCHESTRATOR_ATTEMPT_NUMBER`,
+and `ORCHESTRATOR_ATTEMPT_ID` into the child environment. The task prompt is a
+markdown contract (`build_task_prompt`); project conventions belong in the
+workspace's `AGENTS.md`, not in the runner.
 
 ## The workspace — git branching as the rollback mechanism
 
