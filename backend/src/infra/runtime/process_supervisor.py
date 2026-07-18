@@ -58,14 +58,26 @@ class _BoundedLog:
             ).encode("utf-8")
             + b"\n"
         )
+        marker = b'{"truncated":true}\n'
         with self._lock, self.path.open("ab+") as handle:
             handle.seek(0, os.SEEK_END)
             if handle.tell() + len(record) > self.cap_bytes:
                 handle.seek(0)
-                retained = handle.read(max(0, self.cap_bytes - len(record)))
-                retained = (b'{"truncated":true}\n' + retained)[
-                    -max(0, self.cap_bytes - len(record)) :
-                ]
+                existing = handle.read()
+                # Keep the marker plus the newest complete lines that still fit
+                # alongside the incoming record.
+                budget = max(0, self.cap_bytes - len(record) - len(marker))
+                if budget == 0:
+                    retained = marker if len(marker) + min(len(record), self.cap_bytes) <= self.cap_bytes else b""
+                else:
+                    tail = existing[-budget:]
+                    # Drop a leading partial line when the byte cut lands mid-record.
+                    nl = tail.find(b"\n")
+                    if 0 <= nl < len(tail) - 1:
+                        tail = tail[nl + 1 :]
+                    elif nl == len(tail) - 1:
+                        tail = b""
+                    retained = marker + tail
                 handle.seek(0)
                 handle.truncate()
                 handle.write(retained)
