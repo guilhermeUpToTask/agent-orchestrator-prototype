@@ -149,6 +149,7 @@ class AppContainer:
             self.provider_repo,
             self.model_repo,
             lambda: self.secret_store,
+            self.orchestrator_home,
         )
 
     @cached_property
