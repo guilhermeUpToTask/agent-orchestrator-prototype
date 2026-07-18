@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,8 +157,16 @@ def supervise_process(
         start_new_session=True,
     )
     observe(ObservationKind.PROCESS_STARTED, ProcessObservationPayload(log_path=str(log_path)))
-    outputs: dict[StreamName, list[str]] = {"stdout": [], "stderr": []}
+    outputs: dict[StreamName, deque[str]] = {"stdout": deque(), "stderr": deque()}
+    retained_bytes: dict[StreamName, int] = {"stdout": 0, "stderr": 0}
     counts: dict[StreamName, int] = {"stdout": 0, "stderr": 0}
+
+    def retain(stream: StreamName, chunk: str) -> None:
+        outputs[stream].append(chunk)
+        retained_bytes[stream] += len(chunk.encode("utf-8"))
+        while retained_bytes[stream] > log_cap_bytes:
+            oldest = outputs[stream].popleft()
+            retained_bytes[stream] -= len(oldest.encode("utf-8"))
 
     def read_stream(stream: StreamName, pipe: TextIO | None) -> None:
         if pipe is None:
@@ -166,7 +175,7 @@ def supervise_process(
             chunk = pipe.readline()
             if not chunk:
                 return
-            outputs[stream].append(chunk)
+            retain(stream, chunk)
             counts[stream] += len(chunk.encode("utf-8"))
             log.write(stream, chunk)
             if on_output is not None:
