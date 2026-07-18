@@ -75,6 +75,14 @@
   border-radius: var(--r-2);
 }
 
+/* ── Attention list ─────────────────────────────────────────────────────── */
+
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
 /* ── Rows ───────────────────────────────────────────────────────────────── */
 
 .rows {
@@ -183,30 +191,62 @@
   gap: 4px;
 }
 
-/* ── Error state ────────────────────────────────────────────────────────── */
+/* ── Inline field error text ───────────────────────────────────────────── */
 
-.errorCard {
-  border: 1px solid color-mix(in srgb, var(--fail) 45%, transparent);
-  background: var(--fail-bg);
-  border-radius: var(--r-2);
-  padding: var(--sp-5);
+.errorBody { font-size: var(--fs-body); line-height: 1.55; color: var(--fail-text); }
+.errorBody code { font-size: 12px; color: var(--text-1); }
+
+/* ── Plan list rows (Plans view) ───────────────────────────────────────── */
+
+.planList {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  max-width: 560px;
 }
 
-.errorTitle { font-size: var(--fs-title); font-weight: 600; color: var(--fail-text); }
-
-.errorBody { font-size: var(--fs-body); line-height: 1.55; color: var(--text-2); }
-.errorBody code { font-size: 12px; color: var(--text-1); }
-
-.retryBtn {
-  align-self: flex-start;
-  padding: 7px 14px;
+.planRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-1);
+  border: 1px solid var(--border-0);
   border-radius: var(--r-2);
-  background: var(--accent);
-  color: var(--accent-text-on);
-  font-weight: 500;
+  color: inherit;
+  text-decoration: none;
 }
-.retryBtn:hover { background: var(--accent-hover); }
+.planRow:hover { background: var(--bg-2); color: inherit; }
+
+.planTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.planTitleName {
+  font-weight: 500;
+  color: var(--text-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planTitleId {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.planActivity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}

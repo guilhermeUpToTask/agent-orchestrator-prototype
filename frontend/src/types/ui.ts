@@ -73,6 +73,11 @@ export interface TaskResult {
   metadata: Record<string, string>;
 }
 
+/** The verdict of one verification run — task.verification_evidence is chronological. */
+export interface VerificationEvidence {
+  accepted: boolean;
+}
+
 export interface Task {
   id: string;
   name: string;
@@ -89,6 +94,7 @@ export interface Task {
   cycle_attempt?: number;
   revision?: number;
   role_agent_ids?: Record<string, string>;
+  verification_evidence?: VerificationEvidence[];
 }
 
 export interface Goal {

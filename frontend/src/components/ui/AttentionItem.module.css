@@ -1,0 +1,39 @@
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-3);
+  border-radius: var(--r-2);
+  border: 1px solid;
+  border-left-width: 3px;
+  font: inherit;
+  color: inherit;
+}
+
+button.item {
+  cursor: pointer;
+}
+
+.icon {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.title {
+  color: var(--text-1);
+  font-weight: 500;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.detail {
+  flex: 1 0 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown } from 'lucide-react';
+import { AlertTriangle, ArrowDown } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { usePlannerStore, type BufferedEvent } from '../store/plannerStore';
 import { useMetrics } from '../lib/queries';
 import { absTime, relTime, useNow } from '../lib/time';
 import { tokens } from '../styles/tokens';
+import { Card } from '../components/ui';
 import styles from './Activity.module.css';
 
 type EventKind = 'ok' | 'fail' | 'neutral';
@@ -54,8 +55,29 @@ function Metric({ label, value, warn }: { label: string; value: number | null; w
  * usual cause of death, so they get their own highlighted tile.
  */
 function MetricsStrip({ planId }: { planId?: string }) {
-  const { data } = useMetrics(planId);
-  if (!data) return null;
+  const { data, isLoading, error } = useMetrics(planId);
+
+  if (error && !data) {
+    return (
+      <Card>
+        <div className={styles.metricsError}>
+          <AlertTriangle size={14} aria-hidden />
+          Metrics unavailable — the roll-up request failed
+        </div>
+      </Card>
+    );
+  }
+
+  if (isLoading || !data) {
+    return (
+      <div className={styles.metricsStrip} aria-busy="true" aria-label="Loading metrics">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="skeleton" style={{ height: 46, minWidth: 118 }} />
+        ))}
+      </div>
+    );
+  }
+
   const rateLimited = data.agent.failures_by_kind['rate_limit'] ?? 0;
   const planner = data.llm.scopes.planner;
   const child = data.llm.scopes.child;

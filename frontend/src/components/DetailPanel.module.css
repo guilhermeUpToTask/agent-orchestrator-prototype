@@ -38,11 +38,8 @@
   margin-bottom: var(--sp-4);
 }
 
-.field { margin-bottom: var(--sp-4); }
-.fieldLabel { margin-bottom: 4px; }
-
 .text {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   color: var(--text-2);
   line-height: 1.6;
   margin: 0;
@@ -50,12 +47,12 @@
 }
 
 .muted {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   color: var(--text-3);
 }
 
 .monoText {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-family: var(--font-mono);
   color: var(--text-2);
 }
@@ -77,7 +74,7 @@
 }
 
 .backoff {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-family: var(--font-mono);
   color: var(--gate-text);
 }
@@ -88,7 +85,7 @@
   margin-bottom: 6px;
   background: var(--fail-bg);
   border: 1px solid color-mix(in srgb, var(--fail) 25%, transparent);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-family: var(--font-mono);
   color: var(--fail-text);
   line-height: 1.5;
@@ -100,7 +97,7 @@
   border-radius: var(--r-2);
   background: var(--bg-0);
   border: 1px solid var(--border-0);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-family: var(--font-mono);
   color: var(--text-2);
   line-height: 1.6;
@@ -108,39 +105,6 @@
   word-break: break-word;
   max-height: 260px;
   overflow-y: auto;
-}
-
-/* Inline edit controls (un-freeze #3: edit at the gate or while paused). */
-.editInput {
-  width: 100%;
-  padding: 6px 9px;
-  border-radius: var(--r-2, 6px);
-  border: 1px solid var(--border);
-  background: var(--bg-0, transparent);
-  color: var(--text-1, var(--text));
-  font-size: 12px;
-  font-family: inherit;
-  resize: vertical;
-}
-.saveBtn {
-  padding: 6px 14px;
-  border-radius: var(--r-2, 6px);
-  border: none;
-  background: var(--accent);
-  color: var(--accent-text-on, #fff);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.saveBtn:disabled { opacity: 0.55; cursor: default; }
-.cancelBtn {
-  padding: 6px 14px;
-  border-radius: var(--r-2, 6px);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-2, var(--text-muted));
-  font-size: 12px;
-  cursor: pointer;
 }
 
 /* Per-task agent-event history (durable, from GET /agent-events). */
@@ -151,16 +115,16 @@
   max-height: 180px;
   overflow-y: auto;
   padding: 6px 8px;
-  border-radius: var(--r-2, 6px);
-  background: var(--bg-0, transparent);
-  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
 }
 .agentLogLine {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1.6;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-2, var(--text-muted));
+  color: var(--text-2);
 }

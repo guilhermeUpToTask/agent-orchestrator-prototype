@@ -1,0 +1,13 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  border: 1px solid;
+  line-height: 1;
+}

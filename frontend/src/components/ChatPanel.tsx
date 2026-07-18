@@ -36,23 +36,23 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
         }}>
           {isUser ? <User size={10} color={tokens.accent} /> : <Bot size={10} color={tokens.purple} />}
         </div>
-        <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted }}>
+        <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted }}>
           {isUser ? 'you' : 'reasoner'} · {time}
         </span>
         {committed && (
           <span style={{
-            fontSize: 8, fontFamily: tokens.fontMono, color: tokens.green,
-            background: tokens.greenDim, padding: '1px 6px', borderRadius: 3,
+            fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.green,
+            background: tokens.greenDim, padding: '1px 6px', borderRadius: 'var(--r-1)',
           }}>intent ready for review</span>
         )}
         {submittedBrief && isUser && (
-          <span style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.accent }}>
+          <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.accent }}>
             submitted brief
           </span>
         )}
       </div>
       <div style={{
-        maxWidth: '88%', padding: '8px 12px',
+        maxWidth: '88%', padding: 'var(--sp-2) var(--sp-3)',
         background: isUser ? tokens.accentDim : tokens.cardBg,
         border: `1px solid ${isUser ? 'color-mix(in srgb, var(--accent) 20%, transparent)' : tokens.border}`,
         borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
@@ -66,14 +66,14 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
 function ThinkingBubble({ label }: { label: string }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      padding: '8px 12px', background: tokens.cardBg,
+      display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
+      padding: 'var(--sp-2) var(--sp-3)', background: tokens.cardBg,
       border: `1px solid ${tokens.border}`,
       borderRadius: '10px 10px 10px 2px',
       width: 'fit-content', animation: 'fadein 0.15s ease both',
     }}>
       <Loader2 size={12} color={tokens.purple} style={{ animation: 'spin 1s linear infinite' }} />
-      <span style={{ fontSize: 11, color: tokens.textMuted, fontFamily: tokens.fontMono }}>{label}</span>
+      <span style={{ fontSize: 'var(--fs-micro)', color: tokens.textMuted, fontFamily: tokens.fontMono }}>{label}</span>
     </div>
   );
 }
@@ -130,7 +130,7 @@ export function ChatPanel() {
         display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 12, cursor: 'pointer',
       }} onClick={toggleChatPanel}>
         <ChevronRight size={14} color={tokens.textMuted} />
-        <div style={{ writingMode: 'vertical-rl', marginTop: 12, fontSize: 9, fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em' }}>
+        <div style={{ writingMode: 'vertical-rl', marginTop: 12, fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em' }}>
           CHAT · REASONER
         </div>
       </div>
@@ -150,18 +150,18 @@ export function ChatPanel() {
       {/* Header */}
       <div style={{
         padding: '10px 14px', borderBottom: `1px solid ${tokens.border}`,
-        display: 'flex', alignItems: 'center', gap: 8, background: '#0d0f16', flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', background: 'var(--bg-1)', flexShrink: 0,
       }}>
         <div style={{
           width: 7, height: 7, borderRadius: '50%',
           background: inputEnabled ? tokens.accent : tokens.textMuted,
           boxShadow: inputEnabled ? `0 0 8px ${tokens.accent}` : undefined,
         }} />
-        <span style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPrimary, letterSpacing: '0.08em' }}>
+        <span style={{ fontFamily: tokens.fontMono, fontSize: 'var(--fs-micro)', color: tokens.textPrimary, letterSpacing: '0.08em' }}>
           CHAT · REASONER
         </span>
         <span style={{
-          fontSize: 8, fontFamily: tokens.fontMono, padding: '2px 6px', borderRadius: 3,
+          fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, padding: '2px 6px', borderRadius: 'var(--r-1)',
           background: inputEnabled ? tokens.purpleDim : 'var(--bg-3)',
           color: inputEnabled ? tokens.purple : tokens.textMuted,
           marginLeft: 4,
@@ -178,16 +178,16 @@ export function ChatPanel() {
       <div style={{
         padding: '6px 14px', borderBottom: `1px solid ${tokens.border}`,
         background: inputEnabled ? 'transparent' : 'var(--bg-2)',
-        fontSize: 9, fontFamily: tokens.fontMono, lineHeight: 1.5,
+        fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, lineHeight: 1.5,
         color: inputEnabled ? tokens.textMuted : tokens.purple, flexShrink: 0,
       }}>
         {hint}
       </div>
 
       {/* Messages (server history) */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--sp-3) 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {history.length === 0 && !thinking && (
-          <span style={{ fontSize: 10, fontFamily: tokens.fontMono, color: tokens.textMuted, lineHeight: 1.6 }}>
+          <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted, lineHeight: 1.6 }}>
             {inputEnabled
               ? 'No messages yet — describe the work to start planning.'
               : 'No conversation for this phase.'}
@@ -199,7 +199,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div style={{ padding: '10px 12px', borderTop: `1px solid ${tokens.border}`, display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
+      <div style={{ padding: '10px var(--sp-3)', borderTop: `1px solid ${tokens.border}`, display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-end', flexShrink: 0 }}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -210,7 +210,7 @@ export function ChatPanel() {
           style={{
             flex: 1, background: tokens.inputBg,
             border: `1px solid ${tokens.border}`, borderRadius: tokens.r8,
-            padding: '8px 10px', fontFamily: tokens.fontSans, fontSize: 12,
+            padding: 'var(--sp-2) 10px', fontFamily: tokens.fontSans, fontSize: 12,
             color: tokens.textPrimary, outline: 'none', resize: 'none', lineHeight: 1.5,
           }}
           onFocus={(e) => (e.target.style.borderColor = tokens.accent)}

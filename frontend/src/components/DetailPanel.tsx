@@ -5,16 +5,9 @@ import { usePlannerStore } from '../store/plannerStore';
 import { useAgentEvents, useAgents, useApplyEdit, usePlan, useRetryTask } from '../lib/queries';
 import { tokens } from '../styles/tokens';
 import { StatusBadge } from './StatusBadge';
+import { Button, CountChip, Field, Input, Select, TextArea } from './ui';
 import styles from './DetailPanel.module.css';
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className={styles.field}>
-      <div className={`label ${styles.fieldLabel}`}>{label}</div>
-      {children}
-    </div>
-  );
-}
+import { attemptLabel, verificationLabel } from '../lib/taskLabels';
 
 /**
  * The task inspector: everything the aggregate knows about one task —
@@ -31,10 +24,11 @@ export function DetailPanel() {
   const { data: agents = [] } = useAgents();
   const applyEdit = useApplyEdit(planId);
   const retryTask = useRetryTask(planId);
-  const { data: taskEvents = [] } = useAgentEvents(
-    planId || null,
-    selectedTaskId ?? undefined,
-  );
+  const {
+    data: taskEvents = [],
+    isLoading: eventsLoading,
+    error: eventsError,
+  } = useAgentEvents(planId || null, selectedTaskId ?? undefined);
   const [editing, setEditing] = React.useState(false);
   const [name, setName] = React.useState('');
   const [description, setDescription] = React.useState('');
@@ -52,6 +46,8 @@ export function DetailPanel() {
   if (!detailPanelOpen || !task || !goal) return null;
 
   const agent = task.agent_id ? agents.find((a) => a.id === task.agent_id) ?? null : null;
+  const attempt = attemptLabel(task, agent);
+  const verification = verificationLabel(task);
 
   // Editable exactly where the backend allows: at the pre-execution gate, or
   // while the plan is paused; and only a pending task (or a failed one while
@@ -107,18 +103,18 @@ export function DetailPanel() {
         <StatusBadge domain="status" value={task.status} />
         <div style={{ flex: 1 }} />
         {canRetry && (
-          <button
+          <Button
+            size="sm"
             onClick={() => retryTask.mutate({ goalId: goal.id, taskId: task.id })}
-            aria-label="Retry failed task"
+            pending={retryTask.isPending}
             title={plan?.paused ? "Retry task; Resume remains separate" : "Retry failed task"}
-            className={styles.close}
-            disabled={retryTask.isPending}
           >
-            <RotateCcw size={14} aria-hidden />
-          </button>
+            <RotateCcw size={12} aria-hidden /> Retry
+          </Button>
         )}
         {canEdit && !editing && (
-          <button
+          <Button
+            variant="icon"
             onClick={() => {
               // seed from the CURRENT task when entering edit mode, so a plan
               // refetch since mount can't leave the form showing stale values
@@ -127,53 +123,45 @@ export function DetailPanel() {
               setEditing(true);
             }}
             aria-label="Edit task"
-            className={styles.close}
           >
             <Pencil size={14} aria-hidden />
-          </button>
+          </Button>
         )}
         {canEdit && (
-          <button onClick={deleteTask} aria-label="Delete task" className={styles.close}>
+          <Button variant="icon" onClick={deleteTask} aria-label="Delete task">
             <Trash2 size={14} aria-hidden />
-          </button>
+          </Button>
         )}
-        <button
-          onClick={() => selectTask(null)}
-          aria-label="Close task detail"
-          className={styles.close}
-        >
+        <Button variant="icon" onClick={() => selectTask(null)} aria-label="Close task detail">
           <X size={15} aria-hidden />
-        </button>
+        </Button>
       </div>
 
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-          <input
-            className={styles.editInput}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)' }}>
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Task name"
             aria-label="Task name"
           />
-          <textarea
-            className={styles.editInput}
+          <TextArea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
             rows={3}
             aria-label="Task description"
           />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              className={styles.saveBtn}
+          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <Button
+              variant="primary"
               onClick={saveEdit}
-              disabled={applyEdit.isPending || !name.trim()}
+              disabled={!name.trim()}
+              pending={applyEdit.isPending}
             >
               Save
-            </button>
-            <button className={styles.cancelBtn} onClick={() => setEditing(false)}>
-              Cancel
-            </button>
+            </Button>
+            <Button onClick={() => setEditing(false)}>Cancel</Button>
           </div>
         </div>
       ) : (
@@ -195,17 +183,15 @@ export function DetailPanel() {
 
       <Field label="Agent">
         {canEdit ? (
-          <select
-            className={styles.editInput}
+          <Select
             value={task.agent_id ?? ''}
             onChange={(e) => rebind(e.target.value)}
             aria-label="Rebind agent"
-          >
-            <option value="">(unbound)</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: '(unbound)' },
+              ...agents.map((a) => ({ value: a.id, label: a.name })),
+            ]}
+          />
         ) : agent ? (
           <span className={styles.tag}>{agent.name}</span>
         ) : (
@@ -227,10 +213,24 @@ export function DetailPanel() {
 
       {(task.attempt > 0 || task.reopen_count > 0) && (
         <Field label="Attempts">
-          <span className={styles.monoText}>
-            attempt {task.attempt}
-            {task.reopen_count > 0 && ` · reopened ${task.reopen_count}×`}
-          </span>
+          <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+            {attempt ? (
+              <CountChip tone="fail">{attempt}</CountChip>
+            ) : (
+              <span className={styles.monoText}>attempt {task.attempt}</span>
+            )}
+            {task.reopen_count > 0 && (
+              <span className={styles.monoText}>reopened {task.reopen_count}×</span>
+            )}
+          </div>
+        </Field>
+      )}
+
+      {verification && (
+        <Field label="Verification">
+          <CountChip tone={verification === 'verified' ? 'ok' : 'fail'}>
+            {verification === 'verified' ? 'verified' : 'verification rejected'}
+          </CountChip>
         </Field>
       )}
 
@@ -254,29 +254,45 @@ export function DetailPanel() {
         </Field>
       )}
 
-      {taskEvents.length > 0 && (
+      {eventsLoading ? (
         <Field label="Agent log">
           <div className={styles.agentLog}>
-            {taskEvents.map((e) => (
-              <div key={e.event_id} className={styles.agentLogLine}>
-                <span style={{ color: tokens.textDim }}>
-                  {new Date(e.occurred_at).toLocaleTimeString()}{' '}
-                </span>
-                <span
-                  style={{
-                    color:
-                      e.type === 'agent.failed' ? tokens.red
-                      : e.type === 'agent.finished' ? tokens.green
-                      : tokens.purple,
-                  }}
-                >
-                  a{e.attempt}#{e.seq} {e.type}
-                </span>{' '}
-                {e.payload.reason ?? e.payload.elapsed_seconds ?? e.payload.runtime ?? ''}
-              </div>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="skeleton" style={{ height: 14, marginBottom: 4 }} />
             ))}
           </div>
         </Field>
+      ) : eventsError ? (
+        <Field label="Agent log">
+          <div className={styles.agentLog} style={{ color: 'var(--fail-text)' }}>
+            Agent log unavailable
+          </div>
+        </Field>
+      ) : (
+        taskEvents.length > 0 && (
+          <Field label="Agent log">
+            <div className={styles.agentLog}>
+              {taskEvents.map((e) => (
+                <div key={e.event_id} className={styles.agentLogLine}>
+                  <span style={{ color: tokens.textDim }}>
+                    {new Date(e.occurred_at).toLocaleTimeString()}{' '}
+                  </span>
+                  <span
+                    style={{
+                      color:
+                        e.type === 'agent.failed' ? tokens.red
+                        : e.type === 'agent.finished' ? tokens.green
+                        : tokens.purple,
+                    }}
+                  >
+                    a{e.attempt}#{e.seq} {e.type}
+                  </span>{' '}
+                  {e.payload.reason ?? e.payload.elapsed_seconds ?? e.payload.runtime ?? ''}
+                </div>
+              ))}
+            </div>
+          </Field>
+        )
       )}
     </aside>
   );

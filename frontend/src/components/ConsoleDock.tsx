@@ -78,11 +78,11 @@ export function ConsoleDock() {
   }, [count, liveRows.length]);
 
   const toggleStyle = (active: boolean): React.CSSProperties => ({
-    fontSize: 9,
+    fontSize: 'var(--fs-micro)',
     fontFamily: tokens.fontMono,
     letterSpacing: '0.06em',
     padding: '2px 7px',
-    borderRadius: 5,
+    borderRadius: 'var(--r-2)',
     border: `1px solid ${tokens.border}`,
     color: active ? tokens.accent : tokens.textMuted,
     background: active ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
@@ -101,14 +101,14 @@ export function ConsoleDock() {
       <button
         onClick={toggleConsole}
         style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
+          display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '6px 14px',
           background: 'transparent', border: 'none', cursor: 'pointer',
           color: tokens.textMuted, flexShrink: 0,
         }}
         aria-expanded={consoleOpen}
       >
         <Terminal size={12} aria-hidden />
-        <span style={{ fontSize: 9, fontFamily: tokens.fontMono, letterSpacing: '0.1em' }}>
+        <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, letterSpacing: '0.1em' }}>
           AGENT EVENTS {count > 0 && `· ${count}`}
         </span>
         <div style={{ flex: 1 }} />
@@ -146,12 +146,12 @@ export function ConsoleDock() {
             const element = scrollRef.current;
             if (element) pinnedRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
           }}
-          style={{ flex: 1, overflowY: 'auto', padding: '4px 14px 10px', fontFamily: tokens.fontMono }}
+          style={{ flex: 1, overflowY: 'auto', padding: 'var(--sp-1) 14px 10px', fontFamily: tokens.fontMono }}
         >
-          {isLoading && <div style={{ color: tokens.textMuted, fontSize: 10 }}>Hydrating attempt history…</div>}
+          {isLoading && <div style={{ color: tokens.textMuted, fontSize: 'var(--fs-micro)' }}>Hydrating attempt history…</div>}
 
           {!failedOnly && timeline?.planning_operations.map((operation) => (
-            <div key={operation.id} style={{ fontSize: 10, lineHeight: 1.7, color: operation.status === 'failed' ? tokens.red : tokens.purple }}>
+            <div key={operation.id} style={{ fontSize: 'var(--fs-micro)', lineHeight: 1.7, color: operation.status === 'failed' ? tokens.red : tokens.purple }}>
               planner/{operation.purpose}
               {operation.target_goal_id && ` · goal ${operation.target_goal_id.slice(0, 8)}`}
               {` · ${operation.status} · ${operation.model_request_count} model request(s)`}
@@ -162,19 +162,19 @@ export function ConsoleDock() {
 
           {tasks.map((task) => (
             <div key={`${task.goal_id}:${task.task_id}`} style={{ marginTop: 5 }}>
-              <div style={{ color: tokens.accent, fontSize: 10, lineHeight: 1.7 }}>
+              <div style={{ color: tokens.accent, fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
                 task {task.task_id.slice(0, 8)} · goal {task.goal_id.slice(0, 8)}
               </div>
               {task.runs.map((run) => (
-                <div key={run.id} style={{ paddingLeft: 12 }}>
-                  <div style={{ color: tokens.textSecond, fontSize: 9.5, lineHeight: 1.7 }}>
+                <div key={run.id} style={{ paddingLeft: 'var(--sp-3)' }}>
+                  <div style={{ color: tokens.textSecond, fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
                     run {run.id.slice(0, 8)} · {run.status} · {duration(run.started_at, run.completed_at, now)}
                   </div>
                   {run.attempts.map((attempt) => {
                     const retry = retryCopy(attempt.retry_at, now);
                     const provider = [attempt.runtime, attempt.provider_id, attempt.model_id].filter(Boolean).join('/');
                     return (
-                      <div key={attempt.id} style={{ paddingLeft: 12, color: attemptColor(attempt), fontSize: 9.5, lineHeight: 1.7 }}>
+                      <div key={attempt.id} style={{ paddingLeft: 'var(--sp-3)', color: attemptColor(attempt), fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
                         attempt {attempt.number} · {attempt.status} · {duration(attempt.started_at, attempt.completed_at, now)}
                         {provider && ` · ${provider}`}
                         {attempt.failure_kind && ` · ${attempt.failure_kind}`}
@@ -187,7 +187,7 @@ export function ConsoleDock() {
                           </span>
                         )}
                         {(attempt.stdout_tail || attempt.stderr_tail) && (
-                          <div style={{ color: tokens.textDim, whiteSpace: 'pre-wrap', paddingLeft: 8 }}>
+                          <div style={{ color: tokens.textDim, whiteSpace: 'pre-wrap', paddingLeft: 'var(--sp-2)' }}>
                             {(attempt.stderr_tail || attempt.stdout_tail).slice(-500)}
                           </div>
                         )}
@@ -200,10 +200,10 @@ export function ConsoleDock() {
           ))}
 
           {liveRows.length > 0 && (
-            <div style={{ marginTop: 7, borderTop: `1px solid ${tokens.border}`, paddingTop: 4 }}>
-              <div style={{ fontSize: 9, color: tokens.textMuted }}>LIVE RUNTIME EVENTS</div>
+            <div style={{ marginTop: 7, borderTop: `1px solid ${tokens.border}`, paddingTop: 'var(--sp-1)' }}>
+              <div style={{ fontSize: 'var(--fs-micro)', color: tokens.textMuted }}>LIVE RUNTIME EVENTS</div>
               {liveRows.map((row) => (
-                <div key={row.id} style={{ fontSize: 9.5, lineHeight: 1.7, color: row.type.includes('failed') ? tokens.red : tokens.textSecond }}>
+                <div key={row.id} style={{ fontSize: 'var(--fs-micro)', lineHeight: 1.7, color: row.type.includes('failed') ? tokens.red : tokens.textSecond }}>
                   {new Date(row.at).toLocaleTimeString()} · {row.task_id.slice(0, 8) || 'plan'} · a{row.attempt}#{row.seq} · {row.type} · {row.text}
                 </div>
               ))}
@@ -211,7 +211,7 @@ export function ConsoleDock() {
           )}
 
           {!isLoading && count === 0 && liveRows.length === 0 && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: tokens.textDim, fontSize: 10 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: tokens.textDim, fontSize: 'var(--fs-micro)' }}>
               {failedOnly && <AlertTriangle size={11} aria-hidden />}
               {failedOnly ? 'No failed attempts.' : 'No planning or agent attempts yet.'}
             </div>

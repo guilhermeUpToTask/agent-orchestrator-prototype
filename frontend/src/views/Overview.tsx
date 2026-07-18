@@ -1,12 +1,22 @@
 import React from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Hand, XCircle } from 'lucide-react';
 import { useAgents, usePlan } from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { StatusBadge } from '../components/StatusBadge';
+import { AttentionItem, CountChip, ErrorState } from '../components/ui';
 import { PLAN_STATUS } from '../styles/tokens';
 import type { Goal, Task } from '../types/ui';
 import styles from './Overview.module.css';
+import { attemptLabel } from '../lib/taskLabels';
+
+/** The failure reason inline — never force a Goals navigation just to learn why. */
+function failureDetail(task: Task): string | null {
+  if (!task.result?.failure_reason) return null;
+  return task.result.failure_kind
+    ? `${task.result.failure_reason} (${task.result.failure_kind})`
+    : task.result.failure_reason;
+}
 
 /**
  * The operator's home for one plan: answers "what is happening, and what do
@@ -18,18 +28,16 @@ export function Overview() {
   const { data: plan, isLoading, error, refetch } = usePlan(planId || null);
   const { data: agents = [] } = useAgents();
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
+  const selectTask = usePlannerStore((s) => s.selectTask);
+  const navigate = useNavigate();
 
-  if (error) {
+  if (error && !plan) {
     return (
       <div className={styles.page}>
-        <div className={styles.errorCard} role="alert">
-          <div className={styles.errorTitle}>Can't reach the backend</div>
-          <p className={styles.errorBody}>
-            {(error as Error).message}. Check that the API server is running at{' '}
-            <code>{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</code>, then retry.
-          </p>
-          <button className={styles.retryBtn} onClick={() => refetch()}>Retry</button>
-        </div>
+        <ErrorState
+          message={`${(error as Error).message}. Check that the API server is running at ${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}, then retry.`}
+          onRetry={() => refetch()}
+        />
       </div>
     );
   }
@@ -83,39 +91,45 @@ export function Overview() {
               : "Nothing needs operator attention right now."}
           </p>
         ) : (
-          <ul className={styles.rows}>
-            {gate && (
-              <li>
-                <button className={styles.row} onClick={() => setGateOpen(true)}>
-                  <StatusBadge domain="plan" value={plan.status} bare />
-                  <span className={styles.rowTitle}>{gate}</span>
-                  <ChevronRight size={14} className={styles.rowChev} aria-hidden />
-                </button>
-              </li>
-            )}
+          <div className={styles.attentionList}>
             {plan.block && (
-              <li>
-                <div className={styles.row}>
-                  <StatusBadge domain="plan" value="blocked" bare />
-                  <span className={styles.rowTitle}>{plan.block.explanation}</span>
-                  <span className={styles.rowMeta}>{humanize(plan.block.stage)}</span>
-                </div>
-              </li>
+              <AttentionItem
+                tone="fail"
+                icon={<XCircle size={16} aria-hidden />}
+                title={plan.block.explanation}
+                meta={humanize(plan.block.stage)}
+              />
             )}
-            {failedTasks.map(({ task, goal }) => (
-              <li key={task.id}>
-                <Link className={styles.row} to={`${base}/goals`}>
-                  <StatusBadge domain="status" value={task.status} bare />
-                  <span className={styles.rowTitle}>{task.name}</span>
-                  <span className={styles.rowMeta}>
-                    {goal.name}
-                    {task.attempt > 1 && ` · attempt ${task.attempt}`}
-                  </span>
-                  <ChevronRight size={14} className={styles.rowChev} aria-hidden />
-                </Link>
-              </li>
-            ))}
-          </ul>
+            {gate && (
+              <AttentionItem
+                tone="gate"
+                icon={<Hand size={16} aria-hidden />}
+                title={gate}
+                onClick={() => setGateOpen(true)}
+              />
+            )}
+            {failedTasks.map(({ task, goal }) => {
+              const attempt = attemptLabel(
+                task,
+                agents.find((a) => a.id === task.agent_id) ?? null,
+              );
+              return (
+                <AttentionItem
+                  key={task.id}
+                  tone="fail"
+                  icon={<XCircle size={16} aria-hidden />}
+                  title={task.name}
+                  meta={goal.name}
+                  badge={attempt ? <CountChip tone="fail">{attempt}</CountChip> : undefined}
+                  detail={failureDetail(task)}
+                  onClick={() => {
+                    selectTask(task.id);
+                    navigate(`${base}/goals`);
+                  }}
+                />
+              );
+            })}
+          </div>
         )}
       </section>
 
