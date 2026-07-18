@@ -25,6 +25,11 @@ OutputCallback = Callable[[StreamName, str], None]
 ObservationCallback = Callable[[TelemetryObservation], None]
 
 
+def _require_min_cap(cap_bytes: int, *, label: str) -> None:
+    if cap_bytes < 256:
+        raise ValueError(f"{label} cap must be at least 256 bytes")
+
+
 def attempt_log_path(orchestrator_home: Path, attempt_id: str) -> Path:
     """Return the durable runtime log location for an execution attempt."""
     return orchestrator_home / "runtime-logs" / f"{attempt_id}.jsonl"
@@ -44,11 +49,26 @@ class ProcessSupervisorResult:
 
 class _BoundedLog:
     def __init__(self, path: Path, cap_bytes: int) -> None:
-        if cap_bytes < 256:
-            raise ValueError("log cap must be at least 256 bytes")
+        _require_min_cap(cap_bytes, label="log")
         self.path, self.cap_bytes, self._lock = path, cap_bytes, threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.touch()
+
+    def _compute_retained(self, existing: bytes, record: bytes) -> bytes:
+        marker = b'{"truncated":true}\n'
+        # Keep the marker plus the newest complete lines that still fit
+        # alongside the incoming record.
+        budget = max(0, self.cap_bytes - len(record) - len(marker))
+        if budget == 0:
+            return marker if len(marker) + min(len(record), self.cap_bytes) <= self.cap_bytes else b""
+        tail = existing[-budget:]
+        # Drop a leading partial line when the byte cut lands mid-record.
+        nl = tail.find(b"\n")
+        if 0 <= nl < len(tail) - 1:
+            tail = tail[nl + 1 :]
+        elif nl == len(tail) - 1:
+            tail = b""
+        return marker + tail
 
     def write(self, stream: StreamName, chunk: str) -> None:
         record = (
@@ -59,30 +79,34 @@ class _BoundedLog:
             ).encode("utf-8")
             + b"\n"
         )
-        marker = b'{"truncated":true}\n'
         with self._lock, self.path.open("ab+") as handle:
             handle.seek(0, os.SEEK_END)
             if handle.tell() + len(record) > self.cap_bytes:
                 handle.seek(0)
                 existing = handle.read()
-                # Keep the marker plus the newest complete lines that still fit
-                # alongside the incoming record.
-                budget = max(0, self.cap_bytes - len(record) - len(marker))
-                if budget == 0:
-                    retained = marker if len(marker) + min(len(record), self.cap_bytes) <= self.cap_bytes else b""
-                else:
-                    tail = existing[-budget:]
-                    # Drop a leading partial line when the byte cut lands mid-record.
-                    nl = tail.find(b"\n")
-                    if 0 <= nl < len(tail) - 1:
-                        tail = tail[nl + 1 :]
-                    elif nl == len(tail) - 1:
-                        tail = b""
-                    retained = marker + tail
+                retained = self._compute_retained(existing, record)
                 handle.seek(0)
                 handle.truncate()
                 handle.write(retained)
             handle.write(record[-self.cap_bytes :])
+
+
+class _BoundedBuffer:
+    def __init__(self, cap_bytes: int) -> None:
+        _require_min_cap(cap_bytes, label="buffer")
+        self._chunks: deque[str] = deque()
+        self._retained_bytes = 0
+        self.cap_bytes = cap_bytes
+
+    def append(self, chunk: str) -> None:
+        self._chunks.append(chunk)
+        self._retained_bytes += len(chunk.encode("utf-8"))
+        while self._retained_bytes > self.cap_bytes:
+            oldest = self._chunks.popleft()
+            self._retained_bytes -= len(oldest.encode("utf-8"))
+
+    def __iter__(self):
+        return iter(self._chunks)
 
 
 def terminate_process_group(proc: subprocess.Popen[str]) -> None:
@@ -102,6 +126,59 @@ def terminate_process_group(proc: subprocess.Popen[str]) -> None:
         except ProcessLookupError:
             pass
         proc.wait(timeout=2)
+
+
+def _emit_observation(
+    on_observation: ObservationCallback | None,
+    kind: ObservationKind,
+    payload: ProcessObservationPayload,
+    *,
+    plan_id: str,
+    goal_id: str | None,
+    task_id: str | None,
+    run_id: str | None,
+    attempt_id: str | None,
+    attempt_number: int | None,
+) -> None:
+    if on_observation is not None:
+        on_observation(
+            TelemetryObservation(
+                correlation=ObservationCorrelation(
+                    plan_id=plan_id,
+                    goal_id=goal_id,
+                    task_id=task_id,
+                    run_id=run_id,
+                    attempt_id=attempt_id,
+                    attempt_number=attempt_number,
+                ),
+                observed_at=datetime.now(timezone.utc),
+                source=ObservationSource.PROCESS,
+                quality=ObservationQuality.EXACT,
+                kind=kind,
+                payload=payload,
+            )
+        )
+
+
+def _read_stream(
+    stream: StreamName,
+    pipe: TextIO | None,
+    buffers: dict[StreamName, _BoundedBuffer],
+    counts: dict[StreamName, int],
+    log: _BoundedLog,
+    on_output: OutputCallback | None,
+) -> None:
+    if pipe is None:
+        return
+    while True:
+        chunk = pipe.readline()
+        if not chunk:
+            return
+        buffers[stream].append(chunk)
+        counts[stream] += len(chunk.encode("utf-8"))
+        log.write(stream, chunk)
+        if on_output is not None:
+            on_output(stream, chunk)
 
 
 def supervise_process(
@@ -127,26 +204,6 @@ def supervise_process(
         log_path = Path(raw_path)
     log, started_at = _BoundedLog(log_path, log_cap_bytes), time.monotonic()
 
-    def observe(kind: ObservationKind, payload: ProcessObservationPayload) -> None:
-        if on_observation is not None:
-            on_observation(
-                TelemetryObservation(
-                    correlation=ObservationCorrelation(
-                        plan_id=plan_id,
-                        goal_id=goal_id,
-                        task_id=task_id,
-                        run_id=run_id,
-                        attempt_id=attempt_id,
-                        attempt_number=attempt_number,
-                    ),
-                    observed_at=datetime.now(timezone.utc),
-                    source=ObservationSource.PROCESS,
-                    quality=ObservationQuality.EXACT,
-                    kind=kind,
-                    payload=payload,
-                )
-            )
-
     proc = subprocess.Popen(
         command,
         cwd=cwd,
@@ -156,34 +213,23 @@ def supervise_process(
         text=True,
         start_new_session=True,
     )
-    observe(ObservationKind.PROCESS_STARTED, ProcessObservationPayload(log_path=str(log_path)))
-    outputs: dict[StreamName, deque[str]] = {"stdout": deque(), "stderr": deque()}
-    retained_bytes: dict[StreamName, int] = {"stdout": 0, "stderr": 0}
+    _emit_observation(
+        on_observation,
+        ObservationKind.PROCESS_STARTED,
+        ProcessObservationPayload(log_path=str(log_path)),
+        plan_id=plan_id,
+        goal_id=goal_id,
+        task_id=task_id,
+        run_id=run_id,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number,
+    )
+    buffers = {"stdout": _BoundedBuffer(log_cap_bytes), "stderr": _BoundedBuffer(log_cap_bytes)}
     counts: dict[StreamName, int] = {"stdout": 0, "stderr": 0}
 
-    def retain(stream: StreamName, chunk: str) -> None:
-        outputs[stream].append(chunk)
-        retained_bytes[stream] += len(chunk.encode("utf-8"))
-        while retained_bytes[stream] > log_cap_bytes:
-            oldest = outputs[stream].popleft()
-            retained_bytes[stream] -= len(oldest.encode("utf-8"))
-
-    def read_stream(stream: StreamName, pipe: TextIO | None) -> None:
-        if pipe is None:
-            return
-        while True:
-            chunk = pipe.readline()
-            if not chunk:
-                return
-            retain(stream, chunk)
-            counts[stream] += len(chunk.encode("utf-8"))
-            log.write(stream, chunk)
-            if on_output is not None:
-                on_output(stream, chunk)
-
     threads = [
-        threading.Thread(target=read_stream, args=("stdout", proc.stdout), daemon=True),
-        threading.Thread(target=read_stream, args=("stderr", proc.stderr), daemon=True),
+        threading.Thread(target=_read_stream, args=("stdout", proc.stdout, buffers, counts, log, on_output), daemon=True),
+        threading.Thread(target=_read_stream, args=("stderr", proc.stderr, buffers, counts, log, on_output), daemon=True),
     ]
     for thread in threads:
         thread.start()
@@ -199,7 +245,8 @@ def supervise_process(
         for thread in threads:
             thread.join(timeout=2)
     duration = round(time.monotonic() - started_at, 6)
-    observe(
+    _emit_observation(
+        on_observation,
         ObservationKind.PROCESS_TIMED_OUT if timed_out else ObservationKind.PROCESS_EXITED,
         ProcessObservationPayload(
             stdout_bytes=counts["stdout"],
@@ -208,10 +255,16 @@ def supervise_process(
             duration_seconds=duration,
             log_path=str(log_path),
         ),
+        plan_id=plan_id,
+        goal_id=goal_id,
+        task_id=task_id,
+        run_id=run_id,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number,
     )
     return ProcessSupervisorResult(
-        stdout="".join(outputs["stdout"]),
-        stderr="".join(outputs["stderr"]),
+        stdout="".join(buffers["stdout"]),
+        stderr="".join(buffers["stderr"]),
         exit_code=proc.returncode,
         timed_out=timed_out,
         log_path=log_path,
