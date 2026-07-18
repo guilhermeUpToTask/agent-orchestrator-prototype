@@ -7,13 +7,17 @@ FailureKind). It knows NOTHING about retries, backoff or ordering — those are
 orchestration decisions; the runner is a pure "execute this task now" hand.
 
 Subclasses supply the command line and environment (pi / claude / gemini —
-ported from the pre-refactor runtimes). The subprocess is blocking, hopped off
-the event loop via asyncio.to_thread so a long agent run never blocks the
-worker.
+ported from the pre-refactor runtimes). Subprocess execution is synchronous
+but streams stdout/stderr incrementally via process_supervisor.supervise_process
+(bounded local log per attempt, process-lifecycle observations persisted
+best-effort) rather than blocking on a single communicate() call; the whole
+call is hopped off the event loop via asyncio.to_thread so a long agent run
+never blocks the worker.
 
 Streamed NDJSON events (the full pi stdio handshake) are roadmap 2.4 — the seam
-is isolated in pi_protocol.py; today the sink gets start/finish events so every
-attempt is observable end-to-end.
+is isolated in pi_protocol.py; today the sink gets start/finish events plus
+the process-lifecycle observations above, so every attempt is observable
+end-to-end.
 """
 
 from __future__ import annotations
@@ -99,10 +103,16 @@ class CliAgentRunner(ABC):
         self._provider_id = provider_id
         self._model_id = model_id
         self._observation_repository = observation_repository
+        # Default matches AppContainer.from_env()'s resolution, without
+        # constructing a composition root here — CliAgentRunner is an
+        # adapter, not the place environment gets read (CLAUDE.md invariant
+        # #6). The real wired path (CatalogAgentRunner via container.py)
+        # always supplies orchestrator_home explicitly; this default only
+        # matters for direct/test construction.
         if orchestrator_home is None:
-            from src.infra.container import AppContainer
-
-            orchestrator_home = AppContainer.from_env().orchestrator_home
+            orchestrator_home = Path(
+                os.environ.get("ORCHESTRATOR_HOME", str(Path.home() / ".orchestrator"))
+            )
         self._orchestrator_home = orchestrator_home
 
     @property
