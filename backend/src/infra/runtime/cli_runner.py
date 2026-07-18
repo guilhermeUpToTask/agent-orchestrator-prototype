@@ -23,6 +23,7 @@ import os
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import structlog
 
@@ -36,6 +37,7 @@ from src.domain.value_objects.tasks_vos import TaskResult
 from src.infra.runtime.taxonomy import classify_failure, normalize_failure
 from src.infra.runtime.pi_protocol import parse_pi_events
 from src.infra.runtime.process_supervisor import (
+    attempt_log_path,
     supervise_process,
     terminate_process_group,
 )
@@ -90,10 +92,16 @@ class CliAgentRunner(ABC):
         *,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._provider_id = provider_id
         self._model_id = model_id
+        if orchestrator_home is None:
+            from src.infra.container import AppContainer
+
+            orchestrator_home = AppContainer.from_env().orchestrator_home
+        self._orchestrator_home = orchestrator_home
 
     @property
     @abstractmethod
@@ -227,11 +235,17 @@ class CliAgentRunner(ABC):
         cmd = self._build_cmd(prompt)
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
         try:
+            attempt_id = execution_env.get("ORCHESTRATOR_ATTEMPT_ID")
             result = supervise_process(
                 cmd,
                 cwd=cwd,
                 env={**self._env(), **execution_env},
                 timeout_seconds=self._timeout,
+                log_path=(
+                    attempt_log_path(self._orchestrator_home, attempt_id)
+                    if attempt_id is not None
+                    else None
+                ),
                 on_observation=lambda observation: log.info(
                     "runtime.process_observation",
                     kind=observation.kind.value,
@@ -335,6 +349,7 @@ class PiAgentRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -342,7 +357,7 @@ class PiAgentRunner(CliAgentRunner):
             )
         if not api_key:
             raise ValueError(f"PiAgentRunner requires an api_key for backend '{backend}'")
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._backend = backend
@@ -374,8 +389,9 @@ class ClaudeCodeRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []
@@ -405,8 +421,9 @@ class GeminiRunner(CliAgentRunner):
         timeout_seconds: int = 600,
         provider_id: str | None = None,
         model_id: str | None = None,
+        orchestrator_home: Path | None = None,
     ) -> None:
-        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id)
+        super().__init__(timeout_seconds, provider_id=provider_id, model_id=model_id, orchestrator_home=orchestrator_home)
         self._api_key = api_key
         self._model = model
         self._extra_flags = extra_flags or []

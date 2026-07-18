@@ -35,6 +35,7 @@ would require the master key (which dry-run does not have).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import structlog
@@ -218,11 +219,13 @@ class CatalogAgentRunner:
         provider_repo: SqliteModelProviderRepository,
         model_repo: SqliteModelRepository,
         secret_store: Callable[[], SqliteSecretStore],
+        orchestrator_home: Path | None = None,
     ) -> None:
         self._config_store = config_store
         self._provider_repo = provider_repo
         self._model_repo = model_repo
         self._secret_store = secret_store
+        self._orchestrator_home = orchestrator_home
         self._dummy = DryRunAgentRunner()
 
     def _timeout_seconds(self) -> int:
@@ -255,6 +258,7 @@ class CatalogAgentRunner:
                 timeout_seconds=timeout,
                 provider_id=provider.id,
                 model_id=model.id,
+            orchestrator_home=self._orchestrator_home,
             )
         if runtime == "claude":
             return ClaudeCodeRunner(
@@ -263,6 +267,7 @@ class CatalogAgentRunner:
                 timeout_seconds=timeout,
                 provider_id=provider.id,
                 model_id=model.id,
+                orchestrator_home=self._orchestrator_home,
             )
         return GeminiRunner(
             api_key=api_key,
@@ -270,6 +275,7 @@ class CatalogAgentRunner:
             timeout_seconds=timeout,
             provider_id=provider.id,
             model_id=model.id,
+                orchestrator_home=self._orchestrator_home,
         )
 
     async def run(
@@ -311,6 +317,7 @@ def build_agent_runner(
     provider_repo: SqliteModelProviderRepository,
     model_repo: SqliteModelRepository,
     secret_store: Callable[[], SqliteSecretStore],
+    orchestrator_home: Path | None = None,
 ) -> AgentRunner:
     """`secret_store` is a thunk: dry-run mode must never construct it (it
     fails closed on a missing master key, which dry-run does not have)."""
@@ -319,4 +326,4 @@ def build_agent_runner(
         raise _invalid(status.detail or "agent_runner.mode is invalid")
     if status.mode == "dry-run":
         return DryRunAgentRunner()
-    return CatalogAgentRunner(config_store, provider_repo, model_repo, secret_store)
+    return CatalogAgentRunner(config_store, provider_repo, model_repo, secret_store, orchestrator_home)

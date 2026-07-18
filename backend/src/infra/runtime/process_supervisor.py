@@ -24,6 +24,11 @@ OutputCallback = Callable[[StreamName, str], None]
 ObservationCallback = Callable[[TelemetryObservation], None]
 
 
+def attempt_log_path(orchestrator_home: Path, attempt_id: str) -> Path:
+    """Return the durable runtime log location for an execution attempt."""
+    return orchestrator_home / "runtime-logs" / f"{attempt_id}.jsonl"
+
+
 @dataclass(frozen=True)
 class ProcessSupervisorResult:
     stdout: str

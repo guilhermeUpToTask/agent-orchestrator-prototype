@@ -22,6 +22,13 @@ class SecretNotFoundError(InfrastructureError):
     code = "SECRET_NOT_FOUND"
 
 
+class AttemptNotFoundError(InfrastructureError):
+    code = "ATTEMPT_NOT_FOUND"
+
+    def __init__(self, attempt_id: str) -> None:
+        super().__init__(f"Attempt {attempt_id} not found.", context={"attempt_id": attempt_id})
+
+
 class UnauthorizedError(BaseAppException):
     """Request lacked valid credentials (control-plane token)."""
 
