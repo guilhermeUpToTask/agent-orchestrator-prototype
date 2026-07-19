@@ -1143,6 +1143,69 @@
         }
       }
     },
+    "/api/plans/{plan_id}/attempts/{attempt_id}/log": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Attempt Log",
+        "operationId": "plans-attempt_log",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "tail_lines",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 0,
+              "default": 200,
+              "title": "Tail Lines"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/agent-events": {
       "get": {
         "tags": [
@@ -3624,6 +3687,54 @@
         ],
         "title": "AgentSpec",
         "description": "Definition of an agent: who it is, what it can do, how it retries,\nand which runtime executes it.\n\n`role` is the agent's functional job in the orchestration (e.g. \"test_writer\",\n\"implementer\", \"reviewer\"). `model_role` is an indirection key into the\nprovider/model catalog naming a model *tier* (e.g. \"cheap\", \"smart\",\n\"long_context\") resolved to a concrete IAModel at runtime \u2014 so swapping the\nmodel behind a tier does not require touching every agent that uses it.\n\nRuntime resolution (deliberate Phase-0 un-freeze, 2026-07-05): the agent\nregistry is the authority on which runtime an agent resolves to \u2014\n`runtime_type` picks the CLI runtime (or the dry-run dummy), and\n`provider_id`/`model_id` point into the providers/models catalog for the\ncredentials and model string. Infra validates the wiring; the entity only\ncarries it."
+      },
+      "AttemptLogEntryResponse": {
+        "properties": {
+          "monotonic_seconds": {
+            "type": "number",
+            "title": "Monotonic Seconds"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "stdout",
+              "stderr"
+            ],
+            "title": "Stream"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monotonic_seconds",
+          "stream",
+          "text"
+        ],
+        "title": "AttemptLogEntryResponse"
+      },
+      "AttemptLogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptLogEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries",
+          "truncated"
+        ],
+        "title": "AttemptLogResponse"
       },
       "AttemptTimelineResponse": {
         "properties": {

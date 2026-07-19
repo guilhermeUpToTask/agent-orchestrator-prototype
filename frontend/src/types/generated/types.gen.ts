@@ -209,6 +209,38 @@ export type AgentSpec = {
 };
 
 /**
+ * AttemptLogEntryResponse
+ */
+export type AttemptLogEntryResponse = {
+    /**
+     * Monotonic Seconds
+     */
+    monotonic_seconds: number;
+    /**
+     * Stream
+     */
+    stream: 'stdout' | 'stderr';
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * AttemptLogResponse
+ */
+export type AttemptLogResponse = {
+    /**
+     * Entries
+     */
+    entries: Array<AttemptLogEntryResponse>;
+    /**
+     * Truncated
+     */
+    truncated: boolean;
+};
+
+/**
  * AttemptTimelineResponse
  */
 export type AttemptTimelineResponse = {
@@ -2776,6 +2808,45 @@ export type PlansReplanningResponses = {
 };
 
 export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplanningResponses];
+
+export type PlansAttemptLogData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Attempt Id
+         */
+        attempt_id: string;
+    };
+    query?: {
+        /**
+         * Tail Lines
+         */
+        tail_lines?: number;
+    };
+    url: '/api/plans/{plan_id}/attempts/{attempt_id}/log';
+};
+
+export type PlansAttemptLogErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptLogError = PlansAttemptLogErrors[keyof PlansAttemptLogErrors];
+
+export type PlansAttemptLogResponses = {
+    /**
+     * Successful Response
+     */
+    200: AttemptLogResponse;
+};
+
+export type PlansAttemptLogResponse = PlansAttemptLogResponses[keyof PlansAttemptLogResponses];
 
 export type PlansAgentEventsData = {
     body?: never;

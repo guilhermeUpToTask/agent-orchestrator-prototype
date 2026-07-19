@@ -56,3 +56,5 @@ jobs:
           fi
           if bash backend/scripts/dev.sh check --backend-only --frontend-only; then
             echo "check unexpectedly accepted conflicting surfaces" >&2
+            exit 1
+          fi
