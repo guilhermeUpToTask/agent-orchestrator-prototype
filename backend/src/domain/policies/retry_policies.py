@@ -13,13 +13,18 @@ class RetryPolicy(BaseModel):
     """
 
     max_attempts: int = 3
-    initial_backoff_seconds: float = 2.0
+    initial_backoff_seconds: float = 30.0
     backoff_multiplier: float = 2.0
-    max_backoff_seconds: float = 60.0
+    max_backoff_seconds: float = 900.0
+    jitter_ratio: float = 0.2
     # Typed classification (shared failure taxonomy): a token-limit or auth failure
     # will fail identically on every retry, so it is terminal immediately.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(
-        {FailureKind.TOKEN_LIMIT, FailureKind.AUTH_ERROR}
+        {
+            FailureKind.TOKEN_LIMIT,
+            FailureKind.AUTH_ERROR,
+            FailureKind.VERIFICATION_ERROR,
+        }
     )
 
     def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:
@@ -27,7 +32,7 @@ class RetryPolicy(BaseModel):
             return False
         return attempts < self.max_attempts
 
-    def backoff_for(self, attempt: int) -> float:
+    def backoff_for(self, attempt: int, *, jitter_unit: float = 0.5) -> float:
         """Backoff to wait BEFORE the given attempt (1-based attempt number).
 
         attempt 1 is the first try -> no backoff (0.0).
@@ -40,7 +45,7 @@ class RetryPolicy(BaseModel):
         retry_index = attempt - 1  # attempt 2 -> retry 1, attempt 3 -> retry 2
         # exponent retry_index-1 so the FIRST retry pays the base delay (multiplier**0):
         # initial=2, mult=2 -> attempt2=2s, attempt3=4s, attempt4=8s.
-        delay = self.initial_backoff_seconds * (
-            self.backoff_multiplier ** (retry_index - 1)
-        )
-        return min(delay, self.max_backoff_seconds)
+        delay = self.initial_backoff_seconds * (self.backoff_multiplier ** (retry_index - 1))
+        bounded_unit = max(0.0, min(1.0, jitter_unit))
+        jitter = 1.0 + self.jitter_ratio * ((bounded_unit * 2.0) - 1.0)
+        return min(delay * jitter, self.max_backoff_seconds)

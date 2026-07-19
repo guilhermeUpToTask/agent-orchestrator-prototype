@@ -1,5 +1,6 @@
 """Reference-data repositories on real SQLite: CRUD, the delete-guard /
 cascade-down/guard-up integrity rules, and the default-agent marker."""
+
 from __future__ import annotations
 
 import pytest
@@ -92,7 +93,11 @@ def test_capability_delete_guarded_by_active_plan(sf):
     caps = SqliteCapabilityRepository(sf)
     caps.add(cap())
     uow = SqliteUnitOfWork(sf, FakeClock())
+    SqliteProjectRepository(sf).add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
     plan = Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,
@@ -144,7 +149,11 @@ def test_agent_delete_guarded_by_active_plan_binding(sf):
     agents = SqliteAgentRepository(sf)
     agents.add(agent())
     uow = SqliteUnitOfWork(sf, FakeClock())
+    SqliteProjectRepository(sf).add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
     plan = Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,
@@ -154,9 +163,7 @@ def test_agent_delete_guarded_by_active_plan_binding(sf):
                 name="g",
                 position=0,
                 description="",
-                tasks=[
-                    Task(id="t1", name="t", position=0, description="", agent_id="a1")
-                ],
+                tasks=[Task(id="t1", name="t", position=0, description="", agent_id="a1")],
             )
         ],
     )
@@ -170,7 +177,10 @@ def test_agent_delete_allowed_when_plan_terminal(sf):
     agents = SqliteAgentRepository(sf)
     agents.add(agent())
     uow = SqliteUnitOfWork(sf, FakeClock())
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.DONE)
+    SqliteProjectRepository(sf).add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.DONE)
     with uow:
         uow.plans.save(plan)
     agents.delete("a1")
@@ -250,8 +260,11 @@ def test_model_repo_list_by_provider(sf):
     providers, models = SqliteModelProviderRepository(sf), SqliteModelRepository(sf)
     providers.add(
         ModelProvider(
-            id="prov1", name="P", base_url="u",
-            api_key_ref="secret://provider/prov1", models=[],
+            id="prov1",
+            name="P",
+            base_url="u",
+            api_key_ref="secret://provider/prov1",
+            models=[],
         )
     )
     models.add(IAModel(id="m1", provider_id="prov1", name="n1"))

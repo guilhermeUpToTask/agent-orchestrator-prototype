@@ -243,6 +243,28 @@
   color: var(--fail, #e5484d);
 }
 
+.replanComposer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-1));
+}
+
+.replanInput {
+  width: 100%;
+  resize: vertical;
+  padding: var(--sp-2);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font: inherit;
+  line-height: 1.45;
+}
+
 /* Secondary (outline) button for Pause alongside a primary action. */
 .secondaryBtn {
   display: inline-flex;

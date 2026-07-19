@@ -19,6 +19,7 @@ codes to statuses, so adding an error type is one line — never a new handler.
 There is deliberately NO blanket KeyError/ValueError mapping: an unmapped
 builtin error is a bug and should surface as the enveloped 500.
 """
+
 from __future__ import annotations
 
 import structlog
@@ -42,6 +43,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "PROVIDER_NOT_FOUND": 404,
     "CAPABILITY_NOT_FOUND": 404,
     "SECRET_NOT_FOUND": 404,
+    "ATTEMPT_NOT_FOUND": 404,
     # 409 — conflict
     "STALE_VERSION": 409,
     "GOAL_ALREADY_RUNNING": 409,
@@ -76,17 +78,11 @@ def _envelope(code: str, message: str) -> dict:
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnauthorizedError)
-    async def unauthorized_handler(
-        request: Request, exc: UnauthorizedError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=401, content=_envelope(exc.code, exc.message)
-        )
+    async def unauthorized_handler(request: Request, exc: UnauthorizedError) -> JSONResponse:
+        return JSONResponse(status_code=401, content=_envelope(exc.code, exc.message))
 
     @app.exception_handler(DomainError)
-    async def domain_error_handler(
-        request: Request, exc: DomainError
-    ) -> JSONResponse:
+    async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
         status = _STATUS_BY_CODE.get(exc.code, _DEFAULT_DOMAIN_STATUS)
         log.warning(
             "request_error",
@@ -96,9 +92,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             path=request.url.path,
             context=exc.context,  # log-safe by contract; never secrets
         )
-        return JSONResponse(
-            status_code=status, content=_envelope(exc.code, exc.message)
-        )
+        return JSONResponse(status_code=status, content=_envelope(exc.code, exc.message))
 
     @app.exception_handler(InfrastructureError)
     async def infrastructure_error_handler(
@@ -111,17 +105,13 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status,
             path=request.url.path,
         )
-        return JSONResponse(
-            status_code=status, content=_envelope(exc.code, exc.message)
-        )
+        return JSONResponse(status_code=status, content=_envelope(exc.code, exc.message))
 
     # Full detail (type, stack trace, endpoint, request_id) is logged
     # internally only; the client gets a generic envelope — never a stack
     # trace, never a bare framework error page.
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         log.error(
             "request_unhandled_error",
             exc_type=type(exc).__name__,

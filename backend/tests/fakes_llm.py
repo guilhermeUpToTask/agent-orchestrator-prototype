@@ -1,6 +1,7 @@
 """FakeLLMClient — a scripted LLMClient for driving the agent loop and the
 OpenAIReasoner without a provider. Pops one AssistantTurn per complete() call
 and records every request (messages snapshot + tool names) for assertions."""
+
 from __future__ import annotations
 
 import json

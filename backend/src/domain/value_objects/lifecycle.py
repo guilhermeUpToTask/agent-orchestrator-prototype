@@ -38,3 +38,4 @@ class FailureKind(str, Enum):
     AUTH_ERROR = "auth_error"
     TIMEOUT = "timeout"
     TOOL_ERROR = "tool_error"
+    VERIFICATION_ERROR = "verification_error"

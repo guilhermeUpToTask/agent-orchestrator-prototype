@@ -4,6 +4,7 @@ for machine settings, a project id for per-project settings (incl. the
 framework/dev-tool questionnaire fields; the env provisioner that consumes
 them is deferred). Token-guarded like the rest of the control plane.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -13,9 +14,7 @@ from src.api.dependencies import get_container
 from src.api.security import require_api_token
 from src.infra.container import AppContainer
 
-router = APIRouter(
-    prefix="/config", dependencies=[Depends(require_api_token)], tags=["config"]
-)
+router = APIRouter(prefix="/config", dependencies=[Depends(require_api_token)], tags=["config"])
 
 
 class ConfigValue(BaseModel):
@@ -38,7 +37,5 @@ def set_value(
 
 
 @router.delete("/{scope}/{key}", status_code=204)
-def delete_value(
-    scope: str, key: str, container: AppContainer = Depends(get_container)
-) -> None:
+def delete_value(scope: str, key: str, container: AppContainer = Depends(get_container)) -> None:
     container.config_store.delete(scope, key)

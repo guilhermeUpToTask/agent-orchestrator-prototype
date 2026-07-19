@@ -10,18 +10,22 @@
  * updates live without HTTP polling.
  */
 
-import { useEffect } from 'react';
+import { useEffect } from "react";
 import {
   QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
-} from '@tanstack/react-query';
-import { nanoid } from 'nanoid';
+} from "@tanstack/react-query";
+import { nanoid } from "nanoid";
 
 import {
   applyEdit,
+  activateCycle,
+  approveIntentGate,
   approvePlan,
+  cancelCycleDraft,
+  cancelIntent,
   createAgent,
   createCapability,
   createModel,
@@ -34,6 +38,7 @@ import {
   deleteProject,
   deleteProvider,
   fetchAgentEvents,
+  fetchAttemptTimeline,
   fetchChat,
   fetchMetrics,
   fetchPlan,
@@ -49,11 +54,17 @@ import {
   listProjects,
   listProviders,
   pausePlan,
+  proposeIntent,
   renameModel,
+  recordOutputDisposition,
   reopenReview,
   replanFromReview,
   replanMidRunning,
   resumePlan,
+  retryPlanningStage,
+  retryTask,
+  reviseCycleDraft,
+  reviseIntent,
   sendDiscoveryMessage,
   sendReplanningMessage,
   setConfigKey,
@@ -63,11 +74,13 @@ import {
   updateCapability,
   updateProject,
   updateProvider,
+  type CycleDraftBody,
   type EditBody,
+  type IntentProposalBody,
   type SSEEvent,
-} from './api';
-import { toast, errorDetail } from './toast';
-import { usePlannerStore } from '../store/plannerStore';
+} from "./api";
+import { toast, errorDetail } from "./toast";
+import { usePlannerStore } from "../store/plannerStore";
 import type {
   AgentBody,
   Capability,
@@ -76,7 +89,7 @@ import type {
   PlanPhase,
   ProviderCreateBody,
   ProviderUpdateBody,
-} from '../types/ui';
+} from "../types/ui";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,21 +104,22 @@ export const queryClient = new QueryClient({
 // ─── Query keys ────────────────────────────────────────────────────────────────
 
 export const keys = {
-  plans: ['plans'] as const,
-  plan: (id: string) => ['plan', id] as const,
-  chat: (id: string) => ['chat', id] as const,
-  agents: ['agents'] as const,
-  defaultAgent: ['agents', 'default'] as const,
-  capabilities: ['capabilities'] as const,
-  providers: ['providers'] as const,
-  models: ['models'] as const,
-  projects: ['projects'] as const,
-  config: (scope: string) => ['config', scope] as const,
-  reasonerStatus: ['reasoner-status'] as const,
-  runnerStatus: ['runner-status'] as const,
+  plans: ["plans"] as const,
+  plan: (id: string) => ["plan", id] as const,
+  chat: (id: string) => ["chat", id] as const,
+  agents: ["agents"] as const,
+  defaultAgent: ["agents", "default"] as const,
+  capabilities: ["capabilities"] as const,
+  providers: ["providers"] as const,
+  models: ["models"] as const,
+  projects: ["projects"] as const,
+  config: (scope: string) => ["config", scope] as const,
+  reasonerStatus: ["reasoner-status"] as const,
+  runnerStatus: ["runner-status"] as const,
   agentEvents: (planId: string, taskId?: string) =>
-    ['agent-events', planId, taskId ?? '*'] as const,
-  metrics: (planId?: string) => ['metrics', planId ?? '*'] as const,
+    ["agent-events", planId, taskId ?? "*"] as const,
+  attemptTimeline: (planId: string) => ["attempt-timeline", planId] as const,
+  metrics: (planId?: string) => ["metrics", planId ?? "*"] as const,
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────────
@@ -116,7 +130,7 @@ export function usePlans() {
 
 export function usePlan(planId: string | null) {
   return useQuery({
-    queryKey: keys.plan(planId ?? ''),
+    queryKey: keys.plan(planId ?? ""),
     queryFn: () => fetchPlan(planId as string),
     enabled: !!planId,
   });
@@ -124,7 +138,7 @@ export function usePlan(planId: string | null) {
 
 export function useChat(planId: string | null) {
   return useQuery({
-    queryKey: keys.chat(planId ?? ''),
+    queryKey: keys.chat(planId ?? ""),
     queryFn: () => fetchChat(planId as string),
     enabled: !!planId,
   });
@@ -133,8 +147,17 @@ export function useChat(planId: string | null) {
 /** Durable agent/reasoner telemetry history for a plan (optionally one task). */
 export function useAgentEvents(planId: string | null, taskId?: string) {
   return useQuery({
-    queryKey: keys.agentEvents(planId ?? '', taskId),
+    queryKey: keys.agentEvents(planId ?? "", taskId),
     queryFn: () => fetchAgentEvents(planId as string, { taskId }),
+    enabled: !!planId,
+  });
+}
+
+/** Durable planning plus task -> run -> attempt history, loaded before SSE. */
+export function useAttemptTimeline(planId: string | null) {
+  return useQuery({
+    queryKey: keys.attemptTimeline(planId ?? ""),
+    queryFn: () => fetchAttemptTimeline(planId as string),
     enabled: !!planId,
   });
 }
@@ -173,11 +196,17 @@ export function useDefaultAgent() {
 }
 
 export function useConfigScope(scope: string) {
-  return useQuery({ queryKey: keys.config(scope), queryFn: () => getConfigScope(scope) });
+  return useQuery({
+    queryKey: keys.config(scope),
+    queryFn: () => getConfigScope(scope),
+  });
 }
 
 export function useReasonerStatus() {
-  return useQuery({ queryKey: keys.reasonerStatus, queryFn: getReasonerStatus });
+  return useQuery({
+    queryKey: keys.reasonerStatus,
+    queryFn: getReasonerStatus,
+  });
 }
 
 export function useRunnerStatus() {
@@ -189,9 +218,10 @@ export function useRunnerStatus() {
 export function useCreatePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (brief: string) => createPlan(brief, nanoid()),
+    mutationFn: ({ brief, projectId }: { brief: string; projectId: string }) =>
+      createPlan(brief, projectId, nanoid()),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.plans }),
-    onError: (err) => toast.error('Create plan failed', errorDetail(err)),
+    onError: (err) => toast.error("Create plan failed", errorDetail(err)),
   });
 }
 
@@ -207,7 +237,9 @@ export function useSendMessage(planId: string) {
     mutationFn: async (message: string): Promise<MessageResponse> => {
       const plan = qc.getQueryData<Plan>(keys.plan(planId));
       const send =
-        plan?.phase === 'replanning' ? sendReplanningMessage : sendDiscoveryMessage;
+        plan?.phase === "replanning"
+          ? sendReplanningMessage
+          : sendDiscoveryMessage;
       return send(planId, message);
     },
     onSuccess: (result) => {
@@ -215,12 +247,12 @@ export function useSendMessage(planId: string) {
       if (result.committed) {
         qc.invalidateQueries({ queryKey: keys.plan(planId) });
         qc.invalidateQueries({ queryKey: keys.plans });
-        toast.success('Roadmap committed', `Plan moved to ${result.phase}`);
+        toast.success("Roadmap committed", `Plan moved to ${result.phase}`);
       }
     },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: keys.chat(planId) });
-      toast.error('Message failed', errorDetail(err));
+      toast.error("Message failed", errorDetail(err));
     },
   });
 }
@@ -242,17 +274,137 @@ function usePlanCommand(
 }
 
 export const useApprovePlan = (planId: string) =>
-  usePlanCommand(planId, approvePlan, 'Approve');
+  usePlanCommand(planId, approvePlan, "Approve");
 export const useFinishReview = (planId: string) =>
-  usePlanCommand(planId, finishReview, 'Finish review');
+  usePlanCommand(planId, finishReview, "Finish review");
 export const useReplanFromReview = (planId: string) =>
-  usePlanCommand(planId, replanFromReview, 'Replan');
+  usePlanCommand(planId, replanFromReview, "Replan");
 export const useReplanMidRunning = (planId: string) =>
-  usePlanCommand(planId, replanMidRunning, 'Replan');
+  usePlanCommand(planId, replanMidRunning, "Replan");
 export const useReopenReview = (planId: string) =>
-  usePlanCommand(planId, reopenReview, 'Request changes');
+  usePlanCommand(planId, reopenReview, "Request changes");
 export const useResumePlan = (planId: string) =>
-  usePlanCommand(planId, resumePlan, 'Resume');
+  usePlanCommand(planId, resumePlan, "Resume");
+
+export function useRetryTask(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, taskId }: { goalId: string; taskId: string }) =>
+      retryTask(planId, goalId, taskId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+      qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
+      toast.success("Task queued for retry");
+    },
+    onError: (err) => toast.error("Retry failed", errorDetail(err)),
+  });
+}
+
+export const useRetryPlanningStage = (planId: string) =>
+  usePlanCommand(planId, retryPlanningStage, "Retry planning stage");
+
+export function useStartIntent(
+  planId: string,
+  kind: "initial" | "replan",
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body?: IntentProposalBody) => {
+      const plan = qc.getQueryData<Plan>(keys.plan(planId));
+      if (!plan) throw new Error("Plan details are not loaded");
+      if (kind === "replan" && !body?.objective.trim()) {
+        throw new Error("Describe what should change before starting a replan");
+      }
+      return proposeIntent(planId, body ?? {
+        objective: plan.brief,
+        scope: [],
+        constraints: [],
+        exclusions: [],
+        kind,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+    },
+    onError: (err) => toast.error("Start intent failed", errorDetail(err)),
+  });
+}
+
+export function useReviseIntent(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: IntentProposalBody) => reviseIntent(planId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
+    onError: (err) => toast.error("Intent revision failed", errorDetail(err)),
+  });
+}
+
+export function useReviseCycleDraft(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CycleDraftBody) => reviseCycleDraft(planId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
+    onError: (err) => toast.error("Cycle draft revision failed", errorDetail(err)),
+  });
+}
+
+export const useApproveIntentGate = (
+  planId: string,
+  gateId: string,
+  revision: number,
+) =>
+  usePlanCommand(
+    planId,
+    (id) => approveIntentGate(id, gateId, revision),
+    "Approve intent",
+  );
+
+export const useCancelIntent = (planId: string) =>
+  usePlanCommand(planId, cancelIntent, "Cancel intent");
+
+export const useActivateCycle = (
+  planId: string,
+  gateId: string,
+  revision: number,
+) =>
+  usePlanCommand(
+    planId,
+    async (id) => { await activateCycle(id, gateId, revision); },
+    "Activate cycle",
+  );
+
+export const useCancelCycleDraft = (planId: string) =>
+  usePlanCommand(planId, cancelCycleDraft, "Cancel cycle draft");
+
+export function useRecordOutputDisposition(
+  planId: string,
+  gateId: string,
+  revision: number,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      disposition,
+      outputReference,
+    }: {
+      disposition: "open_pr" | "merge" | "retain_branch" | "discard";
+      outputReference: string | null;
+    }) => recordOutputDisposition(
+      planId,
+      gateId,
+      revision,
+      disposition,
+      outputReference,
+    ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+    },
+    onError: (err) => toast.error("Publication decision failed", errorDetail(err)),
+  });
+}
 
 export function usePausePlan(planId: string) {
   const qc = useQueryClient();
@@ -262,7 +414,7 @@ export function usePausePlan(planId: string) {
       qc.invalidateQueries({ queryKey: keys.plan(planId) });
       qc.invalidateQueries({ queryKey: keys.plans });
     },
-    onError: (err) => toast.error('Pause failed', errorDetail(err)),
+    onError: (err) => toast.error("Pause failed", errorDetail(err)),
   });
 }
 
@@ -271,7 +423,7 @@ export function useApplyEdit(planId: string) {
   return useMutation({
     mutationFn: (edit: EditBody) => applyEdit(planId, edit),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.plan(planId) }),
-    onError: (err) => toast.error('Edit rejected', errorDetail(err)),
+    onError: (err) => toast.error("Edit rejected", errorDetail(err)),
   });
 }
 
@@ -299,24 +451,24 @@ function useRefMutation<TArgs, TResult>(
 export const useCreateProvider = () =>
   useRefMutation(
     (body: ProviderCreateBody) => createProvider(body),
-    'Create provider',
+    "Create provider",
     [keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    'Provider created',
+    "Provider created",
   );
 export const useUpdateProvider = () =>
   useRefMutation(
     ({ id, body }: { id: string; body: ProviderUpdateBody }) =>
       updateProvider(id, body),
-    'Update provider',
+    "Update provider",
     [keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    'Provider saved',
+    "Provider saved",
   );
 export const useDeleteProvider = () =>
   useRefMutation(
     (id: string) => deleteProvider(id),
-    'Delete provider',
+    "Delete provider",
     [keys.providers, keys.models, keys.reasonerStatus, keys.runnerStatus],
-    'Provider deleted',
+    "Provider deleted",
   );
 
 // Models
@@ -324,101 +476,106 @@ export const useCreateModel = () =>
   useRefMutation(
     ({ providerId, name }: { providerId: string; name: string }) =>
       createModel(providerId, name),
-    'Add model',
+    "Add model",
     [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    'Model added',
+    "Model added",
   );
 export const useRenameModel = () =>
   useRefMutation(
     ({ modelId, name }: { modelId: string; name: string }) =>
       renameModel(modelId, name),
-    'Rename model',
+    "Rename model",
     [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    'Model renamed',
+    "Model renamed",
   );
 export const useDeleteModel = () =>
   useRefMutation(
     (modelId: string) => deleteModel(modelId),
-    'Delete model',
+    "Delete model",
     [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    'Model deleted',
+    "Model deleted",
   );
 
 // Capabilities — agents embed capability objects, so refresh those too.
 export const useCreateCapability = () =>
   useRefMutation(
     (cap: Capability) => createCapability(cap),
-    'Create capability',
+    "Create capability",
     [keys.capabilities, keys.agents],
-    'Capability created',
+    "Capability created",
   );
 export const useUpdateCapability = () =>
   useRefMutation(
     ({ id, cap }: { id: string; cap: Capability }) => updateCapability(id, cap),
-    'Update capability',
+    "Update capability",
     [keys.capabilities, keys.agents],
-    'Capability saved',
+    "Capability saved",
   );
 export const useDeleteCapability = () =>
   useRefMutation(
     (id: string) => deleteCapability(id),
-    'Delete capability',
+    "Delete capability",
     [keys.capabilities, keys.agents],
-    'Capability deleted',
+    "Capability deleted",
   );
 
 // Agents
 export const useCreateAgent = () =>
   useRefMutation(
     (body: AgentBody) => createAgent(body),
-    'Create agent',
+    "Create agent",
     [keys.agents, keys.defaultAgent, keys.runnerStatus],
-    'Agent created',
+    "Agent created",
   );
 export const useUpdateAgent = () =>
   useRefMutation(
     ({ id, body }: { id: string; body: AgentBody }) => updateAgent(id, body),
-    'Update agent',
+    "Update agent",
     [keys.agents, keys.defaultAgent, keys.runnerStatus],
-    'Agent saved',
+    "Agent saved",
   );
 export const useDeleteAgent = () =>
   useRefMutation(
     (id: string) => deleteAgent(id),
-    'Delete agent',
+    "Delete agent",
     [keys.agents, keys.defaultAgent, keys.runnerStatus],
-    'Agent deleted',
+    "Agent deleted",
   );
 export const useSetDefaultAgent = () =>
   useRefMutation(
     (id: string) => setDefaultAgent(id),
-    'Set default agent',
+    "Set default agent",
     [keys.agents, keys.defaultAgent, keys.runnerStatus],
-    'Default agent set',
+    "Default agent set",
   );
 
 // Projects
 export const useCreateProject = () =>
   useRefMutation(
     (body: { name: string; repo_url?: string | null }) => createProject(body),
-    'Create project',
+    "Create project",
     [keys.projects],
-    'Project created',
+    "Project created",
   );
 export const useUpdateProject = () =>
   useRefMutation(
-    ({ id, body }: { id: string; body: { name: string; repo_url?: string | null } }) =>
-      updateProject(id, body),
-    'Update project',
+    ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { name: string; repo_url?: string | null };
+    }) => updateProject(id, body),
+    "Update project",
     [keys.projects],
-    'Project saved',
+    "Project saved",
   );
 export const useDeleteProject = () =>
   useRefMutation(
     (id: string) => deleteProject(id),
-    'Delete project',
+    "Delete project",
     [keys.projects],
-    'Project deleted',
+    "Project deleted",
   );
 
 // Config — a reasoner.* write immediately re-validates the status banner.
@@ -431,22 +588,39 @@ export function useSetConfigKey(scope: string) {
       qc.invalidateQueries({ queryKey: keys.config(scope) });
       qc.invalidateQueries({ queryKey: keys.reasonerStatus });
       qc.invalidateQueries({ queryKey: keys.runnerStatus });
-      toast.success('Config saved', 'Restart the API/worker to apply.');
+      toast.success("Config saved", "Restart the API/worker to apply.");
     },
-    onError: (err) => toast.error('Config save failed', errorDetail(err)),
+    onError: (err) => toast.error("Config save failed", errorDetail(err)),
   });
 }
 
 // ─── SSE → cache bridge ────────────────────────────────────────────────────────
 
 const TASK_EVENTS = new Set([
-  'TaskStarted',
-  'TaskCompleted',
-  'TaskRequeued',
-  'TaskFailedEvent',
-  'TaskAbandoned',
-  'GoalCompleted',
-  'GoalFailedEvent',
+  "TaskStarted",
+  "TaskCompleted",
+  "TaskRequeued",
+  "TaskFailedEvent",
+  "TaskAbandoned",
+  "TaskRetried",
+  "GoalCompleted",
+  "GoalFailedEvent",
+]);
+
+const STATE_EVENTS = new Set([
+  "PauseRequested",
+  "PlanBlocked",
+  "BlockResolved",
+  "IntentProposed",
+  "IntentApproved",
+  "CycleDrafted",
+  "CycleVerified",
+  "CycleActivated",
+  "ReviewGateOpened",
+  "OutputDispositionRecorded",
+  "TestBundleFrozen",
+  "TaskVerificationAccepted",
+  "TaskVerificationRejected",
 ]);
 
 /**
@@ -463,16 +637,16 @@ export function useSSEBridge() {
 
   useEffect(() => {
     const unsubscribe = subscribeToEvents({
-      onOpen: () => setConnectionState('live'),
-      onReconnecting: () => setConnectionState('reconnecting'),
-      onDown: () => setConnectionState('down'),
+      onOpen: () => setConnectionState("live"),
+      onReconnecting: () => setConnectionState("reconnecting"),
+      onDown: () => setConnectionState("down"),
       onReconnect: () => {
         // Events emitted during the gap are gone — resync everything.
-        setConnectionState('live');
+        setConnectionState("live");
         qc.invalidateQueries();
       },
       onEvent: (event: SSEEvent) => {
-        setConnectionState('live');
+        setConnectionState("live");
         const { payload } = event;
         const fresh = pushEvent(event.type, payload);
         if (!fresh) return; // at-least-once delivery: already seen event_id
@@ -480,92 +654,113 @@ export function useSSEBridge() {
         const planId = payload.plan_id;
 
         switch (event.type) {
-          case 'agent.event':
+          case "agent.event":
             appendAgentLog(payload);
+            qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
             break;
 
-          case 'PhaseAdvanced': {
+          case "PhaseAdvanced": {
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             const to = payload.to_phase as PlanPhase;
-            if (to === 'awaiting_review') {
-              toast.info('Plan ready for review', 'Approve it to start execution.');
-            } else if (to === 'review') {
-              toast.info('Execution finished', 'Finish the plan or replan the next phase.');
+            if (to === "awaiting_review") {
+              toast.info(
+                "Plan ready for review",
+                "Approve it to start execution.",
+              );
+            } else if (to === "review") {
+              toast.info(
+                "Execution finished",
+                "Finish the plan or replan the next phase.",
+              );
             }
             break;
           }
 
-          case 'PlanCompleted':
-            toast.success('Plan completed');
+          case "PlanCompleted":
+            toast.success("Plan completed");
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
 
-          case 'PlanFailed':
-            toast.error('Plan failed', (payload.reason as string) ?? undefined);
+          case "PlanFailed":
+            toast.error("Plan failed", (payload.reason as string) ?? undefined);
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
 
-          case 'ReasonerFailed': {
+          case "ReasonerFailed": {
             const reason = (payload.reason as string) ?? undefined;
             if (payload.transient) {
               // Backing off — the plan will retry on its own; a PlanFailed follows
               // only if the retry budget runs out.
-              toast.info('Planner backing off', reason);
+              toast.info("Planner backing off", reason);
             } else {
-              toast.error('Planner unavailable', reason);
+              toast.error("Planner unavailable", reason);
             }
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
           }
 
-          case 'PlanPaused': {
+          case "PlanPaused": {
             const reason = (payload.reason as string) ?? undefined;
             if (payload.auto) {
               // the system paused itself (a task exhausted its retries or failed
-              // non-retryably) — it needs a human to edit and resume
-              toast.error('Plan needs attention', reason ?? 'Paused after a failure.');
+              // non-retryably) — it needs a human to edit, retry, and then resume
+              toast.error(
+                "Plan needs attention",
+                reason ?? "Paused after a failure.",
+              );
             } else {
-              toast.info('Plan paused', 'Goals and tasks are editable while paused.');
+              toast.info(
+                "Plan paused",
+                "Goals and tasks are editable while paused.",
+              );
             }
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
           }
 
-          case 'PlanResumed':
-            toast.info('Plan resumed', 'Failed tasks were requeued for retry.');
+          case "PlanResumed":
+            toast.info("Plan resumed", "The manual pause gate was released.");
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             qc.invalidateQueries({ queryKey: keys.plans });
             break;
 
-          case 'ReplanRequested':
-            toast.info('Replan requested', 'Pending work was skipped; chat is open.');
-            qc.invalidateQueries({ queryKey: keys.plan(planId) });
-            break;
-
-          case 'TaskFailedEvent':
-            toast.error(
-              'Task failed',
-              [payload.task_id, payload.reason].filter(Boolean).join(' — '),
+          case "ReplanRequested":
+            toast.info(
+              "Replan requested",
+              "Pending work was skipped; chat is open.",
             );
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             break;
 
-          case 'AgentFellBackToDefault':
+          case "TaskFailedEvent":
+            toast.error(
+              "Task failed",
+              [payload.task_id, payload.reason].filter(Boolean).join(" — "),
+            );
+            qc.invalidateQueries({ queryKey: keys.plan(planId) });
+            qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
+            break;
+
+          case "AgentFellBackToDefault":
             toast.info(
-              'Task fell back to the default agent',
-              `No agent covers: ${(payload.required_capabilities as string[])?.join(', ')}`,
+              "Task fell back to the default agent",
+              `No agent covers: ${(payload.required_capabilities as string[])?.join(", ")}`,
             );
             qc.invalidateQueries({ queryKey: keys.plan(planId) });
             break;
 
           default:
-            if (TASK_EVENTS.has(event.type)) {
+            if (TASK_EVENTS.has(event.type) || STATE_EVENTS.has(event.type)) {
               qc.invalidateQueries({ queryKey: keys.plan(planId) });
+              qc.invalidateQueries({ queryKey: keys.plans });
+              if (TASK_EVENTS.has(event.type)) {
+                qc.invalidateQueries({ queryKey: keys.attemptTimeline(planId) });
+              }
             }
             break;
         }

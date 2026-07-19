@@ -10,12 +10,8 @@ from src.domain.factories.identity import new_id
 # generation (new_id()) and mirrors the uniform create()/reconstruct() split.
 class CapabilityFactory:
     @staticmethod
-    def create(
-        name: str, description: str, tools: list[str] | None = None
-    ) -> Capability:
-        return Capability(
-            id=new_id(), name=name, description=description, tools=tools or []
-        )
+    def create(name: str, description: str, tools: list[str] | None = None) -> Capability:
+        return Capability(id=new_id(), name=name, description=description, tools=tools or [])
 
     @staticmethod
     def reconstruct(data: dict[str, Any]) -> Capability:

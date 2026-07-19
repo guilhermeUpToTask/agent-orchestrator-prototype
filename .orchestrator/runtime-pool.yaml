@@ -1,0 +1,291 @@
+version: 1
+mode: temporary_acceleration
+global:
+  # Ceiling across ALL runtimes combined, including claude_sonnet subagents --
+  # when planning a wave, sum the concurrent slots you intend to use across
+  # every runtime and stay at or under this number. Raised 2026-07-19 from 3
+  # to 4 to make room for one claude_sonnet lane alongside one external CLI
+  # (codex/mimo/grok) without displacing the emergency-repair reserve; the
+  # real safety bound is still require_worktree_isolation +
+  # prohibit_overlapping_paths, not the raw count.
+  max_parallel_writers: 4
+  require_worktree_isolation: true
+  prohibit_overlapping_paths: true
+  reserve_quota_percent: 15
+  quota_snapshot_max_age_minutes: 30
+  execution_wrapper: .orchestrator/lib/runtime_wrapper.py
+  report_generator: .orchestrator/lib/report.py
+  # Cross-experiment reliability rollup (regenerate after every experiment,
+  # consult during routing) -- see .orchestrator/lib/insights.py.
+  insights_generator: .orchestrator/lib/insights.py
+  insights_doc: .orchestrator/insights.md
+  # Grep-first index of reusable primitives, maintained by /accelerate so
+  # independently-routed parallel branches stop reinventing the same "bound
+  # this output" / "emit this event" logic on their own. See the file itself
+  # for the read/write contract.
+  shared_abstractions_ledger: .orchestrator/shared-abstractions.md
+
+runtimes:
+  claude:
+    enabled: true
+    role: coordinator
+    invocation: in_process_agent_tool
+    command: null
+    notes: >-
+      Not a CLI shell-out. Claude stays coordinator via the Agent tool already
+      available in this session (spawns Claude subagents in-process). Never
+      shell out to the `claude` binary from within a session already running
+      Claude Code.
+    capabilities: [planning, architecture, review, ambiguity_resolution]
+    allowed_risk: [low, medium, high, critical]
+    quota_source: interactive
+    quota_confidence: n/a
+    reserve_percent: 20
+
+  claude_sonnet:
+    enabled: true
+    role: economical_worker
+    invocation: in_process_agent_tool
+    command: null
+    notes: >-
+      Also not a CLI shell-out, and distinct from the `claude` coordinator
+      entry above: spawned via the Agent tool with an explicit model:"sonnet"
+      override (never opus/haiku for this lane -- standing token-cost
+      guidance). Runs inside the coordinator's own session, so it needs no
+      probe and shares no separate quota pool, but it STILL gets its own Git
+      worktree per require_worktree_isolation -- an in-process subagent can
+      write to the wrong directory just as easily as an external CLI if not
+      told which worktree to operate in. Use run_in_background so multiple
+      subagents can execute concurrently instead of serializing behind each
+      other; batch independent Agent tool calls in one message rather than
+      spawning them one response at a time.
+    capabilities: [reconnaissance, docs, narrow_implementation, tests, fixtures, mechanical_refactor]
+    allowed_risk: [low, medium]
+    quota_source: interactive
+    quota_confidence: n/a
+    quota_notes: >-
+      Shares the coordinator's own session budget, not a separate metered
+      pool -- token optimization matters MORE here than for external CLIs,
+      not less. Give each subagent only the task packet plus the relevant
+      excerpts (file paths + line ranges), never the full conversation or
+      unrelated files. Prefer a read-only Explore agent for reconnaissance
+      and reserve a writing subagent for the implementation step only. Ask
+      for a bounded report ("under N words") so the subagent's summary does
+      not blow up the coordinator's own context on return.
+    max_concurrent: 3
+
+  codex:
+    enabled: true
+    role: primary_implementer
+    binary_version: "codex-cli 0.144.5"
+    auth: "ChatGPT login (codex login status -> Logged in using ChatGPT)"
+    command:
+      - codex
+      - exec
+      - --sandbox
+      - workspace-write
+      - --cd
+      - "{workdir}"
+      - --skip-git-repo-check
+      - --json
+      - -o
+      - "{last_message_file}"
+      - "{prompt}"
+    command_stdin: /dev/null
+    probe:
+      - codex
+      - exec
+      - --sandbox
+      - read-only
+      - --cd
+      - "{workdir}"
+      - --skip-git-repo-check
+      - "Reply with exactly one word: OK"
+    probe_stdin: /dev/null
+    probe_result: "PASSED 2026-07-18T11:12Z - stdout contained OK, exit 0, model gpt-5.6-luna, ~3.8s"
+    notes: >-
+      Exec mode has no interactive approval channel; actions outside the
+      sandbox are auto-rejected and returned to the model as a failure, so it
+      degrades safely unattended. Must redirect stdin from /dev/null or the
+      process hangs waiting for piped context.
+    capabilities: [repository_analysis, implementation, refactor, tests, debugging, review]
+    allowed_risk: [low, medium, high]
+    quota_source: manual
+    quota_remaining_percent: null
+    quota_reset_at: null
+    quota_snapshot_at: "2026-07-18T11:12:00Z"
+    quota_confidence: low
+    quota_notes: >-
+      No CLI-exposed remaining-quota signal found (codex doctor reports
+      health, not usage). Track burn manually via exec call count and any
+      observed rate-limit/auth errors.
+    max_concurrent: 1
+
+  pi_free:
+    enabled: false
+    role: economical_worker
+    binary_version: "pi 0.80.10"
+    auth: "OPENROUTER_API_KEY env var + pi's own auth.json (confirmed working)"
+    notes: >-
+      DO NOT pass --provider/--model. pi already has defaultProvider=openrouter,
+      defaultModel=nvidia/nemotron-3-ultra-550b-a55b:free configured in
+      ~/.pi/agent/settings.json. The 2026-07-18 run explicitly overrode this to
+      the much smaller nvidia/nemotron-3-nano-30b-a3b:free, which reasons about
+      a task in text but does not reliably invoke its edit/write tools -
+      exits 0 with zero file changes and no error. Confirmed root cause by
+      re-running the identical failed prompt shape with no --model/--provider
+      flags: the file was created correctly on the first try. Omitting the
+      flags lets pi use its own configured (larger, working) default model.
+      DISABLED 2026-07-18 pending investigation - a WORKTREE ISOLATION
+      BREACH, not a hallucination as first suspected. On the bound-output
+      task pi returned a detailed, accurate implementation summary (real
+      class/test names matching what it actually built) and `git status`
+      in the assigned task worktree showed zero changes - looked like a
+      fabricated report. It wasn't: the real edits landed in the MAIN repo
+      working directory (/workspaces/agent-orchestrator on
+      refactor/experimental_workflow) instead of the isolated worktree
+      passed via subprocess cwd (--workdir). Confirmed by finding the exact
+      matching diff as uncommitted changes in the main worktree and
+      stashing it before the next merge could conflict with it. This means
+      pi can silently write outside the directory it was invoked in,
+      bypassing the one safety property (`require_worktree_isolation`)
+      this whole manifest depends on - a runtime writing real code to the
+      wrong place is worse than one that does nothing. Root cause
+      (possible: pi resolving edit/write paths against a cached/detected
+      project root rather than process cwd) is NOT yet understood. Do not
+      re-enable without reproducing and fixing this, or at minimum wrapping
+      every pi_free invocation with a post-hoc check that the invoking
+      repo's working tree is unchanged.
+    command:
+      - pi
+      - -p
+      - --no-session
+      - --no-context-files
+      - --tools
+      - "read,edit,write,grep,find,ls,bash"
+      - "{prompt}"
+    command_stdin: /dev/null
+    probe:
+      - pi
+      - -p
+      - --no-tools
+      - --no-session
+      - --no-context-files
+      - "Reply with exactly one word: OK"
+    probe_stdin: /dev/null
+    probe_result: "PASSED 2026-07-18T11:12Z (nano model, misleading) / RE-VERIFIED 2026-07-18 with no --model: real file-write task succeeded"
+    capabilities: [reconnaissance, docs, narrow_implementation, tests, fixtures]
+    allowed_risk: [low]
+    quota_source: provider
+    provider: openrouter
+    model: "(pi's own configured default - nvidia/nemotron-3-ultra-550b-a55b:free - do not override)"
+    quota_confidence: medium
+    quota_snapshot_at: "2026-07-18T11:12:00Z"
+    quota_notes: >-
+      Free-tier OpenRouter models are rate-limited rather than metered; no
+      remaining-quota endpoint queried (avoids touching credential internals).
+      Treat HTTP 429 as the quota signal and fall back to the next free model
+      or escalate.
+    max_concurrent: 1
+
+  mimo:
+    enabled: true
+    role: economical_worker
+    binary_version: "mimo 0.1.6"
+    auth: "none - native keyless model"
+    command:
+      - mimo
+      - run
+      - --dir
+      - "{workdir}"
+      - --model
+      - "mimo/mimo-auto"
+      - --format
+      - json
+      - "{prompt}"
+    command_stdin: /dev/null
+    probe:
+      - mimo
+      - run
+      - --dir
+      - "{workdir}"
+      - --model
+      - "mimo/mimo-auto"
+      - --format
+      - json
+      - "Reply with exactly one word: OK"
+    probe_stdin: /dev/null
+    probe_result: "PASSED 2026-07-18T11:30Z - stdout OK, exit 0, ~10.3s, usage.cost=0"
+    notes: >-
+      MUST stay pinned to the native mimo/mimo-auto (or xiaomi/mimo-v2.5*)
+      models. Routing through anthropic/claude-haiku-4-5 or
+      openrouter/nvidia/... FAILS with 401 (invalid x-api-key / User not
+      found) because those pass-through providers need credentials in mimo's
+      own store (~/.local/share/mimocode/auth.json, currently empty), not
+      just the ambient ANTHROPIC_API_KEY/OPENROUTER_API_KEY. Do not run `mimo
+      providers login` as part of this flow - that is an interactive
+      credential step out of scope here.
+    capabilities: [reconnaissance, docs, narrow_implementation, tests, fixtures]
+    allowed_risk: [low]
+    quota_source: provider
+    provider: mimo_native
+    model: "mimo/mimo-auto"
+    quota_confidence: medium
+    quota_snapshot_at: "2026-07-18T11:30:00Z"
+    quota_notes: >-
+      Native model reported usage.cost = 0 in the probe response - free, but
+      no documented remaining-quota endpoint. Confidence is medium (single
+      observed data point), not high.
+    max_concurrent: 1
+
+  grok:
+    enabled: true
+    role: experimental_worker
+    binary_version: "grok 0.2.102"
+    auth: "grok.com login (confirmed via grok inspect)"
+    command:
+      - grok
+      - --cwd
+      - "{workdir}"
+      - --permission-mode
+      - bypassPermissions
+      - --output-format
+      - json
+      - -p
+      - "{prompt}"
+    command_stdin: /dev/null
+    probe:
+      - grok
+      - --cwd
+      - "{workdir}"
+      - --sandbox
+      - read-only
+      - --output-format
+      - json
+      - -p
+      - "Reply with exactly one word: OK"
+    probe_stdin: /dev/null
+    probe_result: "PASSED 2026-07-18T11:19Z - stdout OK, exit 0, ~16.4s, auto-routed to grok-4.5-build-free"
+    notes: >-
+      --sandbox's accepted values are not enumerated in --help (unlike
+      codex's [possible values]), so for real write invocations prefer the
+      documented --permission-mode bypassPermissions flag over guessing a
+      --sandbox value; rely on worktree isolation as the actual safety
+      boundary. grok models reports grok-4.5 as default but the probe
+      auto-routed to the free build model.
+    capabilities: [reconnaissance, implementation, review]
+    allowed_risk: [low, medium]
+    quota_source: manual
+    quota_remaining_percent: null
+    quota_snapshot_at: "2026-07-18T11:19:00Z"
+    quota_confidence: low
+    quota_notes: >-
+      grok.com subscription auth; `grok models` shows only the default model
+      name, no numeric quota exposed.
+    max_concurrent: 1
+
+escalation:
+  low: [pi_free, mimo, grok, claude_sonnet, codex, claude]
+  medium: [codex, grok, claude_sonnet, claude]
+  high: [codex, claude]
+  critical: [claude]

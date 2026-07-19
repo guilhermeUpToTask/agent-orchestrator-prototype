@@ -6,6 +6,7 @@ outbox relay delivers arrives here: coarse domain events (system feed) and
 agent runtime events ("agent.event", the live agent feed). Consumers dedup on
 the event_id in every payload — delivery is at-least-once.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,16 +34,11 @@ async def stream_events(request: Request) -> StreamingResponse:
                 if await request.is_disconnected():
                     return
                 try:
-                    event = await asyncio.wait_for(
-                        queue.get(), timeout=_KEEPALIVE_SECONDS
-                    )
+                    event = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue
-                yield (
-                    f"event: {event['type']}\n"
-                    f"data: {json.dumps(event['payload'])}\n\n"
-                )
+                yield (f"event: {event['type']}\ndata: {json.dumps(event['payload'])}\n\n")
         finally:
             broker.unregister(queue)
 

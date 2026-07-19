@@ -9,6 +9,7 @@ the ONLY polling in the system — and only between plans, never within one
 Crash recovery needs no supervisor logic here: a dead worker's lease expires
 and any other worker's next tick reclaims the plan from persisted state.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ import asyncio
 import structlog
 
 from src.app.handlers.planning_handler import PlanningHandler
+from src.app.use_cases.reconcile_runtime import reconcile_stale_attempts
 from src.infra.container import AppContainer
 from src.infra.runtime.dependency_checker import check_dependencies
 from src.infra.runtime.factory import validate_agent_runner_mode
@@ -32,9 +34,9 @@ async def run_worker_forever(
 ) -> None:
     """Run the claim-and-drive loop until `stop` is set (or forever).
 
-    lease_seconds must exceed the longest expected single task run: heartbeats
-    happen between units, never mid-agent-run (mid-run heartbeats are roadmap
-    Phase 3).
+    Active planning and execution actions renew their claim every one-third of
+    lease_seconds; startup reconciliation never abandons attempts behind a live
+    claim.
     """
     from src.app.use_cases.run_worker import worker_tick
 
@@ -46,6 +48,16 @@ async def run_worker_forever(
         container.clock,
     )
     runner_mode = validate_agent_runner_mode(container.config_store)
+    reconciled = reconcile_stale_attempts(container.new_unit_of_work(), container.clock)
+    if reconciled:
+        log.warning("worker.stale_attempts_reconciled", count=len(reconciled))
+    prune = getattr(container.workspace, "prune", None)
+    if prune is not None:
+        await prune()
+    audit = getattr(container.workspace, "audit", None)
+    if audit is not None:
+        audit_result = await audit()
+        log.info("worker.workspace_audited", project_count=len(audit_result))
     if runner_mode.mode == "real":
         # Warn-only probes: dry-run needs no binaries, and a missing runtime
         # surfaces per task as a classified TaskFailed anyway.
@@ -76,6 +88,7 @@ async def run_worker_forever(
                 worker_id,
                 lease_seconds,
                 planning_handler=planning_handler,
+                verifier=container.verification_executor,
             )
         except Exception:
             # One poisoned plan must not kill the worker: the tick's finally

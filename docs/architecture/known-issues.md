@@ -1,58 +1,62 @@
-# Known issues & fragile spots
+# Known issues and compatibility debt
 
-*Verified against the code on 2026-07-06 (branch `refactor/domain`) during a full-codebase archaeology — every entry cites `file:line` under `backend/src/`. Fixes are scheduled in [ROADMAP.md](../../ROADMAP.md); the full analysis (stress tests, alternatives considered) is archived as the [evolution plan](../history/planning/2026-07-06-orchestrator-evolution-plan-fable-5.md).*
+Verified against the refactored code on 2026-07-14. Fixed entries are removed;
+regressions live in tests rather than remaining as warnings here.
 
-> When you fix one of these, delete its entry here and add the regression test that locks it.
+## Lifecycle compatibility
 
-## 🔥 Defects (hotfix candidates)
+- `PlanPhase`, the legacy conversation/control routes, and root `goals`
+  remain for readable migrated plans and existing clients. Cyclic plans route
+  by `PlanStatus` plus open artifacts and active-cycle state, but deleting
+  the compatibility surface requires a separately versioned API removal.
+- Some secondary frontend panels still display legacy phase history. The main
+  status/control surface is status/gate/block/TDD-driven and explicitly
+  distinguishes RUNNING, pause requested, PAUSED, WAITING, BLOCKED, and IDLE.
 
-### H1 — Double-execution window: lease < task timeout, no mid-run heartbeat
+## Verification and publication
 
-The documented invariant — *"lease_seconds must exceed the longest expected single task run"* (`infra/worker/main.py:34-37`) — is violated by the shipped defaults, and nothing enforces it:
+- The repository has `ProjectDefinition` but no richer persisted
+  `ProjectSpec` containing canonical full-suite/build/type/lint/migration
+  commands. Task verification executes frozen TaskContract commands and goal
+  promotion requires accepted task evidence; cycle-wide verification can only
+  aggregate those evidence references until ProjectSpec gains those commands.
+- `open_pr` and `merge` publication dispositions record the reference of an
+  operation completed by an external/operator adapter. This repository has no
+  authenticated GitHub/forge publication port, and this refactor deliberately
+  did not invent provider-specific push/PR behavior or perform an unauthorized
+  external write.
+- Execution attempts have global UUIDs and monotonic absolute numbers, but the
+  execution ledger does not yet promote `run_kind` as a dedicated SQL column.
+  Role identity is present in the orchestration path and separate invocations,
+  prompts/specs, worktrees, run ids, and evidence.
 
-- Default lease: **300s** (`infra/cli/main.py:94-99`); default subprocess timeout: **600s** (`infra/runtime/factory.py:76`).
-- Heartbeats happen only **between** units (`app/use_cases/run_worker.py:60`) — never during the `await runner.run(...)` in `app/handlers/execution_handler.py:109`.
-- Bonus inconsistency: `worker_tick`'s own default is `lease_seconds=60` (`run_worker.py:74`).
+## Operational visibility
 
-**Failure scenario:** with ≥2 workers (or a restart racing a live one), a task running >300s expires its lease; another worker claims the plan, sees the task RUNNING with no result, re-picks it (`start_task` legally accepts RUNNING → RUNNING, `domain/entities/task.py:31-36`), and executes it **concurrently** — duplicate LLM spend and two merges of the same work.
+- Lease heartbeat now runs during long actions, but the plan detail read model
+  exposes the active run start rather than the promoted lease deadline and last
+  heartbeat. Operational telemetry records liveness; a richer query DTO remains.
+- A malformed plan that raises before any save can still be reclaimed first by
+  oldest `updated_at` on a single worker. A dead-letter/operator quarantine
+  policy is still needed for repeated unexpected application exceptions.
+- SSE is bounded and non-durable for clients; reconnect relies on refetch.
+  Relay and event-table retention remain operational work.
 
-### H2 — Poisoned-plan starvation (single-worker head-of-line blocking)
+## Git/process cleanup
 
-Three correct-looking pieces compose into starvation:
+- Owned process groups are terminated and reaped on success, failure, timeout,
+  discard, and stale results. A host crash can still leave Git worktree metadata;
+  periodic `git worktree prune` is not yet automated.
+- Authoritative test checkpoint branch refs are retained after implementation
+  forks from their immutable commit. They preserve auditability but need a
+  retention policy for long-running repositories.
 
-- The claim picks the **oldest `updated_at`** (`infra/db/plan_repository.py:68`).
-- A tick exception is caught and survived (`infra/worker/main.py:77-84`) — good — but the plan's `updated_at` never changed (nothing saved), and `release()` doesn't touch it (`plan_repository.py:83-90`).
+## Invariants to preserve
 
-**Failure scenario:** a plan whose drive raises before any save (unreconstructable JSON, a use-case bug, a deleted-out-from-under reference) is re-claimed **first, every poll tick, forever**. On the standard single-worker deployment, every other plan starves behind it.
-
-## Silent-death spots (crash windows an operator can't see)
-
-1. **Worker dies mid-agent-run** — nothing observable until lease expiry (≤300s); the task shows RUNNING with no event after `TaskStarted`.
-2. **Crash between the git merge and finalize** — `workspace.commit(handle)` (`execution_handler.py:116`) precedes the finalize transaction (`:266-289`). A crash in that gap leaves the merge in `plan/<id>` but the task RUNNING with `result=None`; the re-pick re-runs the whole task and **merges the same work twice**. The check-before-act guard (`:100`) covers only the persisted-result window, not the committed-git window.
-3. **SSE queue overflow drops silently** — a slow client's queue (max 200) drops events with only a server-side warning (`api/sse.py:83-84`); there is no replay on reconnect (the frontend's blanket refetch is the compensation).
-4. **Requeue erases the attempt's result** — `task.requeue()` sets `result = None` (`domain/entities/task.py:58`); the failure trail survives only in outbox event payloads. This was decision #4 of the domain freeze ("history lives in events") — it now hurts operations and is scheduled to change.
-5. **Relay thread crash-loops invisibly** — events stop flowing but the API stays healthy; log-only signal (`api/outbox_relay.py:102-104`).
-
-## Operational debt
-
-- **Agent-events full replay on API boot** — the relay's cursor starts at 0 every startup (`api/outbox_relay.py:96`), re-publishing the entire `agent_events` table to connected SSE clients; combined with **no retention on any event/chat table**, boot cost grows without bound.
-- **Git debris** — no `git worktree prune` anywhere; a crash mid-attempt leaks the worktree dir and its branch ref (`infra/git/workspace.py:107-137`); `plan/*` branches are never garbage-collected. Self-healing-ish (a retry uses a new attempt number → new branch), but `git worktree list` grows across crashes.
-- **Delete-guard by JSON substring** — `_referenced_by_active_plan(s, '"agent_id":"…"')` (`infra/db/reference_repos.py:246`) string-matches the plan document. Safe today (exact-id match; false positives only block a delete), but it silently depends on Pydantic's compact JSON serialization.
-
-## Bug-magnet zones (where a change is most likely to introduce a defect)
-
-1. **The two-transaction choreography** (`execution_handler.py:81-121`) — never let a live aggregate reference cross a transaction boundary (that's what the frozen `_Unit` snapshot is for, `:53-64`), and never skip the re-read + re-guard in a finalize.
-2. **Manual `bump_version()` before every `save()`** (~12 call sites, e.g. `app/use_cases/control.py:24`, `conversation.py:138`) — forgetting it is a runtime `StaleVersionError` no type checker catches.
-3. **The skip/abandon/fail status lattice** (`domain/entities/task.py:61-73`, `goal.py:38-48`) — the guards differ deliberately; requeueing into an abandoned iteration is the resurrection bug the tolerant finalize (`execution_handler.py:216-233`) exists to prevent. Route every new transition through the aggregate.
-
-## Magic numbers (working, but conventions — not laws)
-
-| Value | Where | Meaning |
-|---|---|---|
-| `max_steps=10_000` | `run_worker.py:44` | drive-loop hard stop |
-| 8 000 chars | `cli_runner.py:37` | TaskResult stdout tail |
-| queue 200, drop-on-full | `sse.py:24` | per-SSE-client buffer |
-| 0.5s | `outbox_relay.py:91` | relay poll |
-| 5 000 ms | `db/engine.py:31` | SQLite busy timeout |
-| `position=10**6` | `api/routers/plans.py:104` | add-task sentinel, renumbered by the edit service |
-| `seq` ∈ {0, 1} | `cli_runner.py:92,105,119` | agent events are start/finish only — streaming is a roadmap seam |
+1. No live aggregate reference crosses an agent/reasoner side effect.
+2. Plan save, execution identity, and domain events share one UoW.
+3. Test-author commits never reach the goal branch until independent GREEN
+   verification accepts the implementation candidate.
+4. Goal branches never reach the cycle branch until every task is DONE with
+   accepted revision-bound evidence.
+5. Resume changes availability only; targeted retry/block resolution are
+   separate commands.

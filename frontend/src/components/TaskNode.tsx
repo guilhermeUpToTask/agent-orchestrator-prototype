@@ -1,23 +1,11 @@
 import React, { memo } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { TaskNodeData } from '../types/ui';
-import { tokens, STATUS, raw } from '../styles/tokens';
+import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
-
-const KIND_COLOR = {
-  idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
-} as const;
-
-function PulsingDot({ color }: { color: string }) {
-  return (
-    <div style={{
-      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-      background: color, boxShadow: `0 0 6px ${color}`,
-      animation: 'glow 2.5s ease-in-out infinite',
-      ['--glow-color' as string]: color,
-    }} />
-  );
-}
+import { StatusBadge } from './StatusBadge';
+import { CountChip } from './ui';
+import { attemptLabel, verificationLabel } from '../lib/taskLabels';
 
 function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
   const selectTask = usePlannerStore((s) => s.selectTask);
@@ -26,12 +14,20 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
 
   const task = data.task;
   const status = task?.status ?? 'pending';
-  const meta = STATUS[status] ?? STATUS.pending;
-  const color = KIND_COLOR[meta.kind];
   const isRunning = status === 'running';
-  const isDone = status === 'done';
   const isFailed = status === 'failed';
   const isSkipped = status === 'skipped';
+
+  const attempt = task ? attemptLabel(task, data.agent) : null;
+  const verification = task ? verificationLabel(task) : null;
+
+  const borderColor = isSelected
+    ? tokens.accent
+    : isFailed
+      ? 'color-mix(in srgb, var(--fail) 45%, transparent)'
+      : isRunning
+        ? 'color-mix(in srgb, var(--run) 45%, transparent)'
+        : tokens.border;
 
   return (
     <>
@@ -41,122 +37,68 @@ function TaskNodeComponent({ id, data }: NodeProps<Node<TaskNodeData>>) {
       }} />
 
       <div onClick={() => selectTask(isSelected ? null : id)} style={{
-        width: 240,
-        background: isSelected ? 'var(--run-bg)' : tokens.cardBg,
-        border: `1.5px solid ${isSelected ? tokens.accent : isRunning ? 'color-mix(in srgb, var(--gate) 27%, transparent)' : isFailed ? 'color-mix(in srgb, var(--fail) 20%, transparent)' : tokens.border}`,
-        borderRadius: tokens.r12, cursor: 'pointer', userSelect: 'none',
+        width: 250,
+        background: isSelected ? 'var(--bg-3)' : 'var(--bg-1)',
+        border: `1.5px solid ${borderColor}`,
+        borderRadius: 'var(--r-2)', cursor: 'pointer', userSelect: 'none',
+        padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 5,
         boxShadow: isSelected
           ? `0 0 0 1px ${tokens.accentGlow}, 0 8px 32px rgba(0,0,0,0.7)`
-          : isRunning ? '0 0 16px color-mix(in srgb, var(--gate) 13%, transparent), 0 4px 12px rgba(0,0,0,0.5)'
+          : isRunning ? '0 0 16px color-mix(in srgb, var(--run) 13%, transparent), 0 4px 12px rgba(0,0,0,0.5)'
           : '0 4px 16px rgba(0,0,0,0.4)',
         transition: 'box-shadow 0.2s, border-color 0.2s',
-        animation: 'fadein 0.18s ease both', overflow: 'hidden',
+        animation: 'fadein 0.18s ease both',
         opacity: isSkipped ? 0.55 : 1,
       }}>
-        {/* Status stripe */}
-        <div style={{ height: 3, background: `linear-gradient(90deg, ${color}, transparent)` }} />
-
-        {/* Header */}
-        <div style={{
-          padding: '7px 10px 5px', borderBottom: `1px solid ${tokens.borderMuted}`,
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          <PulsingDot color={color} />
-          <span style={{ fontSize: 9, fontFamily: tokens.fontMono, color, letterSpacing: '0.1em', fontWeight: 600 }}>
-            {meta.label.toUpperCase()}
-          </span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+        {/* Row 1: status + agent */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <StatusBadge domain="status" value={status} bare />
+          <div style={{ flex: 1 }} />
+          {data.agent && (
             <span style={{
-              fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
-              borderRadius: 3, background: 'var(--bg-3)', color: tokens.textMuted,
-            }}>{data.goalName}</span>
-            {data.agent && (
-              <span style={{
-                fontSize: 8, fontFamily: tokens.fontMono, padding: '1px 5px',
-                borderRadius: 3,
-                background: 'color-mix(in srgb, var(--accent) 9%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
-                color: tokens.accent,
-              }}>{data.agent.name}</span>
+              fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, padding: '1px 6px',
+              borderRadius: 'var(--r-1)', background: 'var(--run-bg)', color: 'var(--run-text)',
+            }}>{data.agent.name}</span>
+          )}
+        </div>
+
+        {/* Row 2: task name */}
+        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 500, color: tokens.textPrimary, lineHeight: 1.35 }}>
+          {task?.name ?? id}
+        </div>
+
+        {task?.required_capabilities && task.required_capabilities.length > 0 && (
+          <div style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted }}>
+            caps: {task.required_capabilities.join(', ')}
+          </div>
+        )}
+
+        {/* Row 3: chips */}
+        {(attempt || verification) && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {attempt && <CountChip tone="fail">{attempt}</CountChip>}
+            {verification && (
+              <CountChip tone={verification === 'verified' ? 'ok' : 'fail'}>
+                {verification === 'verified' ? 'verified' : 'verification rejected'}
+              </CountChip>
             )}
           </div>
-        </div>
+        )}
 
-        {/* Body */}
-        <div style={{ padding: '8px 10px 10px' }}>
+        {isFailed && task?.result?.failure_reason && (
           <div style={{
-            fontSize: 12, fontWeight: 600, color: tokens.textPrimary,
-            lineHeight: 1.35, marginBottom: 6,
+            fontFamily: tokens.fontMono, fontSize: 'var(--fs-micro)', color: 'var(--fail-text)',
+            lineHeight: 1.3,
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
           }}>
-            {task?.name ?? id}
+            {task.result.failure_reason}
           </div>
-
-          {(task?.attempt ?? 0) > 1 && (
-            <div style={{
-              fontSize: 9, fontFamily: tokens.fontMono,
-              color: tokens.yellow, marginBottom: 4,
-            }}>
-              ↺ attempt {task.attempt}
-            </div>
-          )}
-
-          {task?.required_capabilities?.length > 0 && (
-            <div style={{
-              fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted,
-              marginBottom: 4,
-            }}>
-              caps: {task.required_capabilities.join(', ')}
-            </div>
-          )}
-
-          {isRunning && (
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
-              {[0, 1, 2].map((i) => (
-                <div key={i} style={{
-                  width: 4, height: 4, borderRadius: '50%', background: tokens.yellow,
-                  animation: `pulse 1.2s ${i * 0.18}s ease-in-out infinite`,
-                }} />
-              ))}
-              <span style={{ fontSize: 9, color: tokens.yellow, fontFamily: tokens.fontMono }}>executing…</span>
-            </div>
-          )}
-
-          {isDone && (
-            <div style={{
-              padding: '3px 7px', borderRadius: 5,
-              background: tokens.greenDim, border: `1px solid ${tokens.green}33`,
-              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.green,
-            }}>
-              ✓ done
-            </div>
-          )}
-
-          {isFailed && (
-            <div style={{
-              padding: '3px 7px', borderRadius: 5,
-              background: tokens.redDim, border: `1px solid ${tokens.red}33`,
-              fontSize: 9, fontFamily: tokens.fontMono, color: tokens.red,
-              lineHeight: 1.3,
-              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}>
-              ✗ {task?.result?.failure_reason ?? 'failed'}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: '3px 10px', borderTop: `1px solid ${tokens.borderMuted}`,
-          fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>
-          {id}
-        </div>
+        )}
       </div>
 
       <Handle type="source" position={Position.Right} style={{
-        background: isDone ? tokens.green : tokens.accentDim,
+        background: status === 'done' ? tokens.green : tokens.accentDim,
         border: `1.5px solid ${isSelected ? tokens.accent : 'var(--border-1)'}`,
         width: 8, height: 8, right: -4,
       }} />

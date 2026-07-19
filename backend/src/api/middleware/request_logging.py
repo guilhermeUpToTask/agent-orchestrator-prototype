@@ -10,6 +10,7 @@ echoed back in the response header.
 (REQUEST_LOG_LEVEL, default info; set ``REQUEST_LOG=0`` to silence) — exception
 logs, by contrast, are always-on and live in the exception handlers.
 """
+
 from __future__ import annotations
 
 import os

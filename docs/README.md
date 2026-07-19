@@ -28,6 +28,13 @@ Read in this order the first time:
 
 The backend's **frozen port contracts** (exact SQL shapes, method signatures, API→use-case map) live next to the code: [`backend/docs/INTEGRATION_GUIDE.md`](../backend/docs/INTEGRATION_GUIDE.md). Per-layer and per-package READMEs live inside `backend/src/` — they are the closest documentation to each line of code.
 
+## Development and delivery
+
+| Doc | Covers |
+|---|---|
+| [development.md](development.md) | Hardened local setup, seeding, supervised startup, parameters, secrets hygiene, and CI-parity checks |
+| [git-flow.md](git-flow.md) | Branch naming, pull requests, Conventional Commits, CI, releases, and hotfixes |
+
 ## Decisions — why it works that way
 
 | Doc | Covers |

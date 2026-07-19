@@ -3,15 +3,19 @@
 that drive the two gates and the replan loop. Routes map 1:1 onto use cases;
 errors bubble to the global mapping layer.
 """
+
 from __future__ import annotations
 
 import uuid
+import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
+from src.app.execution_records import PlanningOperation, PlanningOperationStatus
+from src.app.ports import ChatMessage
 from src.app.use_cases import control
 from src.app.use_cases.apply_edit import (
     AddTask,
@@ -26,13 +30,43 @@ from src.app.use_cases.apply_edit import (
     apply_edit,
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
-from src.app.use_cases.create_plan import create_plan
-from src.app.use_cases.pause_resume import pause_plan, resume_plan
+from src.app.use_cases.create_plan import open_project_plan
+from src.app.use_cases.bind_project import bind_legacy_project
+from src.app.use_cases.cyclic_planning import (
+    activate_cycle,
+    approve_intent,
+    cancel_cycle_draft,
+    cancel_intent,
+    propose_intent,
+    record_output_disposition,
+    revise_cycle_draft,
+    revise_intent,
+    submit_cycle_draft as submit_cycle_draft_use_case,
+)
+from src.app.use_cases.pause_resume import (
+    pause_plan,
+    resume_plan,
+    retry_planning_stage,
+    retry_task,
+)
 from src.app.use_cases.request_replan import request_replan
+from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import (
+    Cycle,
+    CycleDraft,
+    GoalOutline,
+    IntentProposal,
+    OutputDisposition,
+    PlanBlock,
+    ProposalKind,
+    ReviewGate,
+)
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.factories.identity import new_id
 from src.infra.container import AppContainer
+from src.infra.errors import AttemptNotFoundError
+from src.infra.runtime.process_supervisor import attempt_log_path
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -40,10 +74,87 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 # ---- DTOs ----
 class CreatePlanRequest(BaseModel):
     brief: str
+    project_id: str
+
+
+class ProjectBindingRequest(BaseModel):
+    project_id: str
 
 
 class PlanCreatedResponse(BaseModel):
     plan_id: str
+    created: bool
+    opened_existing: bool
+    brief_preserved: bool
+    discovery_operation_id: str | None
+    discovery_status: str | None
+    discovery_reply: str | None
+    discovery_error: str | None
+
+
+class ActiveRunResponse(BaseModel):
+    run_id: str
+    attempt_id: str
+    attempt_number: int
+    goal_id: str
+    task_id: str
+    started_at: str
+
+
+class PlanDetailResponse(BaseModel):
+    id: str
+    project_id: str | None
+    brief: str
+    version: int
+    status: str
+    status_reason: dict[str, str | None]
+    activity: str
+    current_goal_id: str | None
+    current_task_id: str | None
+    tdd_stage: str | None
+    legal_actions: list[str]
+    pause_requested: bool
+    paused: bool
+    paused_reason: str | None
+    active_run: ActiveRunResponse | None
+    planning_operation: dict[str, Any] | None
+    planning_progress: str | None
+    active_cycle: Cycle | None
+    pending_gate: ReviewGate | None
+    block: PlanBlock | None
+    goals: list[Goal]
+    cycles: list[Cycle]
+    intent_proposal: IntentProposal | None
+    cycle_draft: CycleDraft | None
+    legacy_phase: str | None = None
+    phase: str | None = None
+    iteration: int | None = None
+
+
+class IntentProposalRequest(BaseModel):
+    objective: str
+    scope: list[str] = []
+    constraints: list[str] = []
+    exclusions: list[str] = []
+    kind: ProposalKind = ProposalKind.INITIAL
+    planner_session_ref: str | None = None
+
+
+class ReviewDecisionRequest(BaseModel):
+    gate_id: str
+    subject_revision: int
+
+
+class CycleDraftRequest(BaseModel):
+    goals: list[GoalOutline]
+    unfinished_source_treatment: str | None = None
+
+
+class PublicationRequest(BaseModel):
+    gate_id: str
+    subject_revision: int
+    disposition: OutputDisposition
+    output_reference: str | None = None
 
 
 class MessageRequest(BaseModel):
@@ -57,6 +168,9 @@ class MessageResponse(BaseModel):
     reply: str
     committed: bool
     phase: str
+    operation_id: str
+    operation_status: str
+    error: str | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -64,6 +178,81 @@ class ChatMessageResponse(BaseModel):
     content: str
     created_at: str
     meta: dict[str, Any]
+
+
+class PlanningOperationResponse(BaseModel):
+    id: str
+    purpose: str
+    target_goal_id: str | None
+    status: str
+    created_at: str
+    updated_at: str
+    started_at: str | None
+    completed_at: str | None
+    last_liveness_at: str | None
+    model_request_count: int
+    tool_turn_count: int
+    runtime: str | None
+    provider_id: str | None
+    model_id: str | None
+    failure_kind: str | None
+    retry_at: str | None
+    safe_message: str | None
+
+
+class ExecutionAttemptResponse(BaseModel):
+    id: str
+    number: int
+    task_attempt: int
+    status: str
+    started_at: str
+    completed_at: str | None
+    last_liveness_at: str | None
+    timeout_seconds: int | None
+    runtime: str | None
+    provider_id: str | None
+    model_id: str | None
+    failure_kind: str | None
+    provider_code: str | None
+    retryable: bool | None
+    retry_at: str | None
+    limit_scope: str | None
+    exit_code: int | None
+    safe_message: str | None
+    stdout_tail: str
+    stderr_tail: str
+
+
+class ExecutionRunTimelineResponse(BaseModel):
+    id: str
+    goal_id: str
+    task_id: str
+    status: str
+    started_at: str
+    completed_at: str | None
+    attempts: list[ExecutionAttemptResponse]
+
+
+class TaskExecutionTimelineResponse(BaseModel):
+    goal_id: str
+    task_id: str
+    runs: list[ExecutionRunTimelineResponse]
+
+
+class AttemptLogEntryResponse(BaseModel):
+    monotonic_seconds: float
+    stream: Literal["stdout", "stderr"]
+    text: str
+
+
+class AttemptLogResponse(BaseModel):
+    entries: list[AttemptLogEntryResponse]
+    truncated: bool
+
+
+class AttemptTimelineResponse(BaseModel):
+    planning_operations: list[PlanningOperationResponse]
+    tasks: list[TaskExecutionTimelineResponse]
 
 
 class NewTaskBody(BaseModel):
@@ -153,15 +342,128 @@ def _to_edit(body: EditRequest) -> Edit:
 
 
 # ---- routes ----
+@router.post("/{plan_id}/project-binding", status_code=204)
+def bind_project_route(
+    plan_id: str,
+    body: ProjectBindingRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    bind_legacy_project(
+        plan_id,
+        body.project_id,
+        container.new_unit_of_work(),
+        container.project_repo,
+        container.clock,
+    )
+
+
 @router.post("", response_model=PlanCreatedResponse, status_code=201)
-def create(
+async def create(
     body: CreatePlanRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     container: AppContainer = Depends(get_container),
 ) -> PlanCreatedResponse:
     request_id = idempotency_key or str(uuid.uuid4())
-    plan_id = create_plan(body.brief, request_id, container.new_unit_of_work())
-    return PlanCreatedResponse(plan_id=plan_id)
+    container.project_repo.get(body.project_id)
+    opened = open_project_plan(
+        body.brief,
+        body.project_id,
+        request_id,
+        container.new_unit_of_work(),
+    )
+    if opened.request_replayed:
+        with container.new_unit_of_work() as uow:
+            active = uow.executions.find_active_planning_operation(
+                opened.plan_id, "intent_discovery"
+            ) or uow.executions.find_active_planning_operation(opened.plan_id, "replan_discovery")
+            operations = uow.executions.list_planning_operations(opened.plan_id)
+            operation = active or (operations[-1] if operations else None)
+        return PlanCreatedResponse(
+            plan_id=opened.plan_id,
+            created=False,
+            opened_existing=True,
+            brief_preserved=True,
+            discovery_operation_id=(operation.id if operation else None),
+            discovery_status=(operation.status.value if operation else None),
+            discovery_reply=None,
+            discovery_error=None,
+        )
+
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(opened.plan_id)
+        replan = plan.active_cycle is not None
+    try:
+        result = await (
+            replanning_message(
+                opened.plan_id,
+                body.brief,
+                container.new_unit_of_work(),
+                container.reasoner,
+                container.chat_store,
+                container.clock,
+            )
+            if replan
+            else discovery_message(
+                opened.plan_id,
+                body.brief,
+                container.new_unit_of_work(),
+                container.reasoner,
+                container.chat_store,
+                container.clock,
+            )
+        )
+    except InvalidEditError as exc:
+        now = container.clock.now()
+        operation = PlanningOperation(
+            id=str(uuid.uuid4()),
+            plan_id=opened.plan_id,
+            purpose=("replan_discovery" if replan else "intent_discovery"),
+            status=PlanningOperationStatus.FAILED,
+            created_at=now,
+            updated_at=now,
+            started_at=now,
+            completed_at=now,
+            last_liveness_at=now,
+            failure_kind="planning_conflict",
+            safe_message=str(exc)[:500],
+        )
+        with container.new_unit_of_work() as uow:
+            uow.executions.add_planning_operation(operation)
+        container.chat_store.append(
+            opened.plan_id,
+            ChatMessage(
+                role="user",
+                content=body.brief,
+                created_at=now,
+                meta={
+                    "submitted_brief": True,
+                    "applied": False,
+                    "planning_operation_id": operation.id,
+                    "planning_status": operation.status.value,
+                },
+            ),
+        )
+        return PlanCreatedResponse(
+            plan_id=opened.plan_id,
+            created=opened.created,
+            opened_existing=not opened.created,
+            brief_preserved=True,
+            discovery_operation_id=operation.id,
+            discovery_status=operation.status.value,
+            discovery_reply=None,
+            discovery_error=operation.safe_message,
+        )
+
+    return PlanCreatedResponse(
+        plan_id=opened.plan_id,
+        created=opened.created,
+        opened_existing=not opened.created,
+        brief_preserved=True,
+        discovery_operation_id=result.operation_id,
+        discovery_status=result.operation_status.value,
+        discovery_reply=result.reply,
+        discovery_error=result.error,
+    )
 
 
 @router.get("")
@@ -169,12 +471,359 @@ def list_plans(container: AppContainer = Depends(get_container)) -> list[dict]:
     return container.new_unit_of_work().plans.list_summaries()
 
 
-@router.get("/{plan_id}")
-def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> dict:
+@router.get("/{plan_id}", response_model=PlanDetailResponse)
+def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> PlanDetailResponse:
     uow = container.new_unit_of_work()
     with uow:
         plan = uow.plans.get(plan_id)
-    return plan.model_dump(mode="json")
+        open_attempts = uow.executions.list_open_attempts(plan_id)
+        planning_operations = uow.executions.list_planning_operations(plan_id)
+    latest = max(open_attempts, key=lambda attempt: attempt.number, default=None)
+    cycle = plan.active_cycle
+    goals = cycle.goals if cycle is not None else plan.goals
+    current_goal = min(
+        (goal for goal in goals if not goal.is_terminal),
+        key=lambda goal: goal.position,
+        default=None,
+    )
+    current_task = (
+        min(
+            (task for task in current_goal.tasks if not task.is_terminal),
+            key=lambda task: task.position,
+            default=None,
+        )
+        if current_goal is not None
+        else None
+    )
+    planning_operation = planning_operations[-1] if planning_operations else None
+    goal_position = (
+        next(
+            (
+                index
+                for index, goal in enumerate(sorted(goals, key=lambda item: item.position), 1)
+                if current_goal is not None and goal.id == current_goal.id
+            ),
+            None,
+        )
+        if goals
+        else None
+    )
+    planning_progress = None
+    if planning_operation is not None and planning_operation.status in {
+        PlanningOperationStatus.QUEUED,
+        PlanningOperationStatus.STARTED,
+        PlanningOperationStatus.BACKING_OFF,
+    }:
+        if planning_operation.purpose == "goal_contract" and goal_position is not None:
+            planning_progress = f"Generating tasks for goal {goal_position} of {len(goals)}"
+        elif planning_operation.purpose == "cycle_architecture":
+            planning_progress = "Generating the cycle roadmap"
+        else:
+            planning_progress = "Analyzing the brief"
+    return PlanDetailResponse(
+        id=plan.id,
+        project_id=plan.project_id,
+        brief=plan.brief,
+        version=plan.version,
+        status=plan.status.value,
+        status_reason=plan.status_reason,
+        activity=plan.activity,
+        current_goal_id=current_goal.id if current_goal is not None else None,
+        current_task_id=current_task.id if current_task is not None else None,
+        tdd_stage=current_task.tdd_stage if current_task is not None else None,
+        legal_actions=plan.legal_actions,
+        pause_requested=plan.pause_requested,
+        paused=plan.paused,
+        paused_reason=plan.paused_reason,
+        active_run=(
+            ActiveRunResponse(
+                run_id=latest.run_id,
+                attempt_id=latest.id,
+                attempt_number=latest.number,
+                goal_id=latest.goal_id,
+                task_id=latest.task_id,
+                started_at=latest.started_at.isoformat(),
+            )
+            if latest is not None
+            else None
+        ),
+        planning_operation=(
+            {
+                "id": planning_operation.id,
+                "purpose": planning_operation.purpose,
+                "target_goal_id": planning_operation.target_goal_id,
+                "status": planning_operation.status.value,
+                "updated_at": planning_operation.updated_at.isoformat(),
+                "retry_at": (
+                    planning_operation.retry_at.isoformat()
+                    if planning_operation.retry_at is not None
+                    else None
+                ),
+                "safe_message": planning_operation.safe_message,
+            }
+            if planning_operation is not None
+            else None
+        ),
+        planning_progress=planning_progress,
+        active_cycle=cycle,
+        pending_gate=(
+            plan.review_gate
+            if plan.review_gate is not None and plan.review_gate.unresolved
+            else None
+        ),
+        block=(plan.block if plan.block is not None and plan.block.active else None),
+        goals=goals,
+        cycles=plan.cycles,
+        intent_proposal=plan.intent_proposal,
+        cycle_draft=plan.cycle_draft,
+        legacy_phase=plan.legacy_phase,
+        phase=plan.phase.value,
+        iteration=plan.iteration,
+    )
+
+
+@router.get("/{plan_id}/attempts", response_model=AttemptTimelineResponse)
+def attempt_timeline(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> AttemptTimelineResponse:
+    """Durable task -> run -> attempt history, hydrated before live SSE."""
+    with container.new_unit_of_work() as uow:
+        uow.plans.get(plan_id)
+        runs = uow.executions.list_runs(plan_id)
+        attempts = uow.executions.list_attempts(plan_id)
+        operations = uow.executions.list_planning_operations(plan_id)
+
+    attempts_by_run: dict[str, list] = {}
+    for attempt in attempts:
+        attempts_by_run.setdefault(attempt.run_id, []).append(attempt)
+    runs_by_task: dict[tuple[str, str], list] = {}
+    for run in runs:
+        runs_by_task.setdefault((run.goal_id, run.task_id), []).append(run)
+
+    return AttemptTimelineResponse(
+        planning_operations=[
+            PlanningOperationResponse(
+                id=item.id,
+                purpose=item.purpose,
+                target_goal_id=item.target_goal_id,
+                status=item.status.value,
+                created_at=item.created_at.isoformat(),
+                updated_at=item.updated_at.isoformat(),
+                started_at=item.started_at.isoformat() if item.started_at else None,
+                completed_at=item.completed_at.isoformat() if item.completed_at else None,
+                last_liveness_at=(
+                    item.last_liveness_at.isoformat() if item.last_liveness_at else None
+                ),
+                model_request_count=item.model_request_count,
+                tool_turn_count=item.tool_turn_count,
+                runtime=item.runtime,
+                provider_id=item.provider_id,
+                model_id=item.model_id,
+                failure_kind=item.failure_kind,
+                retry_at=item.retry_at.isoformat() if item.retry_at else None,
+                safe_message=item.safe_message,
+            )
+            for item in operations
+        ],
+        tasks=[
+            TaskExecutionTimelineResponse(
+                goal_id=goal_id,
+                task_id=task_id,
+                runs=[
+                    ExecutionRunTimelineResponse(
+                        id=run.id,
+                        goal_id=run.goal_id,
+                        task_id=run.task_id,
+                        status=run.status.value,
+                        started_at=run.started_at.isoformat(),
+                        completed_at=(run.completed_at.isoformat() if run.completed_at else None),
+                        attempts=[
+                            ExecutionAttemptResponse(
+                                id=attempt.id,
+                                number=attempt.number,
+                                task_attempt=attempt.task_attempt,
+                                status=attempt.status.value,
+                                started_at=attempt.started_at.isoformat(),
+                                completed_at=(
+                                    attempt.completed_at.isoformat()
+                                    if attempt.completed_at
+                                    else None
+                                ),
+                                last_liveness_at=(
+                                    attempt.last_liveness_at.isoformat()
+                                    if attempt.last_liveness_at
+                                    else None
+                                ),
+                                timeout_seconds=attempt.timeout_seconds,
+                                runtime=attempt.runtime,
+                                provider_id=attempt.provider_id,
+                                model_id=attempt.model_id,
+                                failure_kind=attempt.failure_kind,
+                                provider_code=attempt.provider_code,
+                                retryable=attempt.retryable,
+                                retry_at=(
+                                    attempt.retry_at.isoformat() if attempt.retry_at else None
+                                ),
+                                limit_scope=(
+                                    attempt.limit_scope.value if attempt.limit_scope else None
+                                ),
+                                exit_code=attempt.exit_code,
+                                safe_message=attempt.safe_message,
+                                stdout_tail=attempt.stdout_tail,
+                                stderr_tail=attempt.stderr_tail,
+                            )
+                            for attempt in attempts_by_run.get(run.id, [])
+                        ],
+                    )
+                    for run in task_runs
+                ],
+            )
+            for (goal_id, task_id), task_runs in runs_by_task.items()
+        ],
+    )
+
+
+@router.post("/{plan_id}/intent", status_code=201)
+def propose_intent_route(
+    plan_id: str,
+    body: IntentProposalRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    proposal = propose_intent(
+        plan_id,
+        objective=body.objective,
+        scope=body.scope,
+        constraints=body.constraints,
+        exclusions=body.exclusions,
+        kind=body.kind,
+        planner_session_ref=body.planner_session_ref,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return proposal.model_dump(mode="json")
+
+
+@router.put("/{plan_id}/intent")
+def revise_intent_route(
+    plan_id: str,
+    body: IntentProposalRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    proposal = revise_intent(
+        plan_id,
+        objective=body.objective,
+        scope=body.scope,
+        constraints=body.constraints,
+        exclusions=body.exclusions,
+        planner_session_ref=body.planner_session_ref,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return proposal.model_dump(mode="json")
+
+
+@router.delete("/{plan_id}/intent", status_code=204)
+def cancel_intent_route(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    cancel_intent(
+        plan_id,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+
+
+@router.post("/{plan_id}/intent/approve", status_code=204)
+def approve_intent_route(
+    plan_id: str,
+    body: ReviewDecisionRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    approve_intent(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+
+
+@router.post("/{plan_id}/cycle-draft", status_code=201)
+def submit_cycle_draft_route(
+    plan_id: str,
+    body: CycleDraftRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    draft = submit_cycle_draft_use_case(
+        plan_id,
+        goals=body.goals,
+        unfinished_source_treatment=body.unfinished_source_treatment,
+        uow=container.new_unit_of_work(),
+    )
+    return draft.model_dump(mode="json")
+
+
+@router.put("/{plan_id}/cycle-draft")
+def revise_cycle_draft_route(
+    plan_id: str,
+    body: CycleDraftRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    draft = revise_cycle_draft(
+        plan_id,
+        goals=body.goals,
+        unfinished_source_treatment=body.unfinished_source_treatment,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+    return draft.model_dump(mode="json")
+
+
+@router.delete("/{plan_id}/cycle-draft", status_code=204)
+def cancel_cycle_draft_route(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    cancel_cycle_draft(
+        plan_id,
+        uow=container.new_unit_of_work(),
+        clock=container.clock,
+    )
+
+
+@router.post("/{plan_id}/cycle-draft/approve", status_code=201)
+def activate_cycle_route(
+    plan_id: str,
+    body: ReviewDecisionRequest,
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    cycle = activate_cycle(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+    return cycle.model_dump(mode="json")
+
+
+@router.post("/{plan_id}/publication", status_code=204)
+def publish_cycle_route(
+    plan_id: str,
+    body: PublicationRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    record_output_disposition(
+        plan_id,
+        body.gate_id,
+        body.subject_revision,
+        body.disposition,
+        body.output_reference,
+        container.new_unit_of_work(),
+        container.clock,
+    )
 
 
 @router.post("/{plan_id}/edits", status_code=204)
@@ -210,9 +859,47 @@ def pause(
 
 @router.post("/{plan_id}/resume", status_code=204)
 def resume(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
-    """Clear the pause gate and requeue failed work (the manual retry): FAILED
-    tasks return to PENDING with a fresh attempt budget. 422 when not paused."""
+    """Remove only the manual pause. Retry/backoff state is untouched.
+
+    A failed task must be retried with the targeted retry command. 422 when the
+    plan is not manually paused.
+    """
     resume_plan(plan_id, container.new_unit_of_work())
+
+
+class RetryTaskRequest(BaseModel):
+    goal_id: str
+    task_id: str
+
+
+@router.post("/{plan_id}/retry", status_code=204)
+def retry_blocked_task(
+    plan_id: str,
+    body: RetryTaskRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retry only the selected failed task; resume remains a separate command."""
+    retry_task(
+        plan_id,
+        body.goal_id,
+        body.task_id,
+        container.new_unit_of_work(),
+        container.clock,
+    )
+
+
+@router.post("/{plan_id}/retry-stage", status_code=204)
+def retry_blocked_planning_stage(
+    plan_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retry a blocked reasoner stage or agent binding after registry repair."""
+    retry_planning_stage(
+        plan_id,
+        container.new_unit_of_work(),
+        container.clock,
+        container.agent_repo,
+    )
 
 
 @router.post("/{plan_id}/approve", status_code=204)
@@ -235,17 +922,13 @@ def finish(plan_id: str, container: AppContainer = Depends(get_container)) -> No
 
 
 @router.post("/{plan_id}/review/replan", status_code=204)
-def replan_from_review(
-    plan_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def replan_from_review(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Human "replan next phase" at the post-execution gate: REVIEW -> REPLANNING."""
     control.review_replan(plan_id, container.new_unit_of_work())
 
 
 @router.post("/{plan_id}/replan", status_code=204)
-def replan_mid_running(
-    plan_id: str, container: AppContainer = Depends(get_container)
-) -> None:
+def replan_mid_running(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
     """Chat-triggered mid-RUNNING replan: skip pending work -> REPLANNING."""
     request_replan(plan_id, container.new_unit_of_work())
 
@@ -267,7 +950,12 @@ async def discovery(
         container.clock,
     )
     return MessageResponse(
-        reply=result.reply, committed=result.committed, phase=result.phase.value
+        reply=result.reply,
+        committed=result.committed,
+        phase=result.phase.value,
+        operation_id=result.operation_id,
+        operation_status=result.operation_status.value,
+        error=result.error,
     )
 
 
@@ -288,8 +976,50 @@ async def replanning(
         container.clock,
     )
     return MessageResponse(
-        reply=result.reply, committed=result.committed, phase=result.phase.value
+        reply=result.reply,
+        committed=result.committed,
+        phase=result.phase.value,
+        operation_id=result.operation_id,
+        operation_status=result.operation_status.value,
+        error=result.error,
     )
+
+
+@router.get("/{plan_id}/attempts/{attempt_id}/log", response_model=AttemptLogResponse)
+def attempt_log(
+    plan_id: str,
+    attempt_id: str,
+    tail_lines: int = Query(default=200, ge=0, le=2000),
+    container: AppContainer = Depends(get_container),
+) -> AttemptLogResponse:
+    with container.new_unit_of_work() as uow:
+        try:
+            attempt = uow.executions.get_attempt(attempt_id)
+        except KeyError as exc:
+            raise AttemptNotFoundError(attempt_id) from exc
+        if attempt.plan_id != plan_id:
+            raise AttemptNotFoundError(attempt_id)
+
+    path = attempt_log_path(container.orchestrator_home, attempt_id)
+    if not path.exists():
+        return AttemptLogResponse(entries=[], truncated=False)
+
+    entries: list[AttemptLogEntryResponse] = []
+    truncated = False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return AttemptLogResponse(entries=[], truncated=False)
+    for line in lines:
+        try:
+            record = json.loads(line)
+            if record.get("truncated") is True:
+                truncated = True
+                continue
+            entries.append(AttemptLogEntryResponse.model_validate(record))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return AttemptLogResponse(entries=entries[-tail_lines:] if tail_lines else [], truncated=truncated)
 
 
 class AgentEventResponse(BaseModel):

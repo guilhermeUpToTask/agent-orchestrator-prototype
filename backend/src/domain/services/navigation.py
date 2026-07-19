@@ -8,15 +8,14 @@ from src.domain.entities.task import Task
 from src.domain.value_objects.lifecycle import Status, TERMINAL
 
 GoalFailed = Literal["GOAL_FAILED"]
-
-# "Work remains but nothing is runnable right now" (all actionable tasks gated by
-# unexpired backoff). Worker treats this as release-and-recheck, NOT done.
+DependencyBlocked = Literal["DEPENDENCY_BLOCKED"]
 NOT_READY: Literal["NOT_READY"] = "NOT_READY"
 
 NextAction = Union[
     tuple[Goal, Task],
     tuple[Goal, None],
     tuple[Goal, GoalFailed],
+    tuple[Goal, DependencyBlocked],
     Literal["NOT_READY"],
     None,
 ]
@@ -27,51 +26,33 @@ def _goal_ready(goal: Goal, done_goal_ids: set[str]) -> bool:
 
 
 def next_action(goals: list[Goal], now: datetime) -> NextAction:
-    """Derive the next actionable unit by scanning statuses at time `now`.
+    """Return work for only the earliest non-terminal goal.
 
-    `now` is injected (never read inside) so the scan stays pure/testable. Backoff
-    is a readiness condition with head-of-line semantics: a goal whose head task
-    has retry_not_before in the future is blocked as a whole (tasks are a
-    sequential chain — the scan never runs a later task past a waiting earlier
-    one); the scan then moves on, exactly like a goal whose dependencies are
-    unmet.
-
-    Returns: (goal,task) run it | (goal,None) close goal | (goal,"GOAL_FAILED")
-    apply policy | "NOT_READY" backing off, recheck later | None plan complete.
+    Position is the scheduling barrier; `depends_on` remains a correctness
+    relationship. Backoff, an unresolved failure, or an unmet dependency on the
+    head goal blocks every later goal. Navigation is a pure scan and stores no
+    cursor.
     """
-    done_goal_ids = {g.id for g in goals if g.status == Status.DONE}
-    saw_backing_off = False
+    ordered = sorted(goals, key=lambda g: g.position)
+    head_goal = next((goal for goal in ordered if goal.status not in TERMINAL), None)
+    if head_goal is None:
+        return None
 
-    for goal in sorted(goals, key=lambda g: g.position):
-        if goal.status in TERMINAL:
-            continue
-        if not _goal_ready(goal, done_goal_ids):
-            continue
+    done_goal_ids = {goal.id for goal in goals if goal.status == Status.DONE}
+    if not _goal_ready(head_goal, done_goal_ids):
+        return head_goal, "DEPENDENCY_BLOCKED"
 
-        # Tasks in a goal are a sequential chain: only the HEAD (first non-terminal
-        # task in position order) is ever a candidate. A backing-off head blocks
-        # the whole goal — never skip ahead to a later task. Cross-goal order is
-        # unaffected: the scan moves on to the next goal whose depends_on are met.
-        head = next(
-            (
-                t
-                for t in sorted(goal.tasks, key=lambda t: t.position)
-                if t.status not in TERMINAL
-            ),
-            None,
-        )
-        if head is not None:
-            if head.is_ready_at(now):
-                return goal, head
-            saw_backing_off = True
-            continue
+    head_task = next(
+        (
+            task
+            for task in sorted(head_goal.tasks, key=lambda task: task.position)
+            if task.status not in TERMINAL
+        ),
+        None,
+    )
+    if head_task is not None:
+        return (head_goal, head_task) if head_task.is_ready_at(now) else NOT_READY
 
-        # No actionable tasks left but at least one FAILED -> emit the GOAL_FAILED
-        # signal; the worker turns that into the auto-pause (needs-attention). A
-        # task with retries left is still actionable (handled above), so a
-        # transient failure never reaches here.
-        if any(t.status == Status.FAILED for t in goal.tasks):
-            return goal, "GOAL_FAILED"
-        return goal, None
-
-    return NOT_READY if saw_backing_off else None
+    if any(task.status == Status.FAILED for task in head_goal.tasks):
+        return head_goal, "GOAL_FAILED"
+    return head_goal, None

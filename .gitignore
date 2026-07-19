@@ -75,6 +75,9 @@ coverage.xml
 # Logs
 *.log
 
+# Local SQLite runtime snapshots
+*.db
+
 # IDEs and editors
 .vscode/
 .idea/
@@ -90,6 +93,6 @@ workflow/
 
 node_modules/
 
-# Ignore Graphify local cache and manifest
-graphify-out/cache
-graphify-out/manifest.json
+# Ignore Graphify local
+.graphify/
+graphify-out/

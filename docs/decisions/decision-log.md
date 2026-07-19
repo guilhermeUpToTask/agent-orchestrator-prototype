@@ -1,8 +1,10 @@
 # Decision log
 
-*Every locked design decision, consolidated. Sources: the [master roadmap](../history/planning/2026-07-02-master-roadmap-final-fable-5.md) ("ALL DECISIONS" section, r2-audited against running code), the [working-prototype plan](../history/planning/2026-07-03-working-prototype-reasoner-frontend-fable-5.md), the [domain design record](domain-design-decisions.md), and [ADR-001](adr-001-concurrency-lease.md). Statements are facts about the current system unless marked superseded.*
+*Every locked design decision, consolidated. Decisions 1-42 remain historical
+evidence, but incompatible lifecycle statements are superseded by decision 43
+and [ADR-003](adr-003-cyclic-project-plan-lifecycle.md).*
 
-## Phase machine & the loop (locked 2026-07-02, Phase-0 freeze)
+## Historical phase machine (superseded by decision 43)
 
 1. **Nine phases**: DISCOVERY, REPLANNING, ARCHITECTURE, ENRICHING, AWAITING_REVIEW, RUNNING, REVIEW, DONE, FAILED. Terminal = {DONE, FAILED}.
 2. **ENRICHING is separate from ARCHITECTURE** for crash-recovery granularity — more phase boundaries = more checkpoints = finer resume. Semantically one activity in two steps, deliberately.
@@ -17,9 +19,9 @@
 ## Concurrency, lease, recovery (ADR-001, locked 2026-07-02)
 
 10. **Per-plan lease now; sequential per plan.** The lease *granularity* is the unit of parallelism — moving it to goal/task level is the designed future switch. When parallelism is needed: move the lease, don't bolt a queue on top.
-11. **The lease replaces the reconciler entirely.** Expired lease = reclaimable; a dead worker needs no supervisor cleanup. Only ARCHITECTURE/ENRICHING/RUNNING are claimable.
+11. **The lease replaces continuous domain reconciliation.** Expired lease = reclaimable; a dead worker needs no supervisor mutation of task outcomes. Decision 45 adds startup-only operational-ledger reconciliation without changing that authority.
 12. **The worker tick reports *progress*, not *claiming*** — a claim yielding only `not_ready`/`paused` sleeps instead of spinning (fixed the verified worker-tick spin bug).
-13. **Heartbeats between units only** (mid-run heartbeats deferred) — so `lease_seconds` must exceed the longest task run. ⚠ The shipped defaults violate this — [known issue H1](../architecture/known-issues.md), fix scheduled first on the roadmap.
+13. **Historical: heartbeats between units only.** Superseded by decision 45: active atomic actions now renew the lease at one-third of its interval.
 14. **Scheduler = thin, idempotent, OS-supervised** (when it lands); no distributed consensus. Lease = recovery *mechanism*; health = *visibility* (a separate, still-unbuilt surface).
 
 ## Retry & failure (locked 2026-07-02)
@@ -80,3 +82,31 @@
 ## Deferred by decision (seams preserved)
 
 PR gate · project spec governance · decision gate · GitHub PR output · parallelism · env provisioner · Postgres · Redis claim path · pi NDJSON streaming. Details and reintroduction designs: [../legacy/pre-refactor-backend.md](../legacy/pre-refactor-backend.md); scheduling: [ROADMAP.md](../../ROADMAP.md).
+
+
+43. **Domain unfreeze #4 (2026-07-14): cyclic ProjectPlan + deterministic TDD execution.** [ADR-003](adr-003-cyclic-project-plan-lifecycle.md) deliberately supersedes the terminal nine-phase lifecycle and the incompatible parts of decisions 1-9, 13, 17-18, 22, 24-25, 34-35, and unfreezes 2-3. One immutable project owns one long-lived plan; root status is `running | paused | waiting | blocked | idle`; finite work lives in cycles; intent, architecture, and publication are exact-revision review gates; pause and retry are separate; runs are monotonic and leased; task completion requires protected, independently verified executable evidence; and verified task-to-goal-to-cycle staging produces one recorded output disposition per cycle. Legacy rows are preserved through the explicit mapping and project-binding quarantine in ADR-003; ownership and approval/publication history are never fabricated.
+
+44. **Domain unfreeze #5 (2026-07-14): durable Git-promotion reservation.** Candidate and goal promotion now reserve the plan before crossing the database-to-Git side-effect boundary. While the reservation is held, pause requests remain legal but replans, semantic edits, intent/draft replacement, and cycle activation are rejected. Finalization re-reads the reservation and captured cycle/task identity before clearing it in the same transaction as task/goal completion. This closes the check-to-merge race without holding a database transaction open across Git I/O.
+
+45. **Operational recovery, provider circuits, and truthful timelines (2026-07-15).** Planning LLM calls are durable `PlanningOperation`s; task invocations persist normalized runtime/provider/model failure evidence and bounded redacted output. Retry defaults are jittered 30s→15m, provider `Retry-After` is a floor, and a persisted runtime/provider/model circuit escalates repeated capacity failures into a structured block with explicit recovery actions. Worker startup abandons stale RUNNING attempt/run rows only when the plan has no live claim, leaving domain task state to the lease-driven reclaim choreography, then conservatively prunes/audits git worktrees. The attempt-history API hydrates the console before SSE; metrics report planner/child/combined coverage with unavailable distinct from zero. This amends decisions 11, 13, 16, 33, and the observability portion of 42 without reintroducing a continuous domain reconciler.
+
+
+46. **Domain unfreeze #6 (2026-07-16): executable recovery and source-preserving replan review.** Structured block actions are now commands rather than display-only strings: execution blocks target one failed task; provider-capacity retry clears only the evidence-linked runtime/provider/model circuit; reasoner blocks retry their current planning stage; and `edit_task` permits a semantic correction of only the blocked target before resolving that block. Resume remains availability-only, absolute attempt identity and unrelated gates/tasks are preserved, and block resolution plus aggregate state plus outbox event commit in one UoW/CAS transaction. Plan detail now exports typed cycles, proposal, draft, gate, and block artifacts. The console renders retry/edit controls, explicit replan intent, locked source-cycle history, and a side-by-side editable CycleDraft. Replan reasoner context includes source-cycle results and unfinished work and explicitly forbids recreating DONE work. No root status or phase transition was added; this deliberately unfreezes only recovery guards, recovery commands, and replan context/review presentation under ADR-003.
+
+47. **Domain unfreeze #7 (2026-07-16): live-registry recovery for frozen task contracts.** An `agent_capability` block now advertises `retry_stage`. Recovery snapshots the blocked goal's frozen task requirements, resolves every mandatory TDD role from the user-managed agent registry outside the plan transaction, then re-reads and version-checks the aggregate before applying all bindings, resolving the block, bumping version, and writing `BlockResolved` in one UoW. Partial binding is forbidden: any uncovered role leaves the plan and every task unchanged. Explicit role matches no longer depend on a default agent. The demo seed provides the mandatory role-capability vocabulary as bootstrap data only; registry-defined execution profiles and preflight coverage remain roadmap work.
+
+48. **Domain unfreeze #8 (2026-07-17): runnable bootstrap and strict cyclic
+recovery/routing invariants.** The default dry-run runtime now produces
+deterministic role-specific artifacts so the shipped stub + seeded
+`test_authoring`/`implementation` agent traverses the same Git, frozen-test,
+scope, verification-evidence, and publication choreography as a real agent.
+Repository-root scope is normalized explicitly; deleted test artifacts become
+recoverable verification failures. CycleDraft creation and later dependency
+edits reject edges to same-position or later goals, preserving the positional
+scheduling barrier. Migrated project-less plans gain the advertised
+transactional `project-binding` command. Project workspaces detect each
+repository's actual default branch and cache by current repository identity, so
+configuration changes cannot strand work on `main` assumptions or a stale
+repository. The unimplemented active `cancel_cycle` advertisement is removed;
+cycle cancellation remains an explicit publication disposition or draft
+cancellation, never a display-only command.

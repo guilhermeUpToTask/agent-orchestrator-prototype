@@ -12,6 +12,7 @@ gets the PRAGMAs the persist-first guarantee depends on:
 The PRAGMAs are attached via a ``connect`` event listener so they apply to
 pooled connections too, not just the first one.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

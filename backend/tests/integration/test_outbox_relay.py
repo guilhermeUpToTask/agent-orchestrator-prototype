@@ -1,6 +1,7 @@
 """The outbox relay: undelivered rows reach the SSE broker in order and are
 marked delivered; re-runs don't re-deliver (forward progress); agent events are
 tailed by cursor; at-least-once + event_id dedup key in every payload."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +13,7 @@ from sqlalchemy import text
 from src.api.outbox_relay import relay_once
 from src.api.sse import SSEBroker
 from src.app.testing.fakes import FakeClock
+from src.domain.entities.project_definition import ProjectDefinition
 from src.domain.events.outbox import PhaseAdvanced, TaskCompleted
 from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
@@ -155,6 +157,9 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
+    container.project_repo.add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
     app = create_app(container)
 
     with TestClient(app) as client:
@@ -164,19 +169,24 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
         original = get_broker().publish
         get_broker().publish = lambda t, p: received.append((t, p))  # type: ignore
         try:
-            plan_id = client.post("/api/plans", json={"brief": "goal: G\ntask: t"}).json()[
-                "plan_id"
-            ]
+            plan_id = client.post(
+                "/api/plans",
+                json={
+                    "brief": "goal: G\ntask: t",
+                    "project_id": "project-1",
+                },
+            ).json()["plan_id"]
             client.post(f"/api/plans/{plan_id}/discovery/message", json={"message": ""})
             deadline = time.time() + 5
             while time.time() < deadline:
-                if any(t == "PhaseAdvanced" for t, _ in received):
+                if any(t == "IntentProposed" for t, _ in received):
                     break
                 time.sleep(0.05)
         finally:
             get_broker().publish = original  # type: ignore
         dependencies.set_container(None)  # type: ignore[arg-type]
 
-    phase_events = [p for t, p in received if t == "PhaseAdvanced"]
-    assert phase_events and phase_events[0]["to_phase"] == "architecture"
-    assert json.dumps(phase_events[0])  # payload is JSON-serializable
+    intent_events = [p for t, p in received if t == "IntentProposed"]
+    assert intent_events and intent_events[0]["plan_id"] == plan_id
+    assert intent_events[0]["proposal_id"]
+    assert json.dumps(intent_events[0])  # payload is JSON-serializable

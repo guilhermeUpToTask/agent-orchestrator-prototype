@@ -1,0 +1,110 @@
+{
+  "experiments_observed": [
+    "obs-followups-2026-07-18",
+    "obs-streaming-2026-07-18",
+    "simplify-runtime-solid-dry-20260718"
+  ],
+  "flags": [
+    "mimo: routed 1 task(s), verified zero -- investigate before routing more.",
+    "mimo: escalation rate 100% exceeds 30% flag threshold.",
+    "mimo: only 1 sample(s) -- treat its rates as low-confidence.",
+    "pi_free: routed 2 task(s), verified zero -- investigate before routing more.",
+    "pi_free: escalation rate 150% exceeds 30% flag threshold.",
+    "pi_free: only 2 sample(s) -- treat its rates as low-confidence."
+  ],
+  "runtimes": [
+    {
+      "by_risk": {
+        "low": {
+          "routed": 2,
+          "verified": 2,
+          "verified_rate": 1.0
+        }
+      },
+      "duration_seconds_median": 600.0,
+      "duration_seconds_p90": 745.4,
+      "escalated_unresolved": 0,
+      "escalation_rate": 0.0,
+      "escalation_reasons": {},
+      "failed": 0,
+      "first_pass_success_rate": 1.0,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "codex",
+      "sample_size": 5,
+      "tasks_routed": 5,
+      "verified_completions": 7
+    },
+    {
+      "by_risk": {},
+      "duration_seconds_median": 180.0,
+      "duration_seconds_p90": 180.0,
+      "escalated_unresolved": 0,
+      "escalation_rate": null,
+      "escalation_reasons": {},
+      "failed": 0,
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "claude",
+      "sample_size": 0,
+      "tasks_routed": 0,
+      "verified_completions": 1
+    },
+    {
+      "by_risk": {},
+      "duration_seconds_median": 342.6,
+      "duration_seconds_p90": 342.6,
+      "escalated_unresolved": 0,
+      "escalation_rate": null,
+      "escalation_reasons": {},
+      "failed": 0,
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "grok",
+      "sample_size": 0,
+      "tasks_routed": 0,
+      "verified_completions": 1
+    },
+    {
+      "by_risk": {},
+      "duration_seconds_median": null,
+      "duration_seconds_p90": null,
+      "escalated_unresolved": 0,
+      "escalation_rate": 1.0,
+      "escalation_reasons": {
+        "mimo run hit the wrapper's 900s timeout with zero stdout/stderr and zero file changes - no verifiable output; retrying on pi_free per one-attempt-then-escalate policy before considering codex": 1
+      },
+      "failed": 0,
+      "first_pass_success_rate": 0.0,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "mimo",
+      "sample_size": 1,
+      "tasks_routed": 1,
+      "verified_completions": 0
+    },
+    {
+      "by_risk": {},
+      "duration_seconds_median": null,
+      "duration_seconds_p90": null,
+      "escalated_unresolved": 0,
+      "escalation_rate": 1.5,
+      "escalation_reasons": {
+        "pi_free (correct default model this time, root cause fix applied) returned a detailed, specific, plausible-sounding implementation summary (class name, test name, exact pass counts, verification output) but git status shows ZERO file changes in the worktree - a fabricated/hallucinated success report, worse than a silent no-op since it would have been trusted without independent verification. Escalating to codex; respecting codex max_concurrent=1, queued behind obs-persist.": 1,
+        "pi_free attempt 2 exited 0 but only emitted reasoning text about markdown formatting and never actually wrote any file changes (git diff empty) - two low-risk-runtime attempts (mimo timeout, pi_free no-op) exhausted per one-repair policy; grok is quota-exhausted for today per task4's error; escalating straight to codex": 1,
+        "pi_free attempt exited 0 with empty stdout/stderr and zero file changes in 9.7s on the full task prompt, while a manual retest of the same full prompt exceeded 60s without returning (likely free-tier NVIDIA model instability/rate-limiting under load) - no verifiable output, treating as a failed attempt per one-attempt-then-escalate policy": 1
+      },
+      "failed": 0,
+      "first_pass_success_rate": 0.0,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "pi_free",
+      "sample_size": 2,
+      "tasks_routed": 2,
+      "verified_completions": 0
+    }
+  ],
+  "task_count": 8
+}

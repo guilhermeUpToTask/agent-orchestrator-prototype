@@ -1,9 +1,6 @@
-"""THE FULL CYCLE driven by the REAL reasoner implementation (OpenAIReasoner)
-on a scripted FakeLLMClient — the same 9-phase + replan walk as
-test_full_cycle.py (which stays on the stub, the deterministic dry-run gate),
-but exercising the production planning path: tool-calling sessions, the
-question turn, submit_goals commits, the per-goal submit_tasks JIT step and
-the plain-text history replay."""
+"""Canonical planning artifacts driven by the real OpenAIReasoner implementation
+on a scripted client and persisted through the real SQLite UnitOfWork."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,15 +17,17 @@ from src.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from src.app.use_cases.control import finish_review, resume_from_review, review_replan
 from src.app.use_cases.conversation import discovery_message, replanning_message
 from src.app.use_cases.create_plan import create_plan
+from src.app.use_cases.cyclic_planning import activate_cycle, approve_intent
 from src.app.use_cases.run_worker import worker_tick
 from src.domain.aggregates.planner_orchestrator import PlanPhase
+from src.domain.entities.planning_artifacts import PlanStatus
 from src.domain.entities.capability import Capability
-from src.domain.value_objects.lifecycle import Status
+from src.domain.entities.project_definition import ProjectDefinition
 from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
+from src.infra.db.reference_repos import SqliteProjectRepository
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
@@ -38,55 +37,58 @@ pytestmark = pytest.mark.integration
 
 CAPS = [Capability(id="backend", name="Backend", description="server-side")]
 
-# The LLM script, in pop order across the whole cycle:
-#   1. discovery turn 1  -> plain text (the question turn, no commit)
-#   2. discovery turn 2  -> submit_goals: API (1 task, caps) + Docs (task-less)
-#   3. ENRICHING JIT     -> submit_tasks for Docs (2 ordered tasks)
-#   4. replanning turn   -> submit_goals: Hardening (1 task)
+# The LLM script follows the canonical purpose profiles in order.
 SCRIPT = [
     text_turn("What kind of docs do you need?"),
     tool_turn(
-        "submit_goals",
+        "submit_intent_proposal",
+        {
+            "normalized_brief": "Build a tiny documented API service.",
+            "objective": "Ship a maintainable API with documentation.",
+            "scope": ["HTTP API", "documentation"],
+            "constraints": ["SQLite"],
+            "exclusions": ["mobile client"],
+            "assumptions": ["single tenant"],
+            "unresolved_questions": [],
+        },
+        "c-intent",
+    ),
+    tool_turn(
+        "submit_cycle_draft",
         {
             "goals": [
                 {
-                    "name": "API",
-                    "description": "build the api",
-                    "tasks": [
-                        {
-                            "name": "scaffold app",
-                            "description": "fastapi skeleton",
-                            "required_capabilities": ["backend"],
-                        }
-                    ],
-                },
-                {"name": "Docs", "description": "user documentation"},
-            ]
-        },
-        "c-goals",
-    ),
-    tool_turn(
-        "submit_tasks",
-        {
-            "tasks": [
-                {"name": "write quickstart", "description": "README quickstart"},
-                {"name": "write api reference", "description": "endpoint docs"},
-            ]
-        },
-        "c-tasks",
-    ),
-    tool_turn(
-        "submit_goals",
-        {
-            "goals": [
-                {
-                    "name": "Hardening",
-                    "description": "make it production-ready",
-                    "tasks": [{"name": "add auth", "description": "token auth"}],
+                    "key": "delivery",
+                    "name": "API delivery",
+                    "objective": "Build and document the API.",
+                    "position": 0,
+                    "depends_on": [],
                 }
             ]
         },
-        "c-replan",
+        "c-draft",
+    ),
+    tool_turn(
+        "submit_goal_contract",
+        {
+            "objective": "Build and document the API.",
+            "acceptance_criteria": [{"id": "g-1", "description": "API is usable"}],
+            "tasks": [
+                {
+                    "objective": "Implement the service and quickstart.",
+                    "acceptance_criteria": [{"id": "t-1", "description": "health endpoint works"}],
+                    "goal_criterion_ids": ["g-1"],
+                    "allowed_scope": ["backend/", "README.md"],
+                    "forbidden_scope": ["frontend/"],
+                    "verification_commands": ["pytest -q"],
+                    "verification_strategy": "executable_check",
+                    "required_capabilities": ["backend"],
+                }
+            ],
+            "cross_task_integration_criterion_ids": [],
+            "required_capabilities": ["backend"],
+        },
+        "c-contract",
     ),
 ]
 
@@ -96,25 +98,42 @@ class LLMStack:
         engine = build_engine(f"sqlite:///{tmp_path / 'llm.db'}")
         Base.metadata.create_all(engine)
         sf = make_session_factory(engine)
+        SqliteProjectRepository(sf).add(
+            ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+        )
         self.clock = FakeClock()
         self.uow = SqliteUnitOfWork(sf, self.clock)
         self.llm = FakeLLMClient(list(SCRIPT))
         self.reasoner = OpenAIReasoner(self.llm, CAPS)
         self.runner = DummyAgentRunner({})
-        self.agents = InMemoryAgentRepository([make_agent_spec()], "a1")
-        self.capabilities = InMemoryCapabilityRepository(CAPS)
+        implementation = Capability(
+            id="implementation", name="Implementation", description="implements changes"
+        )
+        test_authoring = Capability(
+            id="test_authoring", name="Test authoring", description="authors tests"
+        )
+        agent = make_agent_spec().model_copy(
+            update={"capabilities": [CAPS[0], implementation, test_authoring]}
+        )
+        self.agents = InMemoryAgentRepository([agent], "a1")
+        self.capabilities = InMemoryCapabilityRepository([*CAPS, implementation, test_authoring])
         self.chat = InMemoryChatStore()
         self.ws = NoOpWorkspace()
         self.sink = CollectingEventSink()
-        self.planning = PlanningHandler(
-            self.reasoner, self.agents, self.capabilities, self.clock
-        )
+        self.planning = PlanningHandler(self.reasoner, self.agents, self.capabilities, self.clock)
 
     def tick(self):
         return asyncio.run(
             worker_tick(
-                self.uow, self.runner, self.agents, self.ws, self.sink,
-                self.clock, "w1", 60, planning_handler=self.planning,
+                self.uow,
+                self.runner,
+                self.agents,
+                self.ws,
+                self.sink,
+                self.clock,
+                "w1",
+                60,
+                planning_handler=self.planning,
             )
         )
 
@@ -126,18 +145,16 @@ class LLMStack:
 
     def say(self, plan_id, message, *, replanning=False):
         fn = replanning_message if replanning else discovery_message
-        return asyncio.run(
-            fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock)
-        )
+        return asyncio.run(fn(plan_id, message, self.uow, self.reasoner, self.chat, self.clock))
 
     def plan(self, plan_id):
         with self.uow:
             return self.uow.plans.get(plan_id)
 
 
-def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
+def test_canonical_planning_on_the_real_reasoner_with_scripted_llm(tmp_path):
     stack = LLMStack(tmp_path)
-    plan_id = create_plan("Build a tiny service with docs", "req-1", stack.uow)
+    plan_id = create_plan("Build a tiny service with docs", "project-1", "req-1", stack.uow)
 
     # ---- DISCOVERY: question turn, then the commit turn ----
     asked = stack.say(plan_id, "I want a tiny service")
@@ -148,57 +165,39 @@ def test_full_cycle_on_the_real_reasoner_with_scripted_llm(tmp_path):
     committed = stack.say(plan_id, "quickstart plus api reference")
     assert committed.committed is True
     plan = stack.plan(plan_id)
-    assert plan.phase == PlanPhase.ARCHITECTURE
+    assert plan.status == PlanStatus.WAITING
+    assert plan.intent_proposal is not None
+    assert plan.intent_proposal.objective == "Ship a maintainable API with documentation."
     # the second converse call replayed turn 1 as plain text history
     second_call = stack.llm.calls[1]["messages"]
     assert {"role": "user", "content": "I want a tiny service"} in second_call
     assert {
-        "role": "assistant", "content": "What kind of docs do you need?",
+        "role": "assistant",
+        "content": "What kind of docs do you need?",
     } in second_call
 
-    # ---- worker: ARCHITECTURE passthrough + ENRICHING JIT + binding ----
-    stack.drain()
+    assert plan.review_gate is not None
+    approve_intent(plan_id, plan.review_gate.id, 1, stack.uow, stack.clock)
+    asyncio.run(stack.planning.handle(plan_id, stack.plan(plan_id), stack.uow))
     plan = stack.plan(plan_id)
-    assert plan.phase == PlanPhase.AWAITING_REVIEW
-    api_goal, docs_goal = plan.goals
-    assert [t.name for t in api_goal.tasks] == ["scaffold app"]  # pre-populated
-    assert api_goal.tasks[0].required_capabilities == ["backend"]
-    assert [(t.name, t.position) for t in docs_goal.tasks] == [
-        ("write quickstart", 0), ("write api reference", 1),
-    ]
-    assert all(t.agent_id == "a1" for g in plan.goals for t in g.tasks)
-
-    # ---- the gates + execution ----
-    resume_from_review(plan_id, stack.uow)
-    stack.drain()
+    assert plan.cycle_draft is not None and plan.review_gate is not None
+    assert [outline.key for outline in plan.cycle_draft.goals] == ["delivery"]
+    activate_cycle(plan_id, plan.review_gate.id, 1, stack.uow, stack.clock)
+    asyncio.run(stack.planning.handle(plan_id, stack.plan(plan_id), stack.uow))
     plan = stack.plan(plan_id)
-    assert plan.phase == PlanPhase.REVIEW
-    assert all(t.status == Status.DONE for g in plan.goals for t in g.tasks)
-
-    # ---- REPLANNING on real replanning prompt + context ----
-    review_replan(plan_id, stack.uow)
-    replan = stack.say(plan_id, "harden it for production", replanning=True)
-    assert replan.committed is True
-    plan = stack.plan(plan_id)
-    assert plan.iteration == 2
-    assert [g.name for g in plan.goals] == ["API", "Docs", "Hardening"]
-    # the replanning prompt carried prior results (include_results=True)
-    replan_prompt = stack.llm.calls[3]["messages"][1]["content"]
-    assert "Re-planning conversation" in replan_prompt
-    assert "history — do not redo" in replan_prompt
-
-    # ---- iteration 2 to DONE ----
-    stack.drain()
-    resume_from_review(plan_id, stack.uow)
-    stack.drain()
-    finish_review(plan_id, stack.uow)
-    assert stack.plan(plan_id).phase == PlanPhase.DONE
+    assert plan.active_cycle is not None
+    (goal,) = plan.active_cycle.goals
+    assert goal.contract is not None
+    assert goal.tasks[0].contract is not None
+    assert goal.tasks[0].required_capabilities == ["backend"]
+    assert goal.tasks[0].role_agent_ids["implementer"] == "a1"
 
     # chat history holds the whole conversation in order
     rows = stack.chat.list(plan_id)
     assert [(m.role, m.meta.get("committed")) for m in rows] == [
-        ("user", None), ("assistant", False),
-        ("user", None), ("assistant", True),
-        ("user", None), ("assistant", True),
+        ("user", None),
+        ("assistant", False),
+        ("user", None),
+        ("assistant", True),
     ]
     assert stack.llm.script == []  # every scripted turn was consumed

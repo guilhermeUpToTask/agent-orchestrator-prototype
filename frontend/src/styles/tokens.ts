@@ -16,7 +16,7 @@ import {
   Ban, CheckCircle2, CircleDashed, Compass, Eye, Hand, ListTree, Loader2,
   PencilRuler, Play, RefreshCw, XCircle, type LucideIcon,
 } from 'lucide-react';
-import type { PlanPhase, Status } from '../types/ui';
+import type { PlanPhase, PlanStatus, Status } from '../types/ui';
 
 // ─── Semantic kinds ─────────────────────────────────────────────────────────
 
@@ -50,7 +50,15 @@ export const STATUS: Record<Status, StatusMeta> = {
   skipped: { kind: 'idle', label: 'Skipped', Icon: Ban },
 };
 
-/** The 9-phase machine. Gates are amber — anything amber is your queue. */
+export const PLAN_STATUS: Record<PlanStatus, StatusMeta> = {
+  running: { kind: "run", label: "Running", Icon: Play },
+  paused: { kind: "gate", label: "Paused", Icon: Hand },
+  waiting: { kind: "gate", label: "Waiting", Icon: Eye },
+  blocked: { kind: "fail", label: "Blocked", Icon: XCircle },
+  idle: { kind: "idle", label: "Idle", Icon: CircleDashed },
+};
+
+/** Legacy phase compatibility; canonical navigation uses PLAN_STATUS. */
 export const PLAN_PHASE: Record<PlanPhase, StatusMeta> = {
   discovery:       { kind: 'run',  label: 'Discovery',     Icon: Compass },
   replanning:      { kind: 'run',  label: 'Replanning',    Icon: RefreshCw },

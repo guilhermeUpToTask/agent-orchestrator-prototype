@@ -1,6 +1,7 @@
 """The catalog-resolved reasoner factory + the seed CLI: stub default, llm
 fail-fast messages, full resolution on a seeded database, and the rule that
 stub mode never touches the secret store (dry-run needs no master key)."""
+
 from __future__ import annotations
 
 import pytest
@@ -104,9 +105,20 @@ def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):
         result = runner.invoke(cli, ["seed", "demo", "--stub"])
         assert result.exit_code == 0, result.output
     assert {c.id for c in container.capability_repo.list()} == {
-        "backend", "frontend", "testing",
+        "backend",
+        "frontend",
+        "implementation",
+        "test_authoring",
+        "testing",
     }
     assert container.agent_repo.default_agent_id() == "dev-agent"
+    assert {c.id for c in container.agent_repo.get("dev-agent").capabilities} == {
+        "backend",
+        "frontend",
+        "implementation",
+        "test_authoring",
+        "testing",
+    }
     assert isinstance(build(container), StubReasoner)
 
     # llm seed: provider + model + secret + config, twice (idempotent)
@@ -134,8 +146,6 @@ def test_seed_llm_requires_key_in_env(tmp_path, monkeypatch):
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
 
-    result = CliRunner().invoke(
-        cli, ["seed", "demo", "--provider", "openrouter", "--model", "m"]
-    )
+    result = CliRunner().invoke(cli, ["seed", "demo", "--provider", "openrouter", "--model", "m"])
     assert result.exit_code != 0
     assert "OPENROUTER_API_KEY" in result.output

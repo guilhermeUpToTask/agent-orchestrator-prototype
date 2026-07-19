@@ -1,22 +1,27 @@
 """The CLI runner against a scripted fake CLI: success path, and every
 FailureKind classification the shared taxonomy defines (roadmap 2.4 #12)."""
+
 from __future__ import annotations
 
 import asyncio
 import os
 import stat
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from src.app.ports import TaskFailed
+from src.app.runtime_failures import safe_runtime_tail
 from src.app.testing.fakes import CollectingEventSink
+from src.app.testing.observations import InMemoryObservationRepository
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.runtime.cli_runner import CliAgentRunner
-from src.infra.runtime.taxonomy import classify_failure
+from src.infra.runtime.pi_protocol import parse_pi_events
+from src.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 pytestmark = pytest.mark.integration
 
@@ -24,8 +29,8 @@ pytestmark = pytest.mark.integration
 class ScriptedCliRunner(CliAgentRunner):
     """Runs an arbitrary executable — the test controls the CLI's behavior."""
 
-    def __init__(self, executable: str, timeout_seconds: int = 5) -> None:
-        super().__init__(timeout_seconds)
+    def __init__(self, executable: str, timeout_seconds: int = 5, observation_repository=None) -> None:
+        super().__init__(timeout_seconds, observation_repository=observation_repository)
         self._executable = executable
 
     @property
@@ -61,14 +66,18 @@ def spec():
     )
 
 
-def run(runner, workdir):
+def run(runner, workdir, idempotency_key="p1:g1:t1"):
     class _H:
         path = str(workdir)
 
     sink = CollectingEventSink()
     result = asyncio.run(
         runner.run(
-            task(), spec(), idempotency_key="p1:g1:t1", event_sink=sink, workspace=_H()
+            task(),
+            spec(),
+            idempotency_key=idempotency_key,
+            event_sink=sink,
+            workspace=_H(),
         )
     )
     return result, sink
@@ -79,8 +88,59 @@ def test_success_returns_result_and_emits_events(tmp_path):
     result, sink = run(ScriptedCliRunner(cli), tmp_path)
     assert result.status == "success"
     assert "did the work" in result.output
-    assert [e.type for e in sink.events] == ["agent.started", "agent.finished"]
+    assert [e.type for e in sink.events] == [
+        "agent.started",
+        "runtime.output",
+        "agent.finished",
+    ]
+    assert sink.events[1].payload["chunk"] == "did the work"
     assert all(e.task_id == "t1" and e.attempt == 1 for e in sink.events)
+
+
+def test_process_observations_are_persisted_on_success(tmp_path):
+    cli = make_cli(tmp_path, 'echo "did the work"; exit 0')
+    repository = InMemoryObservationRepository(lambda: datetime.now(timezone.utc))
+
+    result, _ = run(ScriptedCliRunner(cli, observation_repository=repository), tmp_path)
+
+    assert result.status == "success"
+    assert [item.observation.kind.value for item in repository.observations] == [
+        "process.started",
+        "process.exited",
+    ]
+
+
+def test_process_observations_are_persisted_before_timeout_failure(tmp_path):
+    cli = make_cli(tmp_path, "sleep 10")
+    repository = InMemoryObservationRepository(lambda: datetime.now(timezone.utc))
+
+    with pytest.raises(TaskFailed) as exc_info:
+        run(
+            ScriptedCliRunner(cli, timeout_seconds=1, observation_repository=repository),
+            tmp_path,
+        )
+
+    assert exc_info.value.kind == FailureKind.TIMEOUT
+    assert [item.observation.kind.value for item in repository.observations] == [
+        "process.started",
+        "process.timed_out",
+    ]
+
+
+def test_execution_correlation_is_allowlisted_into_subprocess_env(tmp_path):
+    cli = make_cli(
+        tmp_path,
+        'printf "%s|%s|%s|%s|%s|%s\\n" '
+        '"$ORCHESTRATOR_PLAN_ID" "$ORCHESTRATOR_GOAL_ID" '
+        '"$ORCHESTRATOR_TASK_ID" "$ORCHESTRATOR_RUN_ID" '
+        '"$ORCHESTRATOR_ATTEMPT_NUMBER" "$ORCHESTRATOR_ATTEMPT_ID"',
+    )
+    result, _ = run(
+        ScriptedCliRunner(cli),
+        tmp_path,
+        idempotency_key="p1:g1:t1:run-1:7:attempt-1",
+    )
+    assert result.output.strip() == "p1|g1|t1|run-1|7|attempt-1"
 
 
 @pytest.mark.parametrize(
@@ -143,3 +203,33 @@ def test_classifier_terminal_kinds_align_with_retry_policy():
     assert policy.should_retry(1, classify_failure("ECONNRESET"))
     assert policy.should_retry(1, classify_failure("", timed_out=True))
     assert policy.should_retry(1, classify_failure("mystery explosion"))
+
+
+def test_nvidia_resource_exhausted_normalizes_retry_evidence_without_secrets():
+    failure = normalize_failure(
+        stderr=(
+            "NVIDIA NIM ResourceExhausted RESOURCE_EXHAUSTED; retry-after: 90s; "
+            "api_key=sk-abcdefghijklmnop Authorization: Bearer token-secret"
+        ),
+        runtime="pi",
+        provider_id="nvidia",
+        model_id="nvidia:nemotron",
+        exit_code=1,
+    )
+    assert failure.kind == FailureKind.RATE_LIMIT
+    assert failure.provider_code == "RESOURCE_EXHAUSTED"
+    assert failure.retry_after_seconds == 90
+    assert failure.retryable
+    assert "sk-" not in failure.safe_message
+    assert "token-secret" not in failure.stderr_tail
+
+
+def test_pi_events_are_allowlisted_and_prompt_fields_are_dropped():
+    events = parse_pi_events(
+        '{"type":"model.usage","payload":{"total_tokens":7,'
+        '"input_tokens":5,"prompt":"private","api_key":"secret"}}\n'
+        '{"type":"unknown","payload":{"total_tokens":99}}\n'
+        "not json"
+    )
+    assert events == [("model.usage", {"input_tokens": 5, "total_tokens": 7})]
+    assert "secret" not in safe_runtime_tail("api_key=secret Bearer opaque-token")

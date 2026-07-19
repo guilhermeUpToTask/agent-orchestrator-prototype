@@ -4,6 +4,7 @@ from the old planning_prompt_builders and adapted to the two-method port:
 converse (discovery / replanning) and enrich_goal. There is no structure
 prompt: ARCHITECTURE is a no-LLM passthrough (see PlanningHandler).
 """
+
 from __future__ import annotations
 
 from src.domain.aggregates.planner_orchestrator import Plan
@@ -28,18 +29,13 @@ def build_discovery_prompt(plan: Plan) -> str:
         f"{render_plan_context(plan)}\n\n"
         "---\n\n"
         "## Discovery conversation\n\n"
-        "You are in the DISCOVERY phase: agree a goal roadmap with the user "
-        "through conversation, then commit it.\n\n"
-        "1. If requirements are unclear, reply in plain text with your "
-        "questions or proposal — the user answers in the next message. Keep "
-        "it short and concrete.\n"
-        "2. When the direction is clear (or the user asks you to proceed), "
-        "call `submit_goals` with an ordered list of 1-6 goals. Each goal "
-        "needs a name and a one-paragraph description. You MAY pre-populate a "
-        "goal's tasks when they are obvious; goals submitted without tasks "
-        "are broken into tasks later, one goal at a time.\n"
-        "3. If `submit_goals` returns `{accepted: false, errors: [...]}`, fix "
-        "exactly those problems and resubmit — do not re-litigate the roadmap."
+        "You are discovering intent, not generating a roadmap or tasks.\n\n"
+        "1. Normalize the submitted brief and make every safe assumption you can.\n"
+        "2. If material questions remain, reply in plain text using exactly these "
+        "headings: 'Normalized brief', 'Safe assumptions', 'Unresolved questions', "
+        "and finish with 'Waiting for your answers.' Ask only unresolved questions.\n"
+        "3. When the intent is clear, call `submit_intent_proposal`. Do not submit "
+        "goals or tasks; roadmap architecture happens only after human approval."
     )
 
 
@@ -52,18 +48,16 @@ def build_replanning_prompt(plan: Plan) -> str:
         "history; you are planning the next one). The context above shows "
         "what was actually built — completed goals are history and must NOT "
         "be re-planned or redone.\n\n"
-        "1. Discuss the next iteration with the user in plain text if their "
-        "intent is unclear.\n"
-        "2. When the direction is clear, call `submit_goals` with the NEW "
-        "goals only (1-6, ordered). They will be appended after the history.\n"
-        "3. On `{accepted: false, errors: [...]}`, fix exactly those problems "
-        "and resubmit."
+        "1. Normalize the requested next-cycle intent and preserve completed work.\n"
+        "2. If material questions remain, reply with only the unresolved questions "
+        "after stating the normalized brief and safe assumptions. Finish with "
+        "'Waiting for your answers.'\n"
+        "3. When clear, call `submit_intent_proposal`. Roadmap goals are generated "
+        "only after the exact proposal revision is approved."
     )
 
 
-def build_enrich_prompt(
-    plan: Plan, goal: Goal, capabilities: Sequence[Capability]
-) -> str:
+def build_enrich_prompt(plan: Plan, goal: Goal, capabilities: Sequence[Capability]) -> str:
     goal_desc = goal.description or "no further description"
     return (
         f"{render_plan_context(plan)}\n\n"

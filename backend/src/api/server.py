@@ -14,6 +14,7 @@ Responsibilities — zero business logic:
 The worker runs as its own process (`orchestrate worker start`) — the old
 in-process coordinator daemons are gone with the pre-refactor architecture.
 """
+
 from __future__ import annotations
 
 import asyncio

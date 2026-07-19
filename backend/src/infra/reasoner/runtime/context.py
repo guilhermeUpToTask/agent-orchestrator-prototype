@@ -11,6 +11,7 @@ sanitized, truncated rendering. Rules that keep the context bounded:
     included only when ``include_results`` and truncated to
     ``max_result_chars``.
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -35,22 +36,36 @@ def render_plan_context(
         f"**Phase**: {plan.phase.value} — **Iteration**: {plan.iteration}",
     ]
 
-    terminal = [g for g in plan.goals if g.is_terminal]
-    live = [g for g in plan.goals if not g.is_terminal]
+    goal_sets: list[tuple[str | None, list[Goal]]] = (
+        [
+            (
+                f"Cycle {cycle.id} [{cycle.status.value}]"
+                + (" — active source" if plan.active_cycle is cycle else ""),
+                cycle.goals,
+            )
+            for cycle in plan.cycles
+        ]
+        if plan.cycles
+        else [(None, plan.goals)]
+    )
 
-    if terminal:
-        sections.append("\n## Completed / closed goals (history — do not redo)")
-        for goal in sorted(terminal, key=lambda g: g.position):
-            sections.append(_render_terminal_goal(goal))
-            if include_results:
-                sections.extend(
-                    _render_task_results(goal.tasks, max_result_chars)
-                )
+    for cycle_heading, goals in goal_sets:
+        if cycle_heading is not None:
+            sections.append(f"\n## {cycle_heading}")
+        terminal = [goal for goal in goals if goal.is_terminal]
+        live = [goal for goal in goals if not goal.is_terminal]
 
-    if live:
-        sections.append("\n## Current goals")
-        for goal in sorted(live, key=lambda g: g.position):
-            sections.append(_render_live_goal(goal))
+        if terminal:
+            sections.append("\n### Completed / closed goals (history — do not redo)")
+            for goal in sorted(terminal, key=lambda item: item.position):
+                sections.append(_render_terminal_goal(goal))
+                if include_results:
+                    sections.extend(_render_task_results(goal.tasks, max_result_chars))
+
+        if live:
+            sections.append("\n### Current / unfinished goals")
+            for goal in sorted(live, key=lambda item: item.position):
+                sections.append(_render_live_goal(goal))
 
     return "\n".join(sections)
 
@@ -69,10 +84,7 @@ def render_capabilities(capabilities: Sequence[Capability]) -> str:
 
 def _render_terminal_goal(goal: Goal) -> str:
     done = sum(1 for t in goal.tasks if t.status.value == "done")
-    return (
-        f"- [{goal.status.value}] **{goal.name}** — {done}/{len(goal.tasks)} "
-        f"tasks done"
-    )
+    return f"- [{goal.status.value}] **{goal.name}** — {done}/{len(goal.tasks)} tasks done"
 
 
 def _render_live_goal(goal: Goal) -> str:

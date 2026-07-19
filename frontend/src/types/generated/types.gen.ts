@@ -5,6 +5,36 @@ export type ClientOptions = {
 };
 
 /**
+ * ActiveRunResponse
+ */
+export type ActiveRunResponse = {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Attempt Id
+     */
+    attempt_id: string;
+    /**
+     * Attempt Number
+     */
+    attempt_number: number;
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+};
+
+/**
  * AgentBody
  */
 export type AgentBody = {
@@ -109,6 +139,14 @@ export type AgentMetrics = {
     failures_by_kind: {
         [key: string]: number;
     };
+    /**
+     * Source
+     */
+    source: string;
+    /**
+     * Quality
+     */
+    quality: string;
 };
 
 /**
@@ -171,6 +209,52 @@ export type AgentSpec = {
 };
 
 /**
+ * AttemptLogEntryResponse
+ */
+export type AttemptLogEntryResponse = {
+    /**
+     * Monotonic Seconds
+     */
+    monotonic_seconds: number;
+    /**
+     * Stream
+     */
+    stream: 'stdout' | 'stderr';
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * AttemptLogResponse
+ */
+export type AttemptLogResponse = {
+    /**
+     * Entries
+     */
+    entries: Array<AttemptLogEntryResponse>;
+    /**
+     * Truncated
+     */
+    truncated: boolean;
+};
+
+/**
+ * AttemptTimelineResponse
+ */
+export type AttemptTimelineResponse = {
+    /**
+     * Planning Operations
+     */
+    planning_operations: Array<PlanningOperationResponse>;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskExecutionTimelineResponse>;
+};
+
+/**
  * Capability
  *
  * A named capability an agent can satisfy, bundling the tools it implies.
@@ -229,6 +313,46 @@ export type ConfigValue = {
 };
 
 /**
+ * ContractCriterion
+ */
+export type ContractCriterion = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Description
+     */
+    description: string;
+};
+
+/**
+ * CoverageMetrics
+ */
+export type CoverageMetrics = {
+    /**
+     * Observations
+     */
+    observations: number;
+    /**
+     * Reported
+     */
+    reported: number;
+    /**
+     * Estimated
+     */
+    estimated: number;
+    /**
+     * Unavailable
+     */
+    unavailable: number;
+    /**
+     * Legacy Unknown
+     */
+    legacy_unknown: number;
+};
+
+/**
  * CreatePlanRequest
  */
 export type CreatePlanRequest = {
@@ -236,7 +360,120 @@ export type CreatePlanRequest = {
      * Brief
      */
     brief: string;
+    /**
+     * Project Id
+     */
+    project_id: string;
 };
+
+/**
+ * Cycle
+ */
+export type Cycle = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Intent Proposal Id
+     */
+    intent_proposal_id: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    status?: CycleStatus;
+    /**
+     * Goals
+     */
+    goals?: Array<Goal>;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at?: string | null;
+    /**
+     * Superseded At
+     */
+    superseded_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
+    /**
+     * Evidence Refs
+     */
+    evidence_refs?: Array<string>;
+    output_disposition?: OutputDisposition | null;
+    /**
+     * Output Reference
+     */
+    output_reference?: string | null;
+};
+
+/**
+ * CycleDraft
+ */
+export type CycleDraft = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Intent Proposal Id
+     */
+    intent_proposal_id: string;
+    /**
+     * Base Plan Version
+     */
+    base_plan_version: number;
+    /**
+     * Source Cycle Id
+     */
+    source_cycle_id?: string | null;
+    /**
+     * Goals
+     */
+    goals: Array<GoalOutline>;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Unfinished Source Treatment
+     */
+    unfinished_source_treatment?: string | null;
+    /**
+     * Approved At
+     */
+    approved_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
+};
+
+/**
+ * CycleDraftRequest
+ */
+export type CycleDraftRequest = {
+    /**
+     * Goals
+     */
+    goals: Array<GoalOutline>;
+    /**
+     * Unfinished Source Treatment
+     */
+    unfinished_source_treatment?: string | null;
+};
+
+/**
+ * CycleStatus
+ */
+export type CycleStatus = 'active' | 'completed' | 'superseded' | 'cancelled';
 
 /**
  * DefaultAgentResponse
@@ -295,13 +532,228 @@ export type EditRequest = {
 };
 
 /**
+ * ExecutionAttemptResponse
+ */
+export type ExecutionAttemptResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Task Attempt
+     */
+    task_attempt: number;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Last Liveness At
+     */
+    last_liveness_at: string | null;
+    /**
+     * Timeout Seconds
+     */
+    timeout_seconds: number | null;
+    /**
+     * Runtime
+     */
+    runtime: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id: string | null;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Failure Kind
+     */
+    failure_kind: string | null;
+    /**
+     * Provider Code
+     */
+    provider_code: string | null;
+    /**
+     * Retryable
+     */
+    retryable: boolean | null;
+    /**
+     * Retry At
+     */
+    retry_at: string | null;
+    /**
+     * Limit Scope
+     */
+    limit_scope: string | null;
+    /**
+     * Exit Code
+     */
+    exit_code: number | null;
+    /**
+     * Safe Message
+     */
+    safe_message: string | null;
+    /**
+     * Stdout Tail
+     */
+    stdout_tail: string;
+    /**
+     * Stderr Tail
+     */
+    stderr_tail: string;
+};
+
+/**
+ * ExecutionRunTimelineResponse
+ */
+export type ExecutionRunTimelineResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Attempts
+     */
+    attempts: Array<ExecutionAttemptResponse>;
+};
+
+/**
  * FailureKind
  *
  * Typed classification of a task failure. Produced by the agent runner,
  * consumed by RetryPolicy.should_retry — a checked classification, not string
  * matching (DESIGN_NOTES #2).
  */
-export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error';
+export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error' | 'verification_error';
+
+/**
+ * Goal
+ *
+ * Phase-level chunk owning an ordered task list. Guarded self-transitions,
+ * called only by the Plan. `depends_on` is the DAG seam (unused in a chain).
+ */
+export type Goal = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Description
+     */
+    description: string;
+    status?: Status;
+    /**
+     * Tasks
+     */
+    tasks?: Array<Task>;
+    /**
+     * Depends On
+     */
+    depends_on?: Array<string>;
+    contract?: GoalContract | null;
+};
+
+/**
+ * GoalContract
+ */
+export type GoalContract = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Acceptance Criteria
+     */
+    acceptance_criteria: Array<ContractCriterion>;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskContract>;
+    /**
+     * Cross Task Integration Criterion Ids
+     */
+    cross_task_integration_criterion_ids?: Array<string>;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+    /**
+     * Frozen At
+     */
+    frozen_at: string;
+};
+
+/**
+ * GoalOutline
+ */
+export type GoalOutline = {
+    /**
+     * Key
+     */
+    key: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Depends On
+     */
+    depends_on?: Array<string>;
+};
 
 /**
  * HTTPValidationError
@@ -346,6 +798,84 @@ export type IaModel = {
 };
 
 /**
+ * IntentProposal
+ */
+export type IntentProposal = {
+    /**
+     * Id
+     */
+    id: string;
+    kind: ProposalKind;
+    /**
+     * Base Plan Version
+     */
+    base_plan_version: number;
+    /**
+     * Source Cycle Id
+     */
+    source_cycle_id?: string | null;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Scope
+     */
+    scope?: Array<string>;
+    /**
+     * Constraints
+     */
+    constraints?: Array<string>;
+    /**
+     * Exclusions
+     */
+    exclusions?: Array<string>;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Planner Session Ref
+     */
+    planner_session_ref?: string | null;
+    /**
+     * Approved At
+     */
+    approved_at?: string | null;
+    /**
+     * Cancelled At
+     */
+    cancelled_at?: string | null;
+};
+
+/**
+ * IntentProposalRequest
+ */
+export type IntentProposalRequest = {
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Scope
+     */
+    scope?: Array<string>;
+    /**
+     * Constraints
+     */
+    constraints?: Array<string>;
+    /**
+     * Exclusions
+     */
+    exclusions?: Array<string>;
+    kind?: ProposalKind;
+    /**
+     * Planner Session Ref
+     */
+    planner_session_ref?: string | null;
+};
+
+/**
  * LlmMetrics
  */
 export type LlmMetrics = {
@@ -360,15 +890,22 @@ export type LlmMetrics = {
     /**
      * Prompt Tokens
      */
-    prompt_tokens: number;
+    prompt_tokens: number | null;
     /**
      * Completion Tokens
      */
-    completion_tokens: number;
+    completion_tokens: number | null;
     /**
      * Total Tokens
      */
-    total_tokens: number;
+    total_tokens: number | null;
+    coverage: CoverageMetrics;
+    /**
+     * Scopes
+     */
+    scopes: {
+        [key: string]: UsageScopeMetrics;
+    };
 };
 
 /**
@@ -400,6 +937,18 @@ export type MessageResponse = {
      * Phase
      */
     phase: string;
+    /**
+     * Operation Id
+     */
+    operation_id: string;
+    /**
+     * Operation Status
+     */
+    operation_status: string;
+    /**
+     * Error
+     */
+    error?: string | null;
 };
 
 /**
@@ -465,6 +1014,11 @@ export type NewTaskBody = {
 };
 
 /**
+ * OutputDisposition
+ */
+export type OutputDisposition = 'open_pr' | 'merge' | 'retain_branch' | 'discard';
+
+/**
  * PauseRequest
  */
 export type PauseRequest = {
@@ -475,6 +1029,64 @@ export type PauseRequest = {
 };
 
 /**
+ * PlanBlock
+ */
+export type PlanBlock = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Explanation
+     */
+    explanation: string;
+    /**
+     * Stage
+     */
+    stage: string;
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
+    /**
+     * Task Id
+     */
+    task_id?: string | null;
+    /**
+     * Task Revision
+     */
+    task_revision?: number | null;
+    /**
+     * Run Id
+     */
+    run_id?: string | null;
+    /**
+     * Evidence Refs
+     */
+    evidence_refs?: Array<string>;
+    /**
+     * Legal Resolutions
+     */
+    legal_resolutions?: Array<string>;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Resolved At
+     */
+    resolved_at?: string | null;
+    /**
+     * Resolution
+     */
+    resolution?: string | null;
+};
+
+/**
  * PlanCreatedResponse
  */
 export type PlanCreatedResponse = {
@@ -482,6 +1094,218 @@ export type PlanCreatedResponse = {
      * Plan Id
      */
     plan_id: string;
+    /**
+     * Created
+     */
+    created: boolean;
+    /**
+     * Opened Existing
+     */
+    opened_existing: boolean;
+    /**
+     * Brief Preserved
+     */
+    brief_preserved: boolean;
+    /**
+     * Discovery Operation Id
+     */
+    discovery_operation_id: string | null;
+    /**
+     * Discovery Status
+     */
+    discovery_status: string | null;
+    /**
+     * Discovery Reply
+     */
+    discovery_reply: string | null;
+    /**
+     * Discovery Error
+     */
+    discovery_error: string | null;
+};
+
+/**
+ * PlanDetailResponse
+ */
+export type PlanDetailResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Project Id
+     */
+    project_id: string | null;
+    /**
+     * Brief
+     */
+    brief: string;
+    /**
+     * Version
+     */
+    version: number;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Status Reason
+     */
+    status_reason: {
+        [key: string]: string | null;
+    };
+    /**
+     * Activity
+     */
+    activity: string;
+    /**
+     * Current Goal Id
+     */
+    current_goal_id: string | null;
+    /**
+     * Current Task Id
+     */
+    current_task_id: string | null;
+    /**
+     * Tdd Stage
+     */
+    tdd_stage: string | null;
+    /**
+     * Legal Actions
+     */
+    legal_actions: Array<string>;
+    /**
+     * Pause Requested
+     */
+    pause_requested: boolean;
+    /**
+     * Paused
+     */
+    paused: boolean;
+    /**
+     * Paused Reason
+     */
+    paused_reason: string | null;
+    active_run: ActiveRunResponse | null;
+    /**
+     * Planning Operation
+     */
+    planning_operation: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Planning Progress
+     */
+    planning_progress: string | null;
+    active_cycle: Cycle | null;
+    pending_gate: ReviewGate | null;
+    block: PlanBlock | null;
+    /**
+     * Goals
+     */
+    goals: Array<Goal>;
+    /**
+     * Cycles
+     */
+    cycles: Array<Cycle>;
+    intent_proposal: IntentProposal | null;
+    cycle_draft: CycleDraft | null;
+    /**
+     * Legacy Phase
+     */
+    legacy_phase?: string | null;
+    /**
+     * Phase
+     */
+    phase?: string | null;
+    /**
+     * Iteration
+     */
+    iteration?: number | null;
+};
+
+/**
+ * PlanningOperationResponse
+ */
+export type PlanningOperationResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Purpose
+     */
+    purpose: string;
+    /**
+     * Target Goal Id
+     */
+    target_goal_id: string | null;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Started At
+     */
+    started_at: string | null;
+    /**
+     * Completed At
+     */
+    completed_at: string | null;
+    /**
+     * Last Liveness At
+     */
+    last_liveness_at: string | null;
+    /**
+     * Model Request Count
+     */
+    model_request_count: number;
+    /**
+     * Tool Turn Count
+     */
+    tool_turn_count: number;
+    /**
+     * Runtime
+     */
+    runtime: string | null;
+    /**
+     * Provider Id
+     */
+    provider_id: string | null;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Failure Kind
+     */
+    failure_kind: string | null;
+    /**
+     * Retry At
+     */
+    retry_at: string | null;
+    /**
+     * Safe Message
+     */
+    safe_message: string | null;
+};
+
+/**
+ * ProjectBindingRequest
+ */
+export type ProjectBindingRequest = {
+    /**
+     * Project Id
+     */
+    project_id: string;
 };
 
 /**
@@ -517,6 +1341,11 @@ export type ProjectDefinition = {
 };
 
 /**
+ * ProposalKind
+ */
+export type ProposalKind = 'initial' | 'replan';
+
+/**
  * ProviderCreateBody
  */
 export type ProviderCreateBody = {
@@ -550,6 +1379,25 @@ export type ProviderUpdateBody = {
      * Api Key
      */
     api_key?: string | null;
+};
+
+/**
+ * PublicationRequest
+ */
+export type PublicationRequest = {
+    /**
+     * Gate Id
+     */
+    gate_id: string;
+    /**
+     * Subject Revision
+     */
+    subject_revision: number;
+    disposition: OutputDisposition;
+    /**
+     * Output Reference
+     */
+    output_reference?: string | null;
 };
 
 /**
@@ -614,10 +1462,101 @@ export type RetryPolicy = {
      */
     max_backoff_seconds?: number;
     /**
+     * Jitter Ratio
+     */
+    jitter_ratio?: number;
+    /**
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
 };
+
+/**
+ * RetryTaskRequest
+ */
+export type RetryTaskRequest = {
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+};
+
+/**
+ * ReviewDecisionRequest
+ */
+export type ReviewDecisionRequest = {
+    /**
+     * Gate Id
+     */
+    gate_id: string;
+    /**
+     * Subject Revision
+     */
+    subject_revision: number;
+};
+
+/**
+ * ReviewGate
+ */
+export type ReviewGate = {
+    /**
+     * Id
+     */
+    id: string;
+    subject_type: ReviewSubjectType;
+    /**
+     * Subject Id
+     */
+    subject_id: string;
+    /**
+     * Subject Revision
+     */
+    subject_revision: number;
+    /**
+     * Allowed Decisions
+     */
+    allowed_decisions: Array<string>;
+    /**
+     * Continuation
+     */
+    continuation: string;
+    resolution?: ReviewResolution | null;
+    /**
+     * Invalidated At
+     */
+    invalidated_at?: string | null;
+};
+
+/**
+ * ReviewResolution
+ */
+export type ReviewResolution = {
+    /**
+     * Decision
+     */
+    decision: string;
+    /**
+     * Resolved At
+     */
+    resolved_at: string;
+    /**
+     * Resolved By
+     */
+    resolved_by?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * ReviewSubjectType
+ */
+export type ReviewSubjectType = 'intent' | 'cycle_draft' | 'cycle_completion';
 
 /**
  * RunnerAgentStatus
@@ -718,6 +1657,272 @@ export type RunnerStatusResponse = {
 };
 
 /**
+ * Status
+ *
+ * Lifecycle state shared by goals and tasks. str-based so comparisons and JSON
+ * serialization are natural (task.status == Status.DONE works).
+ */
+export type Status = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+
+/**
+ * Task
+ */
+export type Task = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Description
+     */
+    description: string;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+    /**
+     * Agent Id
+     */
+    agent_id?: string | null;
+    /**
+     * Role Agent Ids
+     */
+    role_agent_ids?: {
+        [key: string]: string;
+    };
+    status?: Status;
+    result?: TaskResult | null;
+    /**
+     * Attempt
+     */
+    attempt?: number;
+    /**
+     * Retry Cycle
+     */
+    retry_cycle?: number;
+    /**
+     * Cycle Attempt
+     */
+    cycle_attempt?: number;
+    /**
+     * Revision
+     */
+    revision?: number;
+    contract?: TaskContract | null;
+    test_bundle?: TestBundle | null;
+    /**
+     * Verification Evidence
+     */
+    verification_evidence?: Array<VerificationEvidence>;
+    /**
+     * Reopen Count
+     */
+    reopen_count?: number;
+    /**
+     * Retry Not Before
+     */
+    retry_not_before?: string | null;
+};
+
+/**
+ * TaskContract
+ */
+export type TaskContract = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Revision
+     */
+    revision?: number;
+    /**
+     * Objective
+     */
+    objective: string;
+    /**
+     * Acceptance Criteria
+     */
+    acceptance_criteria: Array<ContractCriterion>;
+    /**
+     * Goal Criterion Ids
+     */
+    goal_criterion_ids: Array<string>;
+    /**
+     * Allowed Scope
+     */
+    allowed_scope: Array<string>;
+    /**
+     * Forbidden Scope
+     */
+    forbidden_scope?: Array<string>;
+    /**
+     * Verification Commands
+     */
+    verification_commands: Array<string>;
+    verification_strategy: VerificationStrategy;
+    /**
+     * Required Capabilities
+     */
+    required_capabilities?: Array<string>;
+};
+
+/**
+ * TaskExecutionTimelineResponse
+ */
+export type TaskExecutionTimelineResponse = {
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Runs
+     */
+    runs: Array<ExecutionRunTimelineResponse>;
+};
+
+/**
+ * TaskResult
+ *
+ * Typed output of a task run, and the idempotency record: if set, the work
+ * already happened and must not re-execute.
+ *
+ * Design: `status` and `output` are ALWAYS present (always assertable in tests);
+ * `artifacts` is the flexible per-task-type payload (a code task stores
+ * files_changed, a research task stores sources) so we don't force one rigid
+ * schema across all task types. This structure is the seam that makes
+ * orchestration deterministically testable: tests fabricate TaskResults by hand,
+ * production builds them from the agent — the orchestration treats both identically.
+ */
+export type TaskResult = {
+    /**
+     * Status
+     */
+    status: 'success' | 'failure';
+    /**
+     * Output
+     */
+    output: string;
+    /**
+     * Artifacts
+     */
+    artifacts?: {
+        [key: string]: string;
+    };
+    /**
+     * Failure Reason
+     */
+    failure_reason?: string | null;
+    failure_kind?: FailureKind | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * TestBundle
+ */
+export type TestBundle = {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Task Revision
+     */
+    task_revision: number;
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * Protected File Hashes
+     */
+    protected_file_hashes: {
+        [key: string]: string;
+    };
+    /**
+     * Criterion To Tests
+     */
+    criterion_to_tests: {
+        [key: string]: Array<string>;
+    };
+    verification_strategy: VerificationStrategy;
+    /**
+     * Baseline Evidence Refs
+     */
+    baseline_evidence_refs?: Array<string>;
+    /**
+     * Red Or Baseline Evidence Refs
+     */
+    red_or_baseline_evidence_refs: Array<string>;
+    state?: TestBundleState;
+    /**
+     * Frozen At
+     */
+    frozen_at: string;
+    /**
+     * Invalidated At
+     */
+    invalidated_at?: string | null;
+    /**
+     * Invalidation Reason
+     */
+    invalidation_reason?: string | null;
+};
+
+/**
+ * TestBundleState
+ */
+export type TestBundleState = 'frozen' | 'invalid';
+
+/**
+ * UsageScopeMetrics
+ */
+export type UsageScopeMetrics = {
+    /**
+     * Sessions
+     */
+    sessions: number;
+    /**
+     * Calls
+     */
+    calls: number;
+    /**
+     * Prompt Tokens
+     */
+    prompt_tokens: number | null;
+    /**
+     * Completion Tokens
+     */
+    completion_tokens: number | null;
+    /**
+     * Total Tokens
+     */
+    total_tokens: number | null;
+    coverage: CoverageMetrics;
+};
+
+/**
  * ValidationError
  */
 export type ValidationError = {
@@ -744,6 +1949,101 @@ export type ValidationError = {
         [key: string]: unknown;
     };
 };
+
+/**
+ * VerificationEvidence
+ */
+export type VerificationEvidence = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Task Revision
+     */
+    task_revision: number;
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Candidate Commit Sha
+     */
+    candidate_commit_sha: string;
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * Exact Command
+     */
+    exact_command: string;
+    /**
+     * Exit Code
+     */
+    exit_code: number;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Finished At
+     */
+    finished_at: string;
+    /**
+     * Bounded Output Ref
+     */
+    bounded_output_ref: string;
+    verification_kind: VerificationKind;
+    /**
+     * Accepted
+     */
+    accepted: boolean;
+};
+
+/**
+ * VerificationKind
+ */
+export type VerificationKind = 'baseline' | 'red' | 'characterization' | 'executable_check' | 'authoritative_test' | 'regression' | 'scope' | 'branch_integrity' | 'cleanup';
+
+/**
+ * VerificationStrategy
+ */
+export type VerificationStrategy = 'tdd' | 'characterization' | 'executable_check';
+
+export type PlansBindProjectRouteData = {
+    body: ProjectBindingRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/project-binding';
+};
+
+export type PlansBindProjectRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansBindProjectRouteError = PlansBindProjectRouteErrors[keyof PlansBindProjectRouteErrors];
+
+export type PlansBindProjectRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansBindProjectRouteResponse = PlansBindProjectRouteResponses[keyof PlansBindProjectRouteResponses];
 
 export type PlansListPlansData = {
     body?: never;
@@ -819,7 +2119,131 @@ export type PlansGetPlanError = PlansGetPlanErrors[keyof PlansGetPlanErrors];
 
 export type PlansGetPlanResponses = {
     /**
-     * Response Plans-Get Plan
+     * Successful Response
+     */
+    200: PlanDetailResponse;
+};
+
+export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
+
+export type PlansAttemptTimelineData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/attempts';
+};
+
+export type PlansAttemptTimelineErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptTimelineError = PlansAttemptTimelineErrors[keyof PlansAttemptTimelineErrors];
+
+export type PlansAttemptTimelineResponses = {
+    /**
+     * Successful Response
+     */
+    200: AttemptTimelineResponse;
+};
+
+export type PlansAttemptTimelineResponse = PlansAttemptTimelineResponses[keyof PlansAttemptTimelineResponses];
+
+export type PlansCancelIntentRouteData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/intent';
+};
+
+export type PlansCancelIntentRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansCancelIntentRouteError = PlansCancelIntentRouteErrors[keyof PlansCancelIntentRouteErrors];
+
+export type PlansCancelIntentRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansCancelIntentRouteResponse = PlansCancelIntentRouteResponses[keyof PlansCancelIntentRouteResponses];
+
+export type PlansProposeIntentRouteData = {
+    body: IntentProposalRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/intent';
+};
+
+export type PlansProposeIntentRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansProposeIntentRouteError = PlansProposeIntentRouteErrors[keyof PlansProposeIntentRouteErrors];
+
+export type PlansProposeIntentRouteResponses = {
+    /**
+     * Response Plans-Propose Intent Route
+     *
+     * Successful Response
+     */
+    201: {
+        [key: string]: unknown;
+    };
+};
+
+export type PlansProposeIntentRouteResponse = PlansProposeIntentRouteResponses[keyof PlansProposeIntentRouteResponses];
+
+export type PlansReviseIntentRouteData = {
+    body: IntentProposalRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/intent';
+};
+
+export type PlansReviseIntentRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReviseIntentRouteError = PlansReviseIntentRouteErrors[keyof PlansReviseIntentRouteErrors];
+
+export type PlansReviseIntentRouteResponses = {
+    /**
+     * Response Plans-Revise Intent Route
      *
      * Successful Response
      */
@@ -828,7 +2252,199 @@ export type PlansGetPlanResponses = {
     };
 };
 
-export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
+export type PlansReviseIntentRouteResponse = PlansReviseIntentRouteResponses[keyof PlansReviseIntentRouteResponses];
+
+export type PlansApproveIntentRouteData = {
+    body: ReviewDecisionRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/intent/approve';
+};
+
+export type PlansApproveIntentRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansApproveIntentRouteError = PlansApproveIntentRouteErrors[keyof PlansApproveIntentRouteErrors];
+
+export type PlansApproveIntentRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansApproveIntentRouteResponse = PlansApproveIntentRouteResponses[keyof PlansApproveIntentRouteResponses];
+
+export type PlansCancelCycleDraftRouteData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycle-draft';
+};
+
+export type PlansCancelCycleDraftRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansCancelCycleDraftRouteError = PlansCancelCycleDraftRouteErrors[keyof PlansCancelCycleDraftRouteErrors];
+
+export type PlansCancelCycleDraftRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansCancelCycleDraftRouteResponse = PlansCancelCycleDraftRouteResponses[keyof PlansCancelCycleDraftRouteResponses];
+
+export type PlansSubmitCycleDraftRouteData = {
+    body: CycleDraftRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycle-draft';
+};
+
+export type PlansSubmitCycleDraftRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansSubmitCycleDraftRouteError = PlansSubmitCycleDraftRouteErrors[keyof PlansSubmitCycleDraftRouteErrors];
+
+export type PlansSubmitCycleDraftRouteResponses = {
+    /**
+     * Response Plans-Submit Cycle Draft Route
+     *
+     * Successful Response
+     */
+    201: {
+        [key: string]: unknown;
+    };
+};
+
+export type PlansSubmitCycleDraftRouteResponse = PlansSubmitCycleDraftRouteResponses[keyof PlansSubmitCycleDraftRouteResponses];
+
+export type PlansReviseCycleDraftRouteData = {
+    body: CycleDraftRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycle-draft';
+};
+
+export type PlansReviseCycleDraftRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansReviseCycleDraftRouteError = PlansReviseCycleDraftRouteErrors[keyof PlansReviseCycleDraftRouteErrors];
+
+export type PlansReviseCycleDraftRouteResponses = {
+    /**
+     * Response Plans-Revise Cycle Draft Route
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PlansReviseCycleDraftRouteResponse = PlansReviseCycleDraftRouteResponses[keyof PlansReviseCycleDraftRouteResponses];
+
+export type PlansActivateCycleRouteData = {
+    body: ReviewDecisionRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycle-draft/approve';
+};
+
+export type PlansActivateCycleRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansActivateCycleRouteError = PlansActivateCycleRouteErrors[keyof PlansActivateCycleRouteErrors];
+
+export type PlansActivateCycleRouteResponses = {
+    /**
+     * Response Plans-Activate Cycle Route
+     *
+     * Successful Response
+     */
+    201: {
+        [key: string]: unknown;
+    };
+};
+
+export type PlansActivateCycleRouteResponse = PlansActivateCycleRouteResponses[keyof PlansActivateCycleRouteResponses];
+
+export type PlansPublishCycleRouteData = {
+    body: PublicationRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/publication';
+};
+
+export type PlansPublishCycleRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansPublishCycleRouteError = PlansPublishCycleRouteErrors[keyof PlansPublishCycleRouteErrors];
+
+export type PlansPublishCycleRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansPublishCycleRouteResponse = PlansPublishCycleRouteResponses[keyof PlansPublishCycleRouteResponses];
 
 export type PlansEditPlanData = {
     body: EditRequest;
@@ -922,6 +2538,66 @@ export type PlansResumeResponses = {
 };
 
 export type PlansResumeResponse = PlansResumeResponses[keyof PlansResumeResponses];
+
+export type PlansRetryBlockedTaskData = {
+    body: RetryTaskRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/retry';
+};
+
+export type PlansRetryBlockedTaskErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansRetryBlockedTaskError = PlansRetryBlockedTaskErrors[keyof PlansRetryBlockedTaskErrors];
+
+export type PlansRetryBlockedTaskResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansRetryBlockedTaskResponse = PlansRetryBlockedTaskResponses[keyof PlansRetryBlockedTaskResponses];
+
+export type PlansRetryBlockedPlanningStageData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/retry-stage';
+};
+
+export type PlansRetryBlockedPlanningStageErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansRetryBlockedPlanningStageError = PlansRetryBlockedPlanningStageErrors[keyof PlansRetryBlockedPlanningStageErrors];
+
+export type PlansRetryBlockedPlanningStageResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningStageResponses[keyof PlansRetryBlockedPlanningStageResponses];
 
 export type PlansApproveData = {
     body?: never;
@@ -1132,6 +2808,45 @@ export type PlansReplanningResponses = {
 };
 
 export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplanningResponses];
+
+export type PlansAttemptLogData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Attempt Id
+         */
+        attempt_id: string;
+    };
+    query?: {
+        /**
+         * Tail Lines
+         */
+        tail_lines?: number;
+    };
+    url: '/api/plans/{plan_id}/attempts/{attempt_id}/log';
+};
+
+export type PlansAttemptLogErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptLogError = PlansAttemptLogErrors[keyof PlansAttemptLogErrors];
+
+export type PlansAttemptLogResponses = {
+    /**
+     * Successful Response
+     */
+    200: AttemptLogResponse;
+};
+
+export type PlansAttemptLogResponse = PlansAttemptLogResponses[keyof PlansAttemptLogResponses];
 
 export type PlansAgentEventsData = {
     body?: never;

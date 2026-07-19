@@ -72,11 +72,19 @@ def test_request_replan_mid_running_skips_pending_work():
     """Skip place ONE: at request time every PENDING goal (and PENDING tasks of a
     RUNNING goal) is skipped; the in-flight RUNNING task is left to finalize."""
     running_goal = goal(
-        "g1", 0, [task("g1t0", 0, Status.DONE), task("g1t1", 1, Status.RUNNING),
-                  task("g1t2", 2)], status=Status.RUNNING
+        "g1",
+        0,
+        [task("g1t0", 0, Status.DONE), task("g1t1", 1, Status.RUNNING), task("g1t2", 2)],
+        status=Status.RUNNING,
     )
     pending_goal = goal("g2", 1, [task("g2t0", 0)])
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[running_goal, pending_goal])
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.RUNNING,
+        goals=[running_goal, pending_goal],
+    )
     repo, outbox, uow, *_ = harness(plan)
 
     request_replan("p1", uow)
@@ -91,8 +99,13 @@ def test_request_replan_mid_running_skips_pending_work():
 
 
 def test_review_replan_enters_replanning_from_review():
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.REVIEW,
-                goals=[goal("g1", 0, [task("t0", 0, Status.DONE)], Status.DONE)])
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.REVIEW,
+        goals=[goal("g1", 0, [task("t0", 0, Status.DONE)], Status.DONE)],
+    )
     repo, outbox, uow, *_ = harness(plan)
     review_replan("p1", uow)
     assert repo.get("p1").phase == PlanPhase.REPLANNING
@@ -101,11 +114,16 @@ def test_review_replan_enters_replanning_from_review():
 
 @pytest.mark.parametrize(
     "phase",
-    [PlanPhase.DISCOVERY, PlanPhase.ARCHITECTURE, PlanPhase.ENRICHING,
-     PlanPhase.AWAITING_REVIEW, PlanPhase.REPLANNING],
+    [
+        PlanPhase.DISCOVERY,
+        PlanPhase.ARCHITECTURE,
+        PlanPhase.ENRICHING,
+        PlanPhase.AWAITING_REVIEW,
+        PlanPhase.REPLANNING,
+    ],
 )
 def test_replan_only_from_running_or_review(phase):
-    plan = Plan(id="p1", brief="b", phase=phase)
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=phase)
     repo, outbox, uow, *_ = harness(plan)
     with pytest.raises(InvalidTransitionError):
         request_replan("p1", uow)
@@ -114,12 +132,16 @@ def test_replan_only_from_running_or_review(phase):
 # ===== committing the new goal set =====
 def test_commit_replanned_goals_appends_bumps_iteration_and_flows_to_architecture():
     done_goal = goal("g1", 0, [task("g1t0", 0, Status.DONE)], Status.DONE)
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.REVIEW, goals=[done_goal])
+    plan = Plan(
+        project_id="project-1", id="p1", brief="b", phase=PlanPhase.REVIEW, goals=[done_goal]
+    )
     repo, outbox, uow, *_ = harness(plan)
     review_replan("p1", uow)
 
-    new_goals = [Goal(id="n1", name="n1", position=0, description=""),
-                 Goal(id="n2", name="n2", position=1, description="")]
+    new_goals = [
+        Goal(id="n1", name="n1", position=0, description=""),
+        Goal(id="n2", name="n2", position=1, description=""),
+    ]
     with uow:
         p = uow.plans.get("p1")
         p.commit_replanned_goals(new_goals)
@@ -138,17 +160,18 @@ def test_finalize_abandon_closes_leftover_nonterminal_goals():
     """Skip place TWO (the resurrection fix): commit closes whatever the prior
     iteration left non-terminal, so the scan can never re-select stale work
     after the next iteration starts."""
-    leftover = goal(
-        "g1", 0, [task("t0", 0, Status.RUNNING), task("t1", 1)], status=Status.RUNNING
+    leftover = goal("g1", 0, [task("t0", 0, Status.RUNNING), task("t1", 1)], status=Status.RUNNING)
+    plan = Plan(
+        project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[leftover]
     )
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING, goals=[leftover])
     repo, outbox, uow, *_ = harness(plan)
     request_replan("p1", uow)  # t1 skipped here; t0 still RUNNING (in flight)
 
     with uow:
         p = uow.plans.get("p1")
-        p.commit_replanned_goals([Goal(id="n1", name="n1", position=0, description="",
-                                       tasks=[task("n1t0", 0)])])
+        p.commit_replanned_goals(
+            [Goal(id="n1", name="n1", position=0, description="", tasks=[task("n1t0", 0)])]
+        )
         p.bump_version()
         uow.plans.save(p)
 
@@ -162,7 +185,7 @@ def test_finalize_abandon_closes_leftover_nonterminal_goals():
 
 
 def test_commit_only_from_replanning():
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.RUNNING)
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING)
     with pytest.raises(InvalidTransitionError):
         plan.commit_replanned_goals([])
 
@@ -184,8 +207,13 @@ class _ReplanDuringRun(DummyAgentRunner):
 
 
 def _one_task_running_plan():
-    return Plan(id="p1", brief="b", phase=PlanPhase.RUNNING,
-                goals=[goal("g1", 0, [task("t0", 0)])])
+    return Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.RUNNING,
+        goals=[goal("g1", 0, [task("t0", 0)])],
+    )
 
 
 def test_late_failure_terminal_skips_never_requeues():
@@ -201,15 +229,16 @@ def test_late_failure_terminal_skips_never_requeues():
     assert "TaskAbandoned" in outbox.types()
 
 
-def test_late_success_finalizes_as_harmless_history():
+def test_late_success_is_rejected_and_abandoned():
     repo, outbox, uow, _, agents, ws, sink, clock = harness(_one_task_running_plan())
     runner = _ReplanDuringRun({"t0": DummyBehavior(output="late ok")}, uow, "t0")
     asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
     saved = repo.get("p1")
     assert saved.phase == PlanPhase.REPLANNING
-    assert saved.goals[0].tasks[0].status == Status.DONE  # kept as history/context
-    assert saved.goals[0].tasks[0].result.output == "late ok"
-    assert "TaskCompleted" in outbox.types()
+    assert saved.goals[0].tasks[0].status == Status.SKIPPED
+    assert saved.goals[0].tasks[0].result is None
+    assert "TaskCompleted" not in outbox.types()
+    assert "TaskAbandoned" in outbox.types()
 
 
 def test_late_success_after_finalize_abandon_is_dropped():
@@ -222,8 +251,7 @@ def test_late_success_after_finalize_abandon_is_dropped():
             request_replan("p1", self._uow)
             with self._uow:
                 p = self._uow.plans.get("p1")
-                p.commit_replanned_goals([Goal(id="n1", name="n1", position=0,
-                                               description="")])
+                p.commit_replanned_goals([Goal(id="n1", name="n1", position=0, description="")])
                 p.bump_version()
                 self._uow.plans.save(p)
             return await DummyAgentRunner.run(self, task, spec, **kw)
@@ -241,7 +269,7 @@ def test_late_success_after_finalize_abandon_is_dropped():
 def test_reopen_task_reopens_goal_and_scan_reselects():
     done = goal("g1", 0, [task("t0", 0, Status.DONE)], Status.DONE)
     done.tasks[0].result = TaskResult.success("v1")
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.REVIEW, goals=[done])
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.REVIEW, goals=[done])
 
     plan.reopen_task("g1", "t0")
     assert plan.goals[0].status == Status.RUNNING
@@ -255,10 +283,19 @@ def test_reopen_task_reopens_goal_and_scan_reselects():
 def test_set_iteration_goals_replaces_pending_keeps_history():
     history = goal("old", 0, [task("oldt", 0, Status.DONE)], Status.DONE)
     draft = goal("draft", 1, [task("draftt", 0)])
-    plan = Plan(id="p1", brief="b", phase=PlanPhase.ARCHITECTURE,
-                goals=[history, draft])
-    plan.set_iteration_goals([Goal(id="n1", name="n1", position=0, description=""),
-                              Goal(id="n2", name="n2", position=1, description="")])
+    plan = Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.ARCHITECTURE,
+        goals=[history, draft],
+    )
+    plan.set_iteration_goals(
+        [
+            Goal(id="n1", name="n1", position=0, description=""),
+            Goal(id="n2", name="n2", position=1, description=""),
+        ]
+    )
     assert [g.id for g in plan.goals] == ["old", "n1", "n2"]  # draft replaced
     assert [g.position for g in plan.goals] == [0, 1, 2]  # renumbered after history
     assert plan.goals[0].status == Status.DONE  # history untouched
@@ -266,10 +303,15 @@ def test_set_iteration_goals_replaces_pending_keeps_history():
 
 @pytest.mark.parametrize(
     "phase",
-    [PlanPhase.AWAITING_REVIEW, PlanPhase.RUNNING, PlanPhase.REVIEW,
-     PlanPhase.REPLANNING, PlanPhase.DONE],
+    [
+        PlanPhase.AWAITING_REVIEW,
+        PlanPhase.RUNNING,
+        PlanPhase.REVIEW,
+        PlanPhase.REPLANNING,
+        PlanPhase.DONE,
+    ],
 )
 def test_set_iteration_goals_only_in_planning_phases(phase):
-    plan = Plan(id="p1", brief="b", phase=phase)
+    plan = Plan(project_id="project-1", id="p1", brief="b", phase=phase)
     with pytest.raises((InvalidTransitionError, Exception)):
         plan.set_iteration_goals([])

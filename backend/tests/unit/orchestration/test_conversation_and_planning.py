@@ -6,6 +6,7 @@ The reasoner here is scripted per test (not the stub): conversation tests
 control exactly when goals are committed; enrich tests control the returned
 task sets and can misbehave on purpose (crash, race) to prove the guards.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,10 +15,10 @@ import pytest
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
 from src.domain.entities.task import Task
-from src.domain.errors.tasks_errors import InvalidTransitionError
-from src.domain.ports.reasoner_port import ChatMessage, ReasonerReply
-from src.domain.value_objects.lifecycle import Status
+from src.domain.errors.planning_errors import InvalidEditError
+from src.domain.ports.reasoner_port import ChatMessage, IntentCandidate, ReasonerReply
 from src.domain.value_objects.tasks_vos import TaskResult
 
 from src.app.handlers.base import Signal
@@ -38,7 +39,7 @@ def task(tid: str, position: int = 0) -> Task:
 
 
 def plan_in(phase: PlanPhase, goals: list[Goal] | None = None) -> Plan:
-    return Plan(id="p1", brief="the brief", phase=phase, goals=goals or [])
+    return Plan(project_id="project-1", id="p1", brief="the brief", phase=phase, goals=goals or [])
 
 
 class ScriptedReasoner:
@@ -80,6 +81,7 @@ def turn(env, chat, reasoner, message, *, replanning=False):
 # conversation — multi-turn with commit
 # ---------------------------------------------------------------------------
 
+
 def test_ask_turn_keeps_phase_and_persists_both_messages(env_factory):
     env = env_factory()
     env.seed(plan_in(PlanPhase.DISCOVERY))
@@ -96,38 +98,49 @@ def test_ask_turn_keeps_phase_and_persists_both_messages(env_factory):
         ("user", "build me a service"),
         ("assistant", "which db?"),
     ]
-    assert chat.list("p1")[1].meta == {"committed": False}
+    assert chat.list("p1")[1].meta["committed"] is False
+    assert chat.list("p1")[1].meta["planning_status"] == "waiting_for_user"
+    assert result.operation_status.value == "waiting_for_user"
 
 
 def test_commit_turn_advances_and_marks_meta(env_factory):
     env = env_factory()
     env.seed(plan_in(PlanPhase.DISCOVERY))
     chat = InMemoryChatStore()
-    committed_goals = [goal("g1", 0, [task("t1")])]
     reasoner = ScriptedReasoner(
         replies=[
             ReasonerReply(message="which db?"),
-            ReasonerReply(message="roadmap ready", goals=committed_goals),
+            ReasonerReply(
+                message="intent ready",
+                intent=IntentCandidate(
+                    normalized_brief="Build a SQLite service.",
+                    objective="Ship a service",
+                    constraints=["SQLite"],
+                    assumptions=["single tenant"],
+                ),
+            ),
         ]
     )
 
     turn(env, chat, reasoner, "build me a service")
     result = turn(env, chat, reasoner, "sqlite is fine")
 
-    assert (result.committed, result.phase) == (True, PlanPhase.ARCHITECTURE)
+    assert (result.committed, result.phase) == (True, PlanPhase.DISCOVERY)
     stored = env.stored("p1")
-    assert stored.phase == PlanPhase.ARCHITECTURE
-    assert [g.id for g in stored.goals] == ["g1"]
-    assert env.outbox_types() == ["PhaseAdvanced"]
+    assert stored.status == PlanStatus.WAITING
+    assert stored.intent_proposal is not None
+    assert stored.intent_proposal.objective == "Ship a service"
+    assert stored.review_gate is not None and stored.review_gate.unresolved
+    assert stored.goals == []
+    assert env.outbox_types() == ["IntentProposed", "ReviewGateOpened"]
     # the second converse call saw the first turn's two messages as history
     assert reasoner.converse_calls[1] == ("discovery", "sqlite is fine", 2)
-    assert chat.list("p1")[-1].meta == {"committed": True}
+    assert chat.list("p1")[-1].meta["committed"] is True
+    assert chat.list("p1")[-1].meta["normalized_brief"] == "Build a SQLite service."
 
 
-def test_discovery_commit_after_reopen_replaces_unexecuted_roadmap(env_factory):
-    """Gate chat-back (un-freeze #3): reopen_discovery returns AWAITING_REVIEW to
-    DISCOVERY, and the next commit REPLACES the un-executed goals (set_iteration_goals
-    keeps only terminal history) — the chat survives the round-trip."""
+def test_discovery_after_reopen_proposes_intent_without_mutating_roadmap(env_factory):
+    """Reopened chat proposes reviewable intent; roadmap mutation waits for approval."""
     from src.app.use_cases.control import reopen_discovery
 
     env = env_factory()
@@ -137,23 +150,30 @@ def test_discovery_commit_after_reopen_replaces_unexecuted_roadmap(env_factory):
     chat = InMemoryChatStore()
     chat.append(
         "p1",
-        ChatMessage(
-            role="user", content="the original brief", created_at=env.clock.now()
-        ),
+        ChatMessage(role="user", content="the original brief", created_at=env.clock.now()),
     )
 
     reopen_discovery("p1", env.uow)
     assert env.stored("p1").phase == PlanPhase.DISCOVERY
 
     reasoner = ScriptedReasoner(
-        replies=[ReasonerReply(message="new roadmap", goals=[goal("g-new", 0, [task("t-new")])])]
+        replies=[
+            ReasonerReply(
+                message="new intent",
+                intent=IntentCandidate(
+                    normalized_brief="Do it differently.",
+                    objective="Change the delivery approach",
+                ),
+            )
+        ]
     )
     result = turn(env, chat, reasoner, "actually, do it differently")
 
-    assert (result.committed, result.phase) == (True, PlanPhase.ARCHITECTURE)
+    assert (result.committed, result.phase) == (True, PlanPhase.DISCOVERY)
     stored = env.stored("p1")
-    assert [g.id for g in stored.goals] == ["g-new"]  # old un-executed goal replaced
-    assert stored.iteration == 1  # replacement, not a new append-only iteration
+    assert [g.id for g in stored.goals] == ["g-old"]
+    assert stored.intent_proposal is not None
+    assert stored.intent_proposal.objective == "Change the delivery approach"
     # chat history spans the reopen
     assert [m.content for m in chat.list("p1")][0] == "the original brief"
 
@@ -171,10 +191,12 @@ def test_user_message_survives_reasoner_crash(env_factory):
         turn(env, chat, ExplodingReasoner(), "precious user words")
 
     # persisted BEFORE the LLM call: the words survive the crash
-    assert [(m.role, m.content) for m in chat.list("p1")] == [
-        ("user", "precious user words")
-    ]
+    assert [(m.role, m.content) for m in chat.list("p1")] == [("user", "precious user words")]
     assert env.stored("p1").phase == PlanPhase.DISCOVERY
+    with env.uow:
+        operation = env.uow.executions.list_planning_operations("p1")[-1]
+    assert operation.status.value == "failed"
+    assert operation.failure_kind == "reasoner_crash"
 
 
 def test_message_in_wrong_phase_rejected(env_factory):
@@ -182,12 +204,12 @@ def test_message_in_wrong_phase_rejected(env_factory):
     env.seed(plan_in(PlanPhase.RUNNING, [goal("g1", 0, [task("t1")])]))
     chat = InMemoryChatStore()
 
-    with pytest.raises(InvalidTransitionError):
+    with pytest.raises(InvalidEditError):
         turn(env, chat, ScriptedReasoner(), "hello")
     assert chat.list("p1") == []  # rejected before anything was persisted
 
 
-def test_replanning_commit_increments_iteration_append_only(env_factory):
+def test_replanning_commit_proposes_replan_intent_without_mutating_cycle(env_factory):
     env = env_factory()
     done_task = task("t1")
     done_task.start()
@@ -195,19 +217,41 @@ def test_replanning_commit_increments_iteration_append_only(env_factory):
     done_goal = goal("g1", 0, [done_task])
     done_goal.start()
     done_goal.complete()
-    env.seed(plan_in(PlanPhase.REPLANNING, [done_goal]))
+    plan = plan_in(PlanPhase.REPLANNING)
+    plan.status = PlanStatus.PAUSED
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-old",
+            draft_id="draft-old",
+            status=CycleStatus.ACTIVE,
+            goals=[done_goal],
+            started_at=env.clock.now(),
+        )
+    ]
+    env.seed(plan)
     chat = InMemoryChatStore()
     reasoner = ScriptedReasoner(
-        replies=[ReasonerReply(message="new roadmap", goals=[goal("g2", 0)])]
+        replies=[
+            ReasonerReply(
+                message="replan intent",
+                intent=IntentCandidate(
+                    normalized_brief="Harden the service.",
+                    objective="Harden the completed service",
+                ),
+            )
+        ]
     )
 
     result = turn(env, chat, reasoner, "now harden it", replanning=True)
 
-    assert (result.committed, result.phase) == (True, PlanPhase.ARCHITECTURE)
+    assert (result.committed, result.phase) == (True, PlanPhase.REPLANNING)
     stored = env.stored("p1")
-    assert stored.iteration == 2
-    assert [g.id for g in stored.goals] == ["g1", "g2"]  # append-only history
-    assert stored.goals[0].status == Status.DONE
+    assert stored.iteration == 1
+    assert stored.active_cycle is not None
+    assert [g.id for g in stored.active_cycle.goals] == ["g1"]
+    assert stored.intent_proposal is not None
+    assert stored.intent_proposal.source_cycle_id == "cycle-1"
     assert reasoner.converse_calls[0][0] == "replanning"
 
 
@@ -215,15 +259,14 @@ def test_replanning_commit_increments_iteration_append_only(env_factory):
 # ARCHITECTURE — the no-LLM passthrough
 # ---------------------------------------------------------------------------
 
+
 def test_architecture_passthrough_advances_without_reasoner(env_factory):
     env = env_factory()
     goals = [goal("g1", 0, [task("t1")])]
     env.seed(plan_in(PlanPhase.ARCHITECTURE, goals))
     reasoner = ScriptedReasoner()  # any reasoner call would pop an empty script
 
-    signal = asyncio.run(
-        handler(reasoner, env).handle("p1", env.stored("p1"), env.uow)
-    )
+    signal = asyncio.run(handler(reasoner, env).handle("p1", env.stored("p1"), env.uow))
 
     assert signal == Signal.CONTINUE
     stored = env.stored("p1")
@@ -237,6 +280,7 @@ def test_architecture_passthrough_advances_without_reasoner(env_factory):
 # ---------------------------------------------------------------------------
 # ENRICHING — the JIT step (one goal per handle, checkpointed)
 # ---------------------------------------------------------------------------
+
 
 async def _drive_planning(env, planning, max_steps=10):
     signals = []
@@ -302,9 +346,7 @@ def test_jit_idempotency_guard_never_enriches_twice(env_factory):
         before_enrich=racer_commits_first,
     )
 
-    signal = asyncio.run(
-        handler(reasoner, env).handle("p1", env.stored("p1"), env.uow)
-    )
+    signal = asyncio.run(handler(reasoner, env).handle("p1", env.stored("p1"), env.uow))
 
     assert signal == Signal.CONTINUE
     (g1,) = env.stored("p1").goals
@@ -326,9 +368,7 @@ def test_jit_phase_race_pauses_without_writing(env_factory):
 
     reasoner = ScriptedReasoner(before_enrich=human_replans_meanwhile)
 
-    signal = asyncio.run(
-        handler(reasoner, env).handle("p1", env.stored("p1"), env.uow)
-    )
+    signal = asyncio.run(handler(reasoner, env).handle("p1", env.stored("p1"), env.uow))
 
     assert signal == Signal.PAUSED
     (g1,) = env.stored("p1").goals

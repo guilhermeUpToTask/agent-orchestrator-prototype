@@ -1,6 +1,7 @@
 """The catalog-resolved agent runner: dry-run default without a master key,
 per-agent runtime resolution through the registry + providers catalog, the
 fail-fast/TaskFailed messages, and the seed CLI's runtime binding."""
+
 from __future__ import annotations
 
 import pytest
@@ -19,7 +20,7 @@ from src.infra.db.secret_ref import SecretRef
 from src.infra.db.tables import Base
 from src.infra.errors import InfrastructureError
 from src.infra.runtime.cli_runner import ClaudeCodeRunner, PiAgentRunner
-from src.infra.runtime.dummy_runner import DummyAgentRunner
+from src.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
 from src.infra.runtime.factory import (
     CatalogAgentRunner,
     build_agent_runner,
@@ -84,7 +85,7 @@ def seed_anthropic(container, monkeypatch) -> None:
 def test_dry_run_is_the_default_and_never_touches_secrets(container):
     # no ORCHESTRATOR_MASTER_KEY in the env: constructing the secret store
     # would fail closed — the dry-run path must never get there
-    assert isinstance(build(container), DummyAgentRunner)
+    assert isinstance(build(container), DryRunAgentRunner)
 
 
 def test_invalid_mode_rejected(container):
@@ -119,9 +120,7 @@ def test_real_mode_resolves_per_agent_through_the_catalog(container, monkeypatch
     assert pi._timeout == 120
 
     claude = runner._runner_for(
-        spec_with(
-            runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet"
-        )
+        spec_with(runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet")
     )
     assert isinstance(claude, ClaudeCodeRunner)
 
@@ -132,9 +131,7 @@ def test_real_mode_dry_run_agent_uses_dummy_without_secrets(container):
     scope = container.config_store.ORCHESTRATOR_SCOPE
     container.config_store.set(scope, "agent_runner.mode", "real")
     runner = build(container)
-    assert isinstance(
-        runner._runner_for(spec_with(runtime_type="dry-run")), DummyAgentRunner
-    )
+    assert isinstance(runner._runner_for(spec_with(runtime_type="dry-run")), DummyAgentRunner)
 
 
 def test_broken_binding_raises_terminal_task_failed(container):
@@ -156,23 +153,33 @@ def test_binding_validation_covers_the_wiring_failures(container, monkeypatch):
     seed_anthropic(container, monkeypatch)
     repo_args = (container.provider_repo, container.model_repo)
 
-    assert "runtime_type" in validate_agent_binding(
-        spec_with(runtime_type="cobol"), *repo_args
-    ).detail
-    assert "no provider_id" in validate_agent_binding(
-        spec_with(runtime_type="claude"), *repo_args
-    ).detail
-    assert "no model_id" in validate_agent_binding(
-        spec_with(runtime_type="claude", provider_id="anthropic"), *repo_args
-    ).detail
-    assert "does not exist" in validate_agent_binding(
-        spec_with(runtime_type="claude", provider_id="ghost", model_id="g:m"),
-        *repo_args,
-    ).detail
-    assert "does not exist" in validate_agent_binding(
-        spec_with(runtime_type="claude", provider_id="anthropic", model_id="ghost"),
-        *repo_args,
-    ).detail
+    assert (
+        "runtime_type" in validate_agent_binding(spec_with(runtime_type="cobol"), *repo_args).detail
+    )
+    assert (
+        "no provider_id"
+        in validate_agent_binding(spec_with(runtime_type="claude"), *repo_args).detail
+    )
+    assert (
+        "no model_id"
+        in validate_agent_binding(
+            spec_with(runtime_type="claude", provider_id="anthropic"), *repo_args
+        ).detail
+    )
+    assert (
+        "does not exist"
+        in validate_agent_binding(
+            spec_with(runtime_type="claude", provider_id="ghost", model_id="g:m"),
+            *repo_args,
+        ).detail
+    )
+    assert (
+        "does not exist"
+        in validate_agent_binding(
+            spec_with(runtime_type="claude", provider_id="anthropic", model_id="ghost"),
+            *repo_args,
+        ).detail
+    )
 
     # a provider that maps to no pi backend is fine for claude, invalid for pi
     ref = SecretRef.for_provider("acme")
@@ -199,9 +206,7 @@ def test_binding_validation_covers_the_wiring_failures(container, monkeypatch):
     assert "pi backend" in not_for_pi.detail
 
     cross = validate_agent_binding(
-        spec_with(
-            runtime_type="claude", provider_id="acme", model_id="anthropic:sonnet"
-        ),
+        spec_with(runtime_type="claude", provider_id="acme", model_id="anthropic:sonnet"),
         *repo_args,
     )
     assert cross.valid is False
@@ -211,9 +216,7 @@ def test_binding_validation_covers_the_wiring_failures(container, monkeypatch):
 def test_provider_and_model_bound_to_agent_are_delete_guarded(container, monkeypatch):
     seed_anthropic(container, monkeypatch)
     container.agent_repo.add(
-        spec_with(
-            runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet"
-        )
+        spec_with(runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet")
     )
     from src.domain.errors.config_errors import ReferencedEntityInUseError
 
@@ -233,17 +236,18 @@ def test_seed_binds_the_demo_agent_runtime(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(cli, ["seed", "demo", "--stub"])
     assert result.exit_code == 0, result.output
-    assert container.agent_repo.get("dev-agent").runtime_type == "dry-run"
+    seeded = container.agent_repo.get("dev-agent")
+    assert seeded.runtime_type == "dry-run"
+    assert {capability.id for capability in seeded.capabilities} >= {
+        "test_authoring",
+        "implementation",
+    }
 
-    result = runner.invoke(
-        cli, ["seed", "demo", "--provider", "openrouter", "--model", "gpt-x"]
-    )
+    result = runner.invoke(cli, ["seed", "demo", "--provider", "openrouter", "--model", "gpt-x"])
     assert result.exit_code == 0, result.output
     agent = container.agent_repo.get("dev-agent")
     assert agent.runtime_type == "pi"  # openrouter maps to a pi backend
     assert agent.provider_id == "openrouter"
     assert agent.model_id == "openrouter:gpt-x"
-    binding = validate_agent_binding(
-        agent, container.provider_repo, container.model_repo
-    )
+    binding = validate_agent_binding(agent, container.provider_repo, container.model_repo)
     assert binding.valid is True

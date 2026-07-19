@@ -1,0 +1,5 @@
+[93m[1m! [0mpermission requested: external_directory (/workspaces/agent-orchestrator/*); auto-rejecting
+[93m[1m! [0mpermission requested: external_directory (/workspaces/agent-orchestrator/docs/architecture/*); auto-rejecting
+[93m[1m! [0mpermission requested: external_directory (/workspaces/agent-orchestrator/docs/architecture/*); auto-rejecting
+[93m[1m! [0mpermission requested: external_directory (/workspaces/agent-orchestrator/backend/src/infra/runtime/*); auto-rejecting
+[93m[1m! [0mpermission requested: external_directory (/workspaces/agent-orchestrator/backend/src/api/routers/*); auto-rejecting

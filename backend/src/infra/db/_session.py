@@ -7,6 +7,7 @@ work, commit (durable under synchronous=FULL), and retry the transient
 InfrastructureError. Used by every SQLite adapter so config, task, secret,
 and active-project writes share identical durability/contention behaviour.
 """
+
 from __future__ import annotations
 
 import time
@@ -43,7 +44,7 @@ def run_in_session(session_factory: sessionmaker[Session], fn: Callable[[Session
             if not _is_locked(exc):
                 raise
             last = exc
-            time.sleep(LOCK_BACKOFF_BASE * (2 ** attempt))
+            time.sleep(LOCK_BACKOFF_BASE * (2**attempt))
             log.warning("db.locked_retry", attempt=attempt)
     raise InfrastructureError(
         "Database stayed locked beyond retry budget", code="DB_LOCKED"

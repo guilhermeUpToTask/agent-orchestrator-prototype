@@ -29,6 +29,7 @@ def one_task_plan(retry_max=3, initial_backoff=10.0):
         tasks=[Task(id="t0", name="t", position=0, description="", agent_id="a1")],
     )
     return Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,
@@ -36,6 +37,7 @@ def one_task_plan(retry_max=3, initial_backoff=10.0):
             max_attempts=retry_max,
             initial_backoff_seconds=initial_backoff,
             backoff_multiplier=2.0,
+            jitter_ratio=0,
         ),
         goals=[g],
     )
@@ -52,9 +54,7 @@ def test_scan_skips_task_gated_in_future_returns_not_ready():
     )
     g = Goal(id="g1", name="g", position=0, description="", tasks=[t])
     assert next_action([g], NOW) == NOT_READY  # gated -> not ready
-    assert (
-        next_action([g], NOW + timedelta(seconds=31)) != NOT_READY
-    )  # gate expired -> runnable
+    assert next_action([g], NOW + timedelta(seconds=31)) != NOT_READY  # gate expired -> runnable
 
 
 def test_head_of_line_task_backing_off_blocks_the_goal():
@@ -72,7 +72,7 @@ def test_head_of_line_task_backing_off_blocks_the_goal():
     assert next_action([g], NOW) == NOT_READY
 
 
-def test_blocked_goal_yields_to_next_dependency_satisfied_goal():
+def test_backing_off_head_goal_blocks_every_later_goal():
     gated = Task(
         id="t0",
         name="t0",
@@ -88,12 +88,7 @@ def test_blocked_goal_yields_to_next_dependency_satisfied_goal():
         description="",
         tasks=[Task(id="t1", name="t1", position=0, description="")],
     )
-    # strictness is WITHIN a goal; cross-goal order stays position + depends_on,
-    # so an independent later goal still runs while g1 waits out its backoff
-    action = next_action([g1, g2], NOW)
-    assert action not in (None, NOT_READY)
-    goal, task = action
-    assert goal.id == "g2" and task.id == "t1"
+    assert next_action([g1, g2], NOW) == NOT_READY
 
 
 def test_not_ready_distinct_from_done():
@@ -110,9 +105,7 @@ def test_not_ready_distinct_from_done():
     # vs a plan whose only task is DONE -> None (truly complete)
     t2 = Task(id="t0", name="t", position=0, description="")
     t2.status = Status.DONE
-    g2 = Goal(
-        id="g2", name="g", position=0, description="", status=Status.DONE, tasks=[t2]
-    )
+    g2 = Goal(id="g2", name="g", position=0, description="", status=Status.DONE, tasks=[t2])
     assert next_action([g2], NOW) is None
 
 

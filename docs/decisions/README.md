@@ -6,6 +6,7 @@
 |---|---|
 | [decision-log.md](decision-log.md) | The consolidated, numbered log of every locked design decision, grouped by topic, with dates and rationale |
 | [adr-001-concurrency-lease.md](adr-001-concurrency-lease.md) | The concurrency model: sequential-per-plan now; the lease *granularity* (plan → goal → task) is the intentional future parallelism switch |
+| [adr-002-runtime-neutral-operational-telemetry.md](adr-002-runtime-neutral-operational-telemetry.md) | Proposed: runtime-neutral execution evidence, canonical observations, and OpenTelemetry infrastructure |
 | [domain-design-decisions.md](domain-design-decisions.md) | The ten domain-layer design questions (gates, FailureKind, reopen, result history, capability ids, …) — all resolved at the Phase-0 freeze on 2026-07-02; kept in full as the option-by-option record |
 
 ## Conventions

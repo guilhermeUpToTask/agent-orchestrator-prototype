@@ -12,6 +12,7 @@ The same thread tails agent_events by a cursor (those rows are best-effort
 telemetry written outside any plan transaction — no delivered flag needed,
 just forward progress) and forwards them as "agent.event".
 """
+
 from __future__ import annotations
 
 import json
@@ -31,11 +32,10 @@ _SELECT_UNDELIVERED = text(
     "SELECT id, event_id, plan_id, type, payload FROM outbox"
     " WHERE delivered_at IS NULL ORDER BY id LIMIT :batch"
 )
-_MARK_DELIVERED = text(
-    "UPDATE outbox SET delivered_at = :now WHERE id = :row_id"
-)
+_MARK_DELIVERED = text("UPDATE outbox SET delivered_at = :now WHERE id = :row_id")
 _SELECT_AGENT_EVENTS = text(
-    "SELECT id, event_id, plan_id, task_id, attempt, seq, type, payload"
+    "SELECT id, event_id, plan_id, goal_id, task_id, run_id, attempt_id, "
+    "attempt, seq, type, payload"
     " FROM agent_events WHERE id > :cursor ORDER BY id LIMIT :batch"
 )
 
@@ -73,11 +73,14 @@ def relay_once(
                 {
                     "event_id": row[1],
                     "plan_id": row[2],
-                    "task_id": row[3],
-                    "attempt": row[4],
-                    "seq": row[5],
-                    "type": row[6],
-                    "payload": json.loads(row[7]),
+                    "goal_id": row[3],
+                    "task_id": row[4],
+                    "run_id": row[5],
+                    "attempt_id": row[6],
+                    "attempt": row[7],
+                    "seq": row[8],
+                    "type": row[9],
+                    "payload": json.loads(row[10]),
                 },
             )
     return delivered, agent_cursor
@@ -96,9 +99,7 @@ def run_outbox_relay(
     agent_cursor = 0
     while not should_stop():
         try:
-            delivered, agent_cursor = relay_once(
-                session_factory, broker, agent_cursor, batch
-            )
+            delivered, agent_cursor = relay_once(session_factory, broker, agent_cursor, batch)
         except Exception:
             log.error("outbox_relay.pass_failed", exc_info=True)
             delivered = 0

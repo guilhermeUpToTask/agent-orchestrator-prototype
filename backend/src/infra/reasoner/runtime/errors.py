@@ -7,6 +7,7 @@ support tool use). The classification inspects duck-typed attributes and
 strings, never provider exception classes — provider SDK imports stay in
 llm_client.py.
 """
+
 from __future__ import annotations
 
 from src.app.ports import ReasonerUnavailable

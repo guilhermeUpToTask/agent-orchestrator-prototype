@@ -94,7 +94,7 @@
   display: flex;
   align-items: baseline;
   gap: var(--sp-3);
-  padding: 4px var(--sp-4);
+  padding: var(--sp-1) var(--sp-4);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
@@ -132,7 +132,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 12px;
+  padding: 6px var(--sp-3);
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-text-on);
@@ -146,9 +146,9 @@
 .metricsStrip {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-4, 16px);
-  padding: var(--sp-3, 12px) var(--sp-4, 16px);
-  border-bottom: 1px solid var(--border);
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-0);
 }
 .metric {
   display: flex;
@@ -160,12 +160,19 @@
   font-family: var(--font-mono);
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-1, var(--text));
+  color: var(--text-1);
   line-height: 1.1;
 }
 .metricLabel {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.04em;
-  color: var(--text-3, var(--text-muted));
+  color: var(--text-3);
   text-transform: uppercase;
+}
+
+.metricsError {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fail-text);
 }

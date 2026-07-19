@@ -1,0 +1,57 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_PAT_TOKEN}"
+      }
+    },
+    "serena": {
+      "command": "/root/.local/bin/uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "claude-code",
+        "--project",
+        "/workspaces/agent-orchestrator"
+      ],
+      "disabledTools": [
+        "execute_shell_command"
+      ]
+    },
+    "sqlite": {
+      "command": "/usr/local/bin/uv",
+      "args": [
+        "tool",
+        "run",
+        "--from",
+        "mcp-server-sqlite",
+        "mcp-server-sqlite",
+        "--db-path",
+        "/root/.orchestrator/orchestrator.db"
+      ],
+      "disabledTools": [
+        "write_query",
+        "create_table",
+        "alter_table",
+        "drop_table",
+        "insert_rows",
+        "update_rows",
+        "delete_rows",
+        "append_insight"
+      ]
+    },
+    "graphify": {
+      "command": "/root/.local/share/uv/tools/graphifyy/bin/python",
+      "args": [
+        "-m",
+        "graphify.serve",
+        "/workspaces/agent-orchestrator/graphify-out/graph.json"
+      ]
+    }
+  }
+}

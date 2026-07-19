@@ -4,6 +4,7 @@ a ReasonerFailed event instead of a silent worker.tick_failed loop; a permanent
 failure (or an exhausted budget) fails the plan. On both backends via env_factory —
 the claim predicate must honor the gate identically in fake and real SQLite.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +25,9 @@ def goal(gid: str, position: int, tasks: list[Task] | None = None) -> Goal:
 
 
 def enriching_plan() -> Plan:
-    return Plan(id="p1", brief="b", phase=PlanPhase.ENRICHING, goals=[goal("g1", 0)])
+    return Plan(
+        project_id="project-1", id="p1", brief="b", phase=PlanPhase.ENRICHING, goals=[goal("g1", 0)]
+    )
 
 
 class FailingReasoner:
@@ -47,9 +50,7 @@ class FailingReasoner:
 
 
 def handler(reasoner, env):
-    return PlanningHandler(
-        reasoner, env.agents, InMemoryCapabilityRepository(), env.clock
-    )
+    return PlanningHandler(reasoner, env.agents, InMemoryCapabilityRepository(), env.clock)
 
 
 def test_transient_failure_arms_backoff_gate_and_emits_event(env_factory):
@@ -63,8 +64,8 @@ def test_transient_failure_arms_backoff_gate_and_emits_event(env_factory):
     stored = env.stored("p1")
     assert stored.phase == PlanPhase.ENRICHING  # still recoverable
     assert stored.planning_attempts == 1
-    # armed one backoff step into the future (default retry_policy: 2s before retry #2)
-    assert stored.planning_retry_not_before == env.clock.now() + timedelta(seconds=2.0)
+    # default planning retry starts at a durable 30-second provider-safe window
+    assert stored.planning_retry_not_before == env.clock.now() + timedelta(seconds=30.0)
     assert env.outbox_types() == ["ReasonerFailed"]
 
 
@@ -82,7 +83,10 @@ def test_transient_failures_exhaust_budget_then_fail(env_factory):
     assert env.stored("p1").phase == PlanPhase.FAILED
     # three ReasonerFailed (one per attempt) + the terminal PlanFailed
     assert env.outbox_types() == [
-        "ReasonerFailed", "ReasonerFailed", "ReasonerFailed", "PlanFailed",
+        "ReasonerFailed",
+        "ReasonerFailed",
+        "ReasonerFailed",
+        "PlanFailed",
     ]
 
 

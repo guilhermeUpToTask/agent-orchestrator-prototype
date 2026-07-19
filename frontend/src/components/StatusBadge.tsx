@@ -1,16 +1,18 @@
 import React from 'react';
-import { KIND_VARS, PLAN_PHASE, STATUS, type StatusMeta } from '../styles/tokens';
-import type { PlanPhase, Status } from '../types/ui';
+import { KIND_VARS, PLAN_PHASE, PLAN_STATUS, STATUS, type StatusMeta } from '../styles/tokens';
+import type { PlanPhase, PlanStatus, Status } from '../types/ui';
 
 type Props =
   | { domain: 'status'; value: Status; bare?: boolean }
   | { domain: 'phase'; value: PlanPhase; bare?: boolean }
+  | { domain: 'plan'; value: PlanStatus; bare?: boolean }
   | { domain: 'custom'; value: StatusMeta; bare?: boolean };
 
 function metaFor(p: Props): StatusMeta {
   switch (p.domain) {
     case 'status': return STATUS[p.value] ?? STATUS.pending;
     case 'phase': return PLAN_PHASE[p.value] ?? PLAN_PHASE.discovery;
+    case 'plan': return PLAN_STATUS[p.value] ?? PLAN_STATUS.idle;
     case 'custom': return p.value;
   }
 }

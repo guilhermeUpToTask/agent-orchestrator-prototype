@@ -1,5 +1,6 @@
 """Envelope-encrypted secret store on real SQLite: round-trip, fail-closed
 master-key handling, and the no-plaintext-at-rest guarantee."""
+
 from __future__ import annotations
 
 import pytest
@@ -41,9 +42,7 @@ def test_plaintext_never_at_rest(sf, master_key):
     store = SqliteSecretStore(sf, master_key)
     store.put(SecretRef.for_provider("prov1"), "sk-super-secret")
     with sf() as s:
-        row = s.execute(
-            text("SELECT ciphertext, wrapped_key FROM secrets")
-        ).one()
+        row = s.execute(text("SELECT ciphertext, wrapped_key FROM secrets")).one()
     assert "sk-super-secret" not in row[0]
     assert "sk-super-secret" not in row[1]
 

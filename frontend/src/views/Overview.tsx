@@ -1,35 +1,43 @@
 import React from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Hand, XCircle } from 'lucide-react';
 import { useAgents, usePlan } from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { StatusBadge } from '../components/StatusBadge';
-import { PLAN_PHASE } from '../styles/tokens';
+import { AttentionItem, CountChip, ErrorState } from '../components/ui';
+import { PLAN_STATUS } from '../styles/tokens';
 import type { Goal, Task } from '../types/ui';
 import styles from './Overview.module.css';
+import { attemptLabel } from '../lib/taskLabels';
+
+/** The failure reason inline — never force a Goals navigation just to learn why. */
+function failureDetail(task: Task): string | null {
+  if (!task.result?.failure_reason) return null;
+  return task.result.failure_kind
+    ? `${task.result.failure_reason} (${task.result.failure_kind})`
+    : task.result.failure_reason;
+}
 
 /**
  * The operator's home for one plan: answers "what is happening, and what do
- * I owe?" — the current phase, the amber queue (gates + failed tasks), what
- * is executing right now, and the brief.
+ * I owe?" — the canonical root status/activity, review or recovery queue,
+ * current execution, preserved cycle history, and brief.
  */
 export function Overview() {
   const { planId = '' } = useParams();
   const { data: plan, isLoading, error, refetch } = usePlan(planId || null);
   const { data: agents = [] } = useAgents();
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
+  const selectTask = usePlannerStore((s) => s.selectTask);
+  const navigate = useNavigate();
 
-  if (error) {
+  if (error && !plan) {
     return (
       <div className={styles.page}>
-        <div className={styles.errorCard} role="alert">
-          <div className={styles.errorTitle}>Can't reach the backend</div>
-          <p className={styles.errorBody}>
-            {(error as Error).message}. Check that the API server is running at{' '}
-            <code>{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</code>, then retry.
-          </p>
-          <button className={styles.retryBtn} onClick={() => refetch()}>Retry</button>
-        </div>
+        <ErrorState
+          message={`${(error as Error).message}. Check that the API server is running at ${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}, then retry.`}
+          onRetry={() => refetch()}
+        />
       </div>
     );
   }
@@ -47,30 +55,27 @@ export function Overview() {
   const agentName = (id: string | null) =>
     agents.find((a) => a.id === id)?.name ?? 'unassigned';
 
-  const gate =
-    plan.phase === 'awaiting_review'
-      ? 'Roadmap ready — review the tasks and approve to start execution'
-      : plan.phase === 'review'
-        ? 'Execution finished — finish the plan or replan the next iteration'
-        : null;
+  const gate = plan.pending_gate?.continuation ?? null;
 
   const failedTasks = flatTasks(plan.goals).filter((t) => t.task.status === 'failed');
   const runningTasks = flatTasks(plan.goals).filter((t) => t.task.status === 'running');
-  const attentionCount = (gate ? 1 : 0) + failedTasks.length;
+  const attentionCount = (gate ? 1 : 0) + (plan.block ? 1 : 0) + failedTasks.length;
 
   const base = `/plans/${encodeURIComponent(planId)}`;
 
   return (
     <div className={styles.page}>
-      {/* ── Current phase header ─────────────────────────────────────────── */}
+      {/* ── Current ProjectPlan status ───────────────────────────────────── */}
       <header className={styles.phaseHeader}>
         <div className={styles.phaseTitleRow}>
           <h1 className={styles.phaseTitle}>
-            {PLAN_PHASE[plan.phase].label} — iteration {plan.iteration}
+            {PLAN_STATUS[plan.status].label} — {humanize(plan.activity)}
           </h1>
-          <StatusBadge domain="phase" value={plan.phase} />
+          <StatusBadge domain="plan" value={plan.status} />
         </div>
-        <p className={styles.phaseGoal}>{plan.brief.split('\n')[0]}</p>
+        <p className={styles.phaseGoal}>
+          {plan.status_reason.message ?? plan.brief.split("\n")[0]}
+        </p>
       </header>
 
       {/* ── Needs attention ──────────────────────────────────────────────── */}
@@ -81,35 +86,50 @@ export function Overview() {
 
         {attentionCount === 0 ? (
           <p className={styles.empty}>
-            {plan.phase === 'discovery' || plan.phase === 'replanning'
-              ? 'The reasoner is waiting for you in the chat panel.'
-              : 'Nothing is waiting on you. The machine has the conn.'}
+            {plan.status === "idle"
+              ? "Nothing is waiting on you. Start a new intent when ready."
+              : "Nothing needs operator attention right now."}
           </p>
         ) : (
-          <ul className={styles.rows}>
-            {gate && (
-              <li>
-                <button className={styles.row} onClick={() => setGateOpen(true)}>
-                  <StatusBadge domain="phase" value={plan.phase} bare />
-                  <span className={styles.rowTitle}>{gate}</span>
-                  <ChevronRight size={14} className={styles.rowChev} aria-hidden />
-                </button>
-              </li>
+          <div className={styles.attentionList}>
+            {plan.block && (
+              <AttentionItem
+                tone="fail"
+                icon={<XCircle size={16} aria-hidden />}
+                title={plan.block.explanation}
+                meta={humanize(plan.block.stage)}
+              />
             )}
-            {failedTasks.map(({ task, goal }) => (
-              <li key={task.id}>
-                <Link className={styles.row} to={`${base}/goals`}>
-                  <StatusBadge domain="status" value={task.status} bare />
-                  <span className={styles.rowTitle}>{task.name}</span>
-                  <span className={styles.rowMeta}>
-                    {goal.name}
-                    {task.attempt > 1 && ` · attempt ${task.attempt}`}
-                  </span>
-                  <ChevronRight size={14} className={styles.rowChev} aria-hidden />
-                </Link>
-              </li>
-            ))}
-          </ul>
+            {gate && (
+              <AttentionItem
+                tone="gate"
+                icon={<Hand size={16} aria-hidden />}
+                title={gate}
+                onClick={() => setGateOpen(true)}
+              />
+            )}
+            {failedTasks.map(({ task, goal }) => {
+              const attempt = attemptLabel(
+                task,
+                agents.find((a) => a.id === task.agent_id) ?? null,
+              );
+              return (
+                <AttentionItem
+                  key={task.id}
+                  tone="fail"
+                  icon={<XCircle size={16} aria-hidden />}
+                  title={task.name}
+                  meta={goal.name}
+                  badge={attempt ? <CountChip tone="fail">{attempt}</CountChip> : undefined}
+                  detail={failureDetail(task)}
+                  onClick={() => {
+                    selectTask(task.id);
+                    navigate(`${base}/goals`);
+                  }}
+                />
+              );
+            })}
+          </div>
         )}
       </section>
 
@@ -118,9 +138,9 @@ export function Overview() {
         <h2 className={styles.sectionTitle + ' label'}>Running now</h2>
         {runningTasks.length === 0 ? (
           <p className={styles.empty}>
-            {plan.phase === 'running'
-              ? 'No tasks are executing right now.'
-              : 'Workers run during the RUNNING phase.'}
+            {plan.status === "running"
+              ? "No task invocation is active at this instant."
+              : "Workers advance only while the ProjectPlan is running."}
           </p>
         ) : (
           <ul className={styles.rows}>
@@ -171,6 +191,51 @@ export function Overview() {
         )}
       </section>
 
+      {/* ── Cycle history ───────────────────────────────────────────────── */}
+      <section className={styles.section} aria-label="Cycle history">
+        <h2 className={styles.sectionTitle + " label"}>Cycle history</h2>
+        {plan.cycles.length === 0 ? (
+          <p className={styles.empty}>No cycle has been activated yet.</p>
+        ) : (
+          <div className={styles.docs}>
+            {plan.cycles
+              .slice()
+              .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+              .map((cycle) => {
+                const tasks = cycle.goals.flatMap((goal) => goal.tasks);
+                const done = tasks.filter((task) => task.status === "done").length;
+                return (
+                  <details className={styles.doc} key={cycle.id}>
+                    <summary className={styles.docSummary}>
+                      {cycle.status.toUpperCase()} · {cycle.id}
+                      <span className={styles.rowMeta}>
+                        {" · "}{done}/{tasks.length} tasks done
+                      </span>
+                    </summary>
+                    <div className={styles.docBody}>
+                      {cycle.status === "superseded" && (
+                        <p className={styles.docText}>
+                          Preserved source cycle. Completed work is locked history;
+                          unfinished work was replaced by an approved replan.
+                        </p>
+                      )}
+                      {cycle.goals.map((goal) => (
+                        <div className={styles.docField} key={goal.id}>
+                          <span className="label">{goal.name} · {goal.status}</span>
+                          <span className={styles.docText}>
+                            {goal.tasks.filter((task) => task.status === "done").length}
+                            /{goal.tasks.length} tasks completed
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })}
+          </div>
+        )}
+      </section>
+
       {/* ── The brief ────────────────────────────────────────────────────── */}
       <section className={styles.section} aria-label="Plan brief">
         <h2 className={styles.sectionTitle + ' label'}>Brief</h2>
@@ -178,6 +243,10 @@ export function Overview() {
       </section>
     </div>
   );
+}
+
+function humanize(value: string): string {
+  return value.replace(/:/g, " · ").replace(/_/g, " ");
 }
 
 function flatTasks(goals: Goal[]): { task: Task; goal: Goal }[] {

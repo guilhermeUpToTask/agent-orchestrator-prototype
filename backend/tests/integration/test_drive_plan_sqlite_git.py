@@ -1,6 +1,7 @@
 """The assembled execution stack: drive_plan on the REAL SQLite UoW + the REAL
 git-branching workspace + the dummy runner + the SQLite agent-event sink —
 success commits to the plan branch, failure discards (rollback), events land."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,10 +21,12 @@ from src.app.use_cases.run_worker import drive_plan
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
+from src.domain.entities.project_definition import ProjectDefinition
 from src.domain.value_objects.lifecycle import Status
 from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
+from src.infra.db.reference_repos import SqliteProjectRepository
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.git.workspace import GitBranchWorkspace
 from tests.support import make_agent_spec
@@ -48,6 +51,7 @@ class WritingDummyRunner(DummyAgentRunner):
 
 def _plan():
     return Plan(
+        project_id="project-1",
         id="p1",
         brief="b",
         phase=PlanPhase.RUNNING,
@@ -70,6 +74,9 @@ def test_full_stack_drive_success_and_rollback(tmp_path):
     engine = build_engine(f"sqlite:///{tmp_path / 'o.db'}")
     Base.metadata.create_all(engine)
     sf = make_session_factory(engine)
+    SqliteProjectRepository(sf).add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
     clock = FakeClock()
     uow = SqliteUnitOfWork(sf, clock)
     repo_dir = tmp_path / "project-repo"
@@ -85,9 +92,7 @@ def test_full_stack_drive_success_and_rollback(tmp_path):
     async def drive_until_gate():
         signal = "continue"
         while signal in ("continue", "not_ready"):
-            signal, _ = await drive_plan(
-                "p1", uow, runner, agents, workspace, sink, clock, "w1"
-            )
+            signal, _ = await drive_plan("p1", uow, runner, agents, workspace, sink, clock, "w1")
             if signal == "not_ready":
                 clock.advance(120)  # wait out the backoff gate
         return signal
@@ -117,7 +122,5 @@ def test_full_stack_drive_success_and_rollback(tmp_path):
 
     # agent events landed in SQLite (best-effort sink), tagged per attempt
     with sf() as s:
-        rows = s.execute(
-            text("SELECT task_id, attempt, type FROM agent_events ORDER BY id")
-        ).all()
+        rows = s.execute(text("SELECT task_id, attempt, type FROM agent_events ORDER BY id")).all()
     assert ("t1", 3, "step") in [(r[0], r[1], r[2]) for r in rows]

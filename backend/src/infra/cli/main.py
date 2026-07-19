@@ -32,6 +32,7 @@ def cli() -> None:
 # db
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def db() -> None:
     """Database maintenance."""
@@ -53,9 +54,7 @@ def db_upgrade() -> None:
     backend_root = Path(__file__).resolve().parents[3]
     cfg = Config(str(backend_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(backend_root / "alembic"))
-    cfg.set_main_option(
-        "sqlalchemy.url", db_url_for_home(container.orchestrator_home)
-    )
+    cfg.set_main_option("sqlalchemy.url", db_url_for_home(container.orchestrator_home))
     command.upgrade(cfg, "head")
     ok(f"database migrated to head under {container.orchestrator_home}")
 
@@ -63,6 +62,7 @@ def db_upgrade() -> None:
 # ---------------------------------------------------------------------------
 # api / worker
 # ---------------------------------------------------------------------------
+
 
 @cli.group()
 def api() -> None:
@@ -94,8 +94,7 @@ def worker() -> None:
     "--lease-seconds",
     default=300,
     show_default=True,
-    help="Must exceed the longest expected single task run "
-    "(heartbeats happen between units).",
+    help="Plan lease duration; active actions renew it every one-third interval.",
 )
 @catch_domain_errors
 def worker_start(worker_id: str, poll_seconds: float, lease_seconds: int) -> None:
@@ -121,6 +120,7 @@ def worker_start(worker_id: str, poll_seconds: float, lease_seconds: int) -> Non
 # ---------------------------------------------------------------------------
 # config
 # ---------------------------------------------------------------------------
+
 
 @cli.group()
 def config() -> None:
@@ -243,6 +243,16 @@ def seed_demo(
         Capability(id="backend", name="Backend", description="server-side code"),
         Capability(id="frontend", name="Frontend", description="UI code"),
         Capability(id="testing", name="Testing", description="tests and QA"),
+        Capability(
+            id="test_authoring",
+            name="Test authoring",
+            description="authors authoritative tests before implementation",
+        ),
+        Capability(
+            id="implementation",
+            name="Implementation",
+            description="implements changes against frozen tests",
+        ),
     ]
     for cap in capabilities:
         upsert(container.capability_repo, cap)
@@ -330,6 +340,7 @@ def seed_demo(
 # plan (read-only inspection; mutations go through the API)
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def plan() -> None:
     """Read-only plan inspection."""
@@ -347,10 +358,7 @@ def plan_list() -> None:
         return
     for s in summaries:
         claimed = f" [claimed by {s['claimed_by']}]" if s["claimed_by"] else ""
-        click.echo(
-            f"{s['id']}  {s['phase']:<16} iter={s['iteration']} "
-            f"v{s['version']}{claimed}"
-        )
+        click.echo(f"{s['id']}  {s['phase']:<16} iter={s['iteration']} v{s['version']}{claimed}")
 
 
 @plan.command("show")

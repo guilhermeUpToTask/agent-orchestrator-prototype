@@ -6,6 +6,7 @@ staging area (no in-memory buffer needed) — commit persists state + events
 atomically; rollback discards both. That is the transactional-outbox guarantee
 the in-memory fake simulates with its staged list.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import text

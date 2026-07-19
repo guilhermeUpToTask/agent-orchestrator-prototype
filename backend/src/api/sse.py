@@ -12,6 +12,7 @@ off-loop publishes through loop.call_soon_threadsafe.
 
 Routers keep calling the module-level publish_sse() shim.
 """
+
 from __future__ import annotations
 
 import asyncio

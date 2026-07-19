@@ -10,11 +10,13 @@ the outbox-rollback tests pass for the wrong reason.
 One UoW instance per worker/request — NOT thread-safe (the bound session is
 shared mutable state); give each thread its own instance.
 """
+
 from __future__ import annotations
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.app.ports import Clock
+from src.infra.db.execution_record_repository import SqliteExecutionRecordRepository
 from src.infra.db.outbox import SqliteOutbox
 from src.infra.db.plan_repository import SqlitePlanRepository
 
@@ -24,6 +26,7 @@ class SqliteUnitOfWork:
         self._session_factory = session_factory
         self._session: Session | None = None
         self.plans = SqlitePlanRepository(session_factory, clock)
+        self.executions = SqliteExecutionRecordRepository()
         self.outbox = SqliteOutbox()
 
     def __enter__(self) -> "SqliteUnitOfWork":
@@ -31,6 +34,7 @@ class SqliteUnitOfWork:
             raise RuntimeError("SqliteUnitOfWork transactions cannot be nested")
         self._session = self._session_factory()
         self.plans.bind(self._session)
+        self.executions.bind(self._session)
         self.outbox.bind(self._session)
         return self
 
@@ -45,5 +49,6 @@ class SqliteUnitOfWork:
         finally:
             session.close()
             self.plans.unbind()
+            self.executions.unbind()
             self.outbox.unbind()
             self._session = None

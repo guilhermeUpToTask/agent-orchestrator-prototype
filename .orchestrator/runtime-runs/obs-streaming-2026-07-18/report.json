@@ -1,0 +1,53 @@
+{
+  "runtimes": [
+    {
+      "duration_seconds_median": 600.0,
+      "duration_seconds_p90": 745.4,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 1.0,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "codex",
+      "tasks_routed_initially": 2,
+      "verified_completions": 3
+    },
+    {
+      "duration_seconds_median": 342.6,
+      "duration_seconds_p90": 342.6,
+      "escalation_rate": null,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "quota_tokens_total": 765015,
+      "runtime": "grok",
+      "tasks_routed_initially": 0,
+      "verified_completions": 1
+    },
+    {
+      "duration_seconds_median": null,
+      "duration_seconds_p90": null,
+      "escalation_rate": 1.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.0,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "mimo",
+      "tasks_routed_initially": 1,
+      "verified_completions": 0
+    },
+    {
+      "duration_seconds_median": null,
+      "duration_seconds_p90": null,
+      "escalation_rate": 2.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.0,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "pi_free",
+      "tasks_routed_initially": 1,
+      "verified_completions": 0
+    }
+  ],
+  "task_count": 4
+}

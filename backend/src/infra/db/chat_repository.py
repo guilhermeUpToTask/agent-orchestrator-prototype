@@ -5,6 +5,7 @@ Conversation history for DISCOVERY/REPLANNING. Each append is its own short
 transaction (run_in_session), never part of the plan UnitOfWork: chat is
 display history, plan state is truth — neither may roll the other back.
 """
+
 from __future__ import annotations
 
 import json

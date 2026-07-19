@@ -1,5 +1,7 @@
 """Tests for create_plan / apply_edit / control use cases."""
 
+from datetime import datetime, timezone
+
 import pytest
 
 
@@ -7,6 +9,7 @@ from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
 from src.domain.entities.task import Task
 from src.domain.errors.agent_errors import AgentNotFoundError, UnknownCapabilityError
 from src.domain.errors.planning_errors import EmptyPlanError, InvalidEditError
@@ -79,13 +82,13 @@ def edit(plan_id, e, uow, agents=None, capabilities=None):
 # ---- create_plan ----
 def test_create_plan_returns_id():
     uow, repo = uow_with()
-    pid = create_plan("build a REST API", "req-1", uow)
+    pid = create_plan("build a REST API", "project-1", "req-1", uow)
     assert pid and repo.get(pid).brief == "build a REST API"
 
 
 def test_create_plan_starts_in_discovery_iteration_1():
     uow, repo = uow_with()
-    pid = create_plan("build x", "req-1", uow)
+    pid = create_plan("build x", "project-1", "req-1", uow)
     created = repo.get(pid)
     assert created.phase == PlanPhase.DISCOVERY
     assert created.iteration == 1
@@ -93,23 +96,23 @@ def test_create_plan_starts_in_discovery_iteration_1():
 
 def test_create_plan_idempotent_on_request_id():
     uow, repo = uow_with()
-    pid1 = create_plan("build x", "req-1", uow)
-    pid2 = create_plan("build x", "req-1", uow)  # same request_id
+    pid1 = create_plan("build x", "project-1", "req-1", uow)
+    pid2 = create_plan("build x", "project-1", "req-1", uow)  # same request_id
     assert pid1 == pid2  # NOT a duplicate
     assert len([p for p in repo._store]) == 1
 
 
 def test_create_plan_different_requests_make_different_plans():
     uow, repo = uow_with()
-    pid1 = create_plan("build x", "req-1", uow)
-    pid2 = create_plan("build x", "req-2", uow)
+    pid1 = create_plan("build x", "project-1", "req-1", uow)
+    pid2 = create_plan("build x", "project-2", "req-2", uow)
     assert pid1 != pid2
 
 
 def test_create_plan_empty_brief_raises():
     uow, _ = uow_with()
     with pytest.raises(EmptyPlanError):
-        create_plan("   ", "req-1", uow)
+        create_plan("   ", "project-1", "req-1", uow)
 
 
 # ---- apply_edit ----
@@ -125,7 +128,9 @@ def _plan_with_goal(status=Status.PENDING):
             Task(id="t1", name="t1", position=1, description=""),
         ],
     )
-    return Plan(id="p1", brief="b", phase=PlanPhase.AWAITING_REVIEW, goals=[g])
+    return Plan(
+        project_id="project-1", id="p1", brief="b", phase=PlanPhase.AWAITING_REVIEW, goals=[g]
+    )
 
 
 def test_apply_edit_add_task_bumps_version():
@@ -273,6 +278,15 @@ def test_update_goal_depends_on_cycle_rejected():
         edit("p1", UpdateGoal("g1", depends_on=["g2"]), uow)
 
 
+def test_update_goal_rejects_dependency_on_a_later_goal():
+    g2 = Goal(id="g2", name="g2", position=1, description="")
+    plan = _plan_with_goal()
+    plan.goals.append(g2)
+    uow, _ = uow_with(plan)
+    with pytest.raises(InvalidEditError, match="must precede"):
+        edit("p1", UpdateGoal("g1", depends_on=["g2"]), uow)
+
+
 def test_remove_goal_strips_dangling_depends_on_and_renumbers():
     g2 = Goal(id="g2", name="g2", position=1, description="", depends_on=["g1"])
     g3 = Goal(id="g3", name="g3", position=2, description="", depends_on=["g1"])
@@ -336,6 +350,45 @@ def test_rebind_failed_task_agent_while_paused():
         agents=[make_agent("a-default"), make_agent("a-override")],
     )
     assert repo.get("p1").goals[0].tasks[0].agent_id == "a-override"
+
+
+def test_blocked_cyclic_edit_targets_the_active_cycle_without_manual_pause():
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    plan = _plan_with_goal(status=Status.RUNNING)
+    plan.goals[0].tasks[0].status = Status.FAILED
+    active_goal = plan.goals[0]
+    plan.goals = []
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-1",
+            draft_id="draft-1",
+            goals=[active_goal],
+            started_at=now,
+        )
+    ]
+    plan.phase = PlanPhase.RUNNING
+    plan.status = PlanStatus.BLOCKED
+    plan.paused = False
+    plan.block = PlanBlock(
+        id="block-1",
+        kind="execution_failure",
+        explanation="verification failed",
+        stage="implementation",
+        goal_id="g1",
+        task_id="t0",
+        legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+        created_at=now,
+    )
+    uow, repo = uow_with(plan)
+
+    edit("p1", UpdateTask("g1", "t0", description="recovered"), uow)
+
+    saved = repo.get("p1")
+    assert saved.goals == []
+    assert saved.active_cycle is not None
+    assert saved.active_cycle.goals[0].tasks[0].description == "recovered"
+    assert saved.active_cycle.goals[0].tasks[0].revision == 2
 
 
 # ---- worker-vs-edit race (version-CAS) ----

@@ -1,6 +1,7 @@
 """SqliteChatRepository: per-plan ordering, plan isolation, meta round-trip.
 The in-memory fake (InMemoryChatStore) must mirror these exact semantics, so
 both run the same assertions."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
