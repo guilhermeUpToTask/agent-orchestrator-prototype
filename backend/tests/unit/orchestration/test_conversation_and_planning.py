@@ -15,10 +15,11 @@ import pytest
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanBlock, PlanStatus
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.ports.reasoner_port import ChatMessage, IntentCandidate, ReasonerReply
+from src.domain.value_objects.lifecycle import Status
 from src.domain.value_objects.tasks_vos import TaskResult
 
 from src.app.handlers.base import Signal
@@ -28,6 +29,7 @@ from src.app.testing.fakes import (
     InMemoryChatStore,
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
+from src.app.use_cases.request_replan import request_replan
 
 
 def goal(gid: str, position: int, tasks: list[Task] | None = None) -> Goal:
@@ -253,6 +255,59 @@ def test_replanning_commit_proposes_replan_intent_without_mutating_cycle(env_fac
     assert stored.intent_proposal is not None
     assert stored.intent_proposal.source_cycle_id == "cycle-1"
     assert reasoner.converse_calls[0][0] == "replanning"
+
+
+def test_replan_from_blocked_cycle_settles_work_before_message(env_factory):
+    env = env_factory()
+    failed = task("failed")
+    failed.fail("terminal failure")
+    pending = task("pending", 1)
+    running_goal = goal("g1", 0, [failed, pending])
+    running_goal.start()
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-old",
+        draft_id="draft-old",
+        goals=[running_goal],
+        started_at=env.clock.now(),
+    )
+    plan = plan_in(PlanPhase.RUNNING)
+    plan.status = PlanStatus.BLOCKED
+    plan.cycles = [cycle]
+    plan.block = PlanBlock(
+        id="block-1",
+        kind="execution_failure",
+        explanation="terminal failure",
+        stage="implementation",
+        goal_id="g1",
+        task_id="failed",
+        legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+        created_at=env.clock.now(),
+    )
+    env.seed(plan)
+    request_replan("p1", env.uow)
+
+    settled = env.stored("p1")
+    assert settled.phase == PlanPhase.REPLANNING
+    assert settled.status == PlanStatus.PAUSED
+    assert settled.block is not None and settled.block.resolution == "start_replan"
+    assert all(item.status == Status.SKIPPED for item in settled.active_cycle.goals[0].tasks)
+
+    chat = InMemoryChatStore()
+    reasoner = ScriptedReasoner(
+        replies=[
+            ReasonerReply(
+                message="replan intent",
+                intent=IntentCandidate(
+                    normalized_brief="Harden the service.",
+                    objective="Harden the service",
+                ),
+            )
+        ]
+    )
+    result = turn(env, chat, reasoner, "harden it", replanning=True)
+    assert result.committed is True
+    assert result.phase == PlanPhase.REPLANNING
 
 
 # ---------------------------------------------------------------------------

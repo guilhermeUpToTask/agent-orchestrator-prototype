@@ -51,6 +51,7 @@ __all__ = [
     "WorkspaceHandle",
     "VerificationExecutor",
     "CommandExecution",
+    "MainRepositoryWorkspace",
 ]
 
 
@@ -61,6 +62,13 @@ class CommandExecution:
     started_at: datetime
     finished_at: datetime
     bounded_output_ref: str
+
+
+@runtime_checkable
+class MainRepositoryWorkspace(Protocol):
+    """Optional workspace capability for guarding the project repository."""
+
+    async def main_repo_status(self) -> set[str]: ...
 
 
 @runtime_checkable

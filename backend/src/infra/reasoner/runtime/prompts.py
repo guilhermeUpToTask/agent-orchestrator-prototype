@@ -23,6 +23,16 @@ SYSTEM_PROMPT = (
     "tool-turns."
 )
 
+TDD_TASK_GRANULARITY_GUIDANCE = (
+    "For any task whose `verification_strategy` is `tdd`, make the task a "
+    "feature-level deliverable slice: its objective must state what is being "
+    "delivered and validated (for example, 'Deliver validated Item schemas "
+    "with passing tests'). Never submit a write-tests-only or make-tests-pass-"
+    "only task. The runtime performs the red/green split internally for each "
+    "TDD task: its test-author stage writes the failing tests and freezes the "
+    "bundle, then its implementer stage makes those tests pass."
+)
+
 
 def build_discovery_prompt(plan: Plan) -> str:
     return (
@@ -71,6 +81,7 @@ def build_enrich_prompt(plan: Plan, goal: Goal, capabilities: Sequence[Capabilit
         "description precise enough to execute without asking questions. Set "
         "`required_capabilities` ONLY from the catalog ids above (or leave "
         "it empty).\n\n"
+        f"{TDD_TASK_GRANULARITY_GUIDANCE}\n\n"
         "Call `submit_tasks` exactly once. If it returns "
         "`{accepted: false, errors: [...]}`, fix exactly those problems and "
         "resubmit. Do not plan tasks for any other goal."
