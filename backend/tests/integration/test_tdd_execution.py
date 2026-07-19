@@ -172,7 +172,14 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
 
     # Implementer starts from the authoritative test commit. Its self-report is
     # ignored; independent pytest evidence is what completes and merges the task.
-    assert asyncio.run(handler.handle(plan.id, after_red, uow)).value == "continue"
+    implementer_signal = asyncio.run(handler.handle(plan.id, after_red, uow))
+    after_impl = plans.get(plan.id)
+    impl_task = after_impl.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert implementer_signal.value == "continue", (
+        f"paused_reason={after_impl.paused_reason!r} "
+        f"task_status={impl_task.status.value!r} "
+        f"task_result={impl_task.result!r}"
+    )
     verified = plans.get(plan.id)
     verified_task = verified.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert verified_task.status.value == "done"
