@@ -8,6 +8,7 @@ Everything designed or planned but **not yet implemented**, in priority order. E
 - **[LIVE]** — defects/gaps verified by the first real end-to-end plan ([review](docs/history/analyses/2026-07-13-first-live-plan-review.md), [strategy](docs/history/planning/2026-07-13-execution-domain-refactor-strategy.md)).
 - **[PR20]** — findings from the PR #20 review that landed the cyclic-lifecycle refactor (decisions 44–48).
 - **[CI]** — pending CI/verification hardening surfaced while getting PR #20 green.
+- **[WALK]** — findings from the 2026-07-19 live plan walkthrough (issues #28, #30–#32; fixes in PR #29 and this branch).
 
 Verified defects backing several items below are documented in
 [docs/architecture/known-issues.md](docs/architecture/known-issues.md) — read that
@@ -26,16 +27,7 @@ is legacy-compat only (see known-issues.md); do not describe it as current.
 
 Blocking or near-blocking issues on the current PR.
 
-### 1. RED-gate exit-code discrimination
-The TDD freeze gate in `execution_handler.py` treats any nonzero exit as a
-valid RED baseline, so exit 127 ("command not found" — a broken verification
-command, missing interpreter, bad PATH) is indistinguishable from a genuine
-failing test. Classify infrastructure failure (127, 126, command-not-found
-patterns) separately from test failure; only the latter is a legal RED.
-**Done when:** a scripted 127 in the verification command surfaces as a block
-distinct from RED, on both truth-test backends.
-
-### 2. Verification environment determinism — watch item
+### 1. Verification environment determinism — watch item
 Two determinism bugs in `LocalVerificationExecutor` were found and fixed on
 this branch: a login-shell PATH reset breaking interpreter resolution, and
 interpreter/test-cache byproducts (`__pycache__`, `.pytest_cache`, `*.pyc`)
@@ -43,12 +35,31 @@ leaking into frozen verification bundles. Both are fixed; keep watching for
 further machine-dependent assumptions (locale, timezone, ambient env vars) the
 executor might still inherit from the host shell.
 
+## Now — agent isolation and prompt fidelity [WALK]
+
+The walkthrough proved agents escape cooperative isolation: worktree + cwd is a
+convention, not a boundary. The post-run guard (this branch) is DETECTION; these
+items are prevention, cheapest first.
+
+### 2. Scrub orchestrator env vars from child agent processes
+Agent subprocesses inherit the worker's full environment (`ORCHESTRATOR_HOME`,
+project paths, etc.) — one of the two breadcrumbs that let an exploring agent
+find and write to the project main repo. Pass an allowlisted env (runtime key +
+the vars the CLI needs) instead of `{**os.environ, ...}` in the CLI runners.
+
+### 3. Pointer-free attempt workspaces
+The per-attempt git worktree's `.git` is a pointer file naming the main repo's
+absolute path — the second breadcrumb. Evaluate `git clone --shared` (or
+scissor the pointer) for attempt workspaces so no on-disk path names the main
+repository; keep the branch/merge semantics identical. Decide against the
+worktree-prune/audit machinery decision 45 added before changing the mechanism.
+
 ## Now — test foundation and boundary cleanup [PR20]
 
 Sequencing matters: strengthen tests before refactoring domain/app code so the
 refactors below have a safety net.
 
-### 3. Harden the test foundation
+### 4. Harden the test foundation
 Review unit + integration coverage through the API layer (not just the
 domain/app truth tests) — routers, error mapping, SSE payloads. Document how
 `src/app/testing/fakes.py` (`InMemoryPlanRepository`, `DummyAgentRunner`,
@@ -57,8 +68,11 @@ asset is legible to reviewers, not just inferred from reading it. After that
 review, reevaluate `src/app/verification.py`'s (98 lines) responsibility —
 confirm it's still the single seam for frozen-command execution and not
 duplicating logic that belongs in the handler or the port.
+Known gap from PR #27: no test actually STREAMS `GET /api/events` — the sync
+TestClient deadlocks holding a stream while mutating; needs an async client
+or a threaded consumer.
 
-### 4. Clarify domain/application boundaries
+### 5. Clarify domain/application boundaries
 - Define what an `IntentProposal` is in domain terms and where the API
   surfaces it (response shape, router, OpenAPI schema) — currently implicit
   in the handler/router code, not written down anywhere.
@@ -72,7 +86,7 @@ duplicating logic that belongs in the handler or the port.
   whether domain telemetry + domain events (outbox/agent_events) already
   cover its job.
 
-### 5. Refactor orchestration (after 3 and 4 land)
+### 6. Refactor orchestration (after 4 and 5 land)
 - Decompose `src/domain/aggregates/planner_orchestrator.py` (882 lines) — the
   single-authority aggregate is correct as a boundary, but its size makes
   review and change risky; split by responsibility (transitions vs.
@@ -80,7 +94,7 @@ duplicating logic that belongs in the handler or the port.
   Goal/Task transitions" invariant.
 - Remove legacy/backward-compat code (e.g. the compat branches in
   `src/app/use_cases/advance_plan.py` and similar call sites) — but ONLY
-  after the test hardening in item 3 protects the behavior being deleted.
+  after the test hardening in item 4 protects the behavior being deleted.
 - Formalize abrupt pause/resume semantics: define precisely when a pause must
   interrupt a running task attempt vs. merely stop new claims, and what
   "paused goal" means for a goal mid-promotion. Decision 44's Git-promotion
@@ -88,23 +102,23 @@ duplicating logic that belongs in the handler or the port.
   reservation — this item is the general policy the reservation is a special
   case of.
 
-### 6. Refactor handlers, in dependency order (after 3–5)
+### 7. Refactor handlers, in dependency order (after 4–6)
 `execution_handler.py` (1249 lines) first, then `planning_handler.py` (514
 lines) — execution is upstream of planning in the dependency graph and carries
 more risk. Share only mechanisms proven common to both (not speculative
 abstraction). Refactoring prompts already exist from the PR #20 review; do not
-start until the API-layer tests from item 3 are in place — the whole point is
+start until the API-layer tests from item 4 are in place — the whole point is
 a safety net before touching 1700+ lines of handler code.
 
 ## Next — tooling and documentation consolidation [PR20]
 
-### 7. DB-schema-inspection → diagram tool
+### 8. DB-schema-inspection → diagram tool
 Idea surfaced during the migration 0009 review: a small tool that inspects the
 live SQLite schema and emits a diagram (tables, FKs, indexes) so
 `docs/architecture/data-model.md` can be checked against the DB instead of
 hand-maintained. No design yet — evidence-gated on the doc actually drifting.
 
-### 8. Oversized graphify skill review
+### 9. Oversized graphify skill review
 Tracked separately from this roadmap: the graphify skill review left comments
 against outdated diff locations (the file moved under later commits). Not an
 architecture item — a skill-repo hygiene follow-up.
@@ -199,6 +213,17 @@ Take these up only when real usage demonstrates the need.
 31. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
+
+32. **True FS sandboxing per attempt** [WALK] — the isolation guard detects
+    out-of-worktree writes; prevention means confining the child process
+    (bubblewrap/container: write access to its worktree only, network for the
+    provider API). Needs real design (git across the boundary, network
+    policy); take up only if items 2–3 prove insufficient in practice.
+33. **Per-role model quality bindings** [WALK] — the free reasoning model
+    follows task descriptions over role instructions; the registry already
+    binds provider/model per agent, so route the test_author role to a
+    stronger model once real usage justifies the spend. Pairs with the
+    registry-profiles item above.
 
 ## Deferred features — shelved with designed seams [LEG]
 
