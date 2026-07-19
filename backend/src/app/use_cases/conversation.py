@@ -103,7 +103,12 @@ def _start_operation(
             PlanStatus.BLOCKED,
             PlanStatus.IDLE,
         }:
-            raise InvalidEditError("replan discovery requires settled active-cycle work")
+            cycle = plan.active_cycle
+            settled = cycle is not None and all(
+                task.is_terminal for goal in cycle.goals for task in goal.tasks
+            )
+            if not (plan.status == PlanStatus.WAITING and settled):
+                raise InvalidEditError("replan discovery requires settled active-cycle work")
 
         purpose = "intent_discovery" if kind == ProposalKind.INITIAL else "replan_discovery"
         operation = uow.executions.find_active_planning_operation(plan_id, purpose)
