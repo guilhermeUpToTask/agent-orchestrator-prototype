@@ -73,6 +73,7 @@ from src.app.ports import (
     AgentEventSink,
     AgentRunner,
     Clock,
+    CommandExecution,
     TaskFailed,
     UnitOfWork,
     Workspace,
@@ -205,6 +206,17 @@ class ExecutionHandler:
         return self._finalize_success(plan_id, unit, result, uow)
 
     @staticmethod
+    def _raise_on_infrastructure_exit(outcomes: list[CommandExecution]) -> None:
+        """Exit 126/127 means the command could not run at all — never a test verdict."""
+        failure = next((item for item in outcomes if item.exit_code in {126, 127}), None)
+        if failure is not None:
+            raise TaskFailed(
+                f"verification command {failure.command!r} failed with exit code "
+                f"{failure.exit_code} (infrastructure failure)",
+                FailureKind.TOOL_ERROR,
+            )
+
+    @staticmethod
     def _test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
         normalized = path.replace("\\", "/")
         if strategy == VerificationStrategy.EXECUTABLE_CHECK:
@@ -260,6 +272,7 @@ class ExecutionHandler:
                 f"verification command modified production paths: {disallowed}",
                 FailureKind.VERIFICATION_ERROR,
             )
+        self._raise_on_infrastructure_exit(outcomes)
         if contract.verification_strategy == VerificationStrategy.TDD:
             valid_baseline = bool(outcomes) and any(item.exit_code != 0 for item in outcomes)
         else:
@@ -372,6 +385,7 @@ class ExecutionHandler:
             workspace_handle.path,
             contract.verification_commands,
         )
+        self._raise_on_infrastructure_exit(outcomes)
         if not outcomes or any(item.exit_code != 0 for item in outcomes):
             raise TaskFailed(
                 "authoritative verification command failed",
