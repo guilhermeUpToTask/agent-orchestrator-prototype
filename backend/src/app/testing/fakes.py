@@ -135,6 +135,10 @@ class InMemoryPlanRepository:
 
 # ---- in-memory outbox ----
 class InMemoryOutbox:
+    """Mirrors SqliteOutbox: add() stages on the open transaction; commit flushes
+    events with state, rollback discards the staged list. That is the transactional-
+    outbox guarantee crash/rollback tests depend on."""
+
     def __init__(self) -> None:
         self.events: list[DomainEvent] = []
         self._staged: list[DomainEvent] = []
@@ -155,6 +159,10 @@ class InMemoryOutbox:
 
 # ---- in-memory unit of work (transaction boundary) ----
 class InMemoryUnitOfWork:
+    """Mirrors SqliteUnitOfWork: the with-block is the transaction boundary —
+    plans, execution records, and outbox events commit or roll back together.
+    Success makes staged events durable; exception discards them with state."""
+
     def __init__(
         self,
         repo: InMemoryPlanRepository,
@@ -195,6 +203,10 @@ class InMemoryChatStore:
 
 # ---- in-memory agent registry ----
 class InMemoryAgentRepository:
+    """Mirrors SqliteAgentRepository: in-memory agent catalog with the same typed
+    errors (AgentNotFoundError, NoDefaultAgentError) so match_agent / binding
+    paths exercise production failure shapes without SQLite."""
+
     def __init__(self, agents: list[AgentSpec], default_id: str | None = None) -> None:
         self._agents = {a.id: a for a in agents}
         self._default = default_id
@@ -215,6 +227,10 @@ class InMemoryAgentRepository:
 
 # ---- in-memory capability catalog ----
 class InMemoryCapabilityRepository:
+    """Mirrors SqliteCapabilityRepository: in-memory capability catalog for tests
+    that seed or validate capability IDs (match_agent, apply_edit) without a
+    real reference DB."""
+
     def __init__(self, capabilities: list[Capability] | None = None) -> None:
         self._caps = {c.id: c for c in (capabilities or [])}
 
@@ -242,6 +258,10 @@ class _Handle:
 
 
 class NoOpWorkspace:
+    """Mirrors the Workspace port (GitBranchWorkspace) without git: begin/commit/
+    discard only record calls. Tests depend on the seam so execution exercises
+    the attempt lifecycle without a real worktree or plan-branch isolation."""
+
     def __init__(self) -> None:
         self.begun: list[tuple[str, str, int]] = []
         self.committed: list[str] = []
@@ -285,6 +305,10 @@ class NoOpWorkspace:
 
 # ---- collecting event sink ----
 class CollectingEventSink:
+    """Mirrors SqliteAgentEventSink as a test collector: emit() appends AgentEvents
+    in memory (outside the plan UoW, like the real best-effort side channel).
+    Tests assert streamed runtime telemetry without SQLite INSERT OR IGNORE."""
+
     def __init__(self) -> None:
         self.events: list[AgentEvent] = []
 
