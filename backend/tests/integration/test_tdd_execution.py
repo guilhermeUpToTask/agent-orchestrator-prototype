@@ -59,6 +59,9 @@ def _agent(agent_id: str, capability: str) -> AgentSpec:
 
 
 class WritingRunner:
+    def __init__(self, main_repo: Path | None = None):
+        self._main_repo = main_repo
+
     async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
         root = Path(workspace.path)
         if spec.id == "test-author":
@@ -71,6 +74,8 @@ class WritingRunner:
             )
         else:
             (root / "feature.txt").write_text("ready")
+            if self._main_repo is not None:
+                (self._main_repo / "stray.txt").write_text("escaped")
         return TaskResult.success("agent claimed success")
 
 
@@ -80,7 +85,8 @@ class DeletingTestRunner:
         return TaskResult.success("deleted a test")
 
 
-def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
+@pytest.mark.parametrize("main_repo_write", [False, True])
+def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path, main_repo_write):
     repo_dir = tmp_path / "repo"
     workspace = GitBranchWorkspace(repo_dir)
     clock = FakeClock(NOW)
@@ -148,7 +154,7 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
         default_id="implementer",
     )
     handler = ExecutionHandler(
-        WritingRunner(),
+        WritingRunner(repo_dir if main_repo_write else None),
         agents,
         workspace,
         CollectingEventSink(),
@@ -174,6 +180,24 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
     # ignored; independent pytest evidence is what completes and merges the task.
     implementer_signal = asyncio.run(handler.handle(plan.id, after_red, uow))
     after_impl = plans.get(plan.id)
+    if main_repo_write:
+        assert implementer_signal.value == "paused"
+        assert after_impl.status == PlanStatus.BLOCKED
+        assert after_impl.block is not None
+        assert "stray paths: ['stray.txt']" in after_impl.block.explanation
+        assert after_impl.block.kind == "execution_failure"
+        failed_task = after_impl.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+        assert failed_task.status.value == "failed"
+        # attempt.failure_kind is populated only from RuntimeFailure metadata;
+        # a bare TaskFailed records its kind on the task result instead.
+        assert failed_task.result is not None
+        assert failed_task.result.failure_kind is not None
+        assert failed_task.result.failure_kind.value == "tool_error"
+        # list_attempts ordering ties under FakeClock's fixed timestamps -
+        # select the failed attempt by its message, not by position.
+        attempts = uow.executions.list_attempts(plan.id)
+        assert any("project main repository" in (a.safe_message or "") for a in attempts)
+        return
     impl_task = after_impl.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert implementer_signal.value == "continue", (
         f"paused_reason={after_impl.paused_reason!r} "

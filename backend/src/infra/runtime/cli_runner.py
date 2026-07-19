@@ -32,7 +32,11 @@ import structlog
 
 from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
 from src.app.runtime_failures import safe_runtime_tail
-from src.app.observations import ObservationRepository, ProcessObservationPayload, TelemetryObservation
+from src.app.observations import (
+    ObservationRepository,
+    ProcessObservationPayload,
+    TelemetryObservation,
+)
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
@@ -88,14 +92,57 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
     live in the workspace AGENTS.md — not here — so they apply consistently
     across runtimes."""
     capabilities = ", ".join(task.required_capabilities) or "(none declared)"
+    prompt = (
+        "# Task: "
+        + task.name
+        + "\n\n"
+        + task.description
+        + "\n\n"
+        + "## Your role\n"
+        + spec.role
+        + "\n\n"
+        + "## Instructions\n"
+        + (spec.instructions or "(none)")
+        + "\n\n"
+        + "## Required capabilities\n"
+        + capabilities
+        + "\n\n---\n"
+        + "Task ID: `"
+        + task.id
+        + "` | Attempt: "
+        + str(task.attempt)
+    )
+    if task.contract is None:
+        return prompt
+    contract = task.contract
+    criteria = "\n".join("- `" + c.id + "`: " + c.description for c in contract.acceptance_criteria)
+    allowed = "\n".join("- `" + path + "`" for path in contract.allowed_scope)
+    forbidden = "\n".join("- `" + path + "`" for path in contract.forbidden_scope) or "- (none)"
+    commands = "\n".join("- `" + command + "`" for command in contract.verification_commands)
+    if task.tdd_stage == "test_authoring" or spec.role in {"test_author", "test_writer"}:
+        expectation = (
+            "Write ONLY tests that fail for the right reason; never modify production files."
+        )
+    elif task.tdd_stage == "implementation" or spec.role == "implementer":
+        expectation = "Make the frozen tests pass; never modify tests."
+    else:
+        expectation = "Follow the contract and do not modify files outside the declared scope."
     return (
-        f"# Task: {task.name}\n\n"
-        f"{task.description}\n\n"
-        f"## Your role\n{spec.role}\n\n"
-        f"## Instructions\n{spec.instructions or '(none)'}\n\n"
-        f"## Required capabilities\n{capabilities}\n\n"
-        f"---\n"
-        f"Task ID: `{task.id}` | Attempt: {task.attempt}"
+        prompt
+        + "\n\n## Constraints\nObjective: "
+        + contract.objective
+        + "\n\nAcceptance criteria:\n"
+        + criteria
+        + "\n\nAllowed paths:\n"
+        + allowed
+        + "\n\nForbidden paths:\n"
+        + forbidden
+        + "\n\nVerification commands (the orchestrator runs these independently; self-reported results are ignored):\n"
+        + commands
+        + "\n\nVerification strategy: `"
+        + contract.verification_strategy.value
+        + "`\n\nStage expectations:\n- "
+        + expectation
     )
 
 
@@ -146,8 +193,8 @@ class CliAgentRunner(ABC):
         event_sink: AgentEventSink,
         workspace: WorkspaceHandle,
     ) -> TaskResult:
-        plan_id, goal_id, _, run_id, attempt_number_value, attempt_id = (
-            _parse_idempotency_key(idempotency_key)
+        plan_id, goal_id, _, run_id, attempt_number_value, attempt_id = _parse_idempotency_key(
+            idempotency_key
         )
         attempt_number = (
             int(attempt_number_value) if attempt_number_value is not None else task.attempt
@@ -166,10 +213,10 @@ class CliAgentRunner(ABC):
             seq=0,
             event_type="agent.started",
             payload={
-                    "runtime": self.log_prefix,
-                    "provider_id": self._provider_id or "",
-                    "model_id": self._model_id or "",
-                },
+                "runtime": self.log_prefix,
+                "provider_id": self._provider_id or "",
+                "model_id": self._model_id or "",
+            },
         )
         started = time.monotonic()
         try:
@@ -206,9 +253,7 @@ class CliAgentRunner(ABC):
                         else ""
                     ),
                     "limit_scope": (
-                        exc.failure.limit_scope.value
-                        if exc.failure.limit_scope is not None
-                        else ""
+                        exc.failure.limit_scope.value if exc.failure.limit_scope is not None else ""
                     ),
                     "exit_code": (
                         str(exc.failure.exit_code) if exc.failure.exit_code is not None else ""
@@ -302,6 +347,7 @@ class CliAgentRunner(ABC):
     ) -> TaskResult:
         cmd = self._build_cmd(prompt)
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
+
         def on_observation(observation: TelemetryObservation) -> None:
             observations.append(observation)
             log.info(
