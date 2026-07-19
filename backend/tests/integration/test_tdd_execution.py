@@ -201,6 +201,88 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path):
     assert completed_goal.status.value == "done"
 
 
+def test_tdd_exit_127_is_infrastructure_failure_and_does_not_freeze_bundle(tmp_path):
+    repo_dir = tmp_path / "repo"
+    workspace = GitBranchWorkspace(repo_dir)
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    contract = TaskContract(
+        id="task-1",
+        position=0,
+        objective="implement feature",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="feature is ready")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["feature.txt"],
+        forbidden_scope=["tests/"],
+        verification_commands=["exit 127"],
+        verification_strategy=VerificationStrategy.TDD,
+    )
+    task = Task(
+        id="task-1",
+        name="implement feature",
+        position=0,
+        description="implement feature",
+        contract=contract,
+        role_agent_ids={"test_author": "test-author", "implementer": "implementer"},
+    )
+    goal = Goal(
+        id="goal-1",
+        name="goal",
+        position=0,
+        description="goal",
+        tasks=[task],
+        contract=GoalContract(
+            id="goal-1",
+            objective="goal",
+            acceptance_criteria=[ContractCriterion(id="g-1", description="feature is ready")],
+            tasks=[contract],
+            frozen_at=NOW,
+        ),
+    )
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="brief",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                goals=[goal],
+                started_at=NOW,
+            )
+        ],
+    )
+    plans.add(plan)
+    agents = InMemoryAgentRepository(
+        [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+        default_id="implementer",
+    )
+    handler = ExecutionHandler(
+        WritingRunner(),
+        agents,
+        workspace,
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    assert asyncio.run(handler.handle(plan.id, plan, uow)).value == "continue"
+    after_failure = plans.get(plan.id)
+    failed_task = after_failure.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert failed_task.test_bundle is None
+    assert failed_task.status.value == "pending"
+    attempt = uow.executions.list_attempts(plan.id)[0]
+    assert attempt.failure_kind == "tool_error"
+    assert attempt.safe_message is not None
+    assert "exit 127" in attempt.safe_message
+    assert "exit code 127" in attempt.safe_message
+    assert "infrastructure failure" in attempt.safe_message
+
+
 def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
     repo_dir = tmp_path / "repo"
     subprocess.run(
