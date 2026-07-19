@@ -196,6 +196,29 @@ def test_changed_paths_include_agent_commits_since_task_base(repo):
     assert asyncio.run(flow()) == ["committed.py", "dirty.py"]
 
 
+def test_changed_paths_exclude_interpreter_and_test_cache_byproducts(repo):
+    ws = GitBranchWorkspace(repo)
+    verifier = LocalVerificationExecutor(FakeClock(datetime(2026, 7, 14, tzinfo=timezone.utc)))
+
+    async def flow():
+        handle = await ws.begin("p1", "t1", 1)
+        root = Path(handle.path)
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "test_feature.py").write_text("def test_ok():\n    assert True\n")
+        pycache = tests / "__pycache__"
+        pycache.mkdir()
+        (pycache / "test_feature.cpython-312.pyc").write_bytes(b"\x00bytecode")
+        cache = root / ".pytest_cache" / "v" / "cache"
+        cache.mkdir(parents=True)
+        (cache / "lastfailed").write_text("{}")
+        paths = await verifier.changed_paths(handle.path, handle.base_ref)
+        await ws.discard(handle)
+        return paths
+
+    assert asyncio.run(flow()) == ["tests/test_feature.py"]
+
+
 def test_workspace_prune_and_audit_keep_live_refs_visible(repo):
     ws = GitBranchWorkspace(repo)
 

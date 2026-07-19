@@ -32,6 +32,18 @@ class LocalVerificationExecutor:
             base_ref,
         )
 
+    @staticmethod
+    def _is_byproduct(path: str) -> bool:
+        # Interpreter/test-runner caches are regenerated per worktree (a .pyc
+        # embeds the source mtime), so hashing or scope-checking them makes
+        # verification machine- and timing-dependent.
+        parts = path.replace("\\", "/").split("/")
+        return (
+            "__pycache__" in parts
+            or ".pytest_cache" in parts
+            or path.endswith((".pyc", ".pyo"))
+        )
+
     def _changed_paths(self, root: Path, base_ref: str | None) -> list[str]:
         status = subprocess.run(
             ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
@@ -60,7 +72,7 @@ class LocalVerificationExecutor:
                 text=True,
             )
             paths.update(line.strip() for line in committed.stdout.splitlines() if line.strip())
-        return sorted(paths)
+        return sorted(path for path in paths if not self._is_byproduct(path))
 
     async def run(
         self,
