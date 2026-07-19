@@ -292,7 +292,7 @@ def test_cyclic_plan_review_edits_activation_and_publication(client):
     assert final["phase"] not in {"done", "failed"}
 
 
-def _plan_with_enriched_active_goal(client) -> str:
+def _plan_with_enriched_active_goal(client, project_id="project-1") -> str:
     """Drive intent -> roadmap approval -> one head-goal JIT contract."""
     from src.api import dependencies
     from src.app.use_cases.advance_plan import advance_plan
@@ -329,7 +329,7 @@ def _plan_with_enriched_active_goal(client) -> str:
         },
     )
 
-    plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()[
+    plan_id = client.post("/api/plans", json={"brief": "b", "project_id": project_id}).json()[
         "plan_id"
     ]
     # The create call already persisted the first waiting discovery turn.
@@ -967,3 +967,151 @@ def test_control_plane_token_guard(client, monkeypatch):
     assert denied.status_code == 401
     allowed = client.get("/api/providers", headers={"Authorization": "Bearer sekrit"})
     assert allowed.status_code == 200
+
+
+def _plan_at_cycle_review(client) -> str:
+    project_id = client.post("/api/projects", json={"name": "Cycle project"}).json()["id"]
+    plan_id = client.post("/api/plans", json={"brief": "cycle", "project_id": project_id}).json()["plan_id"]
+    client.post(f"/api/plans/{plan_id}/discovery/message", json={"message": "Deliver cycle"})
+    gate = client.get(f"/api/plans/{plan_id}").json()["pending_gate"]
+    assert client.post(f"/api/plans/{plan_id}/intent/approve", json={"gate_id": gate["id"], "subject_revision": gate["subject_revision"]}).status_code == 204
+    return plan_id
+
+
+def _set_plan_phase(plan_id: str, phase) -> None:
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(plan_id)
+        plan._set_phase(phase)
+        plan.bump_version()
+        uow.plans.save(plan)
+
+
+def test_plan_intent_and_cycle_draft_cancel_routes_over_http(client):
+    from src.domain.aggregates.planner_orchestrator import PlanPhase
+
+    plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()["plan_id"]
+    client.post(f"/api/plans/{plan_id}/intent", json={"objective": "o"})
+    assert client.delete(f"/api/plans/{plan_id}/intent").status_code == 204
+    denied = client.delete(f"/api/plans/{plan_id}/intent")
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "INVALID_EDIT"
+
+    draft_plan = _plan_at_cycle_review(client)
+    _set_plan_phase(draft_plan, PlanPhase.ARCHITECTURE)
+    assert client.post(f"/api/plans/{draft_plan}/cycle-draft", json={"goals": [{"key": "g", "name": "G", "objective": "g", "position": 0, "depends_on": []}]}).status_code == 201
+    _set_plan_phase(draft_plan, PlanPhase.AWAITING_REVIEW)
+    assert client.delete(f"/api/plans/{draft_plan}/cycle-draft").status_code == 204
+    denied = client.delete(f"/api/plans/{draft_plan}/cycle-draft")
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "INVALID_EDIT"
+
+
+def test_review_reopen_route_over_http(client):
+    from src.domain.aggregates.planner_orchestrator import PlanPhase
+    plan_id = _plan_at_cycle_review(client)
+    assert client.post(f"/api/plans/{plan_id}/cycle-draft", json={"goals": [{"key": "g", "name": "G", "objective": "g", "position": 0, "depends_on": []}]}).status_code == 201
+    _set_plan_phase(plan_id, PlanPhase.AWAITING_REVIEW)
+    assert client.post(f"/api/plans/{plan_id}/review/reopen").status_code == 204
+    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == PlanPhase.DISCOVERY.value
+    denied = client.post(f"/api/plans/{plan_id}/review/reopen")
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "INVALID_TRANSITION"
+
+
+def test_review_finish_and_replan_routes_over_http(client):
+    from src.domain.aggregates.planner_orchestrator import PlanPhase
+    finish_plan = _plan_with_enriched_active_goal(client)
+    _set_plan_phase(finish_plan, PlanPhase.REVIEW)
+    assert client.post(f"/api/plans/{finish_plan}/review/finish").status_code == 204
+    assert client.get(f"/api/plans/{finish_plan}").json()["phase"] == PlanPhase.DONE.value
+    # Re-finishing a DONE plan is rejected by the transition guard. (The
+    # dedicated PLAN_ALREADY_TERMINAL code is not naturally reachable over
+    # HTTP: the phase-transition guard fires first.)
+    terminal = client.post(f"/api/plans/{finish_plan}/review/finish")
+    assert terminal.status_code == 422
+    assert terminal.json()["error"]["code"] == "INVALID_TRANSITION"
+    replan_project = client.post("/api/projects", json={"name": "Replan project"}).json()
+    review_replan = _plan_with_enriched_active_goal(client, replan_project["id"])
+    _set_plan_phase(review_replan, PlanPhase.REVIEW)
+    assert client.post(f"/api/plans/{review_replan}/review/replan").status_code == 204
+    assert client.get(f"/api/plans/{review_replan}").json()["phase"] == PlanPhase.REPLANNING.value
+    denied = client.post(f"/api/plans/{review_replan}/review/replan")
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "INVALID_TRANSITION"
+
+
+def test_mid_running_replan_and_replanning_message_routes_over_http(client):
+    from src.domain.aggregates.planner_orchestrator import PlanPhase
+    plan_id = _plan_with_enriched_active_goal(client)
+    assert client.post(f"/api/plans/{plan_id}/replan").status_code == 204
+    assert client.get(f"/api/plans/{plan_id}").json()["phase"] == PlanPhase.REPLANNING.value
+    container = dependencies.get_container()
+    from src.domain.entities.planning_artifacts import PlanStatus
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(plan_id)
+        plan.status = PlanStatus.IDLE
+        plan.bump_version()
+        uow.plans.save(plan)
+    committed = client.post(f"/api/plans/{plan_id}/replanning/message", json={"message": ""})
+    assert committed.status_code == 200
+    assert committed.json()["committed"] is True
+    assert committed.json()["phase"] == PlanPhase.REPLANNING.value
+    denied = client.post(f"/api/plans/{plan_id}/replan")
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "INVALID_TRANSITION"
+    bad_message = client.post(f"/api/plans/{plan_id}/replanning/message", json={"message": "x"})
+    assert bad_message.status_code == 422
+    assert bad_message.json()["error"]["code"] == "INVALID_EDIT"
+
+
+def test_additional_error_codes_over_http(client, monkeypatch):
+    plan_id = _plan_with_enriched_active_goal(client)
+    goal_id = client.get(f"/api/plans/{plan_id}").json()["goals"][0]["id"]
+
+    missing_goal = client.post(f"/api/plans/{plan_id}/edits", json={"type": "update_goal", "goal_id": "ghost", "name": "x"})
+    assert missing_goal.status_code == 404
+    assert missing_goal.json()["error"]["code"] == "GOAL_NOT_FOUND"
+    missing_task = client.post(f"/api/plans/{plan_id}/edits", json={"type": "update_task", "goal_id": goal_id, "task_id": "ghost", "name": "x"})
+    assert missing_task.status_code == 404
+    assert missing_task.json()["error"]["code"] == "TASK_NOT_FOUND"
+
+    missing_agent = client.delete("/api/agents/ghost")
+    assert missing_agent.status_code == 404
+    assert missing_agent.json()["error"]["code"] == "AGENT_NOT_FOUND"
+    missing_provider = client.delete("/api/providers/ghost")
+    assert missing_provider.status_code == 404
+    assert missing_provider.json()["error"]["code"] == "PROVIDER_NOT_FOUND"
+
+    invalid_edit = client.post(f"/api/plans/{plan_id}/edits", json={"type": "rebind_task_agent", "goal_id": goal_id, "task_id": "ghost"})
+    assert invalid_edit.status_code == 422
+    assert invalid_edit.json()["error"]["code"] == "INVALID_EDIT"
+
+    from src.domain.errors.tasks_errors import StaleVersionError
+    from src.infra.db.plan_repository import SqlitePlanRepository
+    original_save = SqlitePlanRepository.save
+    monkeypatch.setattr(SqlitePlanRepository, "save", lambda self, plan: (_ for _ in ()).throw(StaleVersionError(plan.id, plan.version, plan.version + 1)))
+    stale = client.post(f"/api/plans/{plan_id}/edits", json={"type": "update_goal", "goal_id": goal_id, "name": "x"})
+    monkeypatch.setattr(SqlitePlanRepository, "save", original_save)
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "STALE_VERSION"
+
+
+def test_agents_and_projects_crud_over_http(client):
+    agent = client.post("/api/agents", json={"name": "A", "role": "implementer", "model_role": "smart"})
+    assert agent.status_code == 201
+    agent_id = agent.json()["id"]
+    assert any(item["id"] == agent_id for item in client.get("/api/agents").json())
+    assert client.put(f"/api/agents/{agent_id}", json={"name": "A2", "role": "implementer", "model_role": "smart"}).status_code == 204
+    assert any(item["name"] == "A2" for item in client.get("/api/agents").json())
+    assert client.delete(f"/api/agents/{agent_id}").status_code == 204
+    assert all(item["id"] != agent_id for item in client.get("/api/agents").json())
+
+    project = client.post("/api/projects", json={"name": "P", "repo_url": "https://repo"})
+    assert project.status_code == 201
+    project_id = project.json()["id"]
+    assert any(item["id"] == project_id for item in client.get("/api/projects").json())
+    assert client.put(f"/api/projects/{project_id}", json={"name": "P2", "repo_url": None}).status_code == 204
+    assert next(item for item in client.get("/api/projects").json() if item["id"] == project_id)["name"] == "P2"
+    assert client.delete(f"/api/projects/{project_id}").status_code == 204
+    assert all(item["id"] != project_id for item in client.get("/api/projects").json())
