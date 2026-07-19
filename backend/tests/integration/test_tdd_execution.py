@@ -193,8 +193,10 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path, main
         assert failed_task.result is not None
         assert failed_task.result.failure_kind is not None
         assert failed_task.result.failure_kind.value == "tool_error"
-        attempt = uow.executions.list_attempts(plan.id)[-1]
-        assert "project main repository" in (attempt.safe_message or "")
+        # list_attempts ordering ties under FakeClock's fixed timestamps -
+        # select the failed attempt by its message, not by position.
+        attempts = uow.executions.list_attempts(plan.id)
+        assert any("project main repository" in (a.safe_message or "") for a in attempts)
         return
     impl_task = after_impl.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert implementer_signal.value == "continue", (
