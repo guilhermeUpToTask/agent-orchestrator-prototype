@@ -2,131 +2,212 @@
 
 Everything designed or planned but **not yet implemented**, in priority order. Each item names its origin so you can read the full reasoning:
 
-- **[EVO]** — the 2026-07-06 evolution plan ([archived](docs/history/planning/2026-07-06-orchestrator-evolution-plan-fable-5.md)), produced by a full-codebase archaeology with `file:line` evidence.
-- **[MRF]** — the master roadmap the integration was executed against ([archived](docs/history/planning/2026-07-02-master-roadmap-final-fable-5.md)). Phases 0–2 and slices of 3–4 are **done**; the leftovers live here.
+- **[EVO]** — the 2026-07-06 evolution plan ([archived](docs/history/planning/2026-07-06-orchestrator-evolution-plan-fable-5.md)).
+- **[MRF]** — the master roadmap the integration was executed against ([archived](docs/history/planning/2026-07-02-master-roadmap-final-fable-5.md)).
 - **[LEG]** — pre-refactor features shelved with designed seams ([docs/legacy/pre-refactor-backend.md](docs/legacy/pre-refactor-backend.md)).
-- **[LIVE]** — defects and design gaps verified by the first real end-to-end
-  plan ([review](docs/history/analyses/2026-07-13-first-live-plan-review.md) and
-  [refactor strategy](docs/history/planning/2026-07-13-execution-domain-refactor-strategy.md)).
+- **[LIVE]** — defects/gaps verified by the first real end-to-end plan ([review](docs/history/analyses/2026-07-13-first-live-plan-review.md), [strategy](docs/history/planning/2026-07-13-execution-domain-refactor-strategy.md)).
+- **[PR20]** — findings from the PR #20 review that landed the cyclic-lifecycle refactor (decisions 44–48).
+- **[CI]** — pending CI/verification hardening surfaced while getting PR #20 green.
 
-Verified defects backing the Now items are documented in [docs/architecture/known-issues.md](docs/architecture/known-issues.md).
+Verified defects backing several items below are documented in
+[docs/architecture/known-issues.md](docs/architecture/known-issues.md) — read that
+file, don't duplicate it here.
+
+**Current architecture** (context for everything below): a long-lived root
+`ProjectPlan` contains `Cycle`s, the finite delivery unit. Each cycle moves
+`IntentProposal` (versioned, exact-revision review gate) → `CycleDraft`
+(ordered goals, stable local keys, no forward-dependency edges, second
+exact-revision gate) → active `Cycle`. The old nine-phase `PlanPhase` machine
+is legacy-compat only (see known-issues.md); do not describe it as current.
 
 ---
 
-## Now — safety hotfixes [EVO Phase 1]
+## Now — CI and merge hygiene [CI]
 
-Small, independent PRs; no schema changes; each revertible on its own.
+Blocking or near-blocking issues on the current PR.
 
-### 1. 🔥 H1 — Close the double-execution window
-The default worker lease (300s) is *shorter* than the default task timeout (600s), and heartbeats only happen between units — never during an agent run. With ≥2 workers (or a restart racing a live worker), a task running longer than the lease is claimed and executed a **second time, concurrently**.
+### 1. RED-gate exit-code discrimination
+The TDD freeze gate in `execution_handler.py` treats any nonzero exit as a
+valid RED baseline, so exit 127 ("command not found" — a broken verification
+command, missing interpreter, bad PATH) is indistinguishable from a genuine
+failing test. Classify infrastructure failure (127, 126, command-not-found
+patterns) separately from test failure; only the latter is a legal RED.
+**Done when:** a scripted 127 in the verification command surfaces as a block
+distinct from RED, on both truth-test backends.
 
-- Spawn an asyncio heartbeat task around `drive_plan` (`backend/src/app/use_cases/run_worker.py`), cancelled in `finally`. Safe: the lease trio runs on its own short sessions, outside the UoW.
-- Boot check in `backend/src/infra/worker/main.py`: warn + clamp the effective lease to `agent_runner.timeout_seconds + 60` when smaller.
-- Unify the inconsistent lease defaults (60 in `worker_tick`, 300 elsewhere) into one constant.
-- **Done when:** a 700s scripted task under a 300s lease with two workers executes exactly once, on both truth-test backends.
-- **Live confirmation [LIVE]:** a successful attempt ran for 330.10s under the
-  shipped 300s lease. The risk window is no longer hypothetical.
+### 2. Verification environment determinism — watch item
+Two determinism bugs in `LocalVerificationExecutor` were found and fixed on
+this branch: a login-shell PATH reset breaking interpreter resolution, and
+interpreter/test-cache byproducts (`__pycache__`, `.pytest_cache`, `*.pyc`)
+leaking into frozen verification bundles. Both are fixed; keep watching for
+further machine-dependent assumptions (locale, timezone, ambient env vars) the
+executor might still inherit from the host shell.
 
-### 2. 🔥 H2 — Poisoned-plan starvation
-A plan whose drive raises before any save keeps `updated_at` unchanged; the claim query (`ORDER BY updated_at`) picks it **first, every poll tick, forever** — starving every other plan on a single-worker deployment.
+## Now — test foundation and boundary cleanup [PR20]
 
-- `release()` in `backend/src/infra/db/plan_repository.py` sets `updated_at = now`, rotating failing plans to the back of the claim queue.
-- **Done when:** poisoned plan + healthy plan ⇒ the healthy plan advances within two ticks (truth test).
+Sequencing matters: strengthen tests before refactoring domain/app code so the
+refactors below have a safety net.
 
-### H3. 🔥 Restore a strict goal barrier [LIVE]
+### 3. Harden the test foundation
+Review unit + integration coverage through the API layer (not just the
+domain/app truth tests) — routers, error mapping, SSE payloads. Document how
+`src/app/testing/fakes.py` (`InMemoryPlanRepository`, `DummyAgentRunner`,
+`FakeClock`) models real adapter semantics, so its robustness as a design
+asset is legible to reviewers, not just inferred from reading it. After that
+review, reevaluate `src/app/verification.py`'s (98 lines) responsibility —
+confirm it's still the single seam for frozen-command execution and not
+duplicating logic that belongs in the handler or the port.
 
-The current scanner deliberately bypasses a backing-off goal and executes a
-later dependency-satisfied goal. The real planner produced no dependency edges,
-so two goals alternated rate-limit retries despite the documented sequential
-plan model.
+### 4. Clarify domain/application boundaries
+- Define what an `IntentProposal` is in domain terms and where the API
+  surfaces it (response shape, router, OpenAPI schema) — currently implicit
+  in the handler/router code, not written down anywhere.
+- Audit `src/api/routers/plans.py` (1088 lines) for embedded use-case logic
+  (branching, validation, orchestration) that belongs in `src/app/`; routers
+  are supposed to be thin per the architectural invariants.
+- Decide whether app-layer ports (`src/app/ports.py`, 158 lines) are justified
+  as a separate layer from domain ports, or whether they should collapse into
+  the domain ports package.
+- Decide whether `src/app/observations.py` (201 lines) is still needed, or
+  whether domain telemetry + domain events (outbox/agent_events) already
+  cover its job.
 
-- Add an explicit execution policy; ship strict_sequence first.
-- Under that policy, the earliest non-terminal goal blocks every later goal on
-  backoff, failure, or unmet dependency.
-- Extend reasoner goal submission with stable local keys plus depends_on;
-  validate unknown, self, and cyclic references before persisting.
-- Keep DAG-frontier execution disabled until goal-level leases and merge
-  isolation exist.
-- **Done when:** a backing-off or FAILED task in goal 0 causes zero runner calls
-  for later goals on both memory and SQLite truth-test backends.
+### 5. Refactor orchestration (after 3 and 4 land)
+- Decompose `src/domain/aggregates/planner_orchestrator.py` (882 lines) — the
+  single-authority aggregate is correct as a boundary, but its size makes
+  review and change risky; split by responsibility (transitions vs.
+  navigation vs. gate logic) without breaking the "only caller of
+  Goal/Task transitions" invariant.
+- Remove legacy/backward-compat code (e.g. the compat branches in
+  `src/app/use_cases/advance_plan.py` and similar call sites) — but ONLY
+  after the test hardening in item 3 protects the behavior being deleted.
+- Formalize abrupt pause/resume semantics: define precisely when a pause must
+  interrupt a running task attempt vs. merely stop new claims, and what
+  "paused goal" means for a goal mid-promotion. Decision 44's Git-promotion
+  reservation already carves out that pause remains legal during a
+  reservation — this item is the general policy the reservation is a special
+  case of.
 
-### H4. 🔥 Separate resume, retry policy, and run identity [LIVE]
+### 6. Refactor handlers, in dependency order (after 3–5)
+`execution_handler.py` (1249 lines) first, then `planning_handler.py` (514
+lines) — execution is upstream of planning in the dependency graph and carries
+more risk. Share only mechanisms proven common to both (not speculative
+abstraction). Refactoring prompts already exist from the PR #20 review; do not
+start until the API-layer tests from item 3 are in place — the whole point is
+a safety net before touching 1700+ lines of handler code.
 
-Human resume currently retries every FAILED task, clears unrelated PENDING
-backoffs, and resets failed tasks to attempt zero. This reuses a1 event and git
-identities across retry cycles.
+## Next — tooling and documentation consolidation [PR20]
 
-- Make resume release only the pause gate.
-- Add targeted task retry and only later an explicit bulk goal retry.
-- Keep a monotonic absolute attempt/run identity; reset a separate retry-cycle
-  policy counter when a human retries.
-- Add a globally unique run_id to telemetry, idempotency, and workspace naming.
-- **Done when:** two human retry cycles produce distinct monotonic run identities
-  and do not change unrelated tasks or gates.
+### 7. Consolidate `backend/scripts/`
+Analyze `dev.sh` (the live entrypoint) against `start_api_and_worker.sh` and
+`reseed_openrouter_key.sh` — both already print deprecation notices and have
+no remaining callers besides habit. Delete both scripts and any workflow/doc
+steps that still reference them. Document `export_plan_runs.py` (a
+stdlib-only SQLite run exporter) to the same standard as its siblings
+(`export_openapi.py`, `snapshot_current_plan.py`); a focused operator skill
+for it is later work, not part of this item.
 
-## Next — observability, the 3am fixes [EVO Phase 2]
+### 8. DB-schema-inspection → diagram tool
+Idea surfaced during the migration 0009 review: a small tool that inspects the
+live SQLite schema and emits a diagram (tables, FKs, indexes) so
+`docs/architecture/data-model.md` can be checked against the DB instead of
+hand-maintained. No design yet — evidence-gated on the doc actually drifting.
 
-The operator currently cannot answer "what happened to attempt 2 of task X" without reading worker stdout.
+### 9. Oversized graphify skill review
+Tracked separately from this roadmap: the graphify skill review left comments
+against outdated diff locations (the file moved under later commits). Not an
+architecture item — a skill-repo hygiene follow-up.
 
-3. **Attempt history on the task** — `requeue()` (and now `Task.retry()` on resume) *erases* the failed attempt's result; keep a bounded `attempt_history` instead. Requires a deliberate one-field domain un-freeze (precedent: the AgentSpec runtime fields, 2026-07-05). Alembic revision is additive. **More visible now** that resume-as-retry resets `attempt` to 0 (un-freeze #3): the `TaskFailedEvent{kind}` + `agent_events` are the only surviving record of a failed attempt.
-4. **Stop replaying agent history on API boot** — the relay's `agent_events` cursor restarts at 0 every startup, re-publishing the whole table to SSE. Start at `MAX(id)` or persist the cursor in `config`.
-5. **Retention** — `outbox`, `agent_events`, and `plan_chat_messages` grow forever. Add a `db prune` CLI command (delivered outbox rows, aged agent events).
-6. **Attempt-history endpoint** — `GET /api/plans/{id}/tasks/{tid}/attempts` so incidents are answerable from the API alone.
+## Then — operational visibility [LIVE / PR20]
 
-6a. **Truthful usage scopes [LIVE]** — split planner LLM usage from child-agent
-usage; add coverage/provenance fields and reasoning tokens. Until agent usage is
-ingested, label the existing counters “Planner LLM”.
-6b. **Run timing and pause visibility [LIVE]** — expose run_id, started time,
-elapsed, last heartbeat, deadline, and whether pause is merely waiting for the
-current run boundary. Distinguish slow, backing off, timed out, and dead.
-
-## Then — hygiene, deletion over addition [EVO Phase 3]
-
-7. Delete `LocalDirWorkspace` (unused), the `publish_sse` shim (confirm no importers first), and migrate tests off the functional `advance_plan` wrapper.
-8. `git worktree prune` in the workspace `begin` path + a `workspace gc` CLI for dead `plan/*` branches — crashes currently leak worktrees and branches forever.
-9. Target: ≥150 lines deleted; `git worktree list` stable across a kill-mid-task chaos run.
-
-9a. **Own attempt process groups [LIVE]** — terminate and reap descendants on
-success, failure, timeout, and discard. The first live verification task left
-Uvicorn running after its temporary workspace was removed.
+10. **Truthful usage scopes [LIVE]** — split planner LLM usage from
+    child-agent usage; add coverage/provenance fields and reasoning tokens.
+    Partially landed: decision 45 gives planner/child/combined coverage with
+    "unavailable" distinct from zero — re-verify remaining gaps against
+    known-issues.md before treating this as done.
+11. **Run timing and pause visibility [LIVE]** — expose run_id, started time,
+    elapsed, last heartbeat, deadline, and whether pause is merely waiting for
+    the current run boundary. Decision 45 hydrates attempt-history before SSE
+    and decision 46 added typed cycle/proposal/draft/gate/block exports on
+    plan detail; known-issues.md still flags the read model exposes active
+    run start rather than the promoted lease deadline — that gap is this
+    item's remaining scope.
+12. **Dead-letter / operator quarantine policy** — known-issues.md still lists
+    a malformed plan that raises before any save as reclaimable-first by
+    oldest `updated_at`; no quarantine policy for repeated unexpected
+    exceptions yet.
+13. **Execution ledger `run_kind` column** — attempts have global UUIDs and
+    monotonic absolute numbers, but `run_kind` isn't promoted to a dedicated
+    SQL column (known-issues.md).
+14. **`workspace gc` CLI for dead branches** — decision 45 landed conservative
+    worktree pruning/audit at worker startup, closing the original "leaks
+    forever" failure mode; an operator-triggered `workspace gc` for branches
+    left over from long-dead plans may still be worth adding. Re-verify
+    against known-issues.md's "not yet automated everywhere" note before
+    committing to scope.
+15. **Retention** — `outbox`, `agent_events`, `plan_chat_messages`, and now
+    authoritative test-checkpoint branch refs (known-issues.md) grow forever.
+    Add a `db prune` CLI command plus a checkpoint-ref retention policy.
+16. **SSE durability** — SSE is bounded and non-durable; reconnect relies on
+    client refetch. Relay/event-table retention remains operational work
+    (known-issues.md).
 
 ## Then — project ownership and output isolation [LIVE]
 
-- Require a project_id on plans and route through a project workspace resolver.
-- Store repositories under the orchestrator home at
-  projects/<immutable-project-id-or-slug>/repo; do not use a mutable display
-  name as the filesystem identity.
-- Define migration or quarantine behavior for the legacy global workspace-repo.
-- Add project delete guards for active plans and dual-project isolation tests.
-- Add an explicit plan output disposition so DONE says whether the branch was
-  merged, opened as a PR, kept, or discarded.
+17. Require a `project_id` on plans and route through a project workspace
+    resolver.
+18. Store repositories under the orchestrator home at
+    `projects/<immutable-project-id-or-slug>/repo`; do not use a mutable
+    display name as the filesystem identity.
+19. Define migration or quarantine behavior for the legacy global
+    workspace-repo.
+20. Add project delete guards for active plans and dual-project isolation
+    tests.
+21. Add an explicit plan output disposition so DONE says whether the branch
+    was merged, opened as a PR, kept, or discarded. Partially informed by
+    known-issues.md: `open_pr`/`merge` dispositions already record the
+    reference of an externally-completed operation; there is still no
+    authenticated forge port — see the deferred-features table.
 
 ## Later — evidence-gated capability work
 
 Take these up only when real usage demonstrates the need.
 
-10. **Multi-worker deployment, documented + truth-tested** [EVO Phase 4] — the code supports it once H1 lands; add a two-worker truth test and operator docs.
-11. **Goal-level parallelism** [MRF 0.2, ADR-001] — the lease *granularity* is the designed parallelism switch (plan → goal → task). Requires `next_action` returning a set of ready units and a workspace merge-conflict strategy. The `Goal.depends_on` DAG seam already exists, unused. Do **not** bolt a queue on top; move the lease.
-12. **Mutation guards `PLAN_BUSY` / `TASK_RUNNING`** [MRF 3.5] — task/goal edit-delete guards beyond the current status checks; plan-DELETE gated by the lease. The HTTP codes are already reserved in the API error map.
-13. ~~**`manual_retry` use case**~~ [MRF, decision #11] — **done** (un-freeze #3, 2026-07-09): built as `Plan.resume()` — clears the pause + backoff gates, resets attempts, requeues every FAILED task in a non-terminal goal, bypassing `should_retry`. `POST /plans/{id}/resume`.
-14. **Worker/scheduler health surface** [MRF 3.6] — expose last-heartbeat, current claims, and restart counts (a `/api/workers` endpoint). The lease is the recovery *mechanism*; this is *visibility* — you can't tell a hung worker from an idle one today.
-15. **Launcher / OS supervision** [MRF 3.2] — a thin, idempotent supervisor (systemd or process manager) that restarts a dead worker; the lease handles the takeover. Document the failure modes; no distributed consensus.
-16. **pi NDJSON streaming** [MRF 2.4] — the full pi stdio handshake streaming fine-grained agent events; the seam is `src/infra/runtime/pi_protocol.py` (agent events currently emit only start/finish, `seq` 0/1).
-    Hydrate ConsoleDock from durable history before tailing SSE, stream bounded
-    stdout, stderr, tool, usage, and liveness events with run_id, and keep the UI
-    named “Agent events” until it is a real console.
-17. **Redis claim path** [MRF 3.1] — swap the SQLite lease transport behind the repository port *only if* multi-machine workers become real. The SQLite lease is deliberately sufficient for local-first.
-18. **CI pipeline** [MRF 5] — per-PR: unit + integration + dummy e2e + ruff/mypy; nightly/merge-only: the paid real-model smoke. The split matters — don't burn money per push.
-19. **Frontend E2E (Playwright)** [MRF 5, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack. The archived plan targets the *old* API and needs rewriting against `/api/plans/{id}/…`; its environment lessons (webServer boot, sandbox SIGTERM, poll-don't-race-SSE) still apply.
-20. **Unified telemetry store** [MRF 4.4] — one queryable persistence for outbox + agent_events + API request logs. Build on the existing two streams; **no second event system**.
-21. **Registry-defined execution profiles and coverage preflight** [LIVE] — let
-    users create stable execution-role profiles and capability policies in the
-    registry instead of keeping the TDD role vocabulary in `_ROLE_CAPABILITY`.
-    Contracts should reference versioned role/profile ids; the settings UI should
-    show a role × task-capability coverage matrix; cycle review should warn about
-    uncovered combinations before enrichment; and registry edits should expose
-    their impact on active and future contracts without silently rebinding work.
-    Preserve explicit role capability checks and transactional retry binding.
+22. **Multi-worker deployment, documented + truth-tested** [EVO] — add a
+    two-worker truth test and operator docs now that decision 45's stale-claim
+    startup handling exists.
+23. **Goal-level parallelism** [MRF, ADR-001] — the lease *granularity* is the
+    designed parallelism switch (plan → goal → task). Requires `next_action`
+    returning a set of ready units and a workspace merge-conflict strategy.
+    Do **not** bolt a queue on top; move the lease.
+24. **Registry-defined execution profiles and coverage preflight** [LIVE] —
+    let users create stable execution-role profiles and capability policies in
+    the registry instead of keeping the TDD role vocabulary in
+    `_ROLE_CAPABILITY`. Contracts should reference versioned role/profile ids;
+    the settings UI should show a role × task-capability coverage matrix;
+    cycle review should warn about uncovered combinations before enrichment;
+    registry edits should expose their impact on active/future contracts
+    without silently rebinding work. Decision 47 already preserves explicit
+    role-capability checks and transactional retry binding — build on that,
+    don't replace it.
+25. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
+    claims, and restart counts (a `/api/workers` endpoint). The lease is the
+    recovery *mechanism*; this is *visibility*.
+26. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
+    (systemd or process manager) that restarts a dead worker; the lease
+    handles the takeover. Document failure modes; no distributed consensus.
+27. **pi NDJSON streaming** [MRF] — the full pi stdio handshake streaming
+    fine-grained agent events; seam is `src/infra/runtime/pi_protocol.py`.
+28. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
+    repository port *only if* multi-machine workers become real. Deliberately
+    unnecessary for local-first.
+29. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
+    ruff/mypy; nightly/merge-only: the paid real-model smoke. Still open —
+    the split matters, don't burn money per push.
+30. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
+31. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
+    agent_events + API request logs. Build on the existing two streams; **no
+    second event system**.
 
 ## Deferred features — shelved with designed seams [LEG]
 
@@ -134,12 +215,10 @@ Documented in full, with reintroduction designs, in [docs/legacy/pre-refactor-ba
 
 | Feature | Seam that preserves it |
 |---|---|
-| GitHub PR gate (orchestrator opens PRs, humans merge) | The `Workspace` port — a PR output strategy plugs in beside branch-merge |
-| Project spec governance (`propose → diff → apply`) | Two-tier config + the `projects` table |
-| Goal-staged git integration (task -> goal -> plan -> project main or PR) | Add only after strict ordering, monotonic run identity, and project-scoped repositories; it prevents a failed goal from partially integrating into the plan branch |
+| GitHub PR gate / authenticated forge port (orchestrator opens PRs, humans merge) | The `Workspace` port — `open_pr`/`merge` dispositions already record external references (known-issues.md); no authenticated push/PR write exists yet |
+| Project spec governance (`propose → diff → apply`) | Two-tier config + the `projects` table; also blocks a persisted `ProjectSpec` for cycle-wide verification commands (known-issues.md) |
 | Decision gate / decision history | Genuine whitespace — design preserved in the legacy doc |
-| Env provisioner (uv/Bun) + framework questionnaire | Config fields first, provisioning later [MRF 2.8] |
-| Autonomous ARCHITECTURE structuring pass | `PlanningHandler._architect` is an explicit passthrough seam |
+| Env provisioner (uv/Bun) + framework questionnaire | Config fields first, provisioning later [MRF] |
 | Repository indexing / symbol graph / context packaging | Never built; idea preserved |
 | Replay & audit tooling (reconstruct a run from events) | Outbox + agent_events already carry the data |
 
@@ -147,11 +226,12 @@ Documented in full, with reintroduction designs, in [docs/legacy/pre-refactor-ba
 
 Tempting improvements explicitly rejected — with reasons — so they aren't re-litigated by default:
 
-- **Temporal / DBOS / Celery / Redis now** — this is a local-first tool whose deployment story is one SQLite file; a workflow engine adds a server dependency and makes the human-gated phase machine *harder* to test. Re-evaluate only if a multi-executor pool starts re-inventing workflow versioning.
+- **Temporal / DBOS / Celery / Redis now** — this is a local-first tool whose deployment story is one SQLite file; a workflow engine adds a server dependency and makes the human-gated cycle machine *harder* to test. Re-evaluate only if a multi-executor pool starts re-inventing workflow versioning.
 - **Task-level parallelism now** — no throughput evidence; it breaks the plan-document CAS model for a speculative gain.
 - **Splitting the plan JSON into relational goal/task rows** — the single document + the dual-backend truth tests are the system's core asset.
 - **WebSockets / SSE replay on reconnect** — the frontend refetches state on connect; `event_id` dedup covers the rest.
+- **A continuous domain reconciler** — decision 45 deliberately solved operational recovery (stale claims, provider circuits, truthful timelines) without reintroducing one; don't propose it again without new evidence the lease-driven model is insufficient.
 
 ---
 
-*History note: the pre-refactor roadmap (Redis topology, task-manager/reconciler, PR workflows) is preserved verbatim at [docs/history/pre-refactor/roadmap.md](docs/history/pre-refactor/roadmap.md). It describes a system that no longer exists — read it as context, not as a plan.*
+*History note: the pre-refactor roadmap (Redis topology, task-manager/reconciler, PR workflows) is preserved verbatim at [docs/history/pre-refactor/roadmap.md](docs/history/pre-refactor/roadmap.md). It describes a system that no longer exists — read it as context, not as a plan. The nine-phase-machine-era roadmap this file replaces is recoverable from git history on this branch if needed for comparison.*
