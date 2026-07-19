@@ -132,3 +132,12 @@ same PR. Unimplemented ideas go to `ROADMAP.md`, never into `docs/architecture/`
 When fixing an entry in `docs/architecture/known-issues.md`, delete it and add the
 regression test that locks it. Domain un-freezes get a `docs/decisions/decision-log.md`
 entry.
+
+## Temporary multi-runtime acceleration
+
+- For an approved plan with multiple independent tasks, use `/accelerate <plan path or objective>`.
+- Claude is the coordinator, not the default implementation worker.
+- Runtime availability and quota live in `.orchestrator/runtime-pool.yaml`; do not duplicate them here.
+- All delegated writing tasks require isolated Git worktrees, non-overlapping ownership, deterministic verification, and evidence before integration.
+- Preserve domain boundaries: provider-specific runtime behavior belongs in infrastructure adapters, never the domain model.
+- Do not change approved architecture during execution. Escalate ambiguity or decisions to the user.

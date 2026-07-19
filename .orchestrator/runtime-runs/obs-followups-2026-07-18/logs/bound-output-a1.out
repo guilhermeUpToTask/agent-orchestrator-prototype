@@ -1,0 +1,31 @@
+All verification commands pass. Let me provide a summary of the changes.
+
+## Summary
+
+**Problem:** The `supervise_process()` function in `process_supervisor.py` bounded the on-disk JSONL log via `_BoundedLog` (capped at `log_cap_bytes`), but the in-memory `outputs` dict accumulated all stdout/stderr lines without bound — allowing a pathological process to grow memory indefinitely before hitting the wall-clock timeout.
+
+**Solution:** Added a new `_BoundedBuffer` class that mirrors the on-disk bounding strategy for in-memory accumulation:
+
+1. **`_BoundedBuffer`** — per-stream (`stdout`/`stderr`) `deque` of chunks with:
+   - A byte cap (reuses `log_cap_bytes`)
+   - `_enforce_cap()` drops oldest *whole chunks* (complete lines from `readline()`) until under budget → preserves line boundaries, no mid-line truncation
+   - Unbounded `_total_bytes` counters track true totals for `stdout_bytes`/`stderr_bytes` in the result
+
+2. **`supervise_process()`** now uses `_BoundedBuffer` instead of unbounded `list[str]`:
+   - `stdout`/`stderr` in `ProcessSupervisorResult` return the bounded tail content
+   - `stdout_bytes`/`stderr_bytes` still report the true total bytes seen
+   - On-disk `_BoundedLog` behavior unchanged
+
+3. **New test** `test_supervise_process_bounds_in_memory_stdout_stderr` proves the bound holds:
+   - Writes ~4000 bytes with a 1024-byte cap
+   - Asserts `len(result.stdout.encode()) <= cap`
+   - Asserts `result.stdout_bytes > cap` (true total)
+   - Asserts retained content is the tail (newest lines)
+
+**Verification:**
+```
+ruff check src tests --fix     → All checks passed
+mypy src                       → Success: no issues found in 151 source files
+pytest -m "not integration" -k "process_supervisor" → 6 passed
+pytest -q                      → 454 passed, 5 skipped (baseline maintained)
+```

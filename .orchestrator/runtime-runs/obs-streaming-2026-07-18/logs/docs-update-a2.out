@@ -1,0 +1,159 @@
+Now we need to add a row to the "What an operator can see today" table for the new log endpoint. The table has two columns: Question and Answer surface. So we need to add a row describing the new log endpoint. That row should be added near the end of the table. Which row index? Let's count.
+
+The table has a header:
+
+| Question | Answer surface |
+|---|---|
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+| The full state of one plan | `GET /api/plans/{id}` — the entire aggregate document |
+| What's happening right now | `GET /api/events` SSE — domain events + live agent start/finish |
+| Which planning/runtime operations ran or failed? | `GET /api/plans/{id}/attempts` — planning operations plus task → run → attempt evidence, including liveness, provider/model, retry and safe bounded output |
+| Is the runtime wired correctly? | `GET /api/runner/status` (mode, per-agent binding validity, binary probes) · `GET /api/reasoner/status` |
+| What did the user and reasoner say? | `GET /api/plans/{id}/chat` |
+| A plan's agent/reasoner telemetry history | `GET /api/plans/{id}/agent-events?task_id=&limit=` — durable, most-recent-first, optionally per task (the console/DetailPanel live tail plus reload-survivable history) |
+| LLM token spend + agent run/failure counts | `GET /api/metrics?plan_id=` — planner/child/combined scopes, reported/estimated/unavailable coverage, and exact attempt failures grouped by kind |
+| Offline evidence for every plan and execution run | <code>python backend/scripts/export_plan_runs.py --format bundle --output-dir DIR</code> — an atomic, hashed JSON/JSONL snapshot with telemetry, metrics, comparisons, insights, and execution summaries |
+| Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan |
+
+We need to add a row for new log endpoint. Likely something like:
+
+| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |
+
+Thus we need to edit the markdown file to insert that row. We should place it maybe after the "Focused current-plan debugging snapshot" row, or before it.
+
+The instruction: "Add a row for the new log endpoint". It didn't specify exact location, just "add a row for the new log endpoint". The natural place would be after the existing rows, maybe before the final note about Reasoner usage observations. Let's add after the "Focused current-plan debugging snapshot" row.
+
+Thus we need to edit the file to add a row. We can use tool edit.
+
+The edits[] object expects oldText and newText arrays for replacements. Actually the edit tool can make targeted replacements by providing oldText that must match exactly a region of the original file. The oldText must be unique in the original file and must not overlap with any other edits.
+
+We can add new content by searching for a unique anchor text and then adding after it. However edit tool only allows replacements, not insertion. But we can use insertion by matching some existing text and adding after it. Perhaps better is to use edit with oldText being an empty string? Not allowed - oldText must match exactly some region. We can add a row by replacing a placeholder line? There is likely a placeholder line like maybe the table ends with a row that has a trailing separator line. But there is no placeholder.
+
+Alternatively, we could escape from needing to use edit; perhaps we can just use write to create a new version of the file with added content. But the instruction says "Keep edits minimal and additive; don't rewrite unrelated sections." So we can use "edit" tool to replace some text with the same text plus added lines by using replacement that adds new lines after a certain anchor. For insertion, we can match a unique text like "Focused current-plan debugging snapshot" and replace that line with the same line plus new row after it. But the replacement text should replace the line that matches oldText exactly; we cannot replace just part of line; need exact match. If we match the line "Focused current-plan debugging snapshot", we can replace that with "Focused current-plan debugging snapshot\n\n| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |". However we need to preserve the table alignment, ensure we don't break markdown formatting.
+
+But the edit tool expects oldText and newText for each edit. If we replace a single line with multiple lines, that probably works: oldText is the original line; newText includes line breaks and new rows. Fine.
+
+Thus we can use edit:
+
+oldText: "Focused current-plan debugging snapshot"
+
+But note that in the markdown, the line is "## Focused current-plan debugging snapshot". Actually the heading is "## Focused current-plan debugging snapshot". Wait earlier we saw the heading: "## Focused current-plan debugging snapshot". Actually reading near the end we saw "## Focused current-plan debugging snapshot". The row is a heading preceding the row of the table? Actually let's locate the exact text.
+
+Scrolling near the end: after the table, we see:
+
+```
+## Focused current‑plan debugging snapshot
+<code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read‑only evidence core restricted to one deterministically selected plan.
+```
+
+Thus the line "## Focused current-plan debugging snapshot" is a heading before a paragraph describing the snapshot. That is not part of the table. The row we want to add might be better placed after the table rows but before that heading. Perhaps we can add after the table row that ends with "the same read‑only evidence core restricted to one deterministically selected plan." Actually that is separate.
+
+But we need to add a row to the table, not a new heading. So we should insert the row somewhere in the table. Perhaps we can insert before the closing backticks of the table? Actually the table ends with last row containing "Focused current-plan debugging snapshot"? No, that is a heading after the table.
+
+Thus maybe the correct approach is to insert the row as a new row before the closing of the table (i.e., after the last row of the table). The last row is:
+
+| Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan. |
+
+Wait that seems like the last row actually contains a "Question" column entry "Focused current-plan debugging snapshot"? It seems we misinterpreted; that row appears inside the table; but that row looks wrong: It appears that "Focused current-plan debugging snapshot" is placed as a question? Actually the table rows each have two cells: Question and Answer surface. The rows we saw earlier had question texts like "What phase is every plan in? Who holds the lease?" and answer surfaces like "`GET /api/plans` (promoted columns — cheap, no document parse)". Then near the bottom there is a row with "Focused current-plan debugging snapshot" in the first column, and answer cell containing the code snippet. That suggests the table includes that row, but it's somewhat different: The question column includes a short phrase "Focused current-plan debugging snapshot", answer column includes the snippet.
+
+Thus to add a new row, we can add after that row (maybe after it). But we need to maintain markdown table syntax with column separators.
+
+The current table ends with that row then close of table (the `|` lines). Let's view the last part of the file near the table again.
+
+Scrolling in the earlier read: The table ended with:
+
+```
+| Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan. |
+```
+
+Then after that there is a blank line and then "**Reasoner usage observations:** ..." So indeed the table ends with that row.
+
+Thus to add a new row, we can add another row before that last row, or maybe after the last row but before the table close? Actually we need to insert before the closing table? Let's see table structure.
+
+Probably the table rows are separated by newline and have `|` separators. The last row before the table ends is "Focused current-plan debugging snapshot". After that, there may not be any more rows. So we can insert before that row, or we can replace that row with two rows? But we can add a new row just before the final separation lines? There is perhaps a blank line, then the next heading. Actually after the row, there is a blank line then "**Reasoner usage observations:**". So the row ends the table.
+
+Thus we can add a new row before that row. To keep ordering maybe we add before it. But the instruction says "add a row for the new log endpoint". It doesn't specify exact location; likely near the end is fine.
+
+Thus we need to edit the markdown file to insert a row before that final row. Let's think about how to do that using edit tool.
+
+We need to find unique oldText that appears only in that final row. The row contains "Focused current-plan debugging snapshot". That text is unique. We can replace that row with two rows: the new row for log endpoint and then the existing row. Alternatively we could insert before that row. For simplicity, we can add a new row just before that row. Let's replace that row with (new row) + "\n\n" + the existing row? But that would duplicate row? Actually we want to insert a row before that row, i.e., we want to add a new row of the table, not delete or modify anything else.
+
+One way is to replace the line "Focused current-plan debugging snapshot | <code>..." with "Focused current-plan debugging snapshot | <code>..." plus preceding new row? Not quite.
+
+Maybe easier: Insert a row after the previous row (the one before "Focused current-plan debugging snapshot"). We need to locate a unique earlier row that we can target to add after it. For instance, the row before "Focused current-plan debugging snapshot" is "Offline evidence for every plan and execution run". That text is unique. If we replace that row's answer cell with the same answer plus newline plus new row content? That would break formatting.
+
+Better approach: We could add a new row by appending after the "Offline evidence..." row before the "Focused current-plan debugging snapshot" row. Let's locate the exact text of that row's question cell: "Offline evidence for every plan and execution run". That's unique. So we can replace that line with "Offline evidence for every plan and execution run | <code>python backend/scripts/export_plan_runs.py ...</code> — an atomic, hashed JSON/JSONL snapshot ... | \n| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |". But need to preserve markdown table syntax: each row ends with a trailing `|`. Actually in the file each row ends with `|` then newline.
+
+Let's check actual formatting of rows: they appear like:
+
+```
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+```
+
+Thus each row has leading space and trailing space. So we can add a new row after that line by replacing the line that contains "Offline evidence for every plan and execution run | ...", and inserting before the next row.
+
+But it's easier to add a new row before the final row by using the unique question text "Focused current-plan debugging snapshot". But that appears as part of the final row's question column. We could replace that entire row with two rows: first a new row for the log endpoint, then the original row? That would shift order; but maybe that's okay.
+
+We can replace "Focused current-plan debugging snapshot | <code>..." with "How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created | \n| Focused current-plan debugging snapshot | <code>...". But that would keep the original row after the new one, thus adding an extra row before the original row.
+
+But we need to keep the table syntax correct: each row ends with `|`. So we can replace that final row with two rows separated by newline.
+
+Thus find the exact oldText that matches that final row's entire line: "Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan. |". Use that as oldText. Then replace with newText that is two rows: first row for log endpoint, second row is the original row.
+
+However we must ensure newText matches exactly (including line breaks). Actually the edit tool expects oldText as a string to match and newText as replacement string. It can replace that exact region with newText. If newText contains newline characters, it's okay. As long as there is no overlapping edit. So we can do a single edit with multiple lines newText that includes the inserted row and then the original row content preserved.
+
+Thus we can replace the final row with two rows: first row for log endpoint, second row is the original row.
+
+Thus edit:
+
+oldText: "Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan. |"
+
+newText: "| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |\n| Focused current-plan debugging snapshot | <code>python backend/scripts/snapshot_current_plan.py --project-id ID --pretty</code> — the same read-only evidence core restricted to one deterministically selected plan. |"
+
+But need to ensure formatting: The first column of the row must start with `|`. So we need to include leading spaces before the pipe? In the original file each row starts with a leading space before the first `|`? Actually the rows are like " | What phase is every plan...?"? Let's check initial rows: The table header is:
+
+```
+| Question | Answer surface |
+|---|---|
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+```
+
+So rows start with `|`. They have a leading space before the first pipe? Actually they have `|` at column start with no leading spaces. Looking at the earlier text snippet, after the header, each row started with `|` with a space maybe after pipe? Actually it was:
+
+```
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+```
+
+Thus there is a leading `|` then space then question text then space then `|` then space then answer. The pattern is "| question | answer |". So to add a new row, we need to start with `| ` then question text then ` | ` then answer text then ` |`. So the new row should be:
+
+`| How can I view a tail of the bounded log file for a specific attempt? | \`GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N\` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |`
+
+Make sure to escape backticks properly? In markdown, backticks inside the answer can be used; but we need to preserve formatting. Let's just include backticks around the URL.
+
+Thus new row text: `| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |`
+
+But we need to match exactly the trailing `|` at the end of the row as it appears. In the original row pattern, it ends with `|`. Actually they have a trailing space before final `|`. Example:
+
+```
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+```
+
+Thus there is a space before the final `|`. Actually it's just `|` preceded by a space. But easier: we can replicate exactly the pattern used for other rows: start with `| ` then question then ` | ` then answer then ` |`. Let's examine some rows more precisely.
+
+Take first row:
+
+`| What phase is every plan in? Who holds the lease? | \(in the answer\)` Wait it's "`GET /api/plans` (promoted columns — cheap, no document parse)". So it's:
+
+```
+| What phase is every plan in? Who holds the lease? | `GET /api/plans` (promoted columns — cheap, no document parse) |
+```
+
+Thus the pattern: `| ` + question + ` | ` + answer + ` |`. Actually there is a space before and after the `|` separators.
+
+Thus for our new row, we can do:
+
+`| How can I view a tail of the bounded log file for a specific attempt? | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log?tail_lines=N` — returns the bounded tail of that log file, owned‑checked; empty list if not yet created |`
+
+Now we need to add that row preceding the existing final row.
+
+Thus we need to replace the final row with two rows: our new row and the original row. So newText will be (row1)\n\n(row2)?? Actually to keep them on separate lines, we need newline between rows.
