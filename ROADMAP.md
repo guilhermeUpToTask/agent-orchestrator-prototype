@@ -214,12 +214,30 @@ Take these up only when real usage demonstrates the need.
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
 
-32. **True FS sandboxing per attempt** [WALK] — the isolation guard detects
-    out-of-worktree writes; prevention means confining the child process
-    (bubblewrap/container: write access to its worktree only, network for the
-    provider API). Needs real design (git across the boundary, network
-    policy); take up only if items 2–3 prove insufficient in practice.
-33. **Per-role model quality bindings** [WALK] — the free reasoning model
+32. **Devcontainer runtime parity** [WALK] — the live container carries
+    runtimes the `.devcontainer` config never installs (ad-hoc installs, lost
+    on every rebuild): `codex` (the acceleration flow's primary implementer),
+    `grok`, `mimo`, the `gh` CLI (used for all PR/issue automation), and
+    `bubblewrap`. Add them to the Dockerfile with pinned versions; persist
+    their auth/config dirs (`~/.codex`, `~/.grok`, `~/.mimocode`, gh auth)
+    via mounts like the existing `~/.orchestrator` pattern; for bubblewrap
+    also add the container `runArgs` (seccomp profile / userns capability)
+    without which it cannot create namespaces at all. While there: drop the
+    stale `AGENT_MODE` terminal env (the config key replaced it) and align
+    the image's Python with CI (3.12). `gemini` remains a factory
+    `runtime_type` with no binary anywhere — decide to provision or delist it.
+33. **True FS sandboxing per attempt (bubblewrap)** [WALK] — parked with
+    evidence (2026-07-19): bwrap 0.11.0 installs but cannot create namespaces
+    in the current devcontainer (Docker default seccomp blocks `unshare`,
+    userns and plain modes both fail) — a sandbox that can't start where the
+    orchestrator runs delivers zero coverage. Blocked on item 32's container
+    capability work, and on items 2–3 (a bwrap mount plan needs pointer-free
+    workspaces and a scrubbed env anyway). Design when unblocked: a
+    sandbox-when-available wrapper — probe at worker boot alongside the
+    existing binary probes, run attempts under bwrap (bind: attempt workspace
+    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on),
+    loud `sandbox=disabled` fallback to the post-run guard elsewhere.
+34. **Per-role model quality bindings** [WALK] — the free reasoning model
     follows task descriptions over role instructions; the registry already
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the
