@@ -226,7 +226,19 @@ Take these up only when real usage demonstrates the need.
     stale `AGENT_MODE` terminal env (the config key replaced it) and align
     the image's Python with CI (3.12). `gemini` remains a factory
     `runtime_type` with no binary anywhere — decide to provision or delist it.
-33. **True FS sandboxing per attempt (bubblewrap)** [WALK] — parked with
+33. **Sandbox abstraction — keep confinement out of the domain** [WALK] —
+    evaluate the boundary BEFORE any bubblewrap code exists: the frozen
+    domain must never know what a sandbox is, and even `ExecutionHandler`
+    should only see "attempts run confined or not". Likely shape: a
+    `Sandbox` port at the app/infra seam (peer of `AgentRunner`, not a
+    domain concept) with `wrap(cmd, policy) -> cmd` + `probe()` semantics,
+    adapters `NoSandbox` (today's behavior, the permanent fallback) and
+    later `BubblewrapSandbox`; the CLI runners/`supervise_process` consume
+    it blindly; probe status surfaces through `dependency_checker` /
+    `GET /api/runner/status` like the binary probes. Deliverable is a short
+    design note + the port skeleton with the no-op adapter wired — zero
+    behavior change — so item 34 becomes a pure adapter drop-in.
+34. **True FS sandboxing per attempt (bubblewrap)** [WALK] — parked with
     evidence (2026-07-19): bwrap 0.11.0 installs but cannot create namespaces
     in the current devcontainer (Docker default seccomp blocks `unshare`,
     userns and plain modes both fail) — a sandbox that can't start where the
@@ -237,7 +249,7 @@ Take these up only when real usage demonstrates the need.
     existing binary probes, run attempts under bwrap (bind: attempt workspace
     rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on),
     loud `sandbox=disabled` fallback to the post-run guard elsewhere.
-34. **Per-role model quality bindings** [WALK] — the free reasoning model
+35. **Per-role model quality bindings** [WALK] — the free reasoning model
     follows task descriptions over role instructions; the registry already
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the
