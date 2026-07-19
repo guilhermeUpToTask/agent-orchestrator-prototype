@@ -305,6 +305,92 @@ def test_goal_enrichment_uses_only_contract_profile_tools():
     assert "submit_cycle_draft" not in client.calls[0]["tool_names"]
 
 
+def test_tdd_step_submission_is_rejected_then_feature_slice_is_accepted():
+    bad = {
+        "tasks": [
+            {
+                "name": "Write failing tests for Item",
+                "description": "Add red tests",
+                "verification_strategy": "tdd",
+            }
+        ]
+    }
+    good = {
+        "tasks": [
+            {
+                "name": "Deliver validated Item schemas",
+                "description": "Implement Item schemas and their passing tests",
+                "verification_strategy": "tdd",
+            }
+        ]
+    }
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_tasks", bad, "bad"),
+            tool_turn("submit_tasks", good, "good"),
+        ]
+    )
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    tasks = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal(make_plan(), goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    assert rejection["accepted"] is False
+    assert "feature-level deliverable slices" in rejection["errors"][0]
+    assert [task.name for task in tasks] == ["Deliver validated Item schemas"]
+
+
+def test_enrich_prompt_states_tdd_granularity_rule():
+    client = FakeLLMClient(
+        [tool_turn("submit_tasks", {"tasks": [{"name": "deliver feature", "description": "d"}]})]
+    )
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal(make_plan(), goal, CAPS))
+
+    prompt = client.calls[0]["messages"][1]["content"]
+    assert "feature-level deliverable slice" in prompt
+    assert "red/green split internally" in prompt
+
+
+def test_goal_contract_tdd_step_submission_is_rejected_then_accepted():
+    def contract_task(objective: str) -> dict[str, object]:
+        return {
+            "objective": objective,
+            "acceptance_criteria": [{"id": "t-1", "description": "Item works"}],
+            "goal_criterion_ids": ["g-1"],
+            "allowed_scope": ["backend/"],
+            "verification_commands": ["pytest -q"],
+            "verification_strategy": "tdd",
+        }
+
+    bad = {
+        "objective": "Build Item",
+        "acceptance_criteria": [{"id": "g-1", "description": "Item works"}],
+        "tasks": [contract_task("Write tests for Item")],
+    }
+    good = {**bad, "tasks": [contract_task("Deliver validated Item schemas with passing tests")]}
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_goal_contract", bad, "bad"),
+            tool_turn("submit_goal_contract", good, "good"),
+        ]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    contract = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    assert rejection["accepted"] is False
+    assert "feature-level deliverable slices" in rejection["errors"][0]
+    assert contract.tasks[0].objective == "Deliver validated Item schemas with passing tests"
+
+
 # ---- runtime-neutral model usage observations ----
 def test_converse_records_reported_usage_with_provenance():
     from src.app.observations import ObservationQuality, ObservationSource
