@@ -445,7 +445,16 @@ class PiAgentRunner(CliAgentRunner):
         return "pi"
 
     def _build_cmd(self, prompt: str) -> list[str]:
-        return ["pi", "--model", self._model, "-p", prompt, *self._extra_flags]
+        return [
+            "pi",
+            "--model",
+            self._model,
+            "--no-session",
+            "--no-context-files",
+            "-p",
+            prompt,
+            *self._extra_flags,
+        ]
 
     def _env(self) -> dict[str, str]:
         return {**os.environ, PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
