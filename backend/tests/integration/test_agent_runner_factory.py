@@ -125,6 +125,28 @@ def test_real_mode_resolves_per_agent_through_the_catalog(container, monkeypatch
     assert isinstance(claude, ClaudeCodeRunner)
 
 
+def test_pi_command_disables_project_state_reuse_and_preserves_extra_flags():
+    runner = PiAgentRunner(
+        api_key="sk-agent-test",
+        model="claude-sonnet-4-5",
+        extra_flags=["--thinking", "high"],
+    )
+
+    command = runner._build_cmd("implement the task")
+
+    assert command == [
+        "pi",
+        "--model",
+        "claude-sonnet-4-5",
+        "--no-session",
+        "--no-context-files",
+        "-p",
+        "implement the task",
+        "--thinking",
+        "high",
+    ]
+
+
 def test_real_mode_dry_run_agent_uses_dummy_without_secrets(container):
     # NO master key in the env: a dry-run agent inside real mode must resolve
     # to the dummy without ever constructing the secret store
