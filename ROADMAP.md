@@ -98,22 +98,13 @@ a safety net before touching 1700+ lines of handler code.
 
 ## Next — tooling and documentation consolidation [PR20]
 
-### 7. Consolidate `backend/scripts/`
-Analyze `dev.sh` (the live entrypoint) against `start_api_and_worker.sh` and
-`reseed_openrouter_key.sh` — both already print deprecation notices and have
-no remaining callers besides habit. Delete both scripts and any workflow/doc
-steps that still reference them. Document `export_plan_runs.py` (a
-stdlib-only SQLite run exporter) to the same standard as its siblings
-(`export_openapi.py`, `snapshot_current_plan.py`); a focused operator skill
-for it is later work, not part of this item.
-
-### 8. DB-schema-inspection → diagram tool
+### 7. DB-schema-inspection → diagram tool
 Idea surfaced during the migration 0009 review: a small tool that inspects the
 live SQLite schema and emits a diagram (tables, FKs, indexes) so
 `docs/architecture/data-model.md` can be checked against the DB instead of
 hand-maintained. No design yet — evidence-gated on the doc actually drifting.
 
-### 9. Oversized graphify skill review
+### 8. Oversized graphify skill review
 Tracked separately from this roadmap: the graphify skill review left comments
 against outdated diff locations (the file moved under later commits). Not an
 architecture item — a skill-repo hygiene follow-up.

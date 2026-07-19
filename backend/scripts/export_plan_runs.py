@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Export every persisted ProjectPlan run from SQLite without joining the system.
+"""
+scripts/export_plan_runs.py — Export persisted plan runs from SQLite (read-only).
 
-The exporter is intentionally standalone and stdlib-only. It never constructs the
-application container, imports domain/runtime code, calls an API, or writes to the
-orchestrator database. SQLite is opened with ``mode=ro`` and ``query_only=ON`` and
-all reads happen in one snapshot transaction.
+Standalone, stdlib-only SQLite reader for offline debugging and analytics.
+Never constructs the application container, imports domain/runtime code, calls
+an API, or writes to the orchestrator database. Opens SQLite with ``mode=ro``
+and ``query_only=ON``; all reads happen in one snapshot transaction.
 
-The JSON report contains the plan aggregate, planning operations, execution runs
-and attempts, correlated telemetry, domain events, chat context, truthful metrics,
-derived execution summaries, and explicitly labelled insights. Secret, config,
-provider, model, and agent catalog tables are deliberately excluded.
+The JSON report contains the plan aggregate, planning operations, execution
+runs and attempts, correlated telemetry, domain events, chat context, truthful
+metrics, derived execution summaries, and explicitly labelled insights.
+Secret, config, and capability tables are deliberately excluded; provider /
+model / agent catalog fields are redacted.
+
+Usage (from backend/):
+
+    python scripts/export_plan_runs.py --pretty
+    python scripts/export_plan_runs.py --db /path/to/orchestrator.db --plan-id <id>
+    python scripts/export_plan_runs.py --format bundle --output-dir /tmp/export
 """
 
 from __future__ import annotations

@@ -9,8 +9,6 @@ backend/scripts/dev.sh --help
 It resolves every path from its own location, so it works from any current
 directory. It never defaults to a paid provider or model, never accepts a secret
 value on the command line, and supervises long-running processes as one unit.
-The older `start_api_and_worker.sh` and `reseed_openrouter_key.sh` names remain as
-compatibility entry points; new automation should use `dev.sh`.
 
 ## First-time setup
 

@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Parse development entry point
-        run: bash -n backend/scripts/dev.sh backend/scripts/start_api_and_worker.sh backend/scripts/reseed_openrouter_key.sh
+        run: bash -n backend/scripts/dev.sh
 
       - name: Exercise documented interfaces
         run: |
@@ -41,8 +41,6 @@ jobs:
           bash backend/scripts/dev.sh seed --help
           bash backend/scripts/dev.sh start --help
           bash backend/scripts/dev.sh check --help
-          bash backend/scripts/start_api_and_worker.sh --help
-          bash backend/scripts/reseed_openrouter_key.sh --help
 
       - name: Reject unsafe parameter combinations
         run: |
