@@ -19,6 +19,7 @@ trusted) and build the domain objects with new_id() and position=index.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -52,6 +53,7 @@ from src.domain.ports.reasoner_port import (
 from src.infra.reasoner.runtime.agent_loop import SessionResult, run_tool_session
 from src.infra.reasoner.runtime.llm_client import LLMClient
 from src.infra.reasoner.runtime.prompts import (
+    TDD_TASK_GRANULARITY_GUIDANCE,
     SYSTEM_PROMPT,
     build_discovery_prompt,
     build_enrich_prompt,
@@ -85,6 +87,10 @@ _TASK_ITEM_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string"},
             "description": "capability ids from the catalog (optional)",
+        },
+        "verification_strategy": {
+            "type": "string",
+            "enum": [item.value for item in VerificationStrategy],
         },
     },
     "required": ["name", "description"],
@@ -237,6 +243,7 @@ def _validate_task_item(item: Any, where: str, known_caps: set[str]) -> list[str
         errors.append(f"{where}: task 'name' must be a non-empty string")
     if not isinstance(item.get("description"), str):
         errors.append(f"{where}: task 'description' must be a string")
+    errors.extend(_validate_tdd_task_granularity(item, where))
     caps = item.get("required_capabilities", [])
     if not isinstance(caps, list) or not all(isinstance(c, str) for c in caps):
         errors.append(f"{where}: 'required_capabilities' must be a list of strings")
@@ -248,6 +255,27 @@ def _validate_task_item(item: Any, where: str, known_caps: set[str]) -> list[str
                 "from the catalog (or omit required_capabilities)"
             )
     return errors
+
+
+def _validate_tdd_task_granularity(item: dict[str, Any], where: str) -> list[str]:
+    if item.get("verification_strategy") != VerificationStrategy.TDD.value:
+        return []
+    candidates = [item.get("name"), item.get("objective")]
+    texts = [value.strip().lower() for value in candidates if isinstance(value, str)]
+    write_tests_only = any(
+        "write failing test" in text or "write tests for" in text for text in texts
+    )
+    make_tests_pass_only = any(
+        re.fullmatch(r"make(?:\s+\S+){0,8}\s+tests?\s+pass[.!]?", text) for text in texts
+    )
+    if not (write_tests_only or make_tests_pass_only):
+        return []
+    return [
+        f"{where}: TDD tasks must be feature-level deliverable slices; the "
+        "runtime performs the red/green split per task. Do not submit a "
+        "write-tests-only or make-tests-pass-only task; state the validated "
+        "feature delivered instead."
+    ]
 
 
 def _build_task(item: dict[str, Any], position: int, known_caps: set[str]) -> Task:
@@ -373,6 +401,7 @@ class OpenAIReasoner:
                 ]
             ),
         }
+
         tools = build_tool_profile(
             ReasoningPurpose.INTENT_DISCOVERY,
             readers,
@@ -476,6 +505,7 @@ class OpenAIReasoner:
                 [cycle.evidence_refs for cycle in plan.cycles]
             ),
         }
+
         tools = build_tool_profile(
             ReasoningPurpose.CYCLE_ARCHITECTURE,
             readers,
@@ -537,11 +567,24 @@ class OpenAIReasoner:
             "read_active_goal": lambda: goal.model_dump_json(),
             "read_prior_evidence": lambda: json.dumps(proposal.evidence_refs if proposal else []),
         }
+
+        def handle_submit_goal_contract(args: dict[str, Any]) -> str:
+            tasks_raw = args.get("tasks")
+            if not isinstance(tasks_raw, list) or not tasks_raw:
+                return _rejected(["'tasks' must be a non-empty array"])
+            errors: list[str] = []
+            for ti, task_raw in enumerate(tasks_raw):
+                if isinstance(task_raw, dict):
+                    errors.extend(_validate_tdd_task_granularity(task_raw, f"tasks[{ti}]"))
+            if errors:
+                return _rejected(errors)
+            return collector.submit(args)
+
         tools = build_tool_profile(
             ReasoningPurpose.GOAL_ENRICHMENT,
             readers,
             SUBMIT_GOAL_CONTRACT_SCHEMA,
-            collector.submit,
+            handle_submit_goal_contract,
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -551,7 +594,8 @@ class OpenAIReasoner:
                     "Freeze a complete GoalContract for the active goal. Every goal "
                     "criterion must map to atomic ordered tasks. Use TDD for new "
                     "behavior, characterization for preserving behavior, and "
-                    "executable_check where RED is meaningless. Submit exactly once."
+                    "executable_check where RED is meaningless. "
+                    f"{TDD_TASK_GRANULARITY_GUIDANCE} Submit exactly once."
                 ),
             },
         ]
