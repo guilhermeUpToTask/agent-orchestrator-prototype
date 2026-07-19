@@ -74,6 +74,7 @@ from src.app.ports import (
     AgentRunner,
     Clock,
     CommandExecution,
+    MainRepositoryWorkspace,
     TaskFailed,
     UnitOfWork,
     Workspace,
@@ -177,7 +178,9 @@ class ExecutionHandler:
                 else None
             ),
         )
+        main_repo_before: set[str] = set()
         try:
+            main_repo_before = await self._main_repo_status()
             result: TaskResult = await self._runner.run(
                 unit.task_snapshot,
                 unit.spec,
@@ -185,6 +188,7 @@ class ExecutionHandler:
                 event_sink=self._event_sink,
                 workspace=handle,
             )
+            await self._raise_on_main_repo_changes(main_repo_before)
             if unit.cycle_id is not None and unit.task_snapshot.contract is not None:
                 if self._verifier is None:
                     raise TaskFailed(
@@ -199,11 +203,48 @@ class ExecutionHandler:
                 self._abandon_stale(plan_id, unit, uow)
                 return Signal.PAUSED
             await self._workspace.commit(handle)
-        except TaskFailed as exc:
+        except TaskFailed as failure:
+            exc = failure
+            stray_paths = await self._main_repo_stray_paths(main_repo_before)
+            if stray_paths:
+                exc = self._main_repo_failure(stray_paths)
             await self._workspace.discard(handle)
             return self._finalize_failure(plan_id, unit, exc, uow)
 
         return self._finalize_success(plan_id, unit, result, uow)
+
+    async def _main_repo_status(self) -> set[str]:
+        if isinstance(self._workspace, MainRepositoryWorkspace):
+            return await self._workspace.main_repo_status()
+        return set()
+
+
+    @staticmethod
+    def _main_repo_failure(stray_paths: list[str]) -> TaskFailed:
+        message = (
+            "agent modified the project main repository outside its assigned "
+            f"worktree; stray paths: {stray_paths}"
+        )
+        return TaskFailed(
+            message,
+            FailureKind.TOOL_ERROR,
+            failure=RuntimeFailure(
+                kind=FailureKind.TOOL_ERROR,
+                safe_message=message,
+                retryable=False,
+            ),
+        )
+
+    async def _main_repo_stray_paths(self, before: set[str]) -> list[str]:
+        if not isinstance(self._workspace, MainRepositoryWorkspace):
+            return []
+        after = await self._workspace.main_repo_status()
+        return sorted(line[3:] for line in after - before)
+
+    async def _raise_on_main_repo_changes(self, before: set[str]) -> None:
+        stray_paths = await self._main_repo_stray_paths(before)
+        if stray_paths:
+            raise self._main_repo_failure(stray_paths)
 
     @staticmethod
     def _raise_on_infrastructure_exit(outcomes: list[CommandExecution]) -> None:

@@ -103,6 +103,10 @@ class GitBranchWorkspace:
         assert isinstance(handle, GitWorkspaceHandle)
         return await asyncio.to_thread(self._snapshot_sync, handle)
 
+    async def main_repo_status(self) -> set[str]:
+        """Return the main repository's cheap porcelain working-tree fingerprint."""
+        return await asyncio.to_thread(self._main_repo_status_sync)
+
     async def checkpoint(self, handle: WorkspaceHandle) -> str:
         assert isinstance(handle, GitWorkspaceHandle)
         commit_sha = await self.snapshot(handle)
@@ -139,6 +143,11 @@ class GitBranchWorkspace:
     def _prune_sync(self) -> None:
         if (self._repo / ".git").exists():
             _git(self._repo, "worktree", "prune")
+
+    def _main_repo_status_sync(self) -> set[str]:
+        if not (self._repo / ".git").exists():
+            return set()
+        return set(_git(self._repo, "status", "--porcelain").splitlines())
 
     def _audit_sync(self) -> dict[str, list[str]]:
         if not (self._repo / ".git").exists():
