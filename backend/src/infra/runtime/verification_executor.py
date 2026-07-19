@@ -75,8 +75,11 @@ class LocalVerificationExecutor:
     def _run_one(self, root: Path, command: str) -> CommandExecution:
         started = self._clock.now()
         try:
+            # No login shell (-l): login profiles may reset PATH and drop the
+            # orchestrator's environment (venv), making tool resolution
+            # machine-dependent. Verification must run with the worker's env.
             result = subprocess.run(
-                ["/bin/bash", "-lc", command],
+                ["/bin/bash", "-c", command],
                 cwd=root,
                 capture_output=True,
                 text=True,
