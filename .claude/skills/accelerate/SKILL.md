@@ -90,6 +90,35 @@ tasks are technically parallelizable.
 - Give agents minimal context: task packet, relevant spec excerpts, exact paths, and commands.
 - Do not include secrets or provider credentials in prompts or logs.
 
+## Coordinator execution hygiene (paid-for lessons, 2026-07-19)
+
+- **Absolute paths in every wrapper/runtime invocation.** The Bash tool's cwd
+  persists between calls; three dispatches failed because a setup command
+  `cd`'d into a worktree and the next call's relative `--cd`/`--cwd`/wrapper
+  paths resolved against it. Never `cd` in a command you will follow with a
+  dispatch; pass the wrapper, workdir, and `--cd` as absolute paths, always.
+- **Repair, don't redispatch, for quality defects.** A delegated diff that is
+  functionally right but has a flaw the coordinator can fix in minutes
+  (duplicated block, over-specified assertion, positional/ordering flake,
+  deadlocking test) is coordinator-repair territory — amend the task commit
+  and record it in the task outcome. Redispatch only for functional failure;
+  the one-attempt-then-escalate policy is for those, not for style.
+- **Expect layered findings when driving a live system.** Each fix exposes
+  the next defect (misdirected writes → missing detection → missing agent
+  constraints → planning-model mismatch → state trap in the recovery path).
+  Budget waves accordingly; a "fixed" first finding is the start, not the end.
+- **Live-system loop shape** (when the accelerated objective is a running
+  orchestrator/walkthrough): failure event → pull the attempt log → classify
+  (system defect vs agent/model flakiness vs plan content) → file the issue
+  with evidence → dispatch the fix in parallel in its own worktree → integrate
+  → restart the stack only at a plan-safe boundary → retry via the block's
+  legal resolution → confirm the fix against the live system before moving
+  on. Detection beats trust: never accept an agent's self-report of where it
+  wrote; check the tree.
+- **Direct state surgery is a human gate.** Repairing persisted aggregates
+  (DB writes outside the API) requires explicit user approval even when it
+  reuses guarded domain transitions.
+
 ## Verification and integration
 
 Verification is external to the implementing agent. Collect the diff, commands, exit codes, test results, and concise runtime summary. Reject unrelated changes. Verify diffs **against their own worktree with the project's real environment/venv**, never against the coordinator's main working directory — if another task or session has also touched the main tree, checking there verifies the wrong file and passes for the wrong reason. Merge into the goal/integration branch only after authoritative checks pass. Re-check the branch tip immediately before each merge (see Preconditions #4) — a plain `git merge` is safe against concurrent commits (it won't discard them), but confirm there's no conflict before assuming a clean fast pass. Stop at human gates defined by the project.
