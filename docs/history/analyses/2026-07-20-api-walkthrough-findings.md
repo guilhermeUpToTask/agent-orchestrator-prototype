@@ -285,6 +285,22 @@ the rate limit: wait for the free-tier reset, or bind a paid/stronger model
 (a spend decision) — routing the `test_author` role to a stronger model is
 ROADMAP #35.
 
+## Finding #11 — free model won't respect the TDD test_author role (writes production code)  ⚠ OPEN (model quality, ROADMAP #35)
+
+With the burst limit cleared, the real pi/nemotron agent produced actual Go code
+(attempt 11: `go.mod`, `cmd/server/main.go`, `internal/handler/healthz.go`,
+`healthz_test.go`) — but the task was **correctly rejected**: *"test author
+modified production paths"*. The `test_author` role must write ONLY tests; the
+scope guard caught it writing the full implementation. The prompt is already
+explicit (`build_task_prompt`, cli_runner.py:133: "Write ONLY tests that fail for
+the right reason; never modify production files", plus allowed/forbidden scope
+paths). So this is **not** a fixable prompt/code defect — the free
+`nemotron-3-ultra:free` model ignores the role constraint. This is the
+model-quality / role-adherence limitation of ROADMAP #35 (route `test_author` to
+a stronger model). Not a system defect; the TDD scope enforcement works
+correctly. Continuing requires a stronger (paid) model for the role — a
+spend/human-gate decision.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
