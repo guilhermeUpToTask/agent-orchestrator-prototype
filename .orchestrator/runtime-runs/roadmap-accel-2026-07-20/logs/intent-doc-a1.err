@@ -1,0 +1,25 @@
+Error: Internal error: {
+  "message": "API error (status 500 Internal Server Error): API error (status 500 Internal Server Error): error: The model is currently at capacity due to high demand. Please try again in a few minutes, or use a higher service tier for priority processing: https://docs.x.ai/developers/advanced-api-usage/priority-processing",
+  "http_status": 500,
+  "promptUsage": {
+    "inputTokens": 164562,
+    "outputTokens": 3819,
+    "totalTokens": 168381,
+    "cachedReadTokens": 0,
+    "reasoningTokens": 1722,
+    "modelCalls": 6,
+    "apiDurationMs": 682890,
+    "modelUsage": {
+      "grok-4.5-build-free": {
+        "inputTokens": 164562,
+        "outputTokens": 3819,
+        "totalTokens": 168381,
+        "cachedReadTokens": 0,
+        "reasoningTokens": 1722,
+        "modelCalls": 6,
+        "apiDurationMs": 682890
+      }
+    },
+    "numTurns": 6
+  }
+}
