@@ -162,6 +162,29 @@ submitted-intent-with-unresolved-questions as a **question turn** — return a
 for another turn, instead of raising. (The plan is left recoverable at
 `activity=intent_discovery`, `legal_actions=[start_intent]`.)
 
+## Finding #7 — seeded registry can't cover a real plan's capabilities (agent_capability block at enrichment)  ⚠ OPEN (gap, ROADMAP #24)
+
+Driving the fresh `ae47ee19` cycle (activated with 2 goals: implement `/healthz`
++ its test) through **architecture → active cycle** was clean (OpenRouter
+responding). Enrichment froze goal 0's `GoalContract` with a `test_author` task
+requiring capabilities **`['go','http','json','test_authoring']`**, then opened
+an `agent_capability` block: *"no configured agent covers test_author"*. The
+`orchestrate seed demo` registry only defines `[backend, frontend,
+implementation, test_authoring, testing]` — `go`/`http`/`json` don't exist, so
+**any real plan whose reasoner-generated tasks name domain capabilities the seed
+lacks blocks immediately at enrichment**. This is the coverage-preflight gap of
+ROADMAP item 24 (registry-defined execution profiles + a role×capability matrix
+warned about *before* enrichment).
+
+**Resolved operationally (via the API, to continue the walkthrough):** created
+`go`/`http`/`json` capabilities (`POST /api/capabilities`), added them to
+`dev-agent` (`PUT /api/agents/dev-agent`, keeps its `pi` + openrouter/nemotron
+binding), then `POST …/retry-stage` — un-freeze #7's live-registry recovery
+re-resolved the roles and the cycle advanced into **execution** (`activity=task:…`,
+real pi agent). Not a code defect; an operability gap worth an evidence-gated
+preflight. Available runtimes confirmed via `/api/runner/status`: `git`, `pi`
+0.73.1, `claude` 2.1.215 ok; `gemini` missing.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
