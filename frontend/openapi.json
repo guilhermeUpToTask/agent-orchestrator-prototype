@@ -1206,6 +1206,67 @@
         }
       }
     },
+    "/api/plans/{plan_id}/attempts/{attempt_id}/log/stream": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Attempt Log Stream",
+        "description": "Live SSE tail of one attempt's RAW runtime stdout/stderr.\n\nDistinct from `/api/events` (telemetry): this streams the exact bytes the\nagent CLI wrote, straight from the bounded per-attempt runtime log, as they\nland. Each line is an SSE frame\n`id: <offset>` + `data: {monotonic_seconds,stream,text}`; an `event:\ntruncated` frame means the bounded log rotated (reset your view); `event:\nend` closes the stream once the attempt reaches a terminal state. Resume\nwithout replay via the standard `Last-Event-ID` header (or `?offset=`).",
+        "operationId": "plans-attempt_log_stream",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/agent-events": {
       "get": {
         "tags": [
