@@ -260,6 +260,31 @@ navigation vs promotion predicate mismatch; **#7** seed capability-coverage gap
 **#10** dry-run vs real verification. codex-without-bubblewrap
 (`--sandbox danger-full-access`) worked reliably for all three delegated fixes.
 
+## RESOLUTION — #8 fully fixed; loop reached the OpenRouter rate-limit stop condition
+
+The earlier "human gate" stop was premature. The real root of #8 was a **missing
+`--provider`**: the pi runner passed `--model` but not `--provider`, so pi
+couldn't resolve the OpenRouter model. Live-proven:
+`pi --model nvidia/nemotron-…:free` → not found; `pi --provider openrouter
+--model nvidia/nemotron-…:free` → **OK**. Fix: `_build_cmd` now passes
+`--provider <backend>` alongside the bare `--model` (both the prefix-strip and
+the provider are required). After it landed, the **real pi agent ran the model**
+(attempt 10, 0 "Model not found").
+
+The cycle then hit the loop's **defined terminal condition**: the free nemotron
+model returned empty with `ResourceExhausted: Worker local total request limit
+reached (57/32)` — **the OpenRouter model's rate limit is exhausted**. The
+downstream "test author produced no executable checks" block is a symptom of the
+rate-limited empty response, not a defect. The loop stopped here as specified
+(cycle finished OR rate limit exhausted).
+
+Total code fixes this walkthrough (all verified): #1 storm→block (+test),
+#4 honest resolutions, #6 reasoner question-turn, #8a pi model-string prefix,
+**#8b pi `--provider`**, #9 process-observation persistence. To continue past
+the rate limit: wait for the free-tier reset, or bind a paid/stronger model
+(a spend decision) — routing the `test_author` role to a stronger model is
+ROADMAP #35.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
