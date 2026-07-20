@@ -145,6 +145,8 @@ What this buys, and what it costs:
 
 Use cases call `plan.bump_version()` *then* `uow.plans.save(plan)`. The save is a single upsert whose UPDATE arm fires only when `plans.version < excluded.version`; rowcount 0 → `StaleVersionError` → HTTP 409 (the worker-vs-human-edit race, surfaced instead of silently lost). `save()` never touches the lease columns — ownership and state travel on separate paths.
 
+Separate from this document-level CAS: `IntentProposal.revision` (exact match on approve; monotonic +1 on revise) is the optimistic-concurrency gate for **human intent review**. See [plan-lifecycle.md — IntentProposal](plan-lifecycle.md#intentproposal).
+
 ### The lease (rows as ownership)
 
 `claim_one_unit` is one atomic `UPDATE … RETURNING` over the claim predicate (worker-claimable phase + lease NULL/expired, oldest `updated_at` first). `heartbeat`/`release` run on their own short sessions, *outside* the UnitOfWork — they're called between transactions by the worker loop. Lease times are integer epochs from the injected `Clock`, so `FakeClock.advance()` drives expiry deterministically in tests.

@@ -39,6 +39,39 @@ transition rules.
 
 ## Versioned planning artifacts
 
+Planning proceeds through three versioned subjects, in order:
+
+**`IntentProposal` → `CycleDraft` → active `Cycle`.**
+
+### IntentProposal
+
+`IntentProposal` is a **domain entity**
+(`backend/src/domain/entities/planning_artifacts.py`), not a dedicated API
+DTO. It carries the human-reviewed objective, scope, constraints, exclusions,
+proposal kind (`initial` | `replan`), `base_plan_version`, optional replan
+`source_cycle_id`, and a `revision` counter. The plan detail response field
+`intent_proposal` on `PlanDetailResponse`
+(`backend/src/api/routers/plans.py`) surfaces this domain model directly as
+the OpenAPI schema.
+
+`revision` **starts at 1**. The Plan aggregate is the only mutator
+(`backend/src/domain/aggregates/planner_orchestrator.py`):
+
+- `revise_intent` requires the replacement's `revision` to equal
+  `current.revision + 1` (monotonic +1 only). Any other step raises
+  `InvalidEditError`.
+- `approve_intent` requires the caller-supplied revision to match the open
+  proposal exactly. A missing proposal or stale revision raises
+  `InvalidEditError`.
+
+That exact-revision check is the optimistic-concurrency mechanism for the
+**human intent review gate** (paired with the open `ReviewGate`'s
+`subject_revision`). It is distinct from `Plan.version` CAS, which guards
+worker-vs-edit races on the plan document as a whole (see
+[data-model.md](data-model.md#the-version-cas-optimistic-concurrency)).
+
+### Cycle path
+
 1. Conversation and project/repository context produce an `IntentProposal`.
 2. An exact-revision `ReviewGate` allows approve, edit, or cancel.
 3. Approval makes architecture worker-claimable.
