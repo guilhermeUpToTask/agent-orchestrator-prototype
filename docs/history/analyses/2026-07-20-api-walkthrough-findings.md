@@ -316,6 +316,34 @@ start_replan, edit_pending_work]` — the wedge is cleared, the plan is recovera
 through the API. 272 orchestration truth-tests pass; ruff + mypy clean. Regression
 tests added separately.
 
+## Findings #12/#13 — replan-recovery state is inconsistent (found by driving the recovered fc5fa4c3)  ⚠ OPEN (needs design decision)
+
+After un-freeze #9 un-wedged `fc5fa4c3` (`/replan` 422→204), driving it further
+surfaced the next layer — the cyclic **replan-recovery path** leaves a plan in a
+mutually-contradictory state:
+
+- **#12 — `resume` falsely advertised, then 422s.** After `request_replan`,
+  `begin_replanning` sets `paused=False` but the following `resolve_block`
+  ("start_replan") sets `status = PAUSED` (its generic behavior;
+  planner_orchestrator.py resolve_block). Net: `status=PAUSED` + `paused=False`.
+  `legal_actions` (derived from `status`) advertises `resume`, but `resume()`
+  guards on the `paused` field and raises `INVALID_TRANSITION`
+  ("replanning -> resumed"). The plan also isn't worker-claimable (`status≠running`).
+- **#13 — no working way to advance the replan.** `POST /replanning/message` →
+  422 "finish or cancel the current planning review first", but
+  `DELETE /intent` → 422 "open intent proposal not found". The blocking
+  "planning review" is neither an open intent nor resolvable via any advertised
+  `legal_action` (`[resume, start_replan, edit_pending_work]`).
+
+**Root theme:** `request_replan` uses the legacy `begin_replanning` +
+`resolve_block(start_replan)`, whose status side-effects don't compose — the plan
+lands in `PAUSED`/`REPLANNING` with `paused=False` instead of a coherent
+conversational-replan state. The correct root `status` for a cyclic plan in
+conversational replan (WAITING? and how `legal_actions` should advertise the
+replan-message / cancel path) is a **domain-design decision** — not guessed here.
+Observed on the heavily-mutated `fc5fa4c3` (v77); needs a clean-plan reproduction
+to confirm it's general vs an artifact of that plan's accumulated legacy state.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
