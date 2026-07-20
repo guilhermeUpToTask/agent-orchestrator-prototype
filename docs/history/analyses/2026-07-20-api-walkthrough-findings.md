@@ -145,6 +145,23 @@ the full cyclic lifecycle via the API — which exercises the OpenRouter reasone
 (the actual rate-limit stop condition) and can reach completion. `fc5fa4c3`
 remains parked pending the un-freeze decision above.
 
+## Finding #6 — reasoner 500s on an intent-with-questions from the model  🔧 FIX DISPATCHED
+
+Driving discovery on a fresh plan (`ae47ee19`, project `walkthrough-healthz`) the
+free OpenRouter nemotron model submitted an `IntentCandidate` that still had
+`unresolved_questions`. `OpenAIReasoner.converse` (`openai_reasoner.py:430`)
+raises a bare `ValueError("submitted intent cannot retain unresolved questions")`,
+which is **unhandled → `POST /api/plans` returns 500 Internal Server Error**.
+Model flakiness (a malformed intent shape) exposed a system defect (an unmapped
+exception reaching the client as a 500; the conversation should degrade
+gracefully, not crash).
+
+**Fix (dispatched to codex, `--sandbox danger-full-access`, own branch):** treat a
+submitted-intent-with-unresolved-questions as a **question turn** — return a
+`ReasonerReply` carrying the questions with `intent=None` so discovery stays open
+for another turn, instead of raising. (The plan is left recoverable at
+`activity=intent_discovery`, `legal_actions=[start_intent]`.)
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
