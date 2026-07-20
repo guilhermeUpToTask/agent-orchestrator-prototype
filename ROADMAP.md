@@ -41,41 +41,37 @@ The walkthrough proved agents escape cooperative isolation: worktree + cwd is a
 convention, not a boundary. The post-run guard (this branch) is DETECTION; these
 items are prevention, cheapest first.
 
-### 2. Scrub orchestrator env vars from child agent processes
-Agent subprocesses inherit the worker's full environment (`ORCHESTRATOR_HOME`,
-project paths, etc.) — one of the two breadcrumbs that let an exploring agent
-find and write to the project main repo. Pass an allowlisted env (runtime key +
-the vars the CLI needs) instead of `{**os.environ, ...}` in the CLI runners.
-
-### 3. Pointer-free attempt workspaces
+### 2. Pointer-free attempt workspaces
 The per-attempt git worktree's `.git` is a pointer file naming the main repo's
-absolute path — the second breadcrumb. Evaluate `git clone --shared` (or
-scissor the pointer) for attempt workspaces so no on-disk path names the main
-repository; keep the branch/merge semantics identical. Decide against the
-worktree-prune/audit machinery decision 45 added before changing the mechanism.
+absolute path — the second breadcrumb (the first, full env inheritance, was
+closed by the allowlisted child env in the 2026-07-20 accelerate run). Evaluate
+`git clone --shared` (or scissor the pointer) for attempt workspaces so no
+on-disk path names the main repository; keep the branch/merge semantics
+identical. Decide against the worktree-prune/audit machinery decision 45 added
+before changing the mechanism. Evaluation done 2026-07-20: gitfile scissoring
+is ruled out (corrupts worktree bookkeeping); the candidates are
+`GIT_DIR`+per-attempt-index redirection (keeps in-process `--no-ff` merges,
+requires branch-ref-only audit) vs `git clone --shared` (push-based merges,
+alternates still name the main repo). Both obsolete decision 45's
+worktree-based audit — implementation awaits an explicit decision.
 
 ## Now — test foundation and boundary cleanup [PR20]
 
 Sequencing matters: strengthen tests before refactoring domain/app code so the
 refactors below have a safety net.
 
-### 4. Harden the test foundation
-Review unit + integration coverage through the API layer (not just the
-domain/app truth tests) — routers, error mapping, SSE payloads. Document how
-`src/app/testing/fakes.py` (`InMemoryPlanRepository`, `DummyAgentRunner`,
-`FakeClock`) models real adapter semantics, so its robustness as a design
-asset is legible to reviewers, not just inferred from reading it. After that
-review, reevaluate `src/app/verification.py`'s (98 lines) responsibility —
-confirm it's still the single seam for frozen-command execution and not
-duplicating logic that belongs in the handler or the port.
-Known gap from PR #27: no test actually STREAMS `GET /api/events` — the sync
-TestClient deadlocks holding a stream while mutating; needs an async client
-or a threaded consumer.
+### 3. Clarify domain/application boundaries
+(Item "harden the test foundation" closed 2026-07-20: API-layer coverage landed
+in PR #26/#27, the SSE streaming gap is closed by a live-socket uvicorn test,
+and `src/app/verification.py` was confirmed single-owner — its charter is
+frozen test-BUNDLE validation (pure, handler-only caller), not command
+execution, which lives in `VerificationExecutor`.)
 
-### 5. Clarify domain/application boundaries
-- Define what an `IntentProposal` is in domain terms and where the API
-  surfaces it (response shape, router, OpenAPI schema) — currently implicit
-  in the handler/router code, not written down anywhere.
+Decision briefs for the bullets below were prepared in the 2026-07-20
+accelerate run (router-logic inventory with line refs; `app/ports.py` is a
+justified re-export facade — collapsing it would invert the dependency arrow;
+`observations.py` currently has zero live consumers). The decisions remain
+open:
 - Audit `src/api/routers/plans.py` (1088 lines) for embedded use-case logic
   (branching, validation, orchestration) that belongs in `src/app/`; routers
   are supposed to be thin per the architectural invariants.
@@ -86,15 +82,15 @@ or a threaded consumer.
   whether domain telemetry + domain events (outbox/agent_events) already
   cover its job.
 
-### 6. Refactor orchestration (after 4 and 5 land)
+### 4. Refactor orchestration (after 3 lands)
 - Decompose `src/domain/aggregates/planner_orchestrator.py` (882 lines) — the
   single-authority aggregate is correct as a boundary, but its size makes
   review and change risky; split by responsibility (transitions vs.
   navigation vs. gate logic) without breaking the "only caller of
   Goal/Task transitions" invariant.
 - Remove legacy/backward-compat code (e.g. the compat branches in
-  `src/app/use_cases/advance_plan.py` and similar call sites) — but ONLY
-  after the test hardening in item 4 protects the behavior being deleted.
+  `src/app/use_cases/advance_plan.py` and similar call sites) — the test
+  hardening that protects the behavior being deleted landed 2026-07-20.
 - Formalize abrupt pause/resume semantics: define precisely when a pause must
   interrupt a running task attempt vs. merely stop new claims, and what
   "paused goal" means for a goal mid-promotion. Decision 44's Git-promotion
@@ -102,23 +98,26 @@ or a threaded consumer.
   reservation — this item is the general policy the reservation is a special
   case of.
 
-### 7. Refactor handlers, in dependency order (after 4–6)
+### 5. Refactor handlers, in dependency order (after 3–4)
 `execution_handler.py` (1249 lines) first, then `planning_handler.py` (514
 lines) — execution is upstream of planning in the dependency graph and carries
 more risk. Share only mechanisms proven common to both (not speculative
 abstraction). Refactoring prompts already exist from the PR #20 review; do not
-start until the API-layer tests from item 4 are in place — the whole point is
+start until item 3's decisions land — the API-layer safety net exists; the point is
 a safety net before touching 1700+ lines of handler code.
 
 ## Next — tooling and documentation consolidation [PR20]
 
-### 8. DB-schema-inspection → diagram tool
+### 6. DB-schema-inspection → diagram tool
 Idea surfaced during the migration 0009 review: a small tool that inspects the
 live SQLite schema and emits a diagram (tables, FKs, indexes) so
 `docs/architecture/data-model.md` can be checked against the DB instead of
-hand-maintained. No design yet — evidence-gated on the doc actually drifting.
+hand-maintained. Evidence gate checked 2026-07-20: the doc HAD drifted (two
+migrations, 0009+0010 — two tables and ~20 columns) and was hand-fixed in the
+same run (~30 min). One lapse doesn't evidence recurring drift; the tool stays
+unbuilt unless the doc drifts again.
 
-### 9. Oversized graphify skill review
+### 7. Oversized graphify skill review
 Tracked separately from this roadmap: the graphify skill review left comments
 against outdated diff locations (the file moved under later commits). Not an
 architecture item — a skill-repo hygiene follow-up.
