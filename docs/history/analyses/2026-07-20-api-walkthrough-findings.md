@@ -212,6 +212,21 @@ observation feed is therefore incomplete. Dispatched to codex
 (`--sandbox danger-full-access`, own branch) to wire the process-capable
 observation repository (or make `append` accept process observations).
 
+## Finding #10 — dry-run can't complete a task with a real verification command  ⚠ OPEN (env constraint)
+
+The dry-run workaround for #8 applied (attempts 4-5 ran `runtime=dry-run`), but
+each failed at verification: the frozen `TaskContract`'s command is a real
+`go test -v ./internal/handler/...`, which fails against `DummyAgentRunner`'s
+placeholder artifacts (no real Go project). So **neither path completes the
+cycle**: the real pi agent is blocked by the #8 model-string bug, and dry-run
+can't satisfy a real language-specific verification. Cycle completion here
+therefore depends on the **#8 fix** (dispatched to codex) landing so a real
+agent can produce code that passes the frozen `go test`. Until then the loop's
+"cycle finished" stop-condition is not autonomously reachable, and the
+OpenRouter *reasoner* is not the blocker (it drove discovery→architecture→
+enrichment fine), so the "rate limit exhausted" stop-condition isn't triggered
+either. Progress now runs through fixing #8/#9, not driving the plan.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
