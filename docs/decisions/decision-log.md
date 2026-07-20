@@ -110,3 +110,18 @@ configuration changes cannot strand work on `main` assumptions or a stale
 repository. The unimplemented active `cancel_cycle` advertisement is removed;
 cycle cancellation remains an explicit publication disposition or draft
 cancellation, never a display-only command.
+
+49. **Domain unfreeze #9 (2026-07-20): cyclic-aware pause & replan guards.**
+`Plan.request_pause`, `Plan.pause`, and `Plan.begin_replanning` guarded on the
+legacy `PlanPhase` (`WORKER_CLAIMABLE_PHASES` / `{RUNNING, REVIEW}`), but a
+cyclic plan's advertised `legal_actions` derive from root `PlanStatus` + open
+artifacts. A running or blocked cyclic plan whose legacy phase projection is
+`REPLANNING` therefore advertised `pause` / `start_replan` while the domain
+transition rejected them (`INVALID_TRANSITION`) — wedging plans with no working
+recovery, surfaced by the 2026-07-20 API walkthrough (findings #2/#5). The
+guards now consult the cyclic authority exactly as `resume()` already did: pause
+is legal when `status == RUNNING` and (`active_cycle is not None` or the legacy
+phase is claimable); `begin_replanning` skips the legacy phase guard when
+`active_cycle is not None`. Legacy (pre-cyclic) plans keep the phase guards
+unchanged. No new fields or statuses; this aligns advertised `legal_actions`
+with the transition guards so every advertised recovery is executable.

@@ -301,6 +301,21 @@ a stronger model). Not a system defect; the TDD scope enforcement works
 correctly. Continuing requires a stronger (paid) model for the role — a
 spend/human-gate decision.
 
+## RESOLUTION #2/#5 — cyclic-aware pause & replan guards (domain unfreeze #9)  ✅ FIXED & live-verified
+
+User-authorized domain un-freeze (decision 49). `Plan.request_pause`, `Plan.pause`,
+and `Plan.begin_replanning` now consult the cyclic authority (`active_cycle` /
+`status`) instead of only the legacy `PlanPhase`, exactly as `resume()` already
+did — so a running/blocked cyclic plan whose legacy phase is `REPLANNING` can
+actually be paused/replanned, matching its advertised `legal_actions`.
+
+**Live-verified on the previously-wedged `fc5fa4c3`:** `POST /replan` went from
+`422 INVALID_TRANSITION` → **204**, moving the plan from `blocked` (unrecoverable)
+to `paused` / `activity=cycle_architecture` with `legal_actions=[resume,
+start_replan, edit_pending_work]` — the wedge is cleared, the plan is recoverable
+through the API. 272 orchestration truth-tests pass; ruff + mypy clean. Regression
+tests added separately.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
