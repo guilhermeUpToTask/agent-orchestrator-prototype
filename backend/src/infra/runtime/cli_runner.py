@@ -523,6 +523,8 @@ class PiAgentRunner(CliAgentRunner):
     def _build_cmd(self, prompt: str) -> list[str]:
         return [
             "pi",
+            "--provider",
+            self._backend,
             "--model",
             self._model,
             "--no-session",

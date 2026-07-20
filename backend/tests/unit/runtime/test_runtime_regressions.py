@@ -52,8 +52,12 @@ def test_pi_strips_only_its_provider_prefix_from_model_id() -> None:
         provider_id="openrouter",
     )
 
-    assert qualified._build_cmd("prompt")[2] == "nvidia/nemotron:free"
-    assert bare._build_cmd("prompt")[2] == "nvidia/nemotron:free"
+    for runner in (qualified, bare):
+        cmd = runner._build_cmd("prompt")
+        # pi resolves an OpenRouter model only when BOTH the provider and the
+        # bare (prefix-stripped) model name are passed.
+        assert cmd[cmd.index("--model") + 1] == "nvidia/nemotron:free"
+        assert cmd[cmd.index("--provider") + 1] == "openrouter"
 
 
 def test_container_process_repository_persists_process_observations(tmp_path) -> None:
