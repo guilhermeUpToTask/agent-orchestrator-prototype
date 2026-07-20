@@ -101,6 +101,28 @@ advertised `legal_resolutions` (`retry_stage`/`edit_task`/`start_replan`) can
 *actually* repair a `DONE`-but-evidence-less task — otherwise the block is only
 nominally recoverable.
 
+## Finding #4 — block advertises a resolution that can't run (`retry` on a skipped task)  ✅ FIXED
+
+Confirming codex's "nominally recoverable" warning against the live plan:
+`POST /api/plans/{id}/retry {goal_id, task_id}` on the block returned
+
+```
+HTTP 422  INVALID_TRANSITION
+"Task '99446048…' cannot transition from skipped to pending."
+```
+
+The offending task is **`skipped`** (a terminal-but-not-DONE state — exactly the
+case Finding #3 warned about), not FAILED. `Task.retry()` only allows
+`FAILED → pending`, so the `retry_stage` resolution the block advertised is
+rejected the moment an operator invokes it — a nominal-only recovery action.
+
+**Fix** (this branch): `_block_on_unpromotable_goal` now advertises
+`legal_resolutions` honestly — `retry_stage` only when the offending task is
+`FAILED`; otherwise just `edit_task` / `start_replan`. Blocks no longer offer a
+resolution the API will reject. (The deeper cure remains Finding #3 — navigation
+should not select a goal with a `skipped`/evidence-less task as promotable in the
+first place.)
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is

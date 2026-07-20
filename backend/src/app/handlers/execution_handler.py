@@ -717,6 +717,14 @@ class ExecutionHandler:
             for task in goal.tasks
             if task.status != Status.DONE or not task.verification_evidence
         )
+        # Only advertise resolutions that can actually repair this block. `retry`
+        # requires a FAILED task (Task.retry rejects skipped/cancelled/terminal ->
+        # pending), so a goal wedged by a SKIPPED/evidence-less-DONE task is
+        # recoverable only via edit_task or start_replan — offering retry_stage
+        # there is a nominal-only resolution that 422s when the operator tries it.
+        resolutions = ["edit_task", "start_replan"]
+        if offending.status == Status.FAILED:
+            resolutions = ["retry_stage", *resolutions]
         block = PlanBlock(
             id=new_id(),
             kind="execution_failure",
@@ -725,7 +733,7 @@ class ExecutionHandler:
             goal_id=goal.id,
             task_id=offending.id,
             task_revision=offending.revision,
-            legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+            legal_resolutions=resolutions,
             created_at=self._clock.now(),
         )
         plan.open_block(block)
