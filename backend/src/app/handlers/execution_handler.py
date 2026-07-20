@@ -138,7 +138,17 @@ class ExecutionHandler:
             if second is None:  # goal's tasks all terminal, none failed -> close it
                 if plan.active_cycle is None:
                     return self._complete_legacy_goal(plan_id, plan, goal, uow)
-                goal_promotion = self._reserve_goal_promotion(plan, goal, uow)
+                try:
+                    goal_promotion = self._reserve_goal_promotion(plan, goal, uow)
+                except TaskFailed as failure:
+                    # Navigation selected this goal to close, but a task is not
+                    # DONE-with-accepted-evidence (e.g. a legacy/replan artifact).
+                    # Open a recoverable block — never let this escape to the
+                    # worker loop, which re-runs the reservation and hot-loops the
+                    # same TaskFailed every tick.
+                    return self._block_on_unpromotable_goal(
+                        plan_id, plan, goal, failure, uow
+                    )
             else:
                 if second == "GOAL_FAILED":
                     return self._pause_on_failed_goal(plan_id, plan, goal, uow)
@@ -693,6 +703,45 @@ class ExecutionHandler:
         uow.outbox.add(GoalCompleted(plan_id=plan_id, goal_id=goal.id))
         uow.plans.save(plan)
         return Signal.CONTINUE
+
+    def _block_on_unpromotable_goal(
+        self, plan_id: str, plan: Plan, goal: Goal, failure: TaskFailed, uow: UnitOfWork
+    ) -> Signal:
+        """A goal navigation selected to close but that cannot merge (a task is
+        not DONE or has no accepted evidence — typically a legacy/replan artifact)
+        opens a structured block, mirroring `_pause_on_failed_goal`. Without this
+        the reservation's TaskFailed escapes `handle()` to the worker loop, which
+        re-dispatches and re-raises it every tick (a 1Hz poisoned-plan storm)."""
+        offending = next(
+            task
+            for task in goal.tasks
+            if task.status != Status.DONE or not task.verification_evidence
+        )
+        block = PlanBlock(
+            id=new_id(),
+            kind="execution_failure",
+            explanation=str(failure),
+            stage=offending.tdd_stage,
+            goal_id=goal.id,
+            task_id=offending.id,
+            task_revision=offending.revision,
+            legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+            created_at=self._clock.now(),
+        )
+        plan.open_block(block)
+        uow.outbox.add(
+            PlanBlocked(
+                plan_id=plan_id,
+                block_id=block.id,
+                stage=block.stage,
+                goal_id=goal.id,
+                task_id=offending.id,
+                task_revision=offending.revision,
+            )
+        )
+        plan.bump_version()
+        uow.plans.save(plan)
+        return Signal.PAUSED
 
     def _reserve_goal_promotion(
         self,
