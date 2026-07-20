@@ -2,7 +2,7 @@
 
 *One SQLite file holds everything. The plan is a document; the catalogs are relational; secrets are envelope-encrypted.*
 
-Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0008_typed_observations`).
+Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0010_operational_recovery`).
 
 ## Schema at a glance
 
@@ -10,12 +10,20 @@ Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), 
 erDiagram
     plans {
         string id PK
+        string project_id FK "nullable, unique when set"
+        string status "blocked | idle | waiting | running (claim predicate)"
         int version "optimistic-lock CAS"
         string phase "promoted for the claim query"
         int iteration
         text data "THE AGGREGATE - one JSON document"
         string claimed_by "lease"
+        int claimed_at "epoch seconds"
         int lease_expires_at "epoch seconds"
+        int lease_seconds
+        int retry_not_before "planning backoff gate, epoch seconds"
+        int paused "human pause gate"
+        int pause_requested "claim predicate"
+        string created_at
         string updated_at "claim ordering"
     }
     plan_requests {
@@ -50,6 +58,51 @@ erDiagram
         string status "running | succeeded | failed | abandoned"
         string started_at
         string completed_at
+        string last_liveness_at
+        int timeout_seconds
+        string runtime
+        string provider_id
+        string model_id
+        string failure_kind
+        string provider_code
+        int retryable
+        string retry_at
+        string limit_scope
+        int exit_code
+        text safe_message
+        text stdout_tail
+        text stderr_tail
+    }
+    planning_operations {
+        string id PK
+        string plan_id FK
+        string purpose
+        string target_goal_id "nullable"
+        string status "queued|started|waiting_for_user|committed|failed|backing_off"
+        string created_at
+        string updated_at
+        string started_at
+        string completed_at
+        string last_liveness_at
+        int model_request_count
+        int tool_turn_count
+        string runtime
+        string provider_id
+        string model_id
+        string failure_kind
+        string retry_at
+        text safe_message
+    }
+    runtime_circuits {
+        string runtime PK
+        string provider_id PK
+        string model_id PK
+        int failure_count
+        string opened_at
+        string retry_at
+        string last_failure_kind
+        text safe_message
+        int manual_intervention
     }
     agent_events {
         int id PK "relay cursor"
@@ -61,6 +114,7 @@ erDiagram
         string attempt_id
         int attempt "legacy/task-lifetime compatibility"
         int seq "legacy compatibility"
+        string type "legacy event type"
         string observation_kind
         string source
         string quality
@@ -76,9 +130,14 @@ erDiagram
         string role "user | assistant"
         text content
         text meta "committed flag"
+        string created_at
     }
     agents {
         string id PK
+        string name
+        string role
+        string model_role
+        text instructions
         string runtime_type "pi | claude | gemini | dry-run"
         string provider_id "NOT FK-constrained (see note)"
         string model_id
@@ -87,6 +146,8 @@ erDiagram
     }
     capabilities {
         string id PK
+        string name
+        text description
         text tools "JSON list"
     }
     agent_capabilities {
@@ -95,17 +156,21 @@ erDiagram
     }
     providers {
         string id PK
+        string name
         string base_url
         string api_key_ref "secret URI - NEVER plaintext"
     }
     models {
         string id PK
         string provider_id FK "CASCADE down"
+        string name
     }
     secrets {
         string uri PK
         text ciphertext
         text wrapped_key "envelope encryption"
+        string created_at
+        string updated_at
     }
     config {
         string scope PK "orchestrator | project id"
@@ -114,13 +179,16 @@ erDiagram
     }
     projects {
         string id PK
+        string name
         string repo_url
     }
 
+    projects ||--o| plans : "binds (unique project_id)"
     plans ||--o{ plan_requests : "idempotency"
     plans ||--o{ execution_runs : "operational lifecycle"
     plans ||--o{ execution_attempts : "correlation"
     execution_runs ||--o{ execution_attempts : "invocations"
+    plans ||--o{ planning_operations : "operational ledger"
     plans ||--o{ plan_chat_messages : "conversation"
     agents ||--o{ agent_capabilities : ""
     capabilities ||--o{ agent_capabilities : ""
@@ -129,9 +197,13 @@ erDiagram
 
 ## The plan-as-document decision
 
-The `Plan` aggregate — goals, tasks, results, retry policy, everything — is stored as **one JSON document** in `plans.data`. Scalar columns are promoted *only* for what SQL must predicate on: the claim query (`phase` + lease columns), the version CAS, and cheap listings (`updated_at`, `iteration`). There is no ORM mapping of the domain; repositories do JSON in / JSON out via `PlanFactory.reconstruct`.
+The `Plan` aggregate — goals, tasks, results, retry policy, everything — is stored as **one JSON document** in `plans.data`. Scalar columns are promoted *only* for what SQL must predicate on: the claim query (`status`, `pause_requested`, `lease_expires_at` — index `ix_plans_claim`), the version CAS, and cheap listings (`updated_at`, `iteration`). `plans.project_id` is a nullable FK to `projects.id`, guarded by the partial unique index `uq_plans_project_id` (`WHERE project_id IS NOT NULL`) — a project binds to **at most one** plan at a time. `plans.status` is a coarser, worker-claim-oriented projection distinct from the nine-phase `phase` enum; `paused`/`pause_requested`/`retry_not_before` project the domain pause gate and planning backoff gate so they survive crashes. There is no ORM mapping of the domain; repositories do JSON in / JSON out via `PlanFactory.reconstruct`.
 
-`execution_runs` and `execution_attempts` are deliberately outside that document. They are operational application records, not aggregates: a logical run spans automatic retries, while every actual invocation gets a UUID attempt plus a task-lifetime monotonic number. A human retry starts a new run without reusing the workspace attempt number.
+`execution_runs` and `execution_attempts` are deliberately outside that document. They are operational application records, not aggregates: a logical run spans automatic retries, while every actual invocation gets a UUID attempt plus a task-lifetime monotonic number. A human retry starts a new run without reusing the workspace attempt number. `execution_attempts` also carries the runtime-resolution snapshot for the invocation (`runtime`, `provider_id`, `model_id`, `timeout_seconds`, `last_liveness_at`) and the taxonomy/evidence captured on completion (`failure_kind`, `provider_code`, `retryable`, `retry_at`, `limit_scope`, `exit_code`, `safe_message`, `stdout_tail`, `stderr_tail`).
+
+`planning_operations` is the equivalent operational ledger for the DISCOVERY/REPLANNING/ENRICHING side: one row per reasoner-driven operation (`purpose`, optional `target_goal_id`), tracking liveness (`last_liveness_at`), request/turn counters, the runtime/provider/model it ran on, and failure/backoff evidence (`failure_kind`, `retry_at`, `safe_message`) — mirrors the execution-attempt shape for planning work.
+
+`runtime_circuits` is a provider circuit breaker keyed on the composite `(runtime, provider_id, model_id)`: it tracks consecutive failures, when the circuit opened, when it's eligible to retry, the last failure kind, and whether it requires `manual_intervention` before it can close again. `ix_runtime_circuits_retry` supports scanning for circuits eligible to retry.
 
 `agent_events` is the compatibility physical stream for both typed operational observations and legacy runtime events. Typed rows use `event_id` as the stable observation ID and retain provenance, quality, schema version, observed/recorded times, and optional run/attempt correlation. Legacy rows are preserved and marked `legacy_unknown`; nullable metadata permits rolling compatibility with older writers.
 
@@ -145,9 +217,11 @@ What this buys, and what it costs:
 
 Use cases call `plan.bump_version()` *then* `uow.plans.save(plan)`. The save is a single upsert whose UPDATE arm fires only when `plans.version < excluded.version`; rowcount 0 → `StaleVersionError` → HTTP 409 (the worker-vs-human-edit race, surfaced instead of silently lost). `save()` never touches the lease columns — ownership and state travel on separate paths.
 
+Separate from this document-level CAS: `IntentProposal.revision` (exact match on approve; monotonic +1 on revise) is the optimistic-concurrency gate for **human intent review**. See [plan-lifecycle.md — IntentProposal](plan-lifecycle.md#intentproposal).
+
 ### The lease (rows as ownership)
 
-`claim_one_unit` is one atomic `UPDATE … RETURNING` over the claim predicate (worker-claimable phase + lease NULL/expired, oldest `updated_at` first). `heartbeat`/`release` run on their own short sessions, *outside* the UnitOfWork — they're called between transactions by the worker loop. Lease times are integer epochs from the injected `Clock`, so `FakeClock.advance()` drives expiry deterministically in tests.
+`claim_one_unit` is one atomic `UPDATE … RETURNING` over the claim predicate (worker-claimable `status`, `pause_requested` = 0, lease NULL/expired, oldest `updated_at` first). `heartbeat`/`release` run on their own short sessions, *outside* the UnitOfWork — they're called between transactions by the worker loop. Lease times are integer epochs from the injected `Clock`, so `FakeClock.advance()` drives expiry deterministically in tests.
 
 ## Transactions — the UnitOfWork
 

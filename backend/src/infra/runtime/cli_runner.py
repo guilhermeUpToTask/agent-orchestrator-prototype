@@ -42,7 +42,7 @@ from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.value_objects.tasks_vos import TaskResult
 from src.infra.runtime.taxonomy import normalize_failure
-from src.infra.runtime.pi_protocol import parse_pi_events
+from src.infra.runtime.pi_protocol import extract_final_text, parse_pi_events
 from src.infra.runtime.process_supervisor import (
     attempt_log_path,
     supervise_process,
@@ -51,6 +51,15 @@ from src.infra.runtime.process_supervisor import (
 log = structlog.get_logger(__name__)
 
 _OUTPUT_TAIL_CHARS = 8_000  # keep TaskResult.output bounded
+
+_CHILD_ENV_VARS = (
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
+    "TERM", "TMPDIR", "TZ", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+)
+
+
+def _base_child_env() -> dict[str, str]:
+    return {name: value for name in _CHILD_ENV_VARS if (value := os.environ.get(name)) is not None}
 
 
 def _parse_idempotency_key(
@@ -184,6 +193,15 @@ class CliAgentRunner(ABC):
     @abstractmethod
     def _env(self) -> dict[str, str]: ...
 
+    def _task_output(self, stdout: str) -> str:
+        """The human-readable outcome persisted as TaskResult.output.
+
+        Runners whose stdout is a structured event stream (pi --mode json)
+        override this to extract the final message; events always parse from
+        the raw stream, never from this value.
+        """
+        return stdout
+
     async def run(
         self,
         task: Task,
@@ -220,7 +238,7 @@ class CliAgentRunner(ABC):
         )
         started = time.monotonic()
         try:
-            result = await asyncio.to_thread(
+            result, raw_stdout = await asyncio.to_thread(
                 self._run_sync,
                 prompt,
                 workspace.path,
@@ -264,7 +282,7 @@ class CliAgentRunner(ABC):
         await self._persist_observations(observations)
         elapsed = round(time.monotonic() - started, 2)
         seq = 1
-        for event_type, payload in self._events_from_output(result.output):
+        for event_type, payload in self._events_from_output(raw_stdout):
             await self._emit(
                 event_sink,
                 plan_id=plan_id,
@@ -344,7 +362,7 @@ class CliAgentRunner(ABC):
         cwd: str,
         execution_env: dict[str, str],
         observations: list[TelemetryObservation],
-    ) -> TaskResult:
+    ) -> tuple[TaskResult, str]:
         cmd = self._build_cmd(prompt)
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
 
@@ -432,16 +450,19 @@ class CliAgentRunner(ABC):
             raise TaskFailed(failure.safe_message, failure=failure)
 
         log.info(f"{self.log_prefix}.finished", exit_code=0, log_path=str(result.log_path))
-        return TaskResult.success(
-            stdout[-_OUTPUT_TAIL_CHARS:],
-            metadata={
-                "runtime": self.log_prefix,
-                "exit_code": "0",
-                "cleanup": "complete",
-                "log_path": str(result.log_path),
-                "stdout_bytes": str(result.stdout_bytes),
-                "stderr_bytes": str(result.stderr_bytes),
-            },
+        return (
+            TaskResult.success(
+                self._task_output(stdout)[-_OUTPUT_TAIL_CHARS:],
+                metadata={
+                    "runtime": self.log_prefix,
+                    "exit_code": "0",
+                    "cleanup": "complete",
+                    "log_path": str(result.log_path),
+                    "stdout_bytes": str(result.stdout_bytes),
+                    "stderr_bytes": str(result.stderr_bytes),
+                },
+            ),
+            stdout,
         )
 
 
@@ -497,13 +518,20 @@ class PiAgentRunner(CliAgentRunner):
             self._model,
             "--no-session",
             "--no-context-files",
+            "--mode",
+            "json",
             "-p",
             prompt,
             *self._extra_flags,
         ]
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
+        return {**_base_child_env(), PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
+
+    def _task_output(self, stdout: str) -> str:
+        # --mode json makes stdout an NDJSON event stream; persist the final
+        # assistant message as the task outcome, never the raw stream.
+        return extract_final_text(stdout) or stdout
 
     def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
         structured = parse_pi_events(output)
@@ -546,7 +574,7 @@ class ClaudeCodeRunner(CliAgentRunner):
         return cmd + self._extra_flags
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, "ANTHROPIC_API_KEY": self._api_key}
+        return {**_base_child_env(), "ANTHROPIC_API_KEY": self._api_key}
 
 
 class GeminiRunner(CliAgentRunner):
@@ -590,7 +618,7 @@ class GeminiRunner(CliAgentRunner):
 
     def _env(self) -> dict[str, str]:
         return {
-            **os.environ,
+            **_base_child_env(),
             "GEMINI_API_KEY": self._api_key,
             "GEMINI_MODEL": self._model,
         }

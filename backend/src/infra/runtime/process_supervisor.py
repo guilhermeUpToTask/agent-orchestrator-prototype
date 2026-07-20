@@ -79,16 +79,18 @@ class _BoundedLog:
             ).encode("utf-8")
             + b"\n"
         )
-        with self._lock, self.path.open("ab+") as handle:
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() + len(record) > self.cap_bytes:
-                handle.seek(0)
-                existing = handle.read()
-                retained = self._compute_retained(existing, record)
-                handle.seek(0)
-                handle.truncate()
-                handle.write(retained)
-            handle.write(record[-self.cap_bytes :])
+        with self._lock:
+            if self.path.stat().st_size + len(record) > self.cap_bytes:
+                # Rotate atomically: concurrent readers (the attempt-log API
+                # endpoint tails this file mid-run) must never observe the
+                # empty window an in-place truncate+rewrite would open.
+                retained = self._compute_retained(self.path.read_bytes(), record)
+                tmp = self.path.with_suffix(self.path.suffix + ".rotate")
+                tmp.write_bytes(retained + record[-self.cap_bytes :])
+                os.replace(tmp, self.path)
+            else:
+                with self.path.open("ab") as handle:
+                    handle.write(record[-self.cap_bytes :])
 
 
 class _BoundedBuffer:
