@@ -1,0 +1,29 @@
+{
+  "runtimes": [
+    {
+      "duration_seconds_median": 1400.0,
+      "duration_seconds_p90": 2100.0,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.5,
+      "human_interventions": 1,
+      "quota_tokens_total": "unavailable",
+      "runtime": "codex",
+      "tasks_routed_initially": 2,
+      "verified_completions": 2
+    },
+    {
+      "duration_seconds_median": 270.0,
+      "duration_seconds_p90": 300.0,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.5,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "grok",
+      "tasks_routed_initially": 2,
+      "verified_completions": 2
+    }
+  ],
+  "task_count": 4
+}

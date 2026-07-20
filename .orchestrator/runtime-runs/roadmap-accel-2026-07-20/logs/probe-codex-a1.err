@@ -1,0 +1,19 @@
+Reading additional input from stdin...
+OpenAI Codex v0.144.5
+--------
+workdir: /workspaces/agent-orchestrator/.orchestrator/worktrees/integration
+model: gpt-5.6-luna
+provider: openai
+approval: on-request
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019f7cec-595f-72c3-8764-50aec13977b7
+--------
+user
+Reply with exactly one word: OK
+2026-07-20T00:28:14.203345Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_request\", error_description=\"No access token was provided in this request\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+codex
+OK
+tokens used
+5,156
