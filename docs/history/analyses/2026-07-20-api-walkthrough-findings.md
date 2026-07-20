@@ -123,6 +123,28 @@ resolution the API will reject. (The deeper cure remains Finding #3 — navigati
 should not select a goal with a `skipped`/evidence-less task as promotable in the
 first place.)
 
+## Finding #5 — `start_replan` also rejected; `fc5fa4c3` is API-unrecoverable (wedged)  ⚠ OPEN (human gate)
+
+`POST /api/plans/{id}/replan` on the block → `422 INVALID_TRANSITION`
+"cannot transition from replanning to replanning" (the legacy `phase` is already
+`replanning` from the original replan that built this cycle). Combined with
+Finding #4 (`retry` rejected on the `skipped` task), **two of the block's three
+advertised resolutions fail** — the same legacy-phase-vs-cyclic-status mismatch
+as Finding #2, now in the recovery-command guards. `fc5fa4c3` cannot be driven
+forward through the FastAPI layer: it is wedged by a legacy `skipped`-task
+artifact, and every non-`edit` recovery is rejected by a stale-phase guard.
+
+**Recovering it requires a human gate** — either the domain un-freeze that
+Findings #2/#4/#5 all point to (guard on cyclic `status`/`active_cycle`, not
+legacy `phase`), or direct DB state surgery. Neither is takeable autonomously.
+
+**Loop pivot (recorded):** to honor "keep looping until the plan cycle is
+finished or the OpenRouter rate limit is exhausted," the walkthrough continues on
+a **fresh plan under the same project** (`ba5c0163…`, "restful server"), driving
+the full cyclic lifecycle via the API — which exercises the OpenRouter reasoner
+(the actual rate-limit stop condition) and can reach completion. `fc5fa4c3`
+remains parked pending the un-freeze decision above.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
