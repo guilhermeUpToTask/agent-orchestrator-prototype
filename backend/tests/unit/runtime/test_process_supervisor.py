@@ -169,3 +169,40 @@ def test_supervise_process_rejects_tiny_log_cap(tmp_path: Path) -> None:
             log_path=tmp_path / "tiny.jsonl",
             log_cap_bytes=64,
         )
+
+
+def test_bounded_log_rotation_never_exposes_an_empty_file(tmp_path: Path) -> None:
+    """Readers tail the log concurrently (the attempt-log endpoint); rotation
+    must be atomic — a read during the at-cap rewrite may never see an empty
+    or marker-less file."""
+    import threading
+
+    from src.infra.runtime.process_supervisor import _BoundedLog
+
+    log = _BoundedLog(tmp_path / "rot.jsonl", 2048)
+    stop = threading.Event()
+    failures: list[str] = []
+
+    def reader() -> None:
+        while not stop.is_set():
+            content = (tmp_path / "rot.jsonl").read_text(encoding="utf-8")
+            if content == "" and stop.is_set() is False and rotated.is_set():
+                failures.append("empty read after rotation began")
+
+    rotated = threading.Event()
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    try:
+        chunk = "x" * 120 + "\n"
+        for index in range(200):
+            log.write("stdout", chunk)
+            if index > 10:
+                rotated.set()
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+    assert failures == []
+    lines = (tmp_path / "rot.jsonl").read_text(encoding="utf-8").splitlines()
+    assert lines[0].strip() == '{"truncated":true}'
+    assert 0 < sum(len(line.encode()) + 1 for line in lines) <= 2048

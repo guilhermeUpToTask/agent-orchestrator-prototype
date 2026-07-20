@@ -200,8 +200,13 @@ Take these up only when real usage demonstrates the need.
 26. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
     (systemd or process manager) that restarts a dead worker; the lease
     handles the takeover. Document failure modes; no distributed consensus.
-27. **pi NDJSON streaming** [MRF] — the full pi stdio handshake streaming
-    fine-grained agent events; seam is `src/infra/runtime/pi_protocol.py`.
+27. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
+    runner now runs `--mode json`, the NDJSON stream tails into the bounded
+    per-attempt runtime log (atomic rotation; readable mid-run via
+    `GET /plans/{id}/attempts/{id}/log`), tool/usage events are promoted to
+    agent_events, and the final assistant message becomes the task output
+    (`src/infra/runtime/pi_protocol.py`). Remaining scope is only the full
+    rpc/stdio handshake if bidirectional control is ever needed.
 28. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
     repository port *only if* multi-machine workers become real. Deliberately
     unnecessary for local-first.
