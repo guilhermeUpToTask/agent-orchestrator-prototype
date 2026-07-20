@@ -78,6 +78,29 @@ or stop the worker, not `pause`.
 
 ---
 
+## Finding #3 — navigation eligibility ≠ promotion eligibility  ⚠ OPEN (latent, surfaced by codex review)
+
+Independent codex analysis of the storm confirmed both root causes and the fix's
+transaction safety (`_reserve_goal_promotion` is validation-first — it raises
+*before* `reserve_promotion`/`bump_version`/`save`, so the same-txn block sees an
+unmutated plan; idempotency holds because the block makes the plan non-claimable,
+so it is never re-dispatched — live-confirmed by 0 post-fix `tick_failed`).
+
+It also surfaced the deeper semantic mismatch the #1 fix does not resolve:
+`peek_next()` returns `(goal, None)` ("promotable") based only on tasks being
+**terminal and none failed**, while `_reserve_goal_promotion` additionally
+requires every task to be `DONE` **with evidence**. A `DONE`-but-evidence-less
+task (or a skipped/cancelled terminal task) therefore produces a *permanently*
+unpromotable navigation result. The #1 fix converts the resulting storm into a
+block, but the two predicates should be reconciled — navigation should return a
+distinct blocked/invalid state, or share one canonical `can_promote` predicate
+with the reservation. **Follow-up, not yet done.**
+
+Related open question for the next walkthrough layer: verify the block's
+advertised `legal_resolutions` (`retry_stage`/`edit_task`/`start_replan`) can
+*actually* repair a `DONE`-but-evidence-less task — otherwise the block is only
+nominally recoverable.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
