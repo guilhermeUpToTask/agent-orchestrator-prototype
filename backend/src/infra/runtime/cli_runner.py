@@ -52,6 +52,15 @@ log = structlog.get_logger(__name__)
 
 _OUTPUT_TAIL_CHARS = 8_000  # keep TaskResult.output bounded
 
+_CHILD_ENV_VARS = (
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
+    "TERM", "TMPDIR", "TZ", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+)
+
+
+def _base_child_env() -> dict[str, str]:
+    return {name: value for name in _CHILD_ENV_VARS if (value := os.environ.get(name)) is not None}
+
 
 def _parse_idempotency_key(
     idempotency_key: str,
@@ -503,7 +512,7 @@ class PiAgentRunner(CliAgentRunner):
         ]
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
+        return {**_base_child_env(), PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
 
     def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
         structured = parse_pi_events(output)
@@ -546,7 +555,7 @@ class ClaudeCodeRunner(CliAgentRunner):
         return cmd + self._extra_flags
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, "ANTHROPIC_API_KEY": self._api_key}
+        return {**_base_child_env(), "ANTHROPIC_API_KEY": self._api_key}
 
 
 class GeminiRunner(CliAgentRunner):
@@ -590,7 +599,7 @@ class GeminiRunner(CliAgentRunner):
 
     def _env(self) -> dict[str, str]:
         return {
-            **os.environ,
+            **_base_child_env(),
             "GEMINI_API_KEY": self._api_key,
             "GEMINI_MODEL": self._model,
         }
