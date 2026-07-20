@@ -1,0 +1,3 @@
+Unable to edit `ROADMAP.md`: the workspace sandbox fails before every file operation because `bubblewrap` cannot create a namespace.
+No files were changed, and no commit was created.
+Please restore the workspace sandbox/user-namespace capability, then rerun this request.

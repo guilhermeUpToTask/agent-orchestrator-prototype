@@ -1,0 +1,18 @@
+Reading additional input from stdin...
+OpenAI Codex v0.144.5
+--------
+workdir: /workspaces/agent-orchestrator/.orchestrator/worktrees/roadmap-restructure
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019f8032-2aab-71e2-80d8-e54e42281010
+--------
+user
+Reply with exactly one word: OK
+codex
+OK
+tokens used
+2,850

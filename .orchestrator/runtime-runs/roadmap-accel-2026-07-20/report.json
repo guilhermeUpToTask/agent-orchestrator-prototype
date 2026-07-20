@@ -1,0 +1,41 @@
+{
+  "runtimes": [
+    {
+      "duration_seconds_median": 59.5,
+      "duration_seconds_p90": 79.0,
+      "escalation_rate": null,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "claude_sonnet",
+      "tasks_routed_initially": 0,
+      "verified_completions": 6
+    },
+    {
+      "duration_seconds_median": 660.0,
+      "duration_seconds_p90": 660.0,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.5,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "codex",
+      "tasks_routed_initially": 2,
+      "verified_completions": 1
+    },
+    {
+      "duration_seconds_median": 700.0,
+      "duration_seconds_p90": 700.0,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 0.5,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "grok",
+      "tasks_routed_initially": 2,
+      "verified_completions": 1
+    }
+  ],
+  "task_count": 4
+}

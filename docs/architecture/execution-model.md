@@ -8,7 +8,7 @@ Code anchors: `backend/src/app/use_cases/run_worker.py` (the loop), `backend/src
 
 ```mermaid
 flowchart TB
-    start([run_worker_forever]) --> claim["claim_one_unit(worker_id, lease)<br/>ONE atomic UPDATE…RETURNING:<br/>phase ∈ {architecture, enriching, running}<br/>AND (unclaimed OR lease expired)<br/>ORDER BY updated_at"]
+    start([run_worker_forever]) --> claim["claim_one_unit(worker_id, lease)<br/>ONE atomic UPDATE…RETURNING:<br/>status='running' AND project_id IS NOT NULL<br/>AND paused=0 AND pause_requested=0<br/>AND (unclaimed OR lease expired)<br/>ORDER BY updated_at"]
     claim -->|no plan| sleep["sleep poll_seconds (1s)<br/>— the ONLY polling in the system"]
     sleep --> claim
     claim -->|"plan (lease acquired)"| drive

@@ -1,7 +1,8 @@
 # Known issues and compatibility debt
 
-Verified against the refactored code on 2026-07-14. Fixed entries are removed;
-regressions live in tests rather than remaining as warnings here.
+Verified against the refactored code on 2026-07-14; re-verified 2026-07-20
+against merged PRs through #29. Fixed entries are removed; regressions live in
+tests rather than remaining as warnings here.
 
 ## Lifecycle compatibility
 
