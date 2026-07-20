@@ -155,6 +155,15 @@ architecture item — a skill-repo hygiene follow-up.
 16. **SSE durability** — SSE is bounded and non-durable; reconnect relies on
     client refetch. Relay/event-table retention remains operational work
     (known-issues.md).
+16a. **Frontend live runtime-log viewer** — the backend now exposes the RAW
+    per-attempt agent stdout/stderr as a live SSE tail at
+    `GET /api/plans/{id}/attempts/{attempt_id}/log/stream` (distinct from the
+    `/api/events` telemetry feed; `follow_attempt_log` in `process_supervisor.py`,
+    with rotation-reset + `Last-Event-ID` resume). Still needed: a frontend
+    component that opens this stream and renders live stdout/stderr for an
+    attempt in the Activity/Agents view (replacing the current poll of the
+    snapshot `…/log` endpoint), plus `npm run generate:api` to pick up the new
+    route in the generated client.
 
 ## Then — project ownership and output isolation [LIVE]
 
