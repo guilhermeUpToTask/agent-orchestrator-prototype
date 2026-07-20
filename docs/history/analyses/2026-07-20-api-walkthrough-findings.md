@@ -227,6 +227,39 @@ OpenRouter *reasoner* is not the blocker (it drove discovery→architecture→
 enrichment fine), so the "rate limit exhausted" stop-condition isn't triggered
 either. Progress now runs through fixing #8/#9, not driving the plan.
 
+## Walkthrough outcome & stop reason (loop terminated: human gate)
+
+After the #8 code fix (strip the `<provider>:` prefix so pi gets the bare model
+name) landed and was verified live (no more prefix issue, 0 obs-persist errors),
+pi **still** reports `Model "nvidia/nemotron-3-ultra-550b-a55b:free" not found`.
+`pi models` confirms the reason: that model **is not in pi's OpenRouter catalog
+at all**, and pi's catalog has **zero `:free` models** — every usable model is
+paid (claude/gpt/gemini/…). So:
+
+- **Real agent path:** blocked — `dev-agent` is bound to a model pi doesn't have,
+  and the only working alternatives are **paid** models (a spend/consent
+  decision, against the "be wise with token consumption" guidance).
+- **dry-run path:** blocked — can't satisfy the frozen real `go test` (#10).
+- **Reasoner (OpenRouter):** works fine — so the "rate limit exhausted"
+  stop-condition never triggers.
+
+**Neither loop stop-condition is autonomously reachable.** Cycle completion now
+needs a human decision: authorize binding `dev-agent` to an available (paid)
+model — e.g. `anthropic/claude-3.5-haiku` — or accept the demo can't complete a
+real Go cycle in this environment. The loop is therefore stopped here.
+
+### What the walkthrough delivered (branch `walkthrough/api-2026-07-20`)
+Code fixes (all verified, ruff+mypy+tests green): **#1** goal-promotion storm →
+recoverable block (+regression test); **#4** honest block resolutions;
+**#6** reasoner 500 on intent-with-questions → question turn (codex, no bwrap);
+**#8** pi model-string prefix (codex, no bwrap); **#9** process-observation
+persistence wiring (codex, no bwrap). Open/human-gate findings: **#2/#5** pause &
+start_replan rejected by legacy-phase guards (needs domain un-freeze); **#3**
+navigation vs promotion predicate mismatch; **#7** seed capability-coverage gap
+(ROADMAP #24); **#8 (config half)** no free pi model / model-not-in-catalog;
+**#10** dry-run vs real verification. codex-without-bubblewrap
+(`--sandbox danger-full-access`) worked reliably for all three delegated fixes.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
