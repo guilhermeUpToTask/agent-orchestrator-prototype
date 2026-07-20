@@ -185,6 +185,33 @@ real pi agent). Not a code defect; an operability gap worth an evidence-gated
 preflight. Available runtimes confirmed via `/api/runner/status`: `git`, `pi`
 0.73.1, `claude` 2.1.215 ok; `gemini` missing.
 
+## Finding #8 — agent model binding invalid for its runtime (pi can't resolve the openrouter model)  ⚠ OPEN (config)
+
+Execution under the real `pi` agent failed 3 policy attempts with
+`TaskFailed: Error: Model "nvidia/nemotron-3-ultra-550b-a55b:free" not found. Use
+--list-models to see available models.` `dev-agent` is bound to the same
+openrouter/nemotron model as the reasoner, but the `pi` CLI backend doesn't
+resolve that model id, so every attempt fails and opens a correct
+`execution_failure` block (retry/block machinery works — 0 tick_failed, 3
+attempts then block). There is no registry validation that an agent's
+`model_id` is actually resolvable by its `runtime_type`; a bad binding is only
+discovered at execution time as a terminal per-task failure. **Worked around**
+by switching `dev-agent.runtime_type` to `dry-run` (deterministic artifacts
+through the real Git/verify/promote/publish machinery) to drive the cycle to
+completion; the real-runtime model-resolution binding remains a config gap.
+
+## Finding #9 — process-observation persistence always fails (telemetry silently dropped)  🔧 FIX DISPATCHED
+
+Every agent run logs (12×) `runtime.process_observation_persist_failed` with
+`ValueError: process observations require the process repository extension`
+(`observation_repository.py:151`, from `cli_runner._persist_observations`).
+Non-fatal — `_persist_observations` catches and logs — but it means process
+telemetry observations are **never persisted** (the cli_runner is wired with a
+base observation repository lacking the process extension). The runtime-log /
+observation feed is therefore incomplete. Dispatched to codex
+(`--sandbox danger-full-access`, own branch) to wire the process-capable
+observation repository (or make `append` accept process observations).
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
