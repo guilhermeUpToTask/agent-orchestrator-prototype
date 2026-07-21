@@ -475,37 +475,37 @@ class Plan(BaseModel):
         finalize-abandon in commit_replanned_goals(). A human replan supersedes
         any pause: the gate clears so the committed roadmap can execute."""
         self.assert_lifecycle_mutation_allowed()
-        # Cyclic authority: a plan with an active cycle can always be replanned
-        # (start_replan is an advertised block/running resolution), regardless of
-        # the legacy PlanPhase projection — which for a replanned cycle is already
-        # REPLANNING and would otherwise reject "replanning -> replanning". Legacy
-        # (pre-cyclic) plans keep the RUNNING/REVIEW phase guard.
-        if self.active_cycle is None:
-            self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
         self.paused = False
         self.paused_reason = None
-        for goal in self.goals:
-            if goal.status == Status.PENDING:
-                for task in goal.tasks:
-                    if task.status == Status.PENDING:
-                        task.skip()
-                goal.skip()
-            elif goal.status == Status.RUNNING:
-                for task in goal.tasks:
-                    if task.status == Status.PENDING:
-                        task.skip()
-                # leave the goal RUNNING: its in-flight task finalizes tolerantly
-        self._set_phase(PlanPhase.REPLANNING)
         self.pause_requested = False
-        if self.active_cycle is not None:
-            # Cyclic conversational replan (unfreeze #10): establish the coherent
-            # WAITING replan tuple. `_set_phase(REPLANNING)` already set
-            # status=WAITING; here we retire the stale current-planning artifacts
-            # so an approved source intent / draft / gate cannot masquerade as
-            # active planning work. The source Cycle is retained (its
-            # intent_proposal_id preserves history); the next reasoner turn opens
-            # a fresh REPLAN IntentProposal + review gate. Legacy (active_cycle is
-            # None) plans are unchanged.
+        if self.active_cycle is None:
+            # Legacy append-only loop: guard on the legacy phase and SKIP the
+            # abandoned root work so the root-goal scan never resurrects the
+            # superseded iteration. Unchanged behavior for pre-cyclic plans.
+            self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
+            for goal in self.goals:
+                if goal.status == Status.PENDING:
+                    for task in goal.tasks:
+                        if task.status == Status.PENDING:
+                            task.skip()
+                    goal.skip()
+                elif goal.status == Status.RUNNING:
+                    for task in goal.tasks:
+                        if task.status == Status.PENDING:
+                            task.skip()
+                    # leave the goal RUNNING: its in-flight task finalizes tolerantly
+            self._set_phase(PlanPhase.REPLANNING)
+        else:
+            # Cyclic conversational replan (unfreeze #10/#11): SKIP NOTHING. The
+            # source Cycle stays frozen — SKIPPED is legacy iteration-abandonment
+            # residue, invalid for an active cyclic goal — and is superseded only
+            # when the replacement cycle activates. Establish the coherent WAITING
+            # replan tuple: set the compat `phase` projection AND the authoritative
+            # `status` explicitly (not via `_set_phase`'s dual write — issue #41),
+            # and retire the stale current-planning artifacts so an approved source
+            # intent / draft / gate cannot masquerade as active planning work.
+            self.phase = PlanPhase.REPLANNING
+            self.status = PlanStatus.WAITING
             self.intent_proposal = None
             self.cycle_draft = None
             self.review_gate = None

@@ -107,11 +107,20 @@ def _start_operation(
             PlanStatus.BLOCKED,
             PlanStatus.IDLE,
         }:
+            # A plan already in conversational replan (unfreeze #10/#11:
+            # status=WAITING, phase=REPLANNING) may proceed regardless of whether
+            # the frozen source cycle's tasks are terminal — replanning no longer
+            # skips them; the source cycle is superseded on activation, not by
+            # settling its tasks. Otherwise a WAITING plan may only start a replan
+            # once its active-cycle work has settled.
+            already_replanning = (
+                plan.status == PlanStatus.WAITING and plan.phase == PlanPhase.REPLANNING
+            )
             cycle = plan.active_cycle
             settled = cycle is not None and all(
                 task.is_terminal for goal in cycle.goals for task in goal.tasks
             )
-            if not (plan.status == PlanStatus.WAITING and settled):
+            if not (already_replanning or (plan.status == PlanStatus.WAITING and settled)):
                 raise InvalidEditError("replan discovery requires settled active-cycle work")
 
         purpose = "intent_discovery" if kind == ProposalKind.INITIAL else "replan_discovery"

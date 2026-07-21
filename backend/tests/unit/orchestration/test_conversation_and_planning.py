@@ -294,7 +294,13 @@ def test_replan_from_blocked_cycle_settles_work_before_message(env_factory):
     assert settled.status == PlanStatus.WAITING
     assert settled.paused is False and settled.pause_requested is False
     assert settled.block is not None and settled.block.resolution == "start_replan"
-    assert all(item.status == Status.SKIPPED for item in settled.active_cycle.goals[0].tasks)
+    # unfreeze #11: replanning does NOT rewrite the still-active source cycle's
+    # task outcomes (no SKIPPED poisoning of an active cyclic goal); they stay
+    # frozen and are superseded only when the replacement cycle activates.
+    assert [item.status for item in settled.active_cycle.goals[0].tasks] == [
+        Status.FAILED,
+        Status.PENDING,
+    ]
     # stale current-planning artifacts are retired; the source cycle is retained.
     assert settled.intent_proposal is None
     assert settled.cycle_draft is None

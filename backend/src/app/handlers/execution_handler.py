@@ -55,7 +55,7 @@ from src.domain.factories.identity import new_id
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.repositories.agent_repo import AgentRepository
 from src.domain.services.lookups import find_goal, find_task
-from src.domain.services.navigation import NOT_READY
+from src.domain.services.navigation import NOT_READY, can_promote_goal
 from src.domain.value_objects.lifecycle import Status
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
@@ -759,7 +759,7 @@ class ExecutionHandler:
     ) -> tuple[str, str, str]:
         cycle = plan.active_cycle
         assert cycle is not None
-        if any(task.status != Status.DONE or not task.verification_evidence for task in goal.tasks):
+        if not can_promote_goal(goal):
             raise TaskFailed(
                 "goal cannot merge without accepted task evidence",
                 FailureKind.VERIFICATION_ERROR,
