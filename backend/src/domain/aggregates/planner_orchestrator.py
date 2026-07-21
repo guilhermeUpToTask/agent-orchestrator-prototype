@@ -496,6 +496,19 @@ class Plan(BaseModel):
                         task.skip()
                 # leave the goal RUNNING: its in-flight task finalizes tolerantly
         self._set_phase(PlanPhase.REPLANNING)
+        self.pause_requested = False
+        if self.active_cycle is not None:
+            # Cyclic conversational replan (unfreeze #10): establish the coherent
+            # WAITING replan tuple. `_set_phase(REPLANNING)` already set
+            # status=WAITING; here we retire the stale current-planning artifacts
+            # so an approved source intent / draft / gate cannot masquerade as
+            # active planning work. The source Cycle is retained (its
+            # intent_proposal_id preserves history); the next reasoner turn opens
+            # a fresh REPLAN IntentProposal + review gate. Legacy (active_cycle is
+            # None) plans are unchanged.
+            self.intent_proposal = None
+            self.cycle_draft = None
+            self.review_gate = None
 
     def set_iteration_goals(self, new_goals: list[Goal]) -> None:
         """The planning phases' write path (roadmap 2.5 driver): replace the
@@ -603,7 +616,10 @@ class Plan(BaseModel):
             return []
         if self.status == PlanStatus.RUNNING:
             return ["pause", "start_replan"]
-        if self.status == PlanStatus.PAUSED:
+        if self.status == PlanStatus.PAUSED and self.paused:
+            # Only a truly-armed manual pause is resumable. status==PAUSED with
+            # paused==False is an inconsistent state (unfreeze #10), not a
+            # resumable one — never advertise resume for it.
             return [
                 "resume",
                 "start_replan",
@@ -613,7 +629,11 @@ class Plan(BaseModel):
             self.status == PlanStatus.WAITING
             and self.review_gate is None
             and self.intent_proposal is None
+            and self.active_cycle is None
         ):
+            # start_intent is INITIAL planning only. A WAITING plan with an active
+            # cycle is in conversational replan (driven by the replan-message
+            # endpoint), so it advertises no button command here.
             return ["start_intent"]
         return []
 
@@ -634,6 +654,15 @@ class Plan(BaseModel):
             return "cycle_architecture"
         if self.cycle_draft is not None and self.cycle_draft.approved_at is None:
             return "cycle_architecture"
+        if (
+            self.status == PlanStatus.WAITING
+            and self.phase == PlanPhase.REPLANNING
+            and self.active_cycle is not None
+            and self.intent_proposal is None
+        ):
+            # Cyclic conversational replan before a candidate exists (unfreeze #10):
+            # the source cycle is retained but planning artifacts are cleared.
+            return "replan_discovery"
         cycle = self.active_cycle
         if cycle is None:
             return "intent_discovery" if self.status == PlanStatus.WAITING else "idle"

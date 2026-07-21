@@ -125,3 +125,26 @@ phase is claimable); `begin_replanning` skips the legacy phase guard when
 `active_cycle is not None`. Legacy (pre-cyclic) plans keep the phase guards
 unchanged. No new fields or statuses; this aligns advertised `legal_actions`
 with the transition guards so every advertised recovery is executable.
+
+50. **Domain unfreeze #10 (2026-07-21): coherent cyclic conversational-replan
+state.** Findings #12/#13: `request_replan` composed `begin_replanning` (which
+sets `phase=REPLANNING` → `status=WAITING`) then `resolve_block("start_replan")`
+(whose generic fallback set `status=PAUSED` without `paused=True`), leaving the
+invalid tuple `status=PAUSED, paused=False`, and never retired the stale
+`intent_proposal`/`cycle_draft`/`review_gate`. So `legal_actions` advertised
+`resume` (which `resume()` then rejected on the `paused` field), the worker
+couldn't claim the plan (`status≠running`), and an approved source intent
+masqueraded as active planning work. Fix: (a) `begin_replanning` on a cyclic plan
+(active cycle present) now establishes the explicit WAITING replan tuple —
+clears the current intent/draft/gate slots and `pause_requested`, retains the
+source `Cycle` (legacy `active_cycle is None` plans byte-identical); (b)
+`request_replan` resolves the block BEFORE `begin_replanning` so the WAITING
+status is the transaction's final, atomic lifecycle word; (c) `legal_actions`
+advertises `resume` only when the `paused` flag is truly armed, and `start_intent`
+only for INITIAL planning (no active cycle); (d) `activity` reports
+`replan_discovery` for the tuple. Live-verified on a wedged v77 plan.
+`resolve_block`'s generic status fallback is left unchanged (its only caller is
+`request_replan`) and recorded as compatibility debt. Builds on unfreeze #9.
+A codex `gpt-5.6-sol` design analysis (with a 14-item legacy-`PlanPhase`
+side-effect audit) informed this scope; the audit items are tracked follow-ups,
+not part of this narrow unfreeze.

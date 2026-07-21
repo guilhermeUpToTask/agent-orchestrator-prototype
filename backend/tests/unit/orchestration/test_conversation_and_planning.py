@@ -288,10 +288,20 @@ def test_replan_from_blocked_cycle_settles_work_before_message(env_factory):
     request_replan("p1", env.uow)
 
     settled = env.stored("p1")
+    # unfreeze #10: a blocked-cycle replan lands in the coherent WAITING replan
+    # tuple, NOT the old invalid status=PAUSED + paused=False state.
     assert settled.phase == PlanPhase.REPLANNING
-    assert settled.status == PlanStatus.PAUSED
+    assert settled.status == PlanStatus.WAITING
+    assert settled.paused is False and settled.pause_requested is False
     assert settled.block is not None and settled.block.resolution == "start_replan"
     assert all(item.status == Status.SKIPPED for item in settled.active_cycle.goals[0].tasks)
+    # stale current-planning artifacts are retired; the source cycle is retained.
+    assert settled.intent_proposal is None
+    assert settled.cycle_draft is None
+    assert settled.review_gate is None
+    assert settled.active_cycle is not None
+    assert settled.activity == "replan_discovery"
+    assert "resume" not in settled.legal_actions
 
     chat = InMemoryChatStore()
     reasoner = ScriptedReasoner(
