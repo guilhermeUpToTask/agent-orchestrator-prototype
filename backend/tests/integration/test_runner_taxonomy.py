@@ -4,6 +4,7 @@ FailureKind classification the shared taxonomy defines (roadmap 2.4 #12)."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import stat
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.runtime.cli_runner import CliAgentRunner
-from src.infra.runtime.pi_protocol import parse_pi_events
+from src.infra.runtime.pi_protocol import extract_stream_error, parse_pi_events
 from src.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 pytestmark = pytest.mark.integration
@@ -42,6 +43,34 @@ class ScriptedCliRunner(CliAgentRunner):
 
     def _env(self) -> dict[str, str]:
         return dict(os.environ)
+
+
+class ScriptedPiRunner(ScriptedCliRunner):
+    """A pi-shaped runner: interprets in-band stream errors like PiAgentRunner."""
+
+    @property
+    def log_prefix(self) -> str:
+        return "pi"
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        return extract_stream_error(stdout)
+
+
+# The exact record pi emits on Nvidia free-tier exhaustion while exiting 0.
+_PI_RATE_LIMIT_STREAM = json.dumps(
+    {
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [],
+            "stopReason": "error",
+            "errorMessage": (
+                "Upstream error from Nvidia: ResourceExhausted: "
+                "Worker local total request limit reached (32/32)"
+            ),
+        },
+    }
+)
 
 
 def make_cli(tmp_path: Path, body: str) -> str:
@@ -222,6 +251,48 @@ def test_nvidia_resource_exhausted_normalizes_retry_evidence_without_secrets():
     assert failure.retryable
     assert "sk-" not in failure.safe_message
     assert "token-secret" not in failure.stderr_tail
+
+
+def test_pi_in_band_rate_limit_is_retryable_not_empty_success(tmp_path):
+    # Regression (walkthrough finding #16): pi exits 0 but reports the upstream
+    # rate limit inside its NDJSON stream. The empty result must NOT pass as a
+    # successful run (which a downstream test-author stage then mislabels as a
+    # terminal "produced no executable checks"); it must classify as a
+    # RETRYABLE rate limit so the durable backoff waits out the transient cap.
+    cli = make_cli(tmp_path, f"cat <<'PIEOF'\n{_PI_RATE_LIMIT_STREAM}\nPIEOF\nexit 0")
+    with pytest.raises(TaskFailed) as exc_info:
+        run(ScriptedPiRunner(cli), tmp_path)
+    assert exc_info.value.kind == FailureKind.RATE_LIMIT
+    assert exc_info.value.failure is not None and exc_info.value.failure.retryable
+
+
+def test_failed_event_carries_kind_for_in_band_stream_error(tmp_path):
+    cli = make_cli(tmp_path, f"cat <<'PIEOF'\n{_PI_RATE_LIMIT_STREAM}\nPIEOF\nexit 0")
+    runner = ScriptedPiRunner(cli)
+    sink = CollectingEventSink()
+
+    class _H:
+        path = str(tmp_path)
+
+    with pytest.raises(TaskFailed):
+        asyncio.run(
+            runner.run(
+                task(),
+                spec(),
+                idempotency_key="p1:g1:t1",
+                event_sink=sink,
+                workspace=_H(),
+            )
+        )
+    assert [e.type for e in sink.events] == ["agent.started", "agent.failed"]
+    assert sink.events[1].payload["kind"] == "rate_limit"
+
+
+def test_base_runner_does_not_interpret_pi_style_stream(tmp_path):
+    # A non-pi runtime has no in-band error hook: exit 0 stays a success.
+    cli = make_cli(tmp_path, f"cat <<'PIEOF'\n{_PI_RATE_LIMIT_STREAM}\nPIEOF\nexit 0")
+    result, _ = run(ScriptedCliRunner(cli), tmp_path)
+    assert result.status == "success"
 
 
 def test_pi_events_are_allowlisted_and_prompt_fields_are_dropped():

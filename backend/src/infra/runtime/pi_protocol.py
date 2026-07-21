@@ -95,6 +95,35 @@ def parse_pi_events(output: str) -> list[tuple[str, dict[str, Any]]]:
     return events
 
 
+_ERROR_TURN_TYPES = {"message_end", "turn_end", "agent_end"}
+
+
+def extract_stream_error(output: str) -> str | None:
+    """The errorMessage of an errored assistant turn, or None.
+
+    pi `--mode json` reports upstream provider failures IN-BAND: the process
+    exits 0, but an assistant turn carries ``stopReason == "error"`` plus an
+    ``errorMessage`` (rate limits, provider outages, resource exhaustion). Left
+    undetected, such a run looks like a successful no-op (empty content), and a
+    downstream stage then mislabels the empty result — e.g. a test-author run
+    surfaces as a terminal "produced no executable checks" instead of the
+    retryable rate limit it actually was. Callers surface this so the shared
+    failure taxonomy classifies the real cause. Returns the last errored turn's
+    message when several are present.
+    """
+    error: str | None = None
+    for value in _iter_records(output):
+        if value.get("type") not in _ERROR_TURN_TYPES:
+            continue
+        message = value.get("message")
+        if not isinstance(message, dict) or message.get("stopReason") != "error":
+            continue
+        candidate = message.get("errorMessage")
+        if isinstance(candidate, str) and candidate.strip():
+            error = candidate
+    return error
+
+
 def extract_final_text(output: str) -> str | None:
     """The last assistant message's text content, or None when no NDJSON matched.
 
