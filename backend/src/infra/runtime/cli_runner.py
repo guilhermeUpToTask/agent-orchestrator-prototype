@@ -96,11 +96,30 @@ def correlation_env(idempotency_key: str) -> dict[str, str]:
     }
 
 
+def _run_role_label(task: Task, spec: AgentSpec) -> str:
+    """The role the agent plays for THIS run.
+
+    The authoritative run role is the task's live TDD stage (derived from its
+    contract + test-bundle state — the same signal the execution handler uses to
+    resolve the run agent), NOT the agent's static ``role``. Without this, an
+    agent that covers both TDD roles (e.g. one holding both ``test_authoring``
+    and ``implementation``) is told "Your role: implementer / Implement the
+    task" during a *test-authoring* run — contradicting the stage expectation.
+    Falls back to the agent's own role for non-TDD tasks.
+    """
+    if task.tdd_stage == "test_authoring":
+        return "test_author"
+    if task.tdd_stage == "implementation":
+        return "implementer"
+    return spec.role
+
+
 def build_task_prompt(task: Task, spec: AgentSpec) -> str:
     """Markdown task contract handed to the CLI agent. Project-level conventions
     live in the workspace AGENTS.md — not here — so they apply consistently
     across runtimes."""
     capabilities = ", ".join(task.required_capabilities) or "(none declared)"
+    run_role = _run_role_label(task, spec)
     prompt = (
         "# Task: "
         + task.name
@@ -108,7 +127,7 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
         + task.description
         + "\n\n"
         + "## Your role\n"
-        + spec.role
+        + run_role
         + "\n\n"
         + "## Instructions\n"
         + (spec.instructions or "(none)")
@@ -128,11 +147,11 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
     allowed = "\n".join("- `" + path + "`" for path in contract.allowed_scope)
     forbidden = "\n".join("- `" + path + "`" for path in contract.forbidden_scope) or "- (none)"
     commands = "\n".join("- `" + command + "`" for command in contract.verification_commands)
-    if task.tdd_stage == "test_authoring" or spec.role in {"test_author", "test_writer"}:
+    if run_role in {"test_author", "test_writer"}:
         expectation = (
             "Write ONLY tests that fail for the right reason; never modify production files."
         )
-    elif task.tdd_stage == "implementation" or spec.role == "implementer":
+    elif run_role == "implementer":
         expectation = "Make the frozen tests pass; never modify tests."
     else:
         expectation = "Follow the contract and do not modify files outside the declared scope."
