@@ -429,28 +429,50 @@ supersession-on-activation, not per-task skipping, is the correct abandonment bo
 Remaining path (enrich → execute) is gated only by the free-model TDD-role wall
 (finding #11), not by any domain defect.
 
-## Finding #11 CONFIRMED — free nemotron cannot author executable tests (model wall, not config)  🧱 MODEL LIMIT
+## Finding #16 — pi in-band provider errors masked as terminal verification failures  ✅ FIXED (PR #43)
 
-Definitive live evidence on `fc5fa4c3` after recovery. The first activated goal's
-first task (`2980eab1`) reached its TDD **test_authoring** stage and failed with
-`verification_error: "test author produced no executable checks"`. Per the
-maintainer's direction, a **dedicated tester agent** (`test-agent`) was seeded on the
-**same model/provider** as `dev-agent` (pi · openrouter · `nvidia/nemotron-3-ultra-550b-a55b:free`)
-with an explicit test-authoring prompt, and `test_authoring` was removed from
-`dev-agent` — so `resolve_task_role_agents` now cleanly splits
-`test_author → test-agent`, `implementer → dev-agent` (verified). Retrying the task
-(`POST /retry`) re-ran the stage on `test-agent`: **identical failure** — task worktree
-`write-database-contract-tests` left empty (zero files written), 14 s run, empty
-stdout/stderr, `verification_error`. Conclusion: the free nemotron model does not
-produce executable test files regardless of role/prompt/capability wiring. Completing a
-TDD cycle requires a model capable of authoring runnable tests for the test_author role;
-the domain, recovery path, agent-role split, and API drive are all proven correct.
+⚠️ **Corrects an earlier wrong conclusion in this doc.** The `test_authoring`
+failures on `fc5fa4c3` were first read as a free-model *capability* wall ("nemotron
+can't author tests"). The tester agent's **runtime log** (`runtime-logs/<attempt>.jsonl`)
+disproved that: the model **never generated a token**. The assistant turn was
+`{"content":[], "usage":{"totalTokens":0}, "stopReason":"error", "errorMessage":
+"Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (32/32)"}`
+— i.e. a **rate limit**. pi `--mode json` reports such upstream failures IN-BAND
+(the process still exits 0), and `pi_protocol` parsed only usage + final text, so the
+errored run looked like a *successful empty* run. Downstream, the empty test-author
+workspace was raised as a **terminal** `verification_error: "test author produced no
+executable checks"` — turning a **retryable** rate limit into a permanent task death,
+and presenting to the operator as "the model can't write tests."
 
-Minor surfaced defect (worth a follow-up): with a task blocked on a failed
-test_authoring stage the plan reports `legal_actions: ['retry_stage', ...]`, but
-`POST /retry-stage` rejects it (`INVALID_EDIT: plan is not blocked on a retryable
-planning stage`) — the correct action is `POST /retry` (task retry). The derived
-`legal_actions` advertises `retry_stage` where only `retry` (task) applies.
+Fix (PR #43): `pi_protocol.extract_stream_error` detects an errored assistant turn;
+a `CliAgentRunner._detect_stream_error` hook (Pi overrides it) routes exit-0 in-band
+errors through the shared taxonomy — which already maps `resource_exhausted` →
+`FailureKind.RATE_LIMIT` (retryable) — so the durable backoff waits out the transient
+cap and retries. Unit + integration regression tests cover the exact Nvidia stream
+shape. **The free model was never proven incapable of authoring tests; the walkthrough
+simply exhausted the Nvidia free-tier request limit, which the loop watched for.**
+
+## Bug B — task prompt used the agent's static role, not the run role  ✅ FIXED (PR #44)
+
+Same runtime log: the **test_authoring** run was told `## Your role: implementer` /
+`Implement the task exactly as described.` directly above `Write ONLY tests`.
+`build_task_prompt` rendered `spec.role` (static) in the header while the stage
+expectation came from `task.tdd_stage`. An agent covering both TDD roles (dev-agent
+held `test_authoring` + `implementation`, `role=implementer`) thus got a
+self-contradicting prompt on a test-author run. Fix (PR #44): derive one run-role label
+from `task.tdd_stage` (the same signal the execution handler uses) for both the header
+and the expectation; non-TDD tasks fall back to the agent's role (unchanged).
+
+Also surfaced (follow-up, unfixed): with a task blocked on a failed test_authoring
+stage the plan reports `legal_actions: ['retry_stage', ...]`, but `POST /retry-stage`
+rejects it (`INVALID_EDIT: plan is not blocked on a retryable planning stage`) — the
+working action is `POST /retry` (task retry). The derived `legal_actions` advertises
+`retry_stage` where only task `retry` applies.
+
+The agent-role split performed live (dedicated `test-agent` seeded on the same
+model/provider, `test_authoring` moved off `dev-agent`; `resolve_task_role_agents` →
+`test_author: test-agent`, `implementer: dev-agent`) is the correct config regardless,
+and pairs with Bug B's fix.
 
 ## Environment note (not a plan defect)
 
