@@ -344,6 +344,24 @@ replan-message / cancel path) is a **domain-design decision** — not guessed he
 Observed on the heavily-mutated `fc5fa4c3` (v77); needs a clean-plan reproduction
 to confirm it's general vs an artifact of that plan's accumulated legacy state.
 
+## RESOLUTION #12/#13 — coherent cyclic replan state (domain unfreeze #10)  ✅ FIXED & live-verified
+
+Informed by the codex `gpt-5.6-sol` design analysis (saved separately), un-freeze
+#10 fixes both: `begin_replanning` now establishes the explicit WAITING replan
+tuple (clears intent/draft/gate slots, retains the source cycle); `request_replan`
+resolves the block BEFORE `begin_replanning` so WAITING is the atomic final word;
+`legal_actions` advertises `resume` only when `paused` is armed; `activity`
+reports `replan_discovery`. Legacy (`active_cycle is None`) plans are byte-identical.
+
+**Live-verified on the wedged v77 `fc5fa4c3`:** `/replan` → `status=waiting`,
+`activity=replan_discovery`, `paused=False`, `legal_actions=[]` (no false
+`resume`), `intent=None`; then `/replanning/message` → **200, committed** — a
+fresh REPLAN intent (`fb21f076…`) opened at `review:intent`. The plan is fully
+drivable through the replan conversation again. 276 orchestration tests pass;
+ruff + mypy clean; decision-log #50. (Landed as a separate PR from the rest of
+the walkthrough, per the critical-domain-change isolation request.) The codex
+14-item legacy-`PlanPhase` side-effect audit is tracked as follow-up cleanup.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
