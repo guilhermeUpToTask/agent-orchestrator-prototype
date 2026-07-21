@@ -148,3 +148,27 @@ only for INITIAL planning (no active cycle); (d) `activity` reports
 A codex `gpt-5.6-sol` design analysis (with a 14-item legacy-`PlanPhase`
 side-effect audit) informed this scope; the audit items are tracked follow-ups,
 not part of this narrow unfreeze.
+
+51. **Domain unfreeze #11 (2026-07-21): SKIPPED is legacy-only; cyclic
+navigation and promotion share one predicate.** Finding #3 and the maintainer's
+question ("does a skippable goal/task make sense?"). `SKIPPED` is legacy
+append-only iteration-abandonment residue; in the cyclic model the abandonment
+boundary is cycle SUPERSEDED-on-activation, not per-task skipping. Yet
+`request_replan` skipped every pending/running/failed task in the **still-active
+source cycle**, and `begin_replanning`'s root-goal skip loop ran for cyclic plans
+too — creating goals with `SKIPPED` tasks that navigation treats as closeable
+(`{DONE, SKIPPED}`) but promotion rejects (needs every task `DONE`-with-evidence),
+i.e. permanently unpromotable (the root of #3/#4/#12). Fix: (a) `request_replan`
+no longer rewrites the source cycle's task outcomes; (b) `begin_replanning` skips
+nothing on the cyclic branch (legacy branch byte-identical) and sets the WAITING
+tuple with `phase`/`status` written explicitly rather than via `_set_phase`'s dual
+authority (partial issue #41 cleanup); (c) a canonical `can_promote_goal()`
+predicate (`navigation.py`) — every task `DONE` with accepted evidence — is now
+the single rule `_reserve_goal_promotion` uses, so navigation and promotion agree;
+(d) `conversation._start_operation` allows replan discovery for a plan already in
+the WAITING/REPLANNING conversational replan (the frozen source cycle need not be
+settled — it is superseded on activation). `Task.skip()`/`Goal.skip()`/
+`Status.SKIPPED` remain for legacy plans and history; no migration. A
+maintainer-directed codex `gpt-5.6-sol` analysis chose this direction. Composes
+with unfreezes #9/#10. Full navigation `GOAL_UNPROMOTABLE` typing and cyclic
+stale-result ledger settlement remain scoped follow-ups.
