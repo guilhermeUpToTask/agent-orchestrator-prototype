@@ -493,6 +493,15 @@ PI_BACKEND_ENV_VAR: dict[str, str] = {
 }
 
 
+def _pi_model_name(model: str, provider_id: str | None) -> str:
+    """Return pi's provider-local model name from a catalog model id."""
+    if provider_id:
+        prefix = f"{provider_id}:"
+        if model.startswith(prefix):
+            return model[len(prefix) :]
+    return model
+
+
 class PiAgentRunner(CliAgentRunner):
     """Runs `pi --model <m> -p "<prompt>"` in the workspace (pi-mono CLI)."""
 
@@ -522,7 +531,7 @@ class PiAgentRunner(CliAgentRunner):
             observation_repository=observation_repository,
         )
         self._api_key = api_key
-        self._model = model
+        self._model = _pi_model_name(model, provider_id)
         self._backend = backend
         self._extra_flags = extra_flags or []
 
@@ -533,6 +542,8 @@ class PiAgentRunner(CliAgentRunner):
     def _build_cmd(self, prompt: str) -> list[str]:
         return [
             "pi",
+            "--provider",
+            self._backend,
             "--model",
             self._model,
             "--no-session",

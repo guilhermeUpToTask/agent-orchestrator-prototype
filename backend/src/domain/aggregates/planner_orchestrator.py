@@ -267,7 +267,9 @@ class Plan(BaseModel):
             if reason is not None:
                 self.paused_reason = reason
             return
-        if self.status != PlanStatus.RUNNING or self.phase not in WORKER_CLAIMABLE_PHASES:
+        if self.status != PlanStatus.RUNNING or (
+            self.active_cycle is None and self.phase not in WORKER_CLAIMABLE_PHASES
+        ):
             raise InvalidTransitionError("Plan", self.id, self.status.value, "paused")
         self.paused_reason = reason
         if active_action:
@@ -291,7 +293,7 @@ class Plan(BaseModel):
             if reason is not None:
                 self.paused_reason = reason
             return
-        if self.phase not in WORKER_CLAIMABLE_PHASES:
+        if self.active_cycle is None and self.phase not in WORKER_CLAIMABLE_PHASES:
             raise InvalidTransitionError("Plan", self.id, self.phase.value, "paused")
         self.paused = True
         self.paused_reason = reason
@@ -473,7 +475,13 @@ class Plan(BaseModel):
         finalize-abandon in commit_replanned_goals(). A human replan supersedes
         any pause: the gate clears so the committed roadmap can execute."""
         self.assert_lifecycle_mutation_allowed()
-        self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
+        # Cyclic authority: a plan with an active cycle can always be replanned
+        # (start_replan is an advertised block/running resolution), regardless of
+        # the legacy PlanPhase projection — which for a replanned cycle is already
+        # REPLANNING and would otherwise reject "replanning -> replanning". Legacy
+        # (pre-cyclic) plans keep the RUNNING/REVIEW phase guard.
+        if self.active_cycle is None:
+            self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
         self.paused = False
         self.paused_reason = None
         for goal in self.goals:
