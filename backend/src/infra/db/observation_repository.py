@@ -19,6 +19,7 @@ from src.app.observations import (
     ObservationQuality,
     ObservationSource,
     PersistedObservation,
+    ProcessObservationPayload,
     TelemetryObservation,
 )
 from src.app.ports import Clock
@@ -51,7 +52,7 @@ _SELECT_SQL = text(
 def _legacy_type(kind: ObservationKind) -> str:
     if kind is ObservationKind.MODEL_USAGE:
         return "llm.call"
-    raise ValueError(f"no legacy event mapping for {kind.value!r}")
+    return kind.value
 
 
 def _encode_usage(payload: ModelUsagePayload) -> str:
@@ -81,6 +82,20 @@ def _encode_usage(payload: ModelUsagePayload) -> str:
     return json.dumps(values, sort_keys=True, separators=(",", ":"))
 
 
+def _encode_process(payload: ProcessObservationPayload) -> str:
+    return json.dumps(
+        {
+            "duration_seconds": payload.duration_seconds,
+            "exit_code": payload.exit_code,
+            "log_path": payload.log_path,
+            "stderr_bytes": payload.stderr_bytes,
+            "stdout_bytes": payload.stdout_bytes,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
@@ -92,25 +107,9 @@ def _decode(row: object) -> PersistedObservation:
     payload_raw: dict[str, Any] = json.loads(str(values[14]))  # type: ignore[index]
     task_id = None if values[3] is None else str(values[3])  # type: ignore[index]
     attempt_number = int(values[6]) if task_id is not None and int(values[6]) > 0 else None  # type: ignore[index]
-    observation = TelemetryObservation(
-        observation_id=str(values[0]),  # type: ignore[index]
-        correlation=ObservationCorrelation(
-            plan_id=str(values[1]),  # type: ignore[index]
-            goal_id=None if values[2] is None else str(values[2]),  # type: ignore[index]
-            task_id=task_id,
-            run_id=None if values[4] is None else str(values[4]),  # type: ignore[index]
-            attempt_id=None if values[5] is None else str(values[5]),  # type: ignore[index]
-            attempt_number=attempt_number,
-        ),
-        observed_at=datetime.fromisoformat(str(values[7])),  # type: ignore[index]
-        source=ObservationSource(str(values[9])),  # type: ignore[index]
-        quality=ObservationQuality(str(values[10])),  # type: ignore[index]
-        kind=ObservationKind(str(values[11])),  # type: ignore[index]
-        schema_version=int(values[12]),  # type: ignore[index]
-        source_sequence=(
-            None if values[13] is None else int(values[13])  # type: ignore[index]
-        ),
-        payload=ModelUsagePayload(
+    kind = ObservationKind(str(values[11]))  # type: ignore[index]
+    payload = (
+        ModelUsagePayload(
             model_request_count=int(payload_raw["llm_calls"]),
             turn_count=int(payload_raw["turns"]),
             input_tokens=_optional_int(payload_raw.get("prompt_tokens")),
@@ -125,7 +124,39 @@ def _decode(row: object) -> PersistedObservation:
             unavailable_reason=payload_raw.get("unavailable_reason"),
             estimator_name=payload_raw.get("estimator_name"),
             estimator_version=payload_raw.get("estimator_version"),
+        )
+        if kind is ObservationKind.MODEL_USAGE
+        else ProcessObservationPayload(
+            stdout_bytes=int(payload_raw["stdout_bytes"]),
+            stderr_bytes=int(payload_raw["stderr_bytes"]),
+            exit_code=_optional_int(payload_raw.get("exit_code")),
+            duration_seconds=(
+                None
+                if payload_raw.get("duration_seconds") is None
+                else float(payload_raw["duration_seconds"])
+            ),
+            log_path=payload_raw.get("log_path"),
+        )
+    )
+    observation = TelemetryObservation(
+        observation_id=str(values[0]),  # type: ignore[index]
+        correlation=ObservationCorrelation(
+            plan_id=str(values[1]),  # type: ignore[index]
+            goal_id=None if values[2] is None else str(values[2]),  # type: ignore[index]
+            task_id=task_id,
+            run_id=None if values[4] is None else str(values[4]),  # type: ignore[index]
+            attempt_id=None if values[5] is None else str(values[5]),  # type: ignore[index]
+            attempt_number=attempt_number,
         ),
+        observed_at=datetime.fromisoformat(str(values[7])),  # type: ignore[index]
+        source=ObservationSource(str(values[9])),  # type: ignore[index]
+        quality=ObservationQuality(str(values[10])),  # type: ignore[index]
+        kind=kind,
+        schema_version=int(values[12]),  # type: ignore[index]
+        source_sequence=(
+            None if values[13] is None else int(values[13])  # type: ignore[index]
+        ),
+        payload=payload,
     )
     recorded_raw = values[8] if values[8] is not None else values[7]  # type: ignore[index]
     return PersistedObservation(
@@ -146,9 +177,12 @@ class SqliteObservationRepository:
         self._clock = clock
 
     async def append(self, observation: TelemetryObservation) -> bool:
-        recorded_at = self._clock.now()
         if not isinstance(observation.payload, ModelUsagePayload):
             raise ValueError("process observations require the process repository extension")
+        return await self._append(observation)
+
+    async def _append(self, observation: TelemetryObservation) -> bool:
+        recorded_at = self._clock.now()
         correlation = observation.correlation
         params = {
             "event_id": observation.observation_id,
@@ -165,7 +199,11 @@ class SqliteObservationRepository:
             "quality": observation.quality.value,
             "schema_version": observation.schema_version,
             "source_sequence": observation.source_sequence,
-            "payload": _encode_usage(observation.payload),
+            "payload": (
+                _encode_usage(observation.payload)
+                if isinstance(observation.payload, ModelUsagePayload)
+                else _encode_process(observation.payload)
+            ),
             "occurred_at": observation.observed_at.isoformat(),
             "recorded_at": recorded_at.isoformat(),
         }
@@ -195,3 +233,10 @@ class SqliteObservationRepository:
         if row is None:
             raise KeyError(observation_id)
         return _decode(row)
+
+
+class SqliteProcessObservationRepository(SqliteObservationRepository):
+    """SQLite observation store extended with process lifecycle telemetry."""
+
+    async def append(self, observation: TelemetryObservation) -> bool:
+        return await self._append(observation)

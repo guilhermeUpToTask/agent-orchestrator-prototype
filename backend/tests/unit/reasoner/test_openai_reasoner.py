@@ -8,7 +8,6 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-import pytest
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.capability import Capability
@@ -101,7 +100,7 @@ def test_submit_intent_returns_normalized_review_candidate():
     ]
 
 
-def test_submitted_intent_cannot_retain_unresolved_questions():
+def test_submitted_intent_with_unresolved_questions_remains_a_question_turn():
     client = FakeLLMClient(
         [
             tool_turn(
@@ -110,8 +109,12 @@ def test_submitted_intent_cannot_retain_unresolved_questions():
             ),
         ]
     )
-    with pytest.raises(ValueError, match="unresolved questions"):
-        converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
+    reply = converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
+
+    assert reply.intent is None
+    assert reply.message == "Which region?"
+    assert reply.model_request_count == 1
+    assert reply.tool_turn_count == 1
 
 
 def test_enrich_goal_builds_ordered_tasks():

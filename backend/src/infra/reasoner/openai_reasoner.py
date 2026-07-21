@@ -427,7 +427,11 @@ class OpenAIReasoner:
 
         candidate = IntentCandidate.model_validate(collector.value or result.submit_args)
         if candidate.unresolved_questions:
-            raise ValueError("submitted intent cannot retain unresolved questions")
+            return ReasonerReply(
+                message=result.text or " ".join(candidate.unresolved_questions),
+                model_request_count=result.llm_calls,
+                tool_turn_count=result.turns,
+            )
         reply_text = result.text or "Intent proposal is ready for your review."
         return ReasonerReply(
             message=reply_text,

@@ -85,9 +85,13 @@ def _start_operation(
         plan = uow.plans.get(plan_id)
         if plan.project_id is None:
             raise InvalidEditError("project binding is required before intent discovery")
-        if plan.intent_proposal is not None or (
-            plan.review_gate is not None and plan.review_gate.unresolved
-        ):
+        if (
+            plan.intent_proposal is not None and plan.intent_proposal.approved_at is None
+        ) or (plan.review_gate is not None and plan.review_gate.unresolved):
+            # Only an UNRESOLVED intent (or open review gate) is an in-progress
+            # planning review that must be finished/cancelled first. An APPROVED
+            # intent is the current cycle's source and must not block a REPLAN
+            # discovery from opening a new proposal over the active cycle.
             raise InvalidEditError("finish or cancel the current planning review first")
         if kind == ProposalKind.REPLAN and plan.active_cycle is None:
             raise InvalidEditError("replan discovery requires an active cycle")
