@@ -429,6 +429,29 @@ supersession-on-activation, not per-task skipping, is the correct abandonment bo
 Remaining path (enrich → execute) is gated only by the free-model TDD-role wall
 (finding #11), not by any domain defect.
 
+## Finding #11 CONFIRMED — free nemotron cannot author executable tests (model wall, not config)  🧱 MODEL LIMIT
+
+Definitive live evidence on `fc5fa4c3` after recovery. The first activated goal's
+first task (`2980eab1`) reached its TDD **test_authoring** stage and failed with
+`verification_error: "test author produced no executable checks"`. Per the
+maintainer's direction, a **dedicated tester agent** (`test-agent`) was seeded on the
+**same model/provider** as `dev-agent` (pi · openrouter · `nvidia/nemotron-3-ultra-550b-a55b:free`)
+with an explicit test-authoring prompt, and `test_authoring` was removed from
+`dev-agent` — so `resolve_task_role_agents` now cleanly splits
+`test_author → test-agent`, `implementer → dev-agent` (verified). Retrying the task
+(`POST /retry`) re-ran the stage on `test-agent`: **identical failure** — task worktree
+`write-database-contract-tests` left empty (zero files written), 14 s run, empty
+stdout/stderr, `verification_error`. Conclusion: the free nemotron model does not
+produce executable test files regardless of role/prompt/capability wiring. Completing a
+TDD cycle requires a model capable of authoring runnable tests for the test_author role;
+the domain, recovery path, agent-role split, and API drive are all proven correct.
+
+Minor surfaced defect (worth a follow-up): with a task blocked on a failed
+test_authoring stage the plan reports `legal_actions: ['retry_stage', ...]`, but
+`POST /retry-stage` rejects it (`INVALID_EDIT: plan is not blocked on a retryable
+planning stage`) — the correct action is `POST /retry` (task retry). The derived
+`legal_actions` advertises `retry_stage` where only `retry` (task) applies.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
