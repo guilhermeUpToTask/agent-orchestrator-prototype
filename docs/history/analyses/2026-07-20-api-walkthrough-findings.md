@@ -362,6 +362,29 @@ ruff + mypy clean; decision-log #50. (Landed as a separate PR from the rest of
 the walkthrough, per the critical-domain-change isolation request.) The codex
 14-item legacy-`PlanPhase` side-effect audit is tracked as follow-up cleanup.
 
+## RESOLUTION #3 — SKIPPED is legacy-only; navigation & promotion agree (domain unfreeze #11)  ✅ FIXED
+
+Answering the maintainer's question ("does a skippable goal/task make sense?"):
+**no**, in the cyclic model. A codex `gpt-5.6-sol` design analysis confirmed
+`SKIPPED` is legacy append-only iteration-abandonment residue; the cyclic
+abandonment boundary is cycle SUPERSEDED-on-activation. The bug: `request_replan`
+skipped every task in the **still-active** source cycle and `begin_replanning`'s
+root skip loop ran for cyclic plans, producing goals with `SKIPPED` tasks that
+navigation treats as closeable but promotion rejects → permanently unpromotable
+(the shared root of #3/#4/#12).
+
+Fix (un-freeze #11, decision-log #51): `request_replan` no longer rewrites the
+source cycle's task outcomes; `begin_replanning` skips nothing on the cyclic
+branch (legacy byte-identical) and sets the WAITING tuple with `phase`/`status`
+explicit; a canonical `can_promote_goal()` predicate is the single rule
+navigation + `_reserve_goal_promotion` share; `_start_operation` allows replan
+discovery for an already-replanning WAITING plan. `SKIPPED` retained for legacy
+plans/history; no migration. **365 unit tests pass; ruff + mypy clean.** (A
+pre-existing plan already poisoned with `SKIPPED` tasks, like `fc5fa4c3`, isn't
+retroactively un-poisoned — it must be superseded by activating a replacement
+cycle; future replans no longer poison.) Full navigation `GOAL_UNPROMOTABLE`
+typing + cyclic stale-result ledger settlement are scoped follow-ups.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
