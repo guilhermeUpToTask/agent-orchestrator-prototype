@@ -385,6 +385,50 @@ retroactively un-poisoned — it must be superseded by activating a replacement
 cycle; future replans no longer poison.) Full navigation `GOAL_UNPROMOTABLE`
 typing + cyclic stale-result ledger settlement are scoped follow-ups.
 
+## Finding #14 — replan cycle drafts are never reasoner-architected (worker path unreachable)  ⚠ OPEN
+
+Surfaced driving `fc5fa4c3` (an approved REPLAN intent, `cycle_draft: null`, source
+cycle still active). The worker's reasoner-driven draft generation
+(`PlanningHandler._architect_cycle`) is only reached via `PlanDispatcher.advance`
+when **`active_cycle is None`** (advance_plan.py:83). A replan's source cycle stays
+active until the *replacement* activates (correct per unfreeze #11), so
+`active_cycle` is never `None` during a replan → `_architect_cycle` is structurally
+unreachable. `planning_handler.handle` compounds it: with `active_cycle is not None`
+it routes to `_enrich` (line 152) before the approved-intent branch (line 154).
+**Consequence:** initial cycles get reasoner-generated roadmaps; replan cycles do
+not — a replan draft can only be produced by the manual `POST /plans/{id}/cycle-draft`
+route with client-supplied `goals`. Either intentional (replan roadmap comes from the
+conversation) or a genuine gap; if the former, the asymmetry is undocumented and the
+"blocked, legal=[edit_task, start_replan]" surface gives the operator no signal that a
+manual draft is the expected next step. Relates to legacy-phase issue #41.
+
+## Finding #15 — cycle-draft review gate is not surfaced by the plan read model  ⚠ OPEN
+
+After `POST /plans/{id}/cycle-draft` (HTTP 201) on `fc5fa4c3`, the persisted aggregate
+holds an unresolved `ReviewGate` (`subject_type=cycle_draft`, `allowed_decisions=
+[approve, edit, cancel]`) — verified directly in `plans.data`. But `GET /plans/{id}`
+returns `review_gate: null` and `legal_actions: ['edit_task', 'start_replan']` — no
+approve action. A FastAPI-only client therefore **cannot discover the `gate_id`** it
+needs for `POST /cycle-draft/approve`, so the draft can never be approved through the
+API. The derived read model (driven by the still-active/blocked source cycle) wins over
+the freshly-opened draft gate — the same derived-vs-authoritative hazard tracked in
+issue #41. Recovery required reading the gate id from persisted state (read-only), then
+the API approve succeeded: new cycle activated, poisoned source cycle superseded, plan
+returned to `running`/`enriching`. Fix candidate: the plan detail read model must
+surface a pending `cycle_draft` gate (and its `approve` legal action) regardless of the
+source cycle's derived status.
+
+## RESOLUTION context — fc5fa4c3 deadlock broken via FastAPI (unfreeze #10/#11 validated live)
+
+The poisoned plan `fc5fa4c3` (5 pre-existing `SKIPPED` tasks in its active cycle,
+`blocked:implementation`) was recovered end-to-end through the API: `POST /cycle-draft`
+→ `POST /cycle-draft/approve` (gate id read from persisted state per #15) → the
+replacement cycle activated and the poisoned source cycle was **superseded**, clearing
+the poison. This confirms the unfreeze #10/#11 recovery semantics on a live plan:
+supersession-on-activation, not per-task skipping, is the correct abandonment boundary.
+Remaining path (enrich → execute) is gated only by the free-model TDD-role wall
+(finding #11), not by any domain defect.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is
