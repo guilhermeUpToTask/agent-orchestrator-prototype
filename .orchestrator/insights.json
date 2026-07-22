@@ -28,8 +28,8 @@
           "verified_rate": 1.0
         },
         "low": {
-          "routed": 3,
-          "verified": 3,
+          "routed": 4,
+          "verified": 4,
           "verified_rate": 1.0
         },
         "medium": {
@@ -38,23 +38,23 @@
           "verified_rate": 0.9
         }
       },
-      "duration_seconds_median": 660.0,
+      "duration_seconds_median": 630.0,
       "duration_seconds_p90": 908.2,
       "escalated_unresolved": 0,
-      "escalation_rate": 0.045,
+      "escalation_rate": 0.043,
       "escalation_reasons": {
         "codex exec workspace-write wraps every command in bubblewrap, which cannot create namespaces in this devcontainer (bwrap: No permissions to create new namespace); ALL file ops failed, zero changes \u2014 codex unusable for writes here. It fetched ROADMAP.md from GitHub main via MCP, revealing the working branch is STALE vs origin/main (missing PRs #33/#34/#35, which already restructured the roadmap). Escalating to coordinator + user decision on branch reconciliation.": 1
       },
       "failed": 1,
-      "first_pass_success_rate": 0.864,
+      "first_pass_success_rate": 0.87,
       "human_interventions": 1,
       "retry_reasons": {
         "coordinator harness error: relative --cd path resolved against wrapper cwd; retry with absolute path, not a runtime fault": 1
       },
       "runtime": "codex",
-      "sample_size": 22,
-      "tasks_routed": 17,
-      "verified_completions": 22
+      "sample_size": 23,
+      "tasks_routed": 18,
+      "verified_completions": 23
     },
     {
       "by_risk": {
@@ -162,5 +162,5 @@
       "verified_completions": 0
     }
   ],
-  "task_count": 36
+  "task_count": 37
 }

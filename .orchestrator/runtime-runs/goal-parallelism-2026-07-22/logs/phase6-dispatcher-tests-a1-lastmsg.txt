@@ -1,0 +1,26 @@
+Implemented and committed as `a27923f` (`test(dispatcher): cover goal enrichment routing`). Worktree is clean and `TASK.md` is deleted.
+
+Added [test_plan_dispatcher.py](/tmp/agent-orchestrator-goalparallel-phase6/backend/tests/unit/orchestration/test_plan_dispatcher.py) with dual memory/SQLite coverage:
+
+- Blocked head plus ready later goal invokes planning, proving lines 89–94 use all ready goal IDs.
+- Enriched goals invoke the runner—not planning—proving the line 95 execution fallback.
+- Missing planning handler returns `PAUSED`, covering lines 91–93.
+- All-terminal cyclic goals fall through line 95 and open a cycle-completion review gate.
+
+Verification output:
+
+```text
+uv run ruff check src tests --fix
+All checks passed!
+
+uv run mypy src
+Success: no issues found in 155 source files
+
+uv run pytest -m "not integration" -q
+336 passed, 1 skipped, 223 deselected, 2 warnings in 12.29s
+
+uv run pytest -m integration -q
+219 passed, 4 skipped, 337 deselected, 2 warnings in 137.85s
+```
+
+Graphify refreshed successfully: 5,229 nodes, 15,510 edges, 270 communities. HTML was safely skipped because the graph exceeds the 5,000-node visualization limit.
