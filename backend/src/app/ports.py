@@ -30,6 +30,7 @@ from src.domain.ports.reasoner_port import (
     ConversationMode,
     ReasonerReply,
 )
+from src.domain.repositories.goal_lease_repo import GoalLeaseRepository
 from src.domain.repositories.planner_repo import PlanRepository
 from src.domain.value_objects.lifecycle import FailureKind
 
@@ -41,6 +42,7 @@ __all__ = [
     "Clock",
     "ConversationMode",
     "ExecutionRecordRepository",
+    "GoalLeaseRepository",
     "Outbox",
     "Reasoner",
     "ReasonerReply",
@@ -148,11 +150,11 @@ class Outbox(Protocol):
 
 @runtime_checkable
 class UnitOfWork(Protocol):
-    """Transaction boundary. Owns Plan, execution-ledger, and Outbox repositories;
-    entering starts a transaction and exiting commits (or rolls back on exception).
-    This is how state + execution identity + outbox become atomic.
+    """Transaction boundary. Owns Plan, goal-lease, execution-ledger, and Outbox
+    repositories; entering starts a transaction and exiting commits (or rolls back
+    on exception). This is how state + execution identity + outbox become atomic.
 
-    plans/outbox are read-only properties on the protocol so concrete
+    Repository attributes are read-only properties on the protocol so concrete
     implementations' narrower attribute types remain assignable (covariance)."""
 
     @property
@@ -161,6 +163,8 @@ class UnitOfWork(Protocol):
     def outbox(self) -> Outbox: ...
     @property
     def executions(self) -> ExecutionRecordRepository: ...
+    @property
+    def goal_leases(self) -> GoalLeaseRepository: ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...
