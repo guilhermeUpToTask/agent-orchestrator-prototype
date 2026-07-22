@@ -1,0 +1,29 @@
+{
+  "runtimes": [
+    {
+      "duration_seconds_median": 337.9,
+      "duration_seconds_p90": 347.8,
+      "escalation_rate": null,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "quota_tokens_total": 130234,
+      "runtime": "claude_sonnet",
+      "tasks_routed_initially": 0,
+      "verified_completions": 2
+    },
+    {
+      "duration_seconds_median": 908.2,
+      "duration_seconds_p90": 908.2,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 1.0,
+      "human_interventions": 0,
+      "quota_tokens_total": 5379255,
+      "runtime": "codex",
+      "tasks_routed_initially": 1,
+      "verified_completions": 1
+    }
+  ],
+  "task_count": 1
+}
