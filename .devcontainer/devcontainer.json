@@ -9,9 +9,19 @@
   // Passes the .env file from your project root into the container as environment variables.
   // Copy .env.example → .env and fill in your API keys — never commit .env.
   // If .env doesn't exist the container still starts fine (Docker ignores missing --env-file).
+  //
+  // The two --security-opt flags let bubblewrap create unprivileged namespaces inside
+  // the container without granting SYS_ADMIN. Install the host AppArmor profile and
+  // follow the security/verification procedure in .devcontainer/BUBBLEWRAP.md.
+  // Verify after rebuilding the container:
+  //   bwrap --ro-bind / / --unshare-user echo ok
   "runArgs": [
     "--env-file",
-    "${localWorkspaceFolder}/.env"
+    "${localWorkspaceFolder}/.env",
+    "--security-opt",
+    "seccomp=${localWorkspaceFolder}/.devcontainer/seccomp-bwrap.json",
+    "--security-opt",
+    "apparmor=agent-orchestrator-bwrap"
   ],
   // Bind-mount ~/.orchestrator from the host so project state (tasks, agents,
   // logs, repos) persists across container rebuilds — same pattern as ~/.gemini.
