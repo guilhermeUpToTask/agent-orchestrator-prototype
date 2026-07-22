@@ -54,6 +54,13 @@ class _Claim:
     lease_seconds: int
 
 
+@dataclass
+class _GoalClaim:
+    worker_id: str
+    expires_at_epoch: int
+    lease_seconds: int
+
+
 # ---- in-memory plan repository with version-CAS + lease semantics ----
 class InMemoryPlanRepository:
     """Mirrors the real adapter's contracts: detached aggregates (deep copy on
@@ -133,6 +140,57 @@ class InMemoryPlanRepository:
             self._claims.pop(plan_id, None)
 
 
+# ---- in-memory goal-lease repository with the SQLite predicate semantics ----
+class InMemoryGoalLeaseRepository:
+    """Mirror the indexed SQLite claim primitive for one plan/goal pair."""
+
+    def __init__(self) -> None:
+        self._claims: dict[tuple[str, str], _GoalClaim] = {}
+
+    def claim_one_ready_goal(
+        self,
+        plan_id: str,
+        goal_id: str,
+        worker_id: str,
+        lease_seconds: int,
+        now: datetime,
+    ) -> bool:
+        key = (plan_id, goal_id)
+        now_epoch = int(now.timestamp())
+        claim = self._claims.get(key)
+        if claim is not None and claim.expires_at_epoch >= now_epoch:
+            return False
+        self._claims[key] = _GoalClaim(
+            worker_id=worker_id,
+            expires_at_epoch=now_epoch + lease_seconds,
+            lease_seconds=lease_seconds,
+        )
+        return True
+
+    def heartbeat(
+        self,
+        plan_id: str,
+        goal_id: str,
+        worker_id: str,
+        lease_seconds: int,
+        now: datetime,
+    ) -> None:
+        claim = self._claims.get((plan_id, goal_id))
+        if claim is not None and claim.worker_id == worker_id:
+            claim.expires_at_epoch = int(now.timestamp()) + lease_seconds
+            claim.lease_seconds = lease_seconds
+
+    def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
+        key = (plan_id, goal_id)
+        claim = self._claims.get(key)
+        if claim is not None and claim.worker_id == worker_id:
+            self._claims.pop(key, None)
+
+    def is_claim_live(self, plan_id: str, goal_id: str, now: datetime) -> bool:
+        claim = self._claims.get((plan_id, goal_id))
+        return claim is not None and claim.expires_at_epoch > int(now.timestamp())
+
+
 # ---- in-memory outbox ----
 class InMemoryOutbox:
     """Mirrors SqliteOutbox: add() stages on the open transaction; commit flushes
@@ -170,6 +228,7 @@ class InMemoryUnitOfWork:
         executions: InMemoryExecutionRecordRepository | None = None,
     ) -> None:
         self.plans = repo
+        self.goal_leases = InMemoryGoalLeaseRepository()
         self.outbox = outbox
         self.executions = executions or InMemoryExecutionRecordRepository()
 
@@ -376,6 +435,7 @@ class DummyAgentRunner:
 __all__ = [
     "FakeClock",
     "InMemoryPlanRepository",
+    "InMemoryGoalLeaseRepository",
     "InMemoryOutbox",
     "InMemoryExecutionRecordRepository",
     "InMemoryUnitOfWork",

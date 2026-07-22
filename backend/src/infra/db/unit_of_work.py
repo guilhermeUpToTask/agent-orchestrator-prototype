@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.app.ports import Clock
 from src.infra.db.execution_record_repository import SqliteExecutionRecordRepository
+from src.infra.db.goal_lease_repository import SqliteGoalLeaseRepository
 from src.infra.db.outbox import SqliteOutbox
 from src.infra.db.plan_repository import SqlitePlanRepository
 
@@ -26,6 +27,7 @@ class SqliteUnitOfWork:
         self._session_factory = session_factory
         self._session: Session | None = None
         self.plans = SqlitePlanRepository(session_factory, clock)
+        self.goal_leases = SqliteGoalLeaseRepository(session_factory)
         self.executions = SqliteExecutionRecordRepository()
         self.outbox = SqliteOutbox()
 
