@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import os
 import signal
@@ -10,7 +11,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal, TextIO
+from typing import AsyncIterator, Awaitable, Callable, Literal, TextIO
 from src.app.observations import (
     ObservationCorrelation,
     ObservationKind,
@@ -33,6 +34,120 @@ def _require_min_cap(cap_bytes: int, *, label: str) -> None:
 def attempt_log_path(orchestrator_home: Path, attempt_id: str) -> Path:
     """Return the durable runtime log location for an execution attempt."""
     return orchestrator_home / "runtime-logs" / f"{attempt_id}.jsonl"
+
+
+LogStreamKind = Literal["line", "truncated", "keepalive"]
+
+
+@dataclass(frozen=True)
+class LogStreamEvent:
+    """One event from tailing a per-attempt runtime log (see follow_attempt_log).
+
+    `line`      — a parsed `{monotonic_seconds, stream, text}` record (`record`).
+    `truncated` — the bounded log rotated; a reader should reset its view.
+    `keepalive` — no new bytes for a while; emitted so the socket stays open.
+    `offset` is the byte cursor AFTER this event, usable as a resume token.
+    """
+
+    kind: LogStreamKind
+    offset: int
+    record: dict[str, object] | None = None
+
+
+def _log_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
+def _read_complete_lines(path: Path, offset: int) -> tuple[list[str], int]:
+    """Read whole newline-terminated lines from `offset`, leaving any trailing
+    partial line for the next poll. Returns (lines, new_offset)."""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            data = handle.read()
+    except FileNotFoundError:
+        return [], offset
+    if not data:
+        return [], offset
+    cut = data.rfind(b"\n")
+    if cut == -1:
+        return [], offset  # no complete line yet
+    complete = data[: cut + 1]
+    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
+
+
+def _events_from_lines(lines: list[str], offset: int, *, markers: bool) -> list[LogStreamEvent]:
+    out: list[LogStreamEvent] = []
+    for raw in lines:
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("truncated") is True:
+            if markers:
+                out.append(LogStreamEvent(kind="truncated", offset=offset))
+            continue
+        out.append(LogStreamEvent(kind="line", offset=offset, record=record))
+    return out
+
+
+async def follow_attempt_log(
+    path: Path,
+    *,
+    is_terminal: Callable[[], bool],
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
+    start_offset: int = 0,
+    poll_interval: float = 0.4,
+    keepalive_interval: float = 15.0,
+) -> AsyncIterator[LogStreamEvent]:
+    """Tail a bounded per-attempt runtime JSONL, yielding a LogStreamEvent per
+    appended line as the agent subprocess writes it — the RAW runtime stream,
+    distinct from the coarse `agent_events` telemetry feed.
+
+    Handles `_BoundedLog` rotation: when the file shrinks below our cursor (an
+    atomic rotate replaced it with a smaller retained tail) we emit a
+    `truncated` reset and resync from 0; the in-band `{"truncated":true}` marker
+    is surfaced the same way. Stops once `is_terminal()` reports the attempt
+    finished and no unread bytes remain (the terminal transition happens-after
+    all log writes), or `should_stop()` (client disconnect) returns True. All
+    blocking file / status reads are hopped off the event loop.
+    """
+    offset = max(0, start_offset)
+    idle = 0.0
+    while True:
+        if should_stop is not None and await should_stop():
+            return
+        size = await asyncio.to_thread(_log_size, path)
+        if size < offset:  # rotation/truncation shrank the file
+            offset = 0
+            idle = 0.0
+            yield LogStreamEvent(kind="truncated", offset=0)
+            continue
+        if size > offset:
+            lines, offset = await asyncio.to_thread(_read_complete_lines, path, offset)
+            for event in _events_from_lines(lines, offset, markers=True):
+                yield event
+            idle = 0.0
+            continue
+        if await asyncio.to_thread(is_terminal):
+            # final drain — catch any bytes written between our last read and
+            # the terminal transition, then close the stream.
+            size = await asyncio.to_thread(_log_size, path)
+            if size > offset:
+                lines, offset = await asyncio.to_thread(_read_complete_lines, path, offset)
+                for event in _events_from_lines(lines, offset, markers=False):
+                    yield event
+            return
+        await asyncio.sleep(poll_interval)
+        idle += poll_interval
+        if idle >= keepalive_interval:
+            idle = 0.0
+            yield LogStreamEvent(kind="keepalive", offset=offset)
 
 
 @dataclass(frozen=True)

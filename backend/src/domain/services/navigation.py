@@ -25,6 +25,18 @@ def _goal_ready(goal: Goal, done_goal_ids: set[str]) -> bool:
     return all(dep in done_goal_ids for dep in goal.depends_on)
 
 
+def can_promote_goal(goal: Goal) -> bool:
+    """Cyclic goal-promotion eligibility — the single predicate that navigation
+    and `ExecutionHandler._reserve_goal_promotion` must agree on (finding #3).
+
+    A goal may merge into the cycle branch only when EVERY task is `DONE` with
+    accepted verification evidence. A `SKIPPED` task (legacy iteration-abandonment
+    residue, unfreeze #11) or an evidence-less `DONE` means the goal is NOT
+    promotable — it must open a block, never close silently.
+    """
+    return all(task.status == Status.DONE and bool(task.verification_evidence) for task in goal.tasks)
+
+
 def next_action(goals: list[Goal], now: datetime) -> NextAction:
     """Return work for only the earliest non-terminal goal.
 

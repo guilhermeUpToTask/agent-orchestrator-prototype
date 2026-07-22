@@ -83,7 +83,12 @@ def test_test_author_stage_is_tests_only():
 
 def test_implementer_stage_does_not_touch_tests():
     t = Task(id="t1", name="Implement", position=0, description="Pass tests.", contract=contract())
-    t.test_bundle = TestBundle(
+    t.test_bundle = _valid_bundle()
+    assert "Make the frozen tests pass; never modify tests." in build_task_prompt(t, spec())
+
+
+def _valid_bundle() -> TestBundle:
+    return TestBundle(
         task_id="t1",
         task_revision=1,
         test_commit_sha="abc",
@@ -93,4 +98,24 @@ def test_implementer_stage_does_not_touch_tests():
         red_or_baseline_evidence_refs=["e"],
         frozen_at=datetime.now(timezone.utc),
     )
-    assert "Make the frozen tests pass; never modify tests." in build_task_prompt(t, spec())
+
+
+def test_run_role_overrides_static_role_in_test_authoring_stage():
+    # Regression (walkthrough Bug B): an implementer-role agent performing a
+    # test-authoring run must be told it is the test_author — matching the stage
+    # expectation — not "Your role: implementer / Implement the task".
+    t = Task(id="t1", name="Write tests", position=0, description="Cover it.", contract=contract())
+    p = build_task_prompt(t, spec("implementer"))
+    assert "## Your role\ntest_author\n" in p
+    assert "## Your role\nimplementer" not in p
+    assert "Write ONLY tests that fail for the right reason; never modify production files." in p
+
+
+def test_run_role_overrides_static_role_in_implementation_stage():
+    # Symmetric: a test_author-role agent on the implementation stage plays the
+    # implementer role (a validated test bundle exists).
+    t = Task(id="t1", name="Implement", position=0, description="Pass tests.", contract=contract())
+    t.test_bundle = _valid_bundle()
+    p = build_task_prompt(t, spec("test_author"))
+    assert "## Your role\nimplementer\n" in p
+    assert "Make the frozen tests pass; never modify tests." in p

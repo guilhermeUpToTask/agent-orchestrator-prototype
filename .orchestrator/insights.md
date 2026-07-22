@@ -1,12 +1,13 @@
 # Cross-experiment runtime insights
 
-Experiments observed: obs-followups-2026-07-18, obs-streaming-2026-07-18, simplify-runtime-solid-dry-20260718
-Tasks observed (lifetime): 8
+Experiments observed: obs-followups-2026-07-18, obs-streaming-2026-07-18, roadmap-accel-2026-07-20, roadmap-clarity-2026-07-20, roadmap-exec-2026-07-19, simplify-runtime-solid-dry-20260718, walkthrough-2026-07-19
+Tasks observed (lifetime): 30
 
 Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inference. Regenerate after every experiment via `python3 .orchestrator/lib/insights.py`. Consult this during the /accelerate Routing step; do not let it silently override the manifest -- surface disagreements to the user instead.
 
 ## Flags
 
+- codex: 1 human intervention(s) recorded -- check events for root cause.
 - mimo: routed 1 task(s), verified zero -- investigate before routing more.
 - mimo: escalation rate 100% exceeds 30% flag threshold.
 - mimo: only 1 sample(s) -- treat its rates as low-confidence.
@@ -18,9 +19,10 @@ Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inferenc
 
 | Runtime | Routed | Verified | Failed | Escalated (unresolved) | First-pass success | Duration median (s) | Duration p90 (s) | Escalation rate | Human interventions |
 |---|---|---|---|---|---|---|---|---|---|
-| codex | 5 | 7 | 0 | 0 | 1.0 | 600.0 | 745.4 | 0.0 | 0 |
+| codex | 14 | 15 | 1 | 0 | 0.8 | 722.7 | 1400.0 | 0.067 | 1 |
+| claude_sonnet | 10 | 10 | 0 | 0 | None | 86.5 | 226.0 | None | 0 |
+| grok | 3 | 4 | 0 | 0 | 0.5 | 321.3 | 700.0 | 0.0 | 0 |
 | claude | 0 | 1 | 0 | 0 | None | 180.0 | 180.0 | None | 0 |
-| grok | 0 | 1 | 0 | 0 | None | 342.6 | 342.6 | None | 0 |
 | mimo | 1 | 0 | 0 | 0 | 0.0 | None | None | 1.0 | 0 |
 | pi_free | 2 | 0 | 0 | 0 | 0.0 | None | None | 1.5 | 0 |
 
@@ -28,8 +30,24 @@ Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inferenc
 
 **codex**
 - low: 2/2 verified (100%)
+- medium: 7/8 verified (88%)
+- high: 1/1 verified (100%)
+
+**claude_sonnet**
+- low: 9/9 verified (100%)
+- medium: 1/1 verified (100%)
+
+**grok**
+- low: 3/3 verified (100%)
 
 ## Escalation / retry reasons observed
+
+**codex**
+- escalated x1: codex exec workspace-write wraps every command in bubblewrap, which cannot create namespaces in this devcontainer (bwrap: No permissions to create new namespace); ALL file ops failed, zero changes — codex unusable for writes here. It fetched ROADMAP.md from GitHub main via MCP, revealing the working branch is STALE vs origin/main (missing PRs #33/#34/#35, which already restructured the roadmap). Escalating to coordinator + user decision on branch reconciliation.
+- retried x1: coordinator harness error: relative --cd path resolved against wrapper cwd; retry with absolute path, not a runtime fault
+
+**grok**
+- retried x1: same coordinator harness error: relative --cwd path; retry with absolute path
 
 **mimo**
 - escalated x1: mimo run hit the wrapper's 900s timeout with zero stdout/stderr and zero file changes - no verifiable output; retrying on pi_free per one-attempt-then-escalate policy before considering codex

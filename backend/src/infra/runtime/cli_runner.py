@@ -42,7 +42,11 @@ from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.value_objects.tasks_vos import TaskResult
 from src.infra.runtime.taxonomy import normalize_failure
-from src.infra.runtime.pi_protocol import extract_final_text, parse_pi_events
+from src.infra.runtime.pi_protocol import (
+    extract_final_text,
+    extract_stream_error,
+    parse_pi_events,
+)
 from src.infra.runtime.process_supervisor import (
     attempt_log_path,
     supervise_process,
@@ -96,11 +100,30 @@ def correlation_env(idempotency_key: str) -> dict[str, str]:
     }
 
 
+def _run_role_label(task: Task, spec: AgentSpec) -> str:
+    """The role the agent plays for THIS run.
+
+    The authoritative run role is the task's live TDD stage (derived from its
+    contract + test-bundle state — the same signal the execution handler uses to
+    resolve the run agent), NOT the agent's static ``role``. Without this, an
+    agent that covers both TDD roles (e.g. one holding both ``test_authoring``
+    and ``implementation``) is told "Your role: implementer / Implement the
+    task" during a *test-authoring* run — contradicting the stage expectation.
+    Falls back to the agent's own role for non-TDD tasks.
+    """
+    if task.tdd_stage == "test_authoring":
+        return "test_author"
+    if task.tdd_stage == "implementation":
+        return "implementer"
+    return spec.role
+
+
 def build_task_prompt(task: Task, spec: AgentSpec) -> str:
     """Markdown task contract handed to the CLI agent. Project-level conventions
     live in the workspace AGENTS.md — not here — so they apply consistently
     across runtimes."""
     capabilities = ", ".join(task.required_capabilities) or "(none declared)"
+    run_role = _run_role_label(task, spec)
     prompt = (
         "# Task: "
         + task.name
@@ -108,7 +131,7 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
         + task.description
         + "\n\n"
         + "## Your role\n"
-        + spec.role
+        + run_role
         + "\n\n"
         + "## Instructions\n"
         + (spec.instructions or "(none)")
@@ -128,11 +151,11 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
     allowed = "\n".join("- `" + path + "`" for path in contract.allowed_scope)
     forbidden = "\n".join("- `" + path + "`" for path in contract.forbidden_scope) or "- (none)"
     commands = "\n".join("- `" + command + "`" for command in contract.verification_commands)
-    if task.tdd_stage == "test_authoring" or spec.role in {"test_author", "test_writer"}:
+    if run_role in {"test_author", "test_writer"}:
         expectation = (
             "Write ONLY tests that fail for the right reason; never modify production files."
         )
-    elif task.tdd_stage == "implementation" or spec.role == "implementer":
+    elif run_role == "implementer":
         expectation = "Make the frozen tests pass; never modify tests."
     else:
         expectation = "Follow the contract and do not modify files outside the declared scope."
@@ -201,6 +224,17 @@ class CliAgentRunner(ABC):
         the raw stream, never from this value.
         """
         return stdout
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        """Runtime-specific IN-BAND error, or None when the run truly succeeded.
+
+        Some CLIs report an upstream provider failure inside their success-exit
+        output stream (pi `--mode json` emits it as an errored assistant turn
+        while the process still exits 0). Runners that can carry such an error
+        override this so `run()` classifies it through the shared taxonomy
+        instead of returning an empty "success". Base runtimes have none.
+        """
+        return None
 
     async def run(
         self,
@@ -449,6 +483,28 @@ class CliAgentRunner(ABC):
             )
             raise TaskFailed(failure.safe_message, failure=failure)
 
+        stream_error = self._detect_stream_error(stdout)
+        if stream_error is not None:
+            # Exit 0, but the CLI reported an upstream provider error in-band
+            # (e.g. a rate limit). Classify it through the shared taxonomy so a
+            # retryable failure retries with backoff instead of being mistaken
+            # for a successful empty run (which downstream stages then mislabel
+            # as a terminal verification error).
+            failure = normalize_failure(
+                stdout=stdout,
+                stderr=stream_error,
+                runtime=self.log_prefix,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+                exit_code=result.exit_code,
+            )
+            log.warning(
+                f"{self.log_prefix}.stream_error",
+                exit_code=result.exit_code,
+                kind=failure.kind.value,
+            )
+            raise TaskFailed(failure.safe_message, failure=failure)
+
         log.info(f"{self.log_prefix}.finished", exit_code=0, log_path=str(result.log_path))
         return (
             TaskResult.success(
@@ -472,6 +528,15 @@ PI_BACKEND_ENV_VAR: dict[str, str] = {
     "gemini": "GEMINI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
 }
+
+
+def _pi_model_name(model: str, provider_id: str | None) -> str:
+    """Return pi's provider-local model name from a catalog model id."""
+    if provider_id:
+        prefix = f"{provider_id}:"
+        if model.startswith(prefix):
+            return model[len(prefix) :]
+    return model
 
 
 class PiAgentRunner(CliAgentRunner):
@@ -503,7 +568,7 @@ class PiAgentRunner(CliAgentRunner):
             observation_repository=observation_repository,
         )
         self._api_key = api_key
-        self._model = model
+        self._model = _pi_model_name(model, provider_id)
         self._backend = backend
         self._extra_flags = extra_flags or []
 
@@ -514,6 +579,8 @@ class PiAgentRunner(CliAgentRunner):
     def _build_cmd(self, prompt: str) -> list[str]:
         return [
             "pi",
+            "--provider",
+            self._backend,
             "--model",
             self._model,
             "--no-session",
@@ -532,6 +599,11 @@ class PiAgentRunner(CliAgentRunner):
         # --mode json makes stdout an NDJSON event stream; persist the final
         # assistant message as the task outcome, never the raw stream.
         return extract_final_text(stdout) or stdout
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        # pi reports upstream provider errors (rate limits, outages) as an
+        # errored assistant turn while exiting 0; surface it for classification.
+        return extract_stream_error(stdout)
 
     def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
         structured = parse_pi_events(output)

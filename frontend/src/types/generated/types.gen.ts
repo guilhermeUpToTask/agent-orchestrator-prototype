@@ -2848,6 +2848,43 @@ export type PlansAttemptLogResponses = {
 
 export type PlansAttemptLogResponse = PlansAttemptLogResponses[keyof PlansAttemptLogResponses];
 
+export type PlansAttemptLogStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Attempt Id
+         */
+        attempt_id: string;
+    };
+    query?: {
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/plans/{plan_id}/attempts/{attempt_id}/log/stream';
+};
+
+export type PlansAttemptLogStreamErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptLogStreamError = PlansAttemptLogStreamErrors[keyof PlansAttemptLogStreamErrors];
+
+export type PlansAttemptLogStreamResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
 export type PlansAgentEventsData = {
     body?: never;
     path: {

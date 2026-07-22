@@ -1,0 +1,23 @@
+{
+  "text": "I'll make the testing fakes self-documenting: first read the real adapters and existing docstring style, then add concise class docstrings only.Reading the real adapters so each docstring names the correct mirror and preserved semantics.Adding docstrings that name each real adapter and the semantics tests rely on, matching the existing style.Verifying with ruff and unit tests, then committing.Verification passed. Committing docstring-only changes.Docstrings only in `backend/src/app/testing/fakes.py` (execution_records already documented). Verified: ruff clean, 333 unit tests passed. Commit `af77d05` on `task/fakes-docs/a1`.\n\n### Docstrings added\n\n| Class | Mirrors | Semantics noted |\n|---|---|---|\n| **InMemoryOutbox** | `SqliteOutbox` | Stage on open txn; commit flushes with state; rollback drops staged events (transactional outbox) |\n| **InMemoryUnitOfWork** | `SqliteUnitOfWork` | with-block txn boundary; plans + execution records + outbox commit/rollback together |\n| **InMemoryAgentRepository** | `SqliteAgentRepository` | Same typed errors (`AgentNotFoundError`, `NoDefaultAgentError`) for binding paths |\n| **InMemoryCapabilityRepository** | `SqliteCapabilityRepository` | In-memory catalog for seed/validate capability IDs without a reference DB |\n| **NoOpWorkspace** | Workspace port (`GitBranchWorkspace`) | begin/commit/discard record-only; attempt lifecycle without real git worktrees |\n| **CollectingEventSink** | `SqliteAgentEventSink` | In-memory emit outside plan UoW (best-effort side channel) for telemetry asserts |",
+  "stopReason": "EndTurn",
+  "sessionId": "019f7b63-debc-7bd3-bdc1-bfceb4aab8ec",
+  "requestId": "6183ccb1-125e-404c-b298-5b6c0302cbd8",
+  "thought": "The user wants me to implement documentation for fakes in the testing module. Let me follow the instructions carefully:\nGood, I'm already on the right branch. Let me read the real adapters to write accurate docstrings.Let me also read the SqliteAgentRepository portion and check ROADMAP item 3 for any extra guidance. Also look at how InMemoryChatStore docstring is styled.I have a clear picture. I need to add docstrings to:\n```python\n# backend/src/app/testing/fakes.py\n\"\"\"Testing helpers that mirror real adapters while preserving test invariants.\n\nInMemoryOutbox, InMemoryUnitOfWork, InMemoryAgentRepository,\nInMemoryCapabilityRepository, NoOpWorkspace, CollectingEventSink\neach implement the same contracts as their real counterparts so\n uv run pytest -q tests/unit\npasses unchanged.\n\"\"\"\n\nclass InMemoryOutbox:\n    \"\"\"Mirrors SqliteOutbox: add() stages on the open transaction; commit flushes\n    events with state, rollback discards the staged list.execution_records.py already has a docstring. Let me verify the changes are docstring-only and run the verification commands.The tests are still running. Let me wait for them.All tests passed. Now commit with a conventional message on branch task/fakes-docs/a1.Done. Summarize for the user.",
+  "usage": {
+    "input_tokens": 237009,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 3500,
+    "reasoning_tokens": 1068,
+    "total_tokens": 240509
+  },
+  "num_turns": 8,
+  "modelUsage": {
+    "grok-4.5-build-free": {
+      "inputTokens": 237009,
+      "outputTokens": 3500,
+      "cacheReadInputTokens": 0,
+      "modelCalls": 8
+    }
+  }
+}

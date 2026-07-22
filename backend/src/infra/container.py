@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.app.ports import AgentRunner, Clock, Reasoner
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
-from src.infra.db.observation_repository import SqliteObservationRepository
+from src.infra.db.observation_repository import SqliteProcessObservationRepository
 from src.infra.db.reference_repos import (
     SqliteAgentRepository,
     SqliteCapabilityRepository,
@@ -129,8 +129,8 @@ class AppContainer:
         return SqliteAgentEventReader(self.session_factory)
 
     @cached_property
-    def observation_repository(self) -> SqliteObservationRepository:
-        return SqliteObservationRepository(self.session_factory, self.clock)
+    def observation_repository(self) -> SqliteProcessObservationRepository:
+        return SqliteProcessObservationRepository(self.session_factory, self.clock)
 
     @cached_property
     def chat_store(self) -> SqliteChatRepository:

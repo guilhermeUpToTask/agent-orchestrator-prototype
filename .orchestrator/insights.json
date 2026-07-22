@@ -2,9 +2,14 @@
   "experiments_observed": [
     "obs-followups-2026-07-18",
     "obs-streaming-2026-07-18",
-    "simplify-runtime-solid-dry-20260718"
+    "roadmap-accel-2026-07-20",
+    "roadmap-clarity-2026-07-20",
+    "roadmap-exec-2026-07-19",
+    "simplify-runtime-solid-dry-20260718",
+    "walkthrough-2026-07-19"
   ],
   "flags": [
+    "codex: 1 human intervention(s) recorded -- check events for root cause.",
     "mimo: routed 1 task(s), verified zero -- investigate before routing more.",
     "mimo: escalation rate 100% exceeds 30% flag threshold.",
     "mimo: only 1 sample(s) -- treat its rates as low-confidence.",
@@ -15,25 +20,90 @@
   "runtimes": [
     {
       "by_risk": {
+        "high": {
+          "routed": 1,
+          "verified": 1,
+          "verified_rate": 1.0
+        },
         "low": {
           "routed": 2,
           "verified": 2,
           "verified_rate": 1.0
+        },
+        "medium": {
+          "routed": 8,
+          "verified": 7,
+          "verified_rate": 0.875
         }
       },
-      "duration_seconds_median": 600.0,
-      "duration_seconds_p90": 745.4,
+      "duration_seconds_median": 722.7,
+      "duration_seconds_p90": 1400.0,
+      "escalated_unresolved": 0,
+      "escalation_rate": 0.067,
+      "escalation_reasons": {
+        "codex exec workspace-write wraps every command in bubblewrap, which cannot create namespaces in this devcontainer (bwrap: No permissions to create new namespace); ALL file ops failed, zero changes \u2014 codex unusable for writes here. It fetched ROADMAP.md from GitHub main via MCP, revealing the working branch is STALE vs origin/main (missing PRs #33/#34/#35, which already restructured the roadmap). Escalating to coordinator + user decision on branch reconciliation.": 1
+      },
+      "failed": 1,
+      "first_pass_success_rate": 0.8,
+      "human_interventions": 1,
+      "retry_reasons": {
+        "coordinator harness error: relative --cd path resolved against wrapper cwd; retry with absolute path, not a runtime fault": 1
+      },
+      "runtime": "codex",
+      "sample_size": 15,
+      "tasks_routed": 14,
+      "verified_completions": 15
+    },
+    {
+      "by_risk": {
+        "low": {
+          "routed": 9,
+          "verified": 9,
+          "verified_rate": 1.0
+        },
+        "medium": {
+          "routed": 1,
+          "verified": 1,
+          "verified_rate": 1.0
+        }
+      },
+      "duration_seconds_median": 86.5,
+      "duration_seconds_p90": 226.0,
+      "escalated_unresolved": 0,
+      "escalation_rate": null,
+      "escalation_reasons": {},
+      "failed": 0,
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "retry_reasons": {},
+      "runtime": "claude_sonnet",
+      "sample_size": 0,
+      "tasks_routed": 10,
+      "verified_completions": 10
+    },
+    {
+      "by_risk": {
+        "low": {
+          "routed": 3,
+          "verified": 3,
+          "verified_rate": 1.0
+        }
+      },
+      "duration_seconds_median": 321.3,
+      "duration_seconds_p90": 700.0,
       "escalated_unresolved": 0,
       "escalation_rate": 0.0,
       "escalation_reasons": {},
       "failed": 0,
-      "first_pass_success_rate": 1.0,
+      "first_pass_success_rate": 0.5,
       "human_interventions": 0,
-      "retry_reasons": {},
-      "runtime": "codex",
-      "sample_size": 5,
-      "tasks_routed": 5,
-      "verified_completions": 7
+      "retry_reasons": {
+        "same coordinator harness error: relative --cwd path; retry with absolute path": 1
+      },
+      "runtime": "grok",
+      "sample_size": 4,
+      "tasks_routed": 3,
+      "verified_completions": 4
     },
     {
       "by_risk": {},
@@ -47,22 +117,6 @@
       "human_interventions": 0,
       "retry_reasons": {},
       "runtime": "claude",
-      "sample_size": 0,
-      "tasks_routed": 0,
-      "verified_completions": 1
-    },
-    {
-      "by_risk": {},
-      "duration_seconds_median": 342.6,
-      "duration_seconds_p90": 342.6,
-      "escalated_unresolved": 0,
-      "escalation_rate": null,
-      "escalation_reasons": {},
-      "failed": 0,
-      "first_pass_success_rate": null,
-      "human_interventions": 0,
-      "retry_reasons": {},
-      "runtime": "grok",
       "sample_size": 0,
       "tasks_routed": 0,
       "verified_completions": 1
@@ -106,5 +160,5 @@
       "verified_completions": 0
     }
   ],
-  "task_count": 8
+  "task_count": 30
 }

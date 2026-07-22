@@ -136,6 +136,8 @@ def test_pi_command_disables_project_state_reuse_and_preserves_extra_flags():
 
     assert command == [
         "pi",
+        "--provider",
+        "anthropic",
         "--model",
         "claude-sonnet-4-5",
         "--no-session",

@@ -8,13 +8,18 @@ from __future__ import annotations
 
 import uuid
 import json
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
-from src.app.execution_records import PlanningOperation, PlanningOperationStatus
+from src.app.execution_records import (
+    ExecutionAttemptStatus,
+    PlanningOperation,
+    PlanningOperationStatus,
+)
 from src.app.ports import ChatMessage
 from src.app.use_cases import control
 from src.app.use_cases.apply_edit import (
@@ -66,7 +71,7 @@ from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.factories.identity import new_id
 from src.infra.container import AppContainer
 from src.infra.errors import AttemptNotFoundError
-from src.infra.runtime.process_supervisor import attempt_log_path
+from src.infra.runtime.process_supervisor import attempt_log_path, follow_attempt_log
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -1020,6 +1025,78 @@ def attempt_log(
         except (ValueError, TypeError, AttributeError):
             continue
     return AttemptLogResponse(entries=entries[-tail_lines:] if tail_lines else [], truncated=truncated)
+
+
+_TERMINAL_ATTEMPT_STATUSES = frozenset(
+    {
+        ExecutionAttemptStatus.SUCCEEDED,
+        ExecutionAttemptStatus.FAILED,
+        ExecutionAttemptStatus.ABANDONED,
+    }
+)
+
+
+@router.get("/{plan_id}/attempts/{attempt_id}/log/stream")
+async def attempt_log_stream(
+    plan_id: str,
+    attempt_id: str,
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    container: AppContainer = Depends(get_container),
+) -> StreamingResponse:
+    """Live SSE tail of one attempt's RAW runtime stdout/stderr.
+
+    Distinct from `/api/events` (telemetry): this streams the exact bytes the
+    agent CLI wrote, straight from the bounded per-attempt runtime log, as they
+    land. Each line is an SSE frame
+    `id: <offset>` + `data: {monotonic_seconds,stream,text}`; an `event:
+    truncated` frame means the bounded log rotated (reset your view); `event:
+    end` closes the stream once the attempt reaches a terminal state. Resume
+    without replay via the standard `Last-Event-ID` header (or `?offset=`).
+    """
+    with container.new_unit_of_work() as uow:
+        try:
+            attempt = uow.executions.get_attempt(attempt_id)
+        except KeyError as exc:
+            raise AttemptNotFoundError(attempt_id) from exc
+        if attempt.plan_id != plan_id:
+            raise AttemptNotFoundError(attempt_id)
+
+    start = offset
+    resume_id = request.headers.get("last-event-id")
+    if resume_id and resume_id.isdigit():
+        start = int(resume_id)
+
+    path = attempt_log_path(container.orchestrator_home, attempt_id)
+
+    def _is_terminal() -> bool:
+        with container.new_unit_of_work() as uow:
+            try:
+                current = uow.executions.get_attempt(attempt_id)
+            except KeyError:
+                return True  # attempt vanished — nothing more will be written
+            return current.status in _TERMINAL_ATTEMPT_STATUSES
+
+    async def gen() -> AsyncIterator[str]:
+        async for event in follow_attempt_log(
+            path,
+            is_terminal=_is_terminal,
+            should_stop=request.is_disconnected,
+            start_offset=start,
+        ):
+            if event.kind == "keepalive":
+                yield ": keepalive\n\n"
+            elif event.kind == "truncated":
+                yield "event: truncated\ndata: {}\n\n"
+            else:
+                yield f"id: {event.offset}\ndata: {json.dumps(event.record)}\n\n"
+        yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class AgentEventResponse(BaseModel):

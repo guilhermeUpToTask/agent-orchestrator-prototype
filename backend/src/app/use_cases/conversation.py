@@ -85,9 +85,13 @@ def _start_operation(
         plan = uow.plans.get(plan_id)
         if plan.project_id is None:
             raise InvalidEditError("project binding is required before intent discovery")
-        if plan.intent_proposal is not None or (
-            plan.review_gate is not None and plan.review_gate.unresolved
-        ):
+        if (
+            plan.intent_proposal is not None and plan.intent_proposal.approved_at is None
+        ) or (plan.review_gate is not None and plan.review_gate.unresolved):
+            # Only an UNRESOLVED intent (or open review gate) is an in-progress
+            # planning review that must be finished/cancelled first. An APPROVED
+            # intent is the current cycle's source and must not block a REPLAN
+            # discovery from opening a new proposal over the active cycle.
             raise InvalidEditError("finish or cancel the current planning review first")
         if kind == ProposalKind.REPLAN and plan.active_cycle is None:
             raise InvalidEditError("replan discovery requires an active cycle")
@@ -103,11 +107,20 @@ def _start_operation(
             PlanStatus.BLOCKED,
             PlanStatus.IDLE,
         }:
+            # A plan already in conversational replan (unfreeze #10/#11:
+            # status=WAITING, phase=REPLANNING) may proceed regardless of whether
+            # the frozen source cycle's tasks are terminal — replanning no longer
+            # skips them; the source cycle is superseded on activation, not by
+            # settling its tasks. Otherwise a WAITING plan may only start a replan
+            # once its active-cycle work has settled.
+            already_replanning = (
+                plan.status == PlanStatus.WAITING and plan.phase == PlanPhase.REPLANNING
+            )
             cycle = plan.active_cycle
             settled = cycle is not None and all(
                 task.is_terminal for goal in cycle.goals for task in goal.tasks
             )
-            if not (plan.status == PlanStatus.WAITING and settled):
+            if not (already_replanning or (plan.status == PlanStatus.WAITING and settled)):
                 raise InvalidEditError("replan discovery requires settled active-cycle work")
 
         purpose = "intent_discovery" if kind == ProposalKind.INITIAL else "replan_discovery"
