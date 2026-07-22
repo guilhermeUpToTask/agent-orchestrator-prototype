@@ -24,7 +24,7 @@ human command), writes, and commits state + events atomically via the outbox.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from src.domain.aggregates.planner_orchestrator import (
@@ -54,15 +54,20 @@ from src.domain.factories.identity import new_id
 from src.domain.repositories.agent_repo import AgentRepository
 from src.domain.repositories.capability_repo import CapabilityRepository
 from src.domain.services.agent_role_resolution import resolve_task_role_agents
+from src.domain.services.navigation import ready_goal_ids
 
 from src.app.handlers.base import Signal
 from src.app.execution_records import PlanningOperation, PlanningOperationStatus
 from src.app.ports import Clock, Reasoner, ReasonerUnavailable, UnitOfWork
 
 
-def _next_unenriched(plan: Plan) -> Goal | None:
-    """First non-terminal goal (position order) still without tasks."""
-    candidates = [g for g in plan.execution_goals if not g.is_terminal and not g.tasks]
+def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
+    """First non-terminal, dependency-ready goal (position order) still
+    without tasks — dependency-readiness is required so a goal stuck behind an
+    unmet `depends_on` never starves an independently-ready later goal from
+    being JIT-enriched (goal-parallelism fan-out, ADR-001)."""
+    ready_ids = ready_goal_ids(plan.execution_goals, now)
+    candidates = [g for g in plan.execution_goals if g.id in ready_ids and not g.tasks]
     return min(candidates, key=lambda g: g.position, default=None)
 
 
@@ -257,7 +262,7 @@ class PlanningHandler:
     async def _enrich(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         if plan.paused:
             return Signal.PAUSED  # don't spend an LLM call on a paused plan
-        target = _next_unenriched(plan)
+        target = _next_unenriched(plan, self._clock.now())
         if target is not None:
             return await self._enrich_one(plan_id, target, plan, uow)
         return await self._bind_and_gate(plan_id, uow)
