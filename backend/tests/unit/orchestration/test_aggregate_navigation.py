@@ -362,3 +362,44 @@ def test_factory_reconstruct_roundtrip():
     assert restored.id == p.id and restored.goals[0].id == "g1"
     # reconstruct must NOT regenerate identity or reset state
     assert restored.version == p.version
+
+
+# ===== legacy promotion_reservation migration shim (domain unfreeze #12) =====
+
+
+def _legacy_plan_json(promotion_reservation):
+    """A plan JSON blob shaped as it would have been persisted BEFORE
+    unfreeze #12 introduced goal_promotion_reservations — i.e. it carries the
+    old `promotion_reservation` key and has no `goal_promotion_reservations`
+    key at all."""
+    base = PlanFactory.create("build x", "project-1").model_dump()
+    del base["goal_promotion_reservations"]
+    base["promotion_reservation"] = promotion_reservation
+    return base
+
+
+def test_legacy_plan_with_no_reservation_reconstructs_to_empty_dict():
+    restored = PlanFactory.reconstruct(_legacy_plan_json(None))
+    assert restored.goal_promotion_reservations == {}
+
+
+def test_legacy_goal_promotion_token_migrates_to_the_correct_goal_key():
+    legacy_token = "goal:cycle-1:goal-42"
+    restored = PlanFactory.reconstruct(_legacy_plan_json(legacy_token))
+    assert restored.goal_promotion_reservations == {"goal-42": legacy_token}
+
+
+def test_legacy_opaque_execution_id_reservation_is_dropped_not_misassigned():
+    # a task-attempt-in-flight reservation (an opaque execution id, not a
+    # "goal:{cycle}:{goal}" token) has no recoverable goal_id -- dropping it
+    # is the only coherent choice under the new per-goal keying (see the
+    # migration validator's docstring for the full reasoning).
+    restored = PlanFactory.reconstruct(_legacy_plan_json("execution-attempt-abc123"))
+    assert restored.goal_promotion_reservations == {}
+
+
+def test_plan_already_in_the_new_shape_is_left_untouched():
+    p = PlanFactory.create("build x", "project-1")
+    p.goal_promotion_reservations = {"g1": "goal:c1:g1"}
+    restored = PlanFactory.reconstruct(p.model_dump())
+    assert restored.goal_promotion_reservations == {"g1": "goal:c1:g1"}

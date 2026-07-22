@@ -368,7 +368,7 @@ class ExecutionHandler:
             plan = uow.plans.get(plan_id)
             task = self._unit_task(plan, unit)
             if (
-                plan.promotion_reservation != unit.execution.id
+                plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
                 or task.status != Status.RUNNING
                 or task.revision != unit.task_revision
                 or task.attempt != unit.attempt
@@ -379,12 +379,12 @@ class ExecutionHandler:
                     ExecutionAttemptStatus.ABANDONED,
                     ExecutionRunStatus.ABANDONED,
                 )
-                if plan.promotion_reservation == unit.execution.id:
-                    plan.release_promotion(unit.execution.id)
+                if plan.goal_promotion_reservations.get(unit.goal_id) == unit.execution.id:
+                    plan.release_promotion(unit.goal_id, unit.execution.id)
                     plan.bump_version()
                     uow.plans.save(plan)
                 return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
+            plan.release_promotion(unit.goal_id, unit.execution.id)
             task.freeze_test_bundle(bundle)
             plan.requeue_task(unit.goal_id, unit.task_id)
             self._finish_execution(
@@ -483,7 +483,7 @@ class ExecutionHandler:
             plan = uow.plans.get(plan_id)
             task = self._unit_task(plan, unit)
             if (
-                plan.promotion_reservation != unit.execution.id
+                plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
                 or task.status != Status.RUNNING
                 or task.revision != unit.task_revision
                 or task.attempt != unit.attempt
@@ -494,12 +494,12 @@ class ExecutionHandler:
                     ExecutionAttemptStatus.ABANDONED,
                     ExecutionRunStatus.ABANDONED,
                 )
-                if plan.promotion_reservation == unit.execution.id:
-                    plan.release_promotion(unit.execution.id)
+                if plan.goal_promotion_reservations.get(unit.goal_id) == unit.execution.id:
+                    plan.release_promotion(unit.goal_id, unit.execution.id)
                     plan.bump_version()
                     uow.plans.save(plan)
                 return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
+            plan.release_promotion(unit.goal_id, unit.execution.id)
             task.accept_verification(evidence)
             plan.complete_task(
                 unit.goal_id,
@@ -596,7 +596,7 @@ class ExecutionHandler:
             latest = max(open_attempts, key=lambda attempt: attempt.number)
             if latest.id != unit.execution.id:
                 return False
-            plan.reserve_promotion(unit.execution.id)
+            plan.reserve_promotion(unit.goal_id, unit.execution.id)
             plan.bump_version()
             uow.plans.save(plan)
             return True
@@ -765,7 +765,7 @@ class ExecutionHandler:
                 FailureKind.VERIFICATION_ERROR,
             )
         reservation = f"goal:{cycle.id}:{goal.id}"
-        plan.reserve_promotion(reservation)
+        plan.reserve_promotion(goal.id, reservation)
         plan.bump_version()
         uow.plans.save(plan)
         return reservation, cycle.id, goal.id
@@ -782,9 +782,9 @@ class ExecutionHandler:
         except Exception as exc:
             with uow:
                 plan = uow.plans.get(plan_id)
-                if plan.promotion_reservation != reservation:
+                if plan.goal_promotion_reservations.get(goal_id) != reservation:
                     return Signal.PAUSED
-                plan.release_promotion(reservation)
+                plan.release_promotion(goal_id, reservation)
                 block = PlanBlock(
                     id=new_id(),
                     kind="goal_promotion_failure",
@@ -809,7 +809,7 @@ class ExecutionHandler:
 
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.promotion_reservation != reservation:
+            if plan.goal_promotion_reservations.get(goal_id) != reservation:
                 return Signal.PAUSED
             cycle = next(
                 (item for item in plan.cycles if item.id == cycle_id),
@@ -830,7 +830,7 @@ class ExecutionHandler:
                 )
             cycle.evidence_refs.append(f"git:{commit_sha}")
             plan.complete_goal(goal_id)
-            plan.release_promotion(reservation)
+            plan.release_promotion(goal_id, reservation)
             plan.bump_version()
             uow.outbox.add(GoalCompleted(plan_id=plan_id, goal_id=goal_id))
             uow.plans.save(plan)
@@ -913,7 +913,7 @@ class ExecutionHandler:
         if was_reclaimed:
             for open_attempt in uow.executions.list_open_attempts(plan_id):
                 if open_attempt.goal_id == goal.id and open_attempt.task_id == task.id:
-                    plan.release_promotion(open_attempt.id)
+                    plan.release_promotion(goal.id, open_attempt.id)
                     uow.executions.finalize_attempt(
                         open_attempt.id,
                         attempt_status=ExecutionAttemptStatus.ABANDONED,
@@ -1105,7 +1105,7 @@ class ExecutionHandler:
     ) -> Signal:
         with uow:
             plan = uow.plans.get(plan_id)
-            plan.release_promotion(unit.execution.id)
+            plan.release_promotion(unit.goal_id, unit.execution.id)
 
             # TOLERANT FINALIZE: the iteration was abandoned while we ran — a late
             # failure terminal-skips; it must NEVER requeue into the abandoned
@@ -1296,7 +1296,7 @@ class ExecutionHandler:
                     ExecutionAttemptStatus.ABANDONED,
                     ExecutionRunStatus.ABANDONED,
                 )
-                plan.release_promotion(unit.execution.id)
+                plan.release_promotion(unit.goal_id, unit.execution.id)
                 if not superseded.is_terminal:
                     plan.abandon_execution_task(
                         unit.cycle_id,
@@ -1329,7 +1329,7 @@ class ExecutionHandler:
                 )
                 return Signal.PAUSED
 
-            if plan.promotion_reservation != unit.execution.id:
+            if plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id:
                 self._finish_execution(
                     uow,
                     unit,
@@ -1337,7 +1337,7 @@ class ExecutionHandler:
                     ExecutionRunStatus.ABANDONED,
                 )
                 return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
+            plan.release_promotion(unit.goal_id, unit.execution.id)
             plan.complete_task(unit.goal_id, unit.task_id, result)
             if unit.spec.provider_id and unit.spec.model_id:
                 uow.executions.clear_runtime_circuit(

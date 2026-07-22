@@ -93,9 +93,15 @@ class Plan(BaseModel):
     review_gate: ReviewGate | None = None
     block: PlanBlock | None = None
     pause_requested: bool = False
-    # Durable check-to-merge reservation. While set, pause requests may land,
-    # but lifecycle/artifact mutations that could supersede the candidate may not.
-    promotion_reservation: str | None = None
+    # Durable check-to-merge reservation, PER GOAL (domain unfreeze #12 —
+    # goal-level parallelism, ADR-001): while a goal's slot is set, pause
+    # requests may land, but lifecycle/artifact mutations that could
+    # supersede that goal's in-flight candidate may not. Keyed by goal_id so
+    # two goals' task attempts / promotions can be reserved concurrently
+    # without contending on each other — was a single `str | None` scalar
+    # before this unfreeze (see `_migrate_legacy_promotion_reservation`
+    # below for the persisted-JSON shim).
+    goal_promotion_reservations: dict[str, str] = {}
     legacy_phase: str | None = None
     legacy_mapped_status: PlanStatus | None = None
     version: int = 0
@@ -140,6 +146,38 @@ class Plan(BaseModel):
         }
         return {**data, "status": mapped.get(phase, PlanStatus.BLOCKED)}
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_promotion_reservation(cls, data: object) -> object:
+        """Domain unfreeze #12: `promotion_reservation: str | None` (a single
+        plan-wide scalar) became `goal_promotion_reservations: dict[str, str]`
+        (per goal_id). A persisted plan written before this unfreeze carries
+        the old key with a token of the form `goal:{cycle_id}:{goal_id}` (the
+        only shape ever written, per `ExecutionHandler._reserve_goal_promotion`)
+        or, for a task-attempt-in-flight reservation, an opaque execution id
+        with NO parseable goal_id. Since the legacy field only ever guarded
+        ONE thing plan-wide, and the goal_id it belongs to (when parseable) is
+        the last colon-separated segment of the `goal:` token, migrate:
+        - `goal:{cycle_id}:{goal_id}` -> `{goal_id: token}`
+        - anything else non-null (an opaque execution id) -> dropped. A
+          reservation surviving only in a stale snapshot with no recoverable
+          goal_id is, by construction, for an attempt that was already
+          abandoned by the time this plan is ever reconstructed again (the
+          worker's own tolerant-finalize path re-validates identity on every
+          read) — recreating it under an unknown key would leave a
+          permanently-unreleasable phantom reservation, which is worse than
+          dropping it.
+        """
+        if not isinstance(data, dict) or "goal_promotion_reservations" in data:
+            return data
+        legacy = data.get("promotion_reservation")
+        if not legacy:
+            return {**data, "goal_promotion_reservations": {}}
+        parts = legacy.split(":")
+        if len(parts) == 3 and parts[0] == "goal":
+            return {**data, "goal_promotion_reservations": {parts[2]: legacy}}
+        return {**data, "goal_promotion_reservations": {}}
+
     # ---- helpers ----
     def _set_phase(self, phase: PlanPhase) -> None:
         """Compatibility checkpoint while active behavior migrates to artifacts."""
@@ -163,18 +201,29 @@ class Plan(BaseModel):
         if self.phase in TERMINAL_PHASES:
             raise PlanAlreadyTerminalError(self.id, self.phase.value)
 
-    def assert_lifecycle_mutation_allowed(self) -> None:
-        if self.promotion_reservation is not None:
+    def assert_lifecycle_mutation_allowed(self, goal_id: str | None = None) -> None:
+        """`goal_id=None` (plan-wide mutations: replan, iteration commit, cycle
+        draft edits) blocks if ANY goal has an open reservation — a plan-wide
+        mutation legitimately must not race a live merge/finalize of any goal.
+        `goal_id=<x>` (a goal-scoped mutation) blocks only on that goal's own
+        reservation, so an in-flight task/promotion on goal A never blocks an
+        edit that only touches goal B (domain unfreeze #12)."""
+        if goal_id is None:
+            if self.goal_promotion_reservations:
+                raise InvalidEditError("a verified Git promotion is in progress")
+            return
+        if goal_id in self.goal_promotion_reservations:
             raise InvalidEditError("a verified Git promotion is in progress")
 
-    def reserve_promotion(self, reservation: str) -> None:
-        if self.promotion_reservation not in (None, reservation):
+    def reserve_promotion(self, goal_id: str, reservation: str) -> None:
+        current = self.goal_promotion_reservations.get(goal_id)
+        if current not in (None, reservation):
             raise InvalidEditError("another verified Git promotion is in progress")
-        self.promotion_reservation = reservation
+        self.goal_promotion_reservations[goal_id] = reservation
 
-    def release_promotion(self, reservation: str) -> None:
-        if self.promotion_reservation == reservation:
-            self.promotion_reservation = None
+    def release_promotion(self, goal_id: str, reservation: str) -> None:
+        if self.goal_promotion_reservations.get(goal_id) == reservation:
+            del self.goal_promotion_reservations[goal_id]
 
     def abandon_execution_task(
         self,
@@ -579,7 +628,7 @@ class Plan(BaseModel):
 
     @property
     def status_reason(self) -> dict[str, str | None]:
-        if self.promotion_reservation is not None:
+        if self.goal_promotion_reservations:
             return {
                 "kind": "promotion",
                 "code": "git_promotion",
@@ -613,7 +662,7 @@ class Plan(BaseModel):
 
     @property
     def legal_actions(self) -> list[str]:
-        if self.promotion_reservation is not None:
+        if self.goal_promotion_reservations:
             return ["pause"] if self.status == PlanStatus.RUNNING else []
         if self.block is not None and self.block.active:
             return list(self.block.legal_resolutions)
