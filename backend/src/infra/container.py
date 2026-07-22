@@ -47,6 +47,8 @@ from src.infra.git.project_workspace import (
     ProjectRoutingWorkspace,
     ProjectWorkspaceResolver,
 )
+from src.domain.policies.retry_policies import RetryPolicy
+from src.infra.policies.retry_policy_factory import build_retry_policy
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
 from src.infra.runtime.verification_executor import LocalVerificationExecutor
@@ -105,6 +107,14 @@ class AppContainer:
     @cached_property
     def config_store(self) -> SqliteConfigStore:
         return SqliteConfigStore(self.session_factory)
+
+    @property
+    def default_retry_policy(self) -> RetryPolicy:
+        """Read fresh on every access (deliberately NOT a cached_property):
+        the config keys behind it (execution.retry_*) are meant to be tuned
+        via `orchestrate config set` and apply to the next created plan
+        without an API restart."""
+        return build_retry_policy(self.config_store)
 
     @cached_property
     def secret_store(self) -> SqliteSecretStore:

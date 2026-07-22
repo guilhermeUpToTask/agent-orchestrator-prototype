@@ -375,6 +375,7 @@ async def create(
         body.project_id,
         request_id,
         container.new_unit_of_work(),
+        retry_policy=container.default_retry_policy,
     )
     if opened.request_replayed:
         with container.new_unit_of_work() as uow:
