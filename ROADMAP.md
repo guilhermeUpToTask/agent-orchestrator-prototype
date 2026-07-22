@@ -189,11 +189,7 @@ Take these up only when real usage demonstrates the need.
 22. **Multi-worker deployment, documented + truth-tested** [EVO] — add a
     two-worker truth test and operator docs now that decision 45's stale-claim
     startup handling exists.
-23. **Goal-level parallelism** [MRF, ADR-001] — the lease *granularity* is the
-    designed parallelism switch (plan → goal → task). Requires `next_action`
-    returning a set of ready units and a workspace merge-conflict strategy.
-    Do **not** bolt a queue on top; move the lease.
-24. **Registry-defined execution profiles and coverage preflight** [LIVE] —
+23. **Registry-defined execution profiles and coverage preflight** [LIVE] —
     let users create stable execution-role profiles and capability policies in
     the registry instead of keeping the TDD role vocabulary in
     `_ROLE_CAPABILITY`. Contracts should reference versioned role/profile ids;
@@ -203,29 +199,51 @@ Take these up only when real usage demonstrates the need.
     without silently rebinding work. Decision 47 already preserves explicit
     role-capability checks and transactional retry binding — build on that,
     don't replace it.
-25. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
+24. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
     claims, and restart counts (a `/api/workers` endpoint). The lease is the
     recovery *mechanism*; this is *visibility*.
-26. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
+25. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
     (systemd or process manager) that restarts a dead worker; the lease
     handles the takeover. Document failure modes; no distributed consensus.
-27. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
+26. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
     runner now runs `--mode json`, the NDJSON stream tails into the bounded
     per-attempt runtime log (atomic rotation; readable mid-run via
     `GET /plans/{id}/attempts/{id}/log`), tool/usage events are promoted to
     agent_events, and the final assistant message becomes the task output
     (`src/infra/runtime/pi_protocol.py`). Remaining scope is only the full
     rpc/stdio handshake if bidirectional control is ever needed.
-28. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
+27. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
     repository port *only if* multi-machine workers become real. Deliberately
-    unnecessary for local-first.
-29. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
+    unnecessary for local-first. Re-evaluated 2026-07-22 alongside goal-level
+    parallelism landing (item 23's old slot, now implemented — see
+    [ADR-001](docs/decisions/adr-001-concurrency-lease.md)): the SQLite
+    `goal_leases` table already delivers real cross-*process* concurrency on
+    one machine, which is what actually needed solving; Redis only becomes
+    the right answer for cross-*machine* deployment, a different problem
+    this system's single-SQLite-file persistence model doesn't attempt to
+    solve either. Still deliberately unnecessary until multi-machine is the
+    actual goal.
+28. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
     ruff/mypy; nightly/merge-only: the paid real-model smoke. Still open —
     the split matters, don't burn money per push.
-30. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
-31. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
+29. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
+30. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
+31. **Proactive goal-scope-disjointness guard** [MRF, ADR-001 follow-up] —
+    goal-level parallelism (implemented 2026-07-22, domain unfreeze #12)
+    ships with only a REACTIVE safety net for concurrent goals touching
+    overlapping files (the existing `goal_promotion_failure` block, hit at
+    git-merge time). A proactive guard would check, at goal-enrichment time,
+    whether a goal's frozen `allowed_scope` overlaps any OTHER
+    concurrently-reachable goal's (no dependency edge either way) and reject/
+    re-prompt before either ever runs. Deliberately deferred, not an
+    oversight: the failure-UX decision (auto-reprompt the reasoner vs. open a
+    block vs. just log) isn't settled, and "could legitimately run
+    concurrently" is a static approximation that could produce false-positive
+    friction on a deployment that never actually contends (single worker
+    pool, e.g.) — needs real usage evidence first, same as the other
+    evidence-gated items on this list.
 
 32. **Devcontainer runtime parity** [WALK] — the live container carries
     runtimes the `.devcontainer` config never installs (ad-hoc installs, lost

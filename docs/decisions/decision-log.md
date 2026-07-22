@@ -172,3 +172,45 @@ settled — it is superseded on activation). `Task.skip()`/`Goal.skip()`/
 maintainer-directed codex `gpt-5.6-sol` analysis chose this direction. Composes
 with unfreezes #9/#10. Full navigation `GOAL_UNPROMOTABLE` typing and cyclic
 stale-result ledger settlement remain scoped follow-ups.
+
+52. **Domain unfreeze #12 (2026-07-22): goal-level parallelism domain
+primitives — shared dependency graph, additive readiness, per-goal
+promotion reservation.** [ADR-001](adr-001-concurrency-lease.md) (decision
+10, 2026-07-02) designed the lease granularity as the deliberate future
+parallelism switch (plan → goal → task) without yet implementing it. This
+unfreeze does the domain-layer third: (a) `CycleDraft.validate_dependencies`'s
+inline cycle-detection DFS is lifted into a shared, pure
+`domain/services/dependency_graph.py` (`validate_acyclic` + a new
+`ready_nodes` primitive) so goal-parallelism scheduling and cycle-draft
+validation share one DAG implementation instead of two independently
+maintained traversals; (b) `navigation.py` gains **additive** functions
+`ready_goal_ids` (which non-terminal goals have every `depends_on`
+dependency DONE — the ADR's "next_action must return a set" requirement,
+satisfied without changing `next_action`'s own signature so every existing
+caller/test and all legacy-plan behavior stay byte-identical) and
+`action_for_goal` (the per-goal tail `next_action` already had, now shared
+rather than duplicated for goal-selected dispatch); (c) `Plan.promotion_reservation`
+(a single plan-wide `str | None` scalar guarding BOTH task-attempt-in-flight
+and goal-merge-in-flight, whichever needed it at the time) becomes
+`goal_promotion_reservations: dict[str, str]` keyed by `goal_id`, so two
+different goals' task attempts/promotions no longer contend on the same
+slot — the actual blocker to running them concurrently. `reserve_promotion`/
+`release_promotion` take `goal_id` explicitly; `assert_lifecycle_mutation_allowed(goal_id=None)`
+keeps today's "any goal reserved blocks a plan-wide mutation" behavior by
+default for existing callers (`propose_intent`/`revise_intent`/etc., all
+unchanged call sites) while allowing a goal-scoped check for future use. A
+`model_validator(mode="before")` migrates a persisted plan's legacy
+`promotion_reservation` field (a parseable `goal:{cycle_id}:{goal_id}` token
+maps to `{goal_id: token}`; an unparseable opaque execution-id token has no
+recoverable goal_id under the new keying and is dropped — there is no
+consistent key a later `release_promotion` call could ever find it under
+anyway, so dropping is the only coherent choice, not a corner cut for
+convenience).
+
+Everything else in the goal-parallelism work (the `goal_leases` lease/claim
+schema and repository, the worker/dispatcher wiring, the cross-process
+CAS-retry-safe finalize, and the cross-process git-merge lock) is app/infra-
+layer, not domain, and is not folded into this unfreeze entry — the
+decision log's convention is specifically about FROZEN-domain changes. See
+[ADR-001](adr-001-concurrency-lease.md)'s updated status for the full
+picture of what shipped.
