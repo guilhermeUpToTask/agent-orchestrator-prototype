@@ -12,7 +12,7 @@ from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
 from src.domain.services.capability_matching import match_agent
 from datetime import datetime, timezone
-from src.domain.services.navigation import next_action
+from src.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
 
 from src.domain.services import edit_service as ed
 from src.domain.factories.plan_factory import PlanFactory
@@ -103,6 +103,44 @@ def test_multiple_unready_goals_no_noise():
     g3 = goal("g3", 2, [task(0)], deps=["g2"])
     go, _ = next_action([g1, g2, g3], _NOW)
     assert go.id == "g1"
+
+
+# ===== goal-parallelism readiness primitives (domain unfreeze #12) =====
+
+
+def test_ready_goal_ids_returns_all_independent_ready_goals():
+    # g1 and g2 are both ready (no deps); g3 depends on g1 (not done) -> not ready
+    g1 = goal("g1", 0, [task(0)])
+    g2 = goal("g2", 1, [task(0)])
+    g3 = goal("g3", 2, [task(0)], deps=["g1"])
+    assert ready_goal_ids([g1, g2, g3], _NOW) == {"g1", "g2"}
+
+
+def test_ready_goal_ids_diamond_dependency():
+    # d depends on b and c, which both depend on a
+    a = goal("a", 0, [task(0, Status.DONE)], status=Status.DONE)
+    b = goal("b", 1, [task(0)], deps=["a"])
+    c = goal("c", 2, [task(0)], deps=["a"])
+    d = goal("d", 3, [task(0)], deps=["b", "c"])
+    # a is DONE, so b and c are both ready; d needs BOTH b and c done, neither is
+    assert ready_goal_ids([a, b, c, d], _NOW) == {"b", "c"}
+
+
+def test_ready_goal_ids_excludes_terminal_goals():
+    g1 = goal("g1", 0, [task(0, Status.DONE)], status=Status.DONE)
+    g2 = goal("g2", 1, [task(0)])
+    assert ready_goal_ids([g1, g2], _NOW) == {"g2"}
+
+
+def test_action_for_goal_matches_next_action_tail():
+    # action_for_goal, called directly on a goal, must agree with what
+    # next_action would have returned for that same goal — same shared tail.
+    g1 = goal("g1", 0, [task(0)])
+    assert action_for_goal(g1, _NOW) == next_action([g1], _NOW)
+
+    g2 = goal("g2", 0, [task(0, Status.FAILED)])
+    goal_out, second = action_for_goal(g2, _NOW)
+    assert goal_out.id == "g2" and second == "GOAL_FAILED"
 
 
 # ===== FAILED-LOOP FIX =====

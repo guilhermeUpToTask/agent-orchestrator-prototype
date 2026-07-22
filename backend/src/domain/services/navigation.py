@@ -5,6 +5,7 @@ from typing import Literal, Union
 
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
+from src.domain.services.dependency_graph import ready_nodes
 from src.domain.value_objects.lifecycle import Status, TERMINAL
 
 GoalFailed = Literal["GOAL_FAILED"]
@@ -44,6 +45,11 @@ def next_action(goals: list[Goal], now: datetime) -> NextAction:
     relationship. Backoff, an unresolved failure, or an unmet dependency on the
     head goal blocks every later goal. Navigation is a pure scan and stores no
     cursor.
+
+    Behavior is unchanged by the additive goal-parallelism primitives below
+    (`ready_goal_ids`/`action_for_goal`, domain unfreeze #12) — this function's
+    signature and every existing caller/test stay byte-identical; it now just
+    shares its per-goal tail with `action_for_goal` instead of owning it alone.
     """
     ordered = sorted(goals, key=lambda g: g.position)
     head_goal = next((goal for goal in ordered if goal.status not in TERMINAL), None)
@@ -54,17 +60,42 @@ def next_action(goals: list[Goal], now: datetime) -> NextAction:
     if not _goal_ready(head_goal, done_goal_ids):
         return head_goal, "DEPENDENCY_BLOCKED"
 
+    return action_for_goal(head_goal, now)
+
+
+def action_for_goal(goal: Goal, now: datetime) -> NextAction:
+    """The per-goal tail of `next_action`, for a goal the CALLER already
+    selected (e.g. one member of `ready_goal_ids`'s result) — never re-derives
+    goal selection or dependency readiness itself. Shared so `next_action`
+    (position-earliest goal, as always) and goal-level dispatch (caller picks
+    any ready goal) can't drift into two different implementations of
+    "what does this goal want to do next"."""
     head_task = next(
         (
             task
-            for task in sorted(head_goal.tasks, key=lambda task: task.position)
+            for task in sorted(goal.tasks, key=lambda task: task.position)
             if task.status not in TERMINAL
         ),
         None,
     )
     if head_task is not None:
-        return (head_goal, head_task) if head_task.is_ready_at(now) else NOT_READY
+        return (goal, head_task) if head_task.is_ready_at(now) else NOT_READY
 
-    if any(task.status == Status.FAILED for task in head_goal.tasks):
-        return head_goal, "GOAL_FAILED"
-    return head_goal, None
+    if any(task.status == Status.FAILED for task in goal.tasks):
+        return goal, "GOAL_FAILED"
+    return goal, None
+
+
+def ready_goal_ids(goals: list[Goal], now: datetime) -> set[str]:
+    """Every non-terminal goal whose `depends_on` is entirely DONE — the
+    goal-parallelism readiness primitive (ADR-001, domain unfreeze #12).
+    `now` is accepted for signature symmetry with `action_for_goal`/
+    `next_action` (a future backoff-aware readiness refinement might need it)
+    but is unused today: goal-level dependency readiness has no time
+    component, only task-level `retry_not_before` does, and that's checked by
+    `action_for_goal` once a specific goal is selected, not here."""
+    del now  # see docstring — accepted for symmetry, not used yet
+    done_goal_ids = {goal.id for goal in goals if goal.status == Status.DONE}
+    edges = {goal.id: list(goal.depends_on) for goal in goals}
+    candidate_ids = {goal.id for goal in goals if goal.status not in TERMINAL}
+    return ready_nodes(candidate_ids, edges, done_goal_ids)

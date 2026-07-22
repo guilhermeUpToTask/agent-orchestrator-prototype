@@ -8,6 +8,7 @@ from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
 from src.domain.entities.goal import Goal
+from src.domain.services.dependency_graph import validate_acyclic
 
 
 class PlanStatus(str, Enum):
@@ -153,22 +154,7 @@ class CycleDraft(BaseModel):
                 raise ValueError(f"goal '{goal.key}' dependencies must precede it: {later}")
             graph[goal.key] = list(goal.depends_on)
 
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def visit(key: str) -> None:
-            if key in visiting:
-                raise ValueError("cycle draft dependencies must be acyclic")
-            if key in visited:
-                return
-            visiting.add(key)
-            for dependency in graph[key]:
-                visit(dependency)
-            visiting.remove(key)
-            visited.add(key)
-
-        for key in keys:
-            visit(key)
+        validate_acyclic(keys, graph)
         return self
 
 
