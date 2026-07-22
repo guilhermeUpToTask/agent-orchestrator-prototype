@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 
-from src.infra.runtime.pi_protocol import extract_final_text, parse_pi_events
+from src.infra.runtime.pi_protocol import (
+    extract_final_text,
+    extract_stream_error,
+    parse_pi_events,
+)
+from src.infra.runtime.taxonomy import classify_failure
+from src.domain.value_objects.lifecycle import FailureKind
 
 
 def _assistant_message_end(texts: list[str], usage: dict | None = None) -> str:
@@ -98,3 +104,57 @@ def test_extract_final_text_takes_last_assistant_message():
 
 def test_extract_final_text_none_for_plain_text_output():
     assert extract_final_text("plain one-shot pi output\n") is None
+
+
+def _errored_assistant_turn(kind: str, error_message: str) -> str:
+    return json.dumps(
+        {
+            "type": kind,
+            "message": {
+                "role": "assistant",
+                "content": [],
+                "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+                "provider": "openrouter",
+                "usage": {"totalTokens": 0},
+                "stopReason": "error",
+                "errorMessage": error_message,
+            },
+        }
+    )
+
+
+def test_extract_stream_error_surfaces_upstream_rate_limit():
+    # The exact shape pi emits on Nvidia free-tier exhaustion while exiting 0.
+    msg = "Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (32/32)"
+    output = "\n".join(
+        [
+            '{"type":"agent_start"}',
+            _errored_assistant_turn("message_end", msg),
+            _errored_assistant_turn("turn_end", msg),
+        ]
+    )
+    error = extract_stream_error(output)
+    assert error == msg
+    # The whole point: the shared taxonomy must classify it as a RETRYABLE rate
+    # limit, not a terminal failure that would be mistaken for an empty run.
+    assert classify_failure(error) == FailureKind.RATE_LIMIT
+
+
+def test_extract_stream_error_none_for_successful_run():
+    output = "\n".join(
+        [
+            '{"type":"agent_start"}',
+            _assistant_message_end(["Wrote the tests."], usage={"totalTokens": 42}),
+        ]
+    )
+    assert extract_stream_error(output) is None
+
+
+def test_extract_stream_error_ignores_non_error_stop_reason():
+    stopped = json.dumps(
+        {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": [], "stopReason": "stop"},
+        }
+    )
+    assert extract_stream_error(stopped) is None
