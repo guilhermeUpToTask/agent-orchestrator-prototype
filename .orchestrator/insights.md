@@ -1,7 +1,7 @@
 # Cross-experiment runtime insights
 
-Experiments observed: obs-followups-2026-07-18, obs-streaming-2026-07-18, roadmap-accel-2026-07-20, roadmap-clarity-2026-07-20, roadmap-exec-2026-07-19, simplify-runtime-solid-dry-20260718, walkthrough-2026-07-19
-Tasks observed (lifetime): 30
+Experiments observed: obs-followups-2026-07-18, obs-streaming-2026-07-18, roadmap-accel-2026-07-20, roadmap-clarity-2026-07-20, roadmap-exec-2026-07-19, simplify-runtime-solid-dry-20260718, walkthrough-2026-07-19, walkthrough-api-2026-07-20
+Tasks observed (lifetime): 33
 
 Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inference. Regenerate after every experiment via `python3 .orchestrator/lib/insights.py`. Consult this during the /accelerate Routing step; do not let it silently override the manifest -- surface disagreements to the user instead.
 
@@ -19,8 +19,8 @@ Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inferenc
 
 | Runtime | Routed | Verified | Failed | Escalated (unresolved) | First-pass success | Duration median (s) | Duration p90 (s) | Escalation rate | Human interventions |
 |---|---|---|---|---|---|---|---|---|---|
-| codex | 14 | 15 | 1 | 0 | 0.8 | 722.7 | 1400.0 | 0.067 | 1 |
-| claude_sonnet | 10 | 10 | 0 | 0 | None | 86.5 | 226.0 | None | 0 |
+| codex | 16 | 19 | 1 | 0 | 0.842 | 680.0 | 900.0 | 0.053 | 1 |
+| claude_sonnet | 11 | 11 | 0 | 0 | None | 91.0 | 226.0 | None | 0 |
 | grok | 3 | 4 | 0 | 0 | 0.5 | 321.3 | 700.0 | 0.0 | 0 |
 | claude | 0 | 1 | 0 | 0 | None | 180.0 | 180.0 | None | 0 |
 | mimo | 1 | 0 | 0 | 0 | 0.0 | None | None | 1.0 | 0 |
@@ -29,12 +29,12 @@ Pure aggregation over `.orchestrator/runtime-runs/*/events.jsonl` -- no inferenc
 ## By declared risk level
 
 **codex**
-- low: 2/2 verified (100%)
-- medium: 7/8 verified (88%)
+- low: 3/3 verified (100%)
+- medium: 8/9 verified (89%)
 - high: 1/1 verified (100%)
 
 **claude_sonnet**
-- low: 9/9 verified (100%)
+- low: 10/10 verified (100%)
 - medium: 1/1 verified (100%)
 
 **grok**

@@ -6,7 +6,8 @@
     "roadmap-clarity-2026-07-20",
     "roadmap-exec-2026-07-19",
     "simplify-runtime-solid-dry-20260718",
-    "walkthrough-2026-07-19"
+    "walkthrough-2026-07-19",
+    "walkthrough-api-2026-07-20"
   ],
   "flags": [
     "codex: 1 human intervention(s) recorded -- check events for root cause.",
@@ -26,39 +27,39 @@
           "verified_rate": 1.0
         },
         "low": {
-          "routed": 2,
-          "verified": 2,
+          "routed": 3,
+          "verified": 3,
           "verified_rate": 1.0
         },
         "medium": {
-          "routed": 8,
-          "verified": 7,
-          "verified_rate": 0.875
+          "routed": 9,
+          "verified": 8,
+          "verified_rate": 0.889
         }
       },
-      "duration_seconds_median": 722.7,
-      "duration_seconds_p90": 1400.0,
+      "duration_seconds_median": 680.0,
+      "duration_seconds_p90": 900.0,
       "escalated_unresolved": 0,
-      "escalation_rate": 0.067,
+      "escalation_rate": 0.053,
       "escalation_reasons": {
         "codex exec workspace-write wraps every command in bubblewrap, which cannot create namespaces in this devcontainer (bwrap: No permissions to create new namespace); ALL file ops failed, zero changes \u2014 codex unusable for writes here. It fetched ROADMAP.md from GitHub main via MCP, revealing the working branch is STALE vs origin/main (missing PRs #33/#34/#35, which already restructured the roadmap). Escalating to coordinator + user decision on branch reconciliation.": 1
       },
       "failed": 1,
-      "first_pass_success_rate": 0.8,
+      "first_pass_success_rate": 0.842,
       "human_interventions": 1,
       "retry_reasons": {
         "coordinator harness error: relative --cd path resolved against wrapper cwd; retry with absolute path, not a runtime fault": 1
       },
       "runtime": "codex",
-      "sample_size": 15,
-      "tasks_routed": 14,
-      "verified_completions": 15
+      "sample_size": 19,
+      "tasks_routed": 16,
+      "verified_completions": 19
     },
     {
       "by_risk": {
         "low": {
-          "routed": 9,
-          "verified": 9,
+          "routed": 10,
+          "verified": 10,
           "verified_rate": 1.0
         },
         "medium": {
@@ -67,7 +68,7 @@
           "verified_rate": 1.0
         }
       },
-      "duration_seconds_median": 86.5,
+      "duration_seconds_median": 91.0,
       "duration_seconds_p90": 226.0,
       "escalated_unresolved": 0,
       "escalation_rate": null,
@@ -78,8 +79,8 @@
       "retry_reasons": {},
       "runtime": "claude_sonnet",
       "sample_size": 0,
-      "tasks_routed": 10,
-      "verified_completions": 10
+      "tasks_routed": 11,
+      "verified_completions": 11
     },
     {
       "by_risk": {
@@ -160,5 +161,5 @@
       "verified_completions": 0
     }
   ],
-  "task_count": 30
+  "task_count": 33
 }

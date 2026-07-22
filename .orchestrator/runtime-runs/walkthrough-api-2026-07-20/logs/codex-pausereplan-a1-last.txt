@@ -1,0 +1,14 @@
+Added [test_cyclic_pause_replan_phase_guards.py](/workspaces/agent-orchestrator/.orchestrator/worktrees/pause-replan-test/backend/tests/unit/orchestration/test_cyclic_pause_replan_phase_guards.py) with four regression tests covering cyclic pause/replanning and unchanged legacy guards.
+
+```text
+276 passed in 7.10s
+```
+
+Ruff and mypy both pass.
+
+```text
+ .../test_cyclic_pause_replan_phase_guards.py       | 58 ++++++++++++++++++++++
+ 1 file changed, 58 insertions(+)
+```
+
+No commit was created. Graph refresh was unavailable because `graphify` is not installed and no `graphify-out/` exists.
