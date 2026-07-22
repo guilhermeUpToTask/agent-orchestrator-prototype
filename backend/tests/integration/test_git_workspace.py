@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -237,6 +239,133 @@ def test_workspace_prune_and_audit_keep_live_refs_visible(repo):
     assert "plan/p1" in after["branches"]
     assert "task/t1/a1" not in after["branches"]
     assert not any(handle.path in row for row in after["worktrees"])
+
+
+def test_concurrent_merge_goal_for_same_cycle_succeeds_for_both_goals(repo, monkeypatch):
+    """Two DIFFERENT worker processes each finish a different goal of the SAME
+    cycle at nearly the same moment and both call merge_goal concurrently.
+    Without the per-cycle flock, both race to `git worktree add` the same
+    cycle branch and one hits 'fatal: already checked out'."""
+    import src.infra.git.workspace as workspace_mod
+
+    ws = GitBranchWorkspace(repo)
+    real_git = workspace_mod._git
+
+    def slow_git(repo_path, *args):
+        # widen the race window right where both calls would otherwise
+        # collide: checking out the shared cycle branch.
+        if len(args) >= 2 and args[0] == "worktree" and args[1] == "add":
+            time.sleep(0.2)
+        return real_git(repo_path, *args)
+
+    async def flow():
+        h1 = await ws.begin("p1", "t1", 1, cycle_id="c1", goal_id="g1", run_id="run-1")
+        (Path(h1.path) / "feature_a.py").write_text("a\n")
+        await ws.commit(h1)
+
+        h2 = await ws.begin("p1", "t2", 1, cycle_id="c1", goal_id="g2", run_id="run-2")
+        (Path(h2.path) / "feature_b.py").write_text("b\n")
+        await ws.commit(h2)
+
+        monkeypatch.setattr(workspace_mod, "_git", slow_git)
+        return await asyncio.gather(
+            ws.merge_goal("p1", "c1", "g1"),
+            ws.merge_goal("p1", "c1", "g2"),
+        )
+
+    results = asyncio.run(flow())
+    assert len(results) == 2
+    files = _git(repo, "ls-tree", "-r", "--name-only", "cycle/c1").splitlines()
+    assert "feature_a.py" in files
+    assert "feature_b.py" in files
+
+
+def test_merge_goal_serializes_for_the_same_cycle_id(repo, monkeypatch):
+    """Unit-level proof the flock actually blocks: two direct calls to
+    _merge_goal_sync for the SAME cycle_id run one-after-another (total time
+    >= two sequential holds of the artificially slowed critical section)."""
+    import src.infra.git.workspace as workspace_mod
+
+    ws = GitBranchWorkspace(repo)
+    real_git = workspace_mod._git
+    delay = 0.3
+
+    def slow_git(repo_path, *args):
+        if args and args[0] == "merge":
+            time.sleep(delay)
+        return real_git(repo_path, *args)
+
+    async def setup():
+        h1 = await ws.begin("p1", "t1", 1, cycle_id="same-cycle", goal_id="ga", run_id="run-a")
+        (Path(h1.path) / "a.py").write_text("a\n")
+        await ws.commit(h1)
+        h2 = await ws.begin("p1", "t2", 1, cycle_id="same-cycle", goal_id="gb", run_id="run-b")
+        (Path(h2.path) / "b.py").write_text("b\n")
+        await ws.commit(h2)
+
+    asyncio.run(setup())
+    monkeypatch.setattr(workspace_mod, "_git", slow_git)
+
+    results: dict[str, str] = {}
+
+    def run_merge(goal_id):
+        results[goal_id] = ws._merge_goal_sync("same-cycle", goal_id)
+
+    start = time.monotonic()
+    t1 = threading.Thread(target=run_merge, args=("ga",))
+    t2 = threading.Thread(target=run_merge, args=("gb",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    elapsed = time.monotonic() - start
+
+    assert len(results) == 2
+    # serialized: the second call must wait out the first's whole locked
+    # section, so total wall time is at least two sequential holds.
+    assert elapsed >= delay * 2 * 0.9
+
+
+def test_merge_goal_does_not_serialize_across_different_cycle_ids(repo, monkeypatch):
+    """The lock is per-cycle-id: two DIFFERENT cycles must not block each
+    other even though they share the same GitBranchWorkspace instance."""
+    import src.infra.git.workspace as workspace_mod
+
+    ws = GitBranchWorkspace(repo)
+    real_git = workspace_mod._git
+    delay = 0.3
+
+    def slow_git(repo_path, *args):
+        if args and args[0] == "merge":
+            time.sleep(delay)
+        return real_git(repo_path, *args)
+
+    async def setup():
+        h1 = await ws.begin("p1", "t1", 1, cycle_id="cycle-x", goal_id="gx", run_id="run-x")
+        (Path(h1.path) / "x.py").write_text("x\n")
+        await ws.commit(h1)
+        h2 = await ws.begin("p1", "t2", 1, cycle_id="cycle-y", goal_id="gy", run_id="run-y")
+        (Path(h2.path) / "y.py").write_text("y\n")
+        await ws.commit(h2)
+
+    asyncio.run(setup())
+    monkeypatch.setattr(workspace_mod, "_git", slow_git)
+
+    def run_merge(cycle_id, goal_id):
+        ws._merge_goal_sync(cycle_id, goal_id)
+
+    start = time.monotonic()
+    t1 = threading.Thread(target=run_merge, args=("cycle-x", "gx"))
+    t2 = threading.Thread(target=run_merge, args=("cycle-y", "gy"))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    elapsed = time.monotonic() - start
+
+    # not serialized: both critical sections overlap, so total time stays
+    # well under two sequential holds.
+    assert elapsed < delay * 2 * 0.9
 
 
 def test_project_resolver_uses_the_repository_default_branch(tmp_path):
