@@ -16,9 +16,11 @@
   // Bind-mount ~/.orchestrator from the host so project state (tasks, agents,
   // logs, repos) persists across container rebuilds — same pattern as ~/.gemini.
   "mounts": [
-    "source=${localEnv:HOME}/.orchestrator,target=/root/.orchestrator,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.orchestrator,target=/root/.orchestrator,type=bind,consistency=cached",
+    "source=codex-state,target=/root/.codex,type=volume",
+    "source=claude-state,target=/root/.claude,type=volume"
   ],
-  "postCreateCommand": "uv pip install --system -e '.[dev]'",
+  "postCreateCommand": "cd backend && uv pip install --system -e '.[dev]'",
   "postStartCommand": "redis-server /etc/redis/redis-dev.conf --daemonize yes && sleep 1 && redis-cli ping",
   "customizations": {
     "vscode": {
@@ -40,14 +42,13 @@
         "editor.formatOnSave": true,
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff"
-        },
-        //TODO: Pass those envs to the .env later on.
-        "terminal.integrated.env.linux": {
-          "REDIS_URL": "redis://localhost:6379/0",
-          "AGENT_MODE": "real",
-          "ORCHESTRATOR_HOME": "/root/.orchestrator",
-          "PYTHONPATH": "/workspaces/agent-orchestrator"
         }
+        // Container env vars come from a single source: the repo-root .env,
+        // injected via the runArgs --env-file above (copy .env.example → .env).
+        // No env is hardcoded here — that kept a stale AGENT_MODE (there is no
+        // such env var; runtime mode lives in the SQLite config store) and
+        // split the source of truth. ORCHESTRATOR_HOME defaults to
+        // ~/.orchestrator (= /root/.orchestrator, the mounted dir) with no env.
       }
     }
   },

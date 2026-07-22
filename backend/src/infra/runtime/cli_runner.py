@@ -42,7 +42,11 @@ from src.domain.entities.task import Task
 from src.domain.events.agent_events import AgentEvent
 from src.domain.value_objects.tasks_vos import TaskResult
 from src.infra.runtime.taxonomy import normalize_failure
-from src.infra.runtime.pi_protocol import extract_final_text, parse_pi_events
+from src.infra.runtime.pi_protocol import (
+    extract_final_text,
+    extract_stream_error,
+    parse_pi_events,
+)
 from src.infra.runtime.process_supervisor import (
     attempt_log_path,
     supervise_process,
@@ -220,6 +224,17 @@ class CliAgentRunner(ABC):
         the raw stream, never from this value.
         """
         return stdout
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        """Runtime-specific IN-BAND error, or None when the run truly succeeded.
+
+        Some CLIs report an upstream provider failure inside their success-exit
+        output stream (pi `--mode json` emits it as an errored assistant turn
+        while the process still exits 0). Runners that can carry such an error
+        override this so `run()` classifies it through the shared taxonomy
+        instead of returning an empty "success". Base runtimes have none.
+        """
+        return None
 
     async def run(
         self,
@@ -468,6 +483,28 @@ class CliAgentRunner(ABC):
             )
             raise TaskFailed(failure.safe_message, failure=failure)
 
+        stream_error = self._detect_stream_error(stdout)
+        if stream_error is not None:
+            # Exit 0, but the CLI reported an upstream provider error in-band
+            # (e.g. a rate limit). Classify it through the shared taxonomy so a
+            # retryable failure retries with backoff instead of being mistaken
+            # for a successful empty run (which downstream stages then mislabel
+            # as a terminal verification error).
+            failure = normalize_failure(
+                stdout=stdout,
+                stderr=stream_error,
+                runtime=self.log_prefix,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+                exit_code=result.exit_code,
+            )
+            log.warning(
+                f"{self.log_prefix}.stream_error",
+                exit_code=result.exit_code,
+                kind=failure.kind.value,
+            )
+            raise TaskFailed(failure.safe_message, failure=failure)
+
         log.info(f"{self.log_prefix}.finished", exit_code=0, log_path=str(result.log_path))
         return (
             TaskResult.success(
@@ -562,6 +599,11 @@ class PiAgentRunner(CliAgentRunner):
         # --mode json makes stdout an NDJSON event stream; persist the final
         # assistant message as the task outcome, never the raw stream.
         return extract_final_text(stdout) or stdout
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        # pi reports upstream provider errors (rate limits, outages) as an
+        # errored assistant turn while exiting 0; surface it for classification.
+        return extract_stream_error(stdout)
 
     def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
         structured = parse_pi_events(output)
