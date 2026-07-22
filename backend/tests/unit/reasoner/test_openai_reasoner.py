@@ -8,7 +8,6 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-import pytest
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.capability import Capability

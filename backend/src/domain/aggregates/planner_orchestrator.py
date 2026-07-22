@@ -475,6 +475,13 @@ class Plan(BaseModel):
         finalize-abandon in commit_replanned_goals(). A human replan supersedes
         any pause: the gate clears so the committed roadmap can execute."""
         self.assert_lifecycle_mutation_allowed()
+        # Cyclic authority: a plan with an active cycle can always be replanned
+        # (start_replan is an advertised block/running resolution), regardless of
+        # the legacy PlanPhase projection — which for a replanned cycle is already
+        # REPLANNING and would otherwise reject "replanning -> replanning". Legacy
+        # (pre-cyclic) plans keep the RUNNING/REVIEW phase guard.
+        if self.active_cycle is None:
+            self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
         self.paused = False
         self.paused_reason = None
         self.pause_requested = False
