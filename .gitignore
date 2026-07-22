@@ -71,6 +71,7 @@ coverage.xml
 .env
 .env.*
 *.env
+!.env.example
 
 # Logs
 *.log
@@ -96,3 +97,10 @@ node_modules/
 # Ignore Graphify local
 .graphify/
 graphify-out/
+
+# Local Claude Code settings (per-user, not shared)
+.claude/settings.local.json
+frontend/.claude/settings.local.json
+
+# Accelerate: transient git worktree scratch (worktrees are created at runtime)
+.orchestrator/worktrees/

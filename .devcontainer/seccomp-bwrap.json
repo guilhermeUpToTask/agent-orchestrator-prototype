@@ -1,0 +1,44 @@
+{
+  "_comment": "Surgical seccomp profile for the agent-orchestrator devcontainer. Purpose: let bubblewrap create user/mount namespaces (needed by codex's --sandbox workspace-write and by the orchestrator's future per-attempt bwrap confinement of grok/pi) WITHOUT dropping to --security-opt seccomp=unconfined. Strategy: allow by default, then ERRNO-deny the genuinely host-dangerous syscalls that Docker's default profile also blocks (kernel-module load/unload, kexec, reboot, clock/time changes, raw I/O ports, swap, perf/bpf, etc.). The namespace family (unshare, clone, clone3, setns, mount, umount2, pivot_root, keyctl) is intentionally LEFT ALLOWED. This is not byte-identical to moby's deny-by-default profile; it is an auditable allow-by-default variant chosen for maintainability. Pair with --security-opt apparmor=unconfined (AppArmor docker-default blocks mount/pivot_root). Verify after rebuild: `bwrap --ro-bind / / --unshare-user echo ok`.",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "syscalls": [
+    {
+      "names": [
+        "acct",
+        "bpf",
+        "clock_adjtime",
+        "clock_adjtime64",
+        "clock_settime",
+        "clock_settime64",
+        "create_module",
+        "delete_module",
+        "finit_module",
+        "get_kernel_syms",
+        "init_module",
+        "ioperm",
+        "iopl",
+        "kexec_file_load",
+        "kexec_load",
+        "lookup_dcookie",
+        "nfsservctl",
+        "open_by_handle_at",
+        "perf_event_open",
+        "query_module",
+        "quotactl",
+        "reboot",
+        "settimeofday",
+        "stime",
+        "swapoff",
+        "swapon",
+        "_sysctl",
+        "sysfs",
+        "uselib",
+        "ustat",
+        "vm86",
+        "vm86old"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+diff --git a/.devcontainer/devcontainer.json b/.devcontainer/devcontainer.json
+--- a/.devcontainer/devcontainer.json
++++ b/.devcontainer/devcontainer.json
+@@ -9,7 +9,17 @@
+   // Passes the .env file from your project root into the container as environment variables.
+   // Copy .env.example → .env and fill in your API keys — never commit .env.
+   // If .env doesn't exist the container still starts fine (Docker ignores missing --env-file).
++  //
++  // The two --security-opt flags let bubblewrap create user/mount namespaces inside the
++  // container (Docker's default seccomp blocks unshare/clone(CLONE_NEW*) and AppArmor's
++  // docker-default blocks mount/pivot_root). Needed by codex's --sandbox workspace-write
++  // and any orchestrator-applied per-attempt sandbox. Verify after rebuild:
++  //   bwrap --ro-bind / / --unshare-user echo ok
+   "runArgs": [
+     "--env-file",
+-    "${localWorkspaceFolder}/.env"
++    "${localWorkspaceFolder}/.env",
++    "--security-opt",
++    "seccomp=${localWorkspaceFolder}/.devcontainer/seccomp-bwrap.json",
++    "--security-opt",
++    "apparmor=unconfined"
+   ],
