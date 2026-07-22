@@ -167,6 +167,17 @@ class Plan(BaseModel):
         if self.promotion_reservation is not None:
             raise InvalidEditError("a verified Git promotion is in progress")
 
+    def update_retry_policy(self, retry_policy: RetryPolicy) -> None:
+        """Operator-tunable backoff/attempt budget (un-freeze #12). Governs the
+        NEXT retry/backoff decision only — an in-flight task's already-computed
+        attempt count and any armed `retry_not_before` are untouched, so this
+        cannot retroactively reinterpret a decision already made under the old
+        policy. Legal at any status (including blocked/paused): the whole point
+        is to let an operator widen the budget for a plan that is currently
+        stuck on a transient/rate-limited failure without a replan."""
+        self._assert_not_terminal()
+        self.retry_policy = retry_policy
+
     def reserve_promotion(self, reservation: str) -> None:
         if self.promotion_reservation not in (None, reservation):
             raise InvalidEditError("another verified Git promotion is in progress")

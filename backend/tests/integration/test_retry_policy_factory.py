@@ -18,6 +18,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def container(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     c = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(c.engine)
     return c
@@ -93,3 +94,37 @@ def test_created_plan_uses_the_container_configured_retry_policy(container):
         plan = uow.plans.get(opened.plan_id)
     assert plan.retry_policy.max_attempts == 25
     assert plan.retry_policy.max_backoff_seconds == 7200.0
+
+
+def test_retry_policy_endpoint_partially_updates_an_existing_plan(container):
+    """POST /{plan_id}/retry-policy (un-freeze #12) is a DIFFERENT lever from
+    execution.retry_* config: config only seeds a NEW plan at creation; this
+    endpoint retunes one ALREADY-persisted plan, live, without a replan."""
+    from fastapi.testclient import TestClient
+
+    from src.api.server import create_app
+    from src.app.use_cases.create_plan import open_project_plan
+    from src.domain.entities.project_definition import ProjectDefinition
+
+    project_id = "project-1"
+    container.project_repo.add(
+        ProjectDefinition(id=project_id, name="Test project", repo_url=None)
+    )
+    opened = open_project_plan(
+        "brief", project_id, "req-1", container.new_unit_of_work()
+    )
+
+    app = create_app(container)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/plans/{opened.plan_id}/retry-policy",
+            json={"max_attempts": 20, "max_backoff_seconds": 3600},
+        )
+    assert resp.status_code == 204
+
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(opened.plan_id)
+    assert plan.retry_policy.max_attempts == 20
+    assert plan.retry_policy.max_backoff_seconds == 3600.0
+    # untouched fields keep the bare default, not reset by the partial update
+    assert plan.retry_policy.backoff_multiplier == RetryPolicy().backoff_multiplier
