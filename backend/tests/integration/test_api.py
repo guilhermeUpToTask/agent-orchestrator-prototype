@@ -1036,9 +1036,11 @@ def test_review_finish_and_replan_routes_over_http(client):
     _set_plan_phase(review_replan, PlanPhase.REVIEW)
     assert client.post(f"/api/plans/{review_replan}/review/replan").status_code == 204
     assert client.get(f"/api/plans/{review_replan}").json()["phase"] == PlanPhase.REPLANNING.value
-    denied = client.post(f"/api/plans/{review_replan}/review/replan")
-    assert denied.status_code == 422
-    assert denied.json()["error"]["code"] == "INVALID_TRANSITION"
+    # Replan requests are safe to repeat while conversational replanning is
+    # already active; the coherent WAITING tuple is simply re-established.
+    repeated = client.post(f"/api/plans/{review_replan}/review/replan")
+    assert repeated.status_code == 204
+    assert client.get(f"/api/plans/{review_replan}").json()["phase"] == PlanPhase.REPLANNING.value
 
 
 def test_mid_running_replan_and_replanning_message_routes_over_http(client):
@@ -1057,9 +1059,10 @@ def test_mid_running_replan_and_replanning_message_routes_over_http(client):
     assert committed.status_code == 200
     assert committed.json()["committed"] is True
     assert committed.json()["phase"] == PlanPhase.REPLANNING.value
-    denied = client.post(f"/api/plans/{plan_id}/replan")
-    assert denied.status_code == 422
-    assert denied.json()["error"]["code"] == "INVALID_TRANSITION"
+    # Re-entering replanning is idempotent at the HTTP boundary; the existing
+    # proposal remains active until its review is finished or cancelled.
+    repeated = client.post(f"/api/plans/{plan_id}/replan")
+    assert repeated.status_code == 204
     bad_message = client.post(f"/api/plans/{plan_id}/replanning/message", json={"message": "x"})
     assert bad_message.status_code == 422
     assert bad_message.json()["error"]["code"] == "INVALID_EDIT"
