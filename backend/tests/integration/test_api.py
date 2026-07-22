@@ -1059,13 +1059,14 @@ def test_mid_running_replan_and_replanning_message_routes_over_http(client):
     assert committed.status_code == 200
     assert committed.json()["committed"] is True
     assert committed.json()["phase"] == PlanPhase.REPLANNING.value
-    # Re-entering replanning is idempotent at the HTTP boundary; the existing
-    # proposal remains active until its review is finished or cancelled.
+    # Re-entering replanning is idempotent at the HTTP boundary and retires the
+    # just-created proposal so discovery can restart cleanly.
     repeated = client.post(f"/api/plans/{plan_id}/replan")
     assert repeated.status_code == 204
-    bad_message = client.post(f"/api/plans/{plan_id}/replanning/message", json={"message": "x"})
-    assert bad_message.status_code == 422
-    assert bad_message.json()["error"]["code"] == "INVALID_EDIT"
+    restarted = client.post(f"/api/plans/{plan_id}/replanning/message", json={"message": "x"})
+    assert restarted.status_code == 200
+    assert restarted.json()["committed"] is True
+    assert restarted.json()["phase"] == PlanPhase.REPLANNING.value
 
 
 def test_additional_error_codes_over_http(client, monkeypatch):
