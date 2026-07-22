@@ -25,7 +25,7 @@ from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.services.capability_matching import match_agent
 from src.domain.services.lookups import find_goal, find_task
-from src.domain.services.navigation import next_action, NextAction
+from src.domain.services.navigation import action_for_goal, next_action, NextAction
 from src.domain.value_objects.lifecycle import FailureKind, Status
 from src.domain.value_objects.tasks_vos import TaskResult
 
@@ -257,6 +257,14 @@ class Plan(BaseModel):
     # ---- navigation ----
     def peek_next(self, now: datetime) -> NextAction:
         return next_action(self.execution_goals, now)
+
+    def peek_next_for_goal(self, goal_id: str, now: datetime) -> NextAction:
+        """Goal-level parallelism (ADR-001, domain unfreeze #12): the caller
+        (a goal-scoped worker, already holding that goal's lease) has already
+        selected which goal to drive — this does NOT re-derive goal selection
+        or dependency readiness the way `peek_next` does; it only computes
+        the per-goal action for the ONE goal the caller names."""
+        return action_for_goal(self._goal(goal_id), now)
 
     # ---- task transitions (aggregate calls entity methods) ----
     def start_task(self, goal_id: str, task_id: str) -> None:

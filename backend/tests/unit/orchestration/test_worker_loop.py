@@ -178,8 +178,7 @@ def test_worker_tick_reports_progress_not_claiming(env_factory):
     assert env.runner.calls.get("g1t0") == 1
 
 
-def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
-    env = env_factory()
+def test_heartbeat_failure_cancels_and_awaits_the_advance_task():
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -194,17 +193,13 @@ def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
         task = asyncio.create_task(pending_advance())
         await started.wait()
 
-        def fail_heartbeat(plan_id: str, worker_id: str) -> None:
+        def fail_heartbeat() -> None:
             raise RuntimeError("lease renewal failed")
 
-        env.uow.plans.heartbeat = fail_heartbeat
         try:
             await _advance_with_heartbeats(
-                "p1",
-                "w1",
-                60,
                 0,
-                env.uow,
+                fail_heartbeat,
                 task,
             )
         except RuntimeError as exc:

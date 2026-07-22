@@ -139,6 +139,11 @@ class InMemoryPlanRepository:
         if claim is not None and claim.worker_id == worker_id:
             self._claims.pop(plan_id, None)
 
+    def list_running_ids(self, limit: int) -> list[str]:
+        running = [plan for plan in self._store.values() if plan.status.value == "running"]
+        running.sort(key=lambda plan: plan.id)  # deterministic; real adapter orders by updated_at
+        return [plan.id for plan in running[:limit]]
+
 
 # ---- in-memory goal-lease repository with the SQLite predicate semantics ----
 class InMemoryGoalLeaseRepository:

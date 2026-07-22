@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.repositories.agent_repo import AgentRepository
+from src.domain.services.navigation import ready_goal_ids
 
 from src.app.handlers.base import PhaseHandler, Signal
 from src.app.handlers.execution_handler import ExecutionHandler
@@ -60,6 +61,7 @@ class PlanDispatcher:
         self._execution = ExecutionHandler(runner, agents, workspace, event_sink, clock, verifier)
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)
+        self._clock = clock
 
     async def advance(self, plan_id: str, uow: UnitOfWork) -> Signal:
         with uow:
@@ -69,12 +71,24 @@ class PlanDispatcher:
         if plan.active_cycle is not None:
             if plan.status.value != "running" or plan.pause_requested:
                 return Signal.PAUSED
-            head = min(
-                (goal for goal in plan.execution_goals if not goal.is_terminal),
-                key=lambda goal: goal.position,
-                default=None,
-            )
-            if head is not None and not head.tasks:
+            goals = plan.execution_goals
+            # Goal-level parallelism (ADR-001, domain unfreeze #12) is PURELY
+            # ADDITIVE here: this plan-level tick keeps driving execution
+            # exactly as it always has (next_action's single-earliest-ready
+            # result, unchanged since Phase 1) so a lone worker process (no
+            # separate goal-lease worker running) behaves byte-identically to
+            # before this unfreeze. The only change is routing to planning
+            # when ANY ready goal needs enrichment (not just the
+            # earliest-position one — the actual fix for the fan-out gap
+            # Phase 2 addressed inside PlanningHandler, but the DISPATCHER
+            # must also stop assuming "earliest non-terminal goal has no
+            # tasks yet" is the only case that needs a planning tick).
+            # Separate goal_tick workers (run_worker.py) ADDITIONALLY claim
+            # and drive OTHER ready-and-enriched goals concurrently — this
+            # tick never needs to know whether any exist.
+            ready_ids = ready_goal_ids(goals, self._clock.now())
+            needs_enrichment = any(goal.id in ready_ids and not goal.tasks for goal in goals)
+            if needs_enrichment:
                 if self._planning is None:
                     return Signal.PAUSED
                 return await self._planning.handle(plan_id, plan, uow)

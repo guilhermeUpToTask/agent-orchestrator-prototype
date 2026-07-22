@@ -119,7 +119,18 @@ class ExecutionHandler:
         self._clock = clock
         self._verifier = verifier
 
-    async def handle(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
+    async def handle_goal(
+        self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork
+    ) -> Signal:
+        """Goal-level parallelism (ADR-001, domain unfreeze #12): the caller is
+        a goal-scoped worker that already holds `goal_id`'s lease. Drives that
+        ONE goal via the identical body `handle()` uses for the plan-level
+        (legacy/pre-goal-parallelism) path — see `handle`'s `goal_id` param."""
+        return await self.handle(plan_id, plan, uow, goal_id=goal_id)
+
+    async def handle(
+        self, plan_id: str, plan: Plan, uow: UnitOfWork, goal_id: str | None = None
+    ) -> Signal:
         # ---- txn1: pick the unit, mark RUNNING, persist + outbox atomically ----
         goal_promotion: tuple[str, str, str] | None = None
         unit: _Unit | None = None
@@ -127,7 +138,10 @@ class ExecutionHandler:
             plan = uow.plans.get(plan_id)
             if plan.paused or plan.pause_requested:
                 return Signal.PAUSED  # pause gate armed while we were dispatched
-            action = plan.peek_next(self._clock.now())
+            now = self._clock.now()
+            action = (
+                plan.peek_next_for_goal(goal_id, now) if goal_id is not None else plan.peek_next(now)
+            )
 
             if action is None:
                 return self._enter_review(plan_id, plan, uow)
@@ -722,6 +736,16 @@ class ExecutionHandler:
         # pending), so a goal wedged by a SKIPPED/evidence-less-DONE task is
         # recoverable only via edit_task or start_replan — offering retry_stage
         # there is a nominal-only resolution that 422s when the operator tries it.
+        if plan.block is not None and plan.block.active:
+            # Goal-level parallelism (domain unfreeze #12): Plan.block is
+            # still a single plan-wide scalar (unlike goal_promotion_reservations,
+            # deliberately NOT reshaped per-goal in this phase — BLOCKED is a
+            # whole-plan operator-facing status by design). If a DIFFERENT
+            # goal already opened a block this same tick, don't crash on
+            # open_block's "already active" guard — the plan is already
+            # correctly BLOCKED; this goal's own problem surfaces once the
+            # first block is resolved and navigation re-selects it.
+            return Signal.PAUSED
         resolutions = ["edit_task", "start_replan"]
         if offending.status == Status.FAILED:
             resolutions = ["retry_stage", *resolutions]
@@ -846,6 +870,10 @@ class ExecutionHandler:
         failed = next(task for task in goal.tasks if task.status == Status.FAILED)
         reason = f"goal {goal.id} has a failed task"
         if plan.active_cycle is not None:
+            if plan.block is not None and plan.block.active:
+                # Same "plan.block is a plan-wide scalar" reasoning as
+                # _block_on_unpromotable_goal — see its comment.
+                return Signal.PAUSED
             block = PlanBlock(
                 id=new_id(),
                 kind="execution_failure",

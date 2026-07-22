@@ -1,0 +1,196 @@
+"""Goal-level parallelism end-to-end (ADR-001, domain unfreeze #12 / Phase 3c):
+claim_ready_goal + drive_goal + ExecutionHandler.handle_goal, on both backends
+via env_factory. Two independent, already-enriched goals in the same active
+cycle claim to DIFFERENT workers and each drives its own goal's task without
+touching the other — the additive path alongside (not replacing) the
+existing plan-level advance_plan/next_action flow."""
+
+from __future__ import annotations
+
+import asyncio
+
+
+from src.app.handlers.execution_handler import ExecutionHandler
+from src.app.use_cases.claim_ready_goal import claim_ready_goal
+from src.app.use_cases.run_worker import drive_goal
+from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from src.domain.entities.task import Task
+from src.domain.value_objects.lifecycle import Status
+
+
+def _task(task_id: str) -> Task:
+    return Task(id=task_id, name=task_id, position=0, description="", agent_id="a1")
+
+
+def _two_independent_ready_goals_plan(now, *, tasks_per_goal: int = 1) -> Plan:
+    def tasks(prefix: str) -> list[Task]:
+        return [_task(f"{prefix}{i}") for i in range(tasks_per_goal)]
+
+    return Plan(
+        project_id="project-1",
+        id="p1",
+        brief="b",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                status=CycleStatus.ACTIVE,
+                started_at=now,
+                goals=[
+                    Goal(id="g1", name="g1", position=0, description="", tasks=tasks("t1-")),
+                    Goal(id="g2", name="g2", position=1, description="", tasks=tasks("t2-")),
+                ],
+            )
+        ],
+    )
+
+
+def test_claim_ready_goal_gives_each_worker_a_different_goal(env_factory):
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now())
+    env.seed(plan)
+
+    first = claim_ready_goal(env.uow, "w1", 60, env.clock)
+    second = claim_ready_goal(env.uow, "w2", 60, env.clock)
+
+    assert first is not None and second is not None
+    assert first[0] == "p1" and second[0] == "p1"
+    assert first[1] != second[1]
+    assert {first[1], second[1]} == {"g1", "g2"}
+
+
+def test_claim_ready_goal_returns_none_when_both_goals_already_claimed(env_factory):
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now())
+    env.seed(plan)
+
+    claim_ready_goal(env.uow, "w1", 60, env.clock)
+    claim_ready_goal(env.uow, "w2", 60, env.clock)
+
+    assert claim_ready_goal(env.uow, "w3", 60, env.clock) is None
+
+
+def test_drive_goal_progresses_only_its_own_goal(env_factory):
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now())
+    env.seed(plan)
+
+    claimed = claim_ready_goal(env.uow, "w1", 60, env.clock)
+    assert claimed is not None
+    plan_id, goal_id = claimed
+
+    signal, progressed = asyncio.run(
+        drive_goal(plan_id, goal_id, env.uow, *env.args[1:], "w1")
+    )
+
+    assert progressed >= 1
+    stored = env.stored(plan_id)
+    goals_by_id = {g.id: g for g in stored.active_cycle.goals}
+    driven_task = goals_by_id[goal_id].tasks[0]
+    assert driven_task.status == Status.DONE
+    other_goal_id = "g2" if goal_id == "g1" else "g1"
+    other_task = goals_by_id[other_goal_id].tasks[0]
+    assert other_task.status == Status.PENDING  # untouched by the other goal's drive
+
+
+def test_both_goals_can_be_driven_concurrently_by_different_workers(env_factory):
+    # Two tasks per goal: completing the first task never triggers goal
+    # promotion (can_promote_goal needs EVERY task DONE-with-evidence), so
+    # this stays isolated from the separate, already-known "Plan.block is a
+    # single plan-wide scalar" limitation (goal completion/promotion-failure
+    # handling under concurrent goals is explicitly out of scope for this
+    # phase) and cleanly proves just the claim+drive concurrency property.
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now(), tasks_per_goal=2)
+    env.seed(plan)
+
+    claimed_1 = claim_ready_goal(env.uow, "w1", 60, env.clock)
+    claimed_2 = claim_ready_goal(env.uow, "w2", 60, env.clock)
+    assert claimed_1 is not None and claimed_2 is not None
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    async def drive_both():
+        plan_now = env.stored("p1")
+        return await asyncio.gather(
+            execution.handle_goal(claimed_1[0], claimed_1[1], plan_now, env.uow),
+            execution.handle_goal(claimed_2[0], claimed_2[1], plan_now, env.uow),
+        )
+
+    asyncio.run(drive_both())
+
+    stored = env.stored("p1")
+    goals_by_id = {g.id: g for g in stored.active_cycle.goals}
+    assert goals_by_id["g1"].tasks[0].status in (Status.RUNNING, Status.DONE)
+    assert goals_by_id["g2"].tasks[0].status in (Status.RUNNING, Status.DONE)
+    # neither goal is complete -- each still has a second pending task
+    assert goals_by_id["g1"].tasks[1].status == Status.PENDING
+    assert goals_by_id["g2"].tasks[1].status == Status.PENDING
+
+
+def test_two_goals_concurrently_unpromotable_blocks_once_not_crashes(env_factory):
+    """Plan.block is still a single plan-wide scalar (deliberately not
+    reshaped per-goal this phase -- BLOCKED is a whole-plan status by
+    design). If goal-level parallelism lets two DIFFERENT goals discover a
+    block-worthy problem in the same tick, the second must degrade to a
+    graceful PAUSED, never an uncaught InvalidEditError from open_block's
+    "already active" guard."""
+    env = env_factory()
+    # single-task goals with NO verification_evidence: completing the task
+    # makes can_promote_goal reject the goal, triggering the block path.
+    plan = _two_independent_ready_goals_plan(env.clock.now())
+    env.seed(plan)
+
+    claimed_1 = claim_ready_goal(env.uow, "w1", 60, env.clock)
+    claimed_2 = claim_ready_goal(env.uow, "w2", 60, env.clock)
+    assert claimed_1 is not None and claimed_2 is not None
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    # drive each goal's single task to DONE first (still isolated calls).
+    plan_now = env.stored("p1")
+    asyncio.run(execution.handle_goal(claimed_1[0], claimed_1[1], plan_now, env.uow))
+    plan_now = env.stored("p1")
+    asyncio.run(execution.handle_goal(claimed_2[0], claimed_2[1], plan_now, env.uow))
+
+    # both goals' tasks are now DONE-without-evidence -> both attempt to
+    # close/promote concurrently on the next round; must not raise.
+    plan_now = env.stored("p1")
+
+    async def drive_both_to_block():
+        return await asyncio.gather(
+            execution.handle_goal(claimed_1[0], claimed_1[1], plan_now, env.uow),
+            execution.handle_goal(claimed_2[0], claimed_2[1], plan_now, env.uow),
+            return_exceptions=True,
+        )
+
+    signals = asyncio.run(drive_both_to_block())
+
+    assert not any(isinstance(result, BaseException) for result in signals), signals
+    stored = env.stored("p1")
+    assert stored.status.value == "blocked"
+    assert stored.block is not None and stored.block.active
+
+
+def test_handle_goal_matches_handle_for_a_legacy_single_goal_lease_free_call(env_factory):
+    """handle_goal is the SAME body as handle() (goal_id threaded through) --
+    not a divergent reimplementation. Prove that directly at the handler
+    level, independent of the claim/drive plumbing above."""
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now())
+    env.seed(plan)
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    stored = env.stored("p1")
+    signal = asyncio.run(execution.handle_goal("p1", "g1", stored, env.uow))
+
+    assert signal.value in ("continue", "paused")
+    after = env.stored("p1")
+    goals_by_id = {g.id: g for g in after.active_cycle.goals}
+    assert goals_by_id["g1"].tasks[0].status in (Status.RUNNING, Status.DONE)
+    assert goals_by_id["g2"].tasks[0].status == Status.PENDING

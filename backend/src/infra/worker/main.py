@@ -38,7 +38,7 @@ async def run_worker_forever(
     lease_seconds; startup reconciliation never abandons attempts behind a live
     claim.
     """
-    from src.app.use_cases.run_worker import worker_tick
+    from src.app.use_cases.run_worker import goal_tick, worker_tick
 
     uow = container.new_unit_of_work()
     planning_handler = PlanningHandler(
@@ -96,6 +96,29 @@ async def run_worker_forever(
             # the other plans. Retry churn is poll-cadence-bounded.
             log.error("worker.tick_failed", worker_id=worker_id, exc_info=True)
             progressed = False
-        if not progressed:
+        # Goal-level parallelism (ADR-001, domain unfreeze #12): a plan-level
+        # tick no longer drives cyclic execution once every ready goal is
+        # already enriched (advance_plan.py) -- goal_tick is what actually
+        # claims and drives those goals. Running both ticks from the SAME
+        # worker process means a single `orchestrate worker start` keeps
+        # executing cyclic plans exactly as before; running MULTIPLE
+        # processes is what turns this into real cross-process goal
+        # parallelism, since goal_tick's claim is per-goal, not per-plan.
+        try:
+            goal_progressed = await goal_tick(
+                uow,
+                container.agent_runner,
+                container.agent_repo,
+                container.workspace,
+                container.agent_event_sink,
+                container.clock,
+                worker_id,
+                lease_seconds,
+                verifier=container.verification_executor,
+            )
+        except Exception:
+            log.error("worker.goal_tick_failed", worker_id=worker_id, exc_info=True)
+            goal_progressed = False
+        if not progressed and not goal_progressed:
             await asyncio.sleep(poll_seconds)
     log.info("worker.stopped", worker_id=worker_id)
