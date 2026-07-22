@@ -344,6 +344,136 @@ replan-message / cancel path) is a **domain-design decision** — not guessed he
 Observed on the heavily-mutated `fc5fa4c3` (v77); needs a clean-plan reproduction
 to confirm it's general vs an artifact of that plan's accumulated legacy state.
 
+## RESOLUTION #12/#13 — coherent cyclic replan state (domain unfreeze #10)  ✅ FIXED & live-verified
+
+Informed by the codex `gpt-5.6-sol` design analysis (saved separately), un-freeze
+#10 fixes both: `begin_replanning` now establishes the explicit WAITING replan
+tuple (clears intent/draft/gate slots, retains the source cycle); `request_replan`
+resolves the block BEFORE `begin_replanning` so WAITING is the atomic final word;
+`legal_actions` advertises `resume` only when `paused` is armed; `activity`
+reports `replan_discovery`. Legacy (`active_cycle is None`) plans are byte-identical.
+
+**Live-verified on the wedged v77 `fc5fa4c3`:** `/replan` → `status=waiting`,
+`activity=replan_discovery`, `paused=False`, `legal_actions=[]` (no false
+`resume`), `intent=None`; then `/replanning/message` → **200, committed** — a
+fresh REPLAN intent (`fb21f076…`) opened at `review:intent`. The plan is fully
+drivable through the replan conversation again. 276 orchestration tests pass;
+ruff + mypy clean; decision-log #50. (Landed as a separate PR from the rest of
+the walkthrough, per the critical-domain-change isolation request.) The codex
+14-item legacy-`PlanPhase` side-effect audit is tracked as follow-up cleanup.
+
+## RESOLUTION #3 — SKIPPED is legacy-only; navigation & promotion agree (domain unfreeze #11)  ✅ FIXED
+
+Answering the maintainer's question ("does a skippable goal/task make sense?"):
+**no**, in the cyclic model. A codex `gpt-5.6-sol` design analysis confirmed
+`SKIPPED` is legacy append-only iteration-abandonment residue; the cyclic
+abandonment boundary is cycle SUPERSEDED-on-activation. The bug: `request_replan`
+skipped every task in the **still-active** source cycle and `begin_replanning`'s
+root skip loop ran for cyclic plans, producing goals with `SKIPPED` tasks that
+navigation treats as closeable but promotion rejects → permanently unpromotable
+(the shared root of #3/#4/#12).
+
+Fix (un-freeze #11, decision-log #51): `request_replan` no longer rewrites the
+source cycle's task outcomes; `begin_replanning` skips nothing on the cyclic
+branch (legacy byte-identical) and sets the WAITING tuple with `phase`/`status`
+explicit; a canonical `can_promote_goal()` predicate is the single rule
+navigation + `_reserve_goal_promotion` share; `_start_operation` allows replan
+discovery for an already-replanning WAITING plan. `SKIPPED` retained for legacy
+plans/history; no migration. **365 unit tests pass; ruff + mypy clean.** (A
+pre-existing plan already poisoned with `SKIPPED` tasks, like `fc5fa4c3`, isn't
+retroactively un-poisoned — it must be superseded by activating a replacement
+cycle; future replans no longer poison.) Full navigation `GOAL_UNPROMOTABLE`
+typing + cyclic stale-result ledger settlement are scoped follow-ups.
+
+## Finding #14 — replan cycle drafts are never reasoner-architected (worker path unreachable)  ⚠ OPEN
+
+Surfaced driving `fc5fa4c3` (an approved REPLAN intent, `cycle_draft: null`, source
+cycle still active). The worker's reasoner-driven draft generation
+(`PlanningHandler._architect_cycle`) is only reached via `PlanDispatcher.advance`
+when **`active_cycle is None`** (advance_plan.py:83). A replan's source cycle stays
+active until the *replacement* activates (correct per unfreeze #11), so
+`active_cycle` is never `None` during a replan → `_architect_cycle` is structurally
+unreachable. `planning_handler.handle` compounds it: with `active_cycle is not None`
+it routes to `_enrich` (line 152) before the approved-intent branch (line 154).
+**Consequence:** initial cycles get reasoner-generated roadmaps; replan cycles do
+not — a replan draft can only be produced by the manual `POST /plans/{id}/cycle-draft`
+route with client-supplied `goals`. Either intentional (replan roadmap comes from the
+conversation) or a genuine gap; if the former, the asymmetry is undocumented and the
+"blocked, legal=[edit_task, start_replan]" surface gives the operator no signal that a
+manual draft is the expected next step. Relates to legacy-phase issue #41.
+
+## Finding #15 — cycle-draft review gate is not surfaced by the plan read model  ⚠ OPEN
+
+After `POST /plans/{id}/cycle-draft` (HTTP 201) on `fc5fa4c3`, the persisted aggregate
+holds an unresolved `ReviewGate` (`subject_type=cycle_draft`, `allowed_decisions=
+[approve, edit, cancel]`) — verified directly in `plans.data`. But `GET /plans/{id}`
+returns `review_gate: null` and `legal_actions: ['edit_task', 'start_replan']` — no
+approve action. A FastAPI-only client therefore **cannot discover the `gate_id`** it
+needs for `POST /cycle-draft/approve`, so the draft can never be approved through the
+API. The derived read model (driven by the still-active/blocked source cycle) wins over
+the freshly-opened draft gate — the same derived-vs-authoritative hazard tracked in
+issue #41. Recovery required reading the gate id from persisted state (read-only), then
+the API approve succeeded: new cycle activated, poisoned source cycle superseded, plan
+returned to `running`/`enriching`. Fix candidate: the plan detail read model must
+surface a pending `cycle_draft` gate (and its `approve` legal action) regardless of the
+source cycle's derived status.
+
+## RESOLUTION context — fc5fa4c3 deadlock broken via FastAPI (unfreeze #10/#11 validated live)
+
+The poisoned plan `fc5fa4c3` (5 pre-existing `SKIPPED` tasks in its active cycle,
+`blocked:implementation`) was recovered end-to-end through the API: `POST /cycle-draft`
+→ `POST /cycle-draft/approve` (gate id read from persisted state per #15) → the
+replacement cycle activated and the poisoned source cycle was **superseded**, clearing
+the poison. This confirms the unfreeze #10/#11 recovery semantics on a live plan:
+supersession-on-activation, not per-task skipping, is the correct abandonment boundary.
+Remaining path (enrich → execute) is gated only by the free-model TDD-role wall
+(finding #11), not by any domain defect.
+
+## Finding #16 — pi in-band provider errors masked as terminal verification failures  ✅ FIXED (PR #43)
+
+⚠️ **Corrects an earlier wrong conclusion in this doc.** The `test_authoring`
+failures on `fc5fa4c3` were first read as a free-model *capability* wall ("nemotron
+can't author tests"). The tester agent's **runtime log** (`runtime-logs/<attempt>.jsonl`)
+disproved that: the model **never generated a token**. The assistant turn was
+`{"content":[], "usage":{"totalTokens":0}, "stopReason":"error", "errorMessage":
+"Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (32/32)"}`
+— i.e. a **rate limit**. pi `--mode json` reports such upstream failures IN-BAND
+(the process still exits 0), and `pi_protocol` parsed only usage + final text, so the
+errored run looked like a *successful empty* run. Downstream, the empty test-author
+workspace was raised as a **terminal** `verification_error: "test author produced no
+executable checks"` — turning a **retryable** rate limit into a permanent task death,
+and presenting to the operator as "the model can't write tests."
+
+Fix (PR #43): `pi_protocol.extract_stream_error` detects an errored assistant turn;
+a `CliAgentRunner._detect_stream_error` hook (Pi overrides it) routes exit-0 in-band
+errors through the shared taxonomy — which already maps `resource_exhausted` →
+`FailureKind.RATE_LIMIT` (retryable) — so the durable backoff waits out the transient
+cap and retries. Unit + integration regression tests cover the exact Nvidia stream
+shape. **The free model was never proven incapable of authoring tests; the walkthrough
+simply exhausted the Nvidia free-tier request limit, which the loop watched for.**
+
+## Bug B — task prompt used the agent's static role, not the run role  ✅ FIXED (PR #44)
+
+Same runtime log: the **test_authoring** run was told `## Your role: implementer` /
+`Implement the task exactly as described.` directly above `Write ONLY tests`.
+`build_task_prompt` rendered `spec.role` (static) in the header while the stage
+expectation came from `task.tdd_stage`. An agent covering both TDD roles (dev-agent
+held `test_authoring` + `implementation`, `role=implementer`) thus got a
+self-contradicting prompt on a test-author run. Fix (PR #44): derive one run-role label
+from `task.tdd_stage` (the same signal the execution handler uses) for both the header
+and the expectation; non-TDD tasks fall back to the agent's role (unchanged).
+
+Also surfaced (follow-up, unfixed): with a task blocked on a failed test_authoring
+stage the plan reports `legal_actions: ['retry_stage', ...]`, but `POST /retry-stage`
+rejects it (`INVALID_EDIT: plan is not blocked on a retryable planning stage`) — the
+working action is `POST /retry` (task retry). The derived `legal_actions` advertises
+`retry_stage` where only task `retry` applies.
+
+The agent-role split performed live (dedicated `test-agent` seeded on the same
+model/provider, `test_authoring` moved off `dev-agent`; `resolve_task_role_agents` →
+`test_author: test-agent`, `implementer: dev-agent`) is the correct config regardless,
+and pairs with Bug B's fix.
+
 ## Environment note (not a plan defect)
 
 Worker boot warns `worker.dependency_missing binary=gemini` — the `gemini` CLI is

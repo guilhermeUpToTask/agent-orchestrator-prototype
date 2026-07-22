@@ -484,18 +484,38 @@ class Plan(BaseModel):
             self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
         self.paused = False
         self.paused_reason = None
-        for goal in self.goals:
-            if goal.status == Status.PENDING:
-                for task in goal.tasks:
-                    if task.status == Status.PENDING:
-                        task.skip()
-                goal.skip()
-            elif goal.status == Status.RUNNING:
-                for task in goal.tasks:
-                    if task.status == Status.PENDING:
-                        task.skip()
-                # leave the goal RUNNING: its in-flight task finalizes tolerantly
-        self._set_phase(PlanPhase.REPLANNING)
+        self.pause_requested = False
+        if self.active_cycle is None:
+            # Legacy append-only loop: guard on the legacy phase and SKIP the
+            # abandoned root work so the root-goal scan never resurrects the
+            # superseded iteration. Unchanged behavior for pre-cyclic plans.
+            self._guard_phase({PlanPhase.RUNNING, PlanPhase.REVIEW}, PlanPhase.REPLANNING)
+            for goal in self.goals:
+                if goal.status == Status.PENDING:
+                    for task in goal.tasks:
+                        if task.status == Status.PENDING:
+                            task.skip()
+                    goal.skip()
+                elif goal.status == Status.RUNNING:
+                    for task in goal.tasks:
+                        if task.status == Status.PENDING:
+                            task.skip()
+                    # leave the goal RUNNING: its in-flight task finalizes tolerantly
+            self._set_phase(PlanPhase.REPLANNING)
+        else:
+            # Cyclic conversational replan (unfreeze #10/#11): SKIP NOTHING. The
+            # source Cycle stays frozen — SKIPPED is legacy iteration-abandonment
+            # residue, invalid for an active cyclic goal — and is superseded only
+            # when the replacement cycle activates. Establish the coherent WAITING
+            # replan tuple: set the compat `phase` projection AND the authoritative
+            # `status` explicitly (not via `_set_phase`'s dual write — issue #41),
+            # and retire the stale current-planning artifacts so an approved source
+            # intent / draft / gate cannot masquerade as active planning work.
+            self.phase = PlanPhase.REPLANNING
+            self.status = PlanStatus.WAITING
+            self.intent_proposal = None
+            self.cycle_draft = None
+            self.review_gate = None
 
     def set_iteration_goals(self, new_goals: list[Goal]) -> None:
         """The planning phases' write path (roadmap 2.5 driver): replace the
@@ -603,7 +623,10 @@ class Plan(BaseModel):
             return []
         if self.status == PlanStatus.RUNNING:
             return ["pause", "start_replan"]
-        if self.status == PlanStatus.PAUSED:
+        if self.status == PlanStatus.PAUSED and self.paused:
+            # Only a truly-armed manual pause is resumable. status==PAUSED with
+            # paused==False is an inconsistent state (unfreeze #10), not a
+            # resumable one — never advertise resume for it.
             return [
                 "resume",
                 "start_replan",
@@ -613,7 +636,11 @@ class Plan(BaseModel):
             self.status == PlanStatus.WAITING
             and self.review_gate is None
             and self.intent_proposal is None
+            and self.active_cycle is None
         ):
+            # start_intent is INITIAL planning only. A WAITING plan with an active
+            # cycle is in conversational replan (driven by the replan-message
+            # endpoint), so it advertises no button command here.
             return ["start_intent"]
         return []
 
@@ -634,6 +661,15 @@ class Plan(BaseModel):
             return "cycle_architecture"
         if self.cycle_draft is not None and self.cycle_draft.approved_at is None:
             return "cycle_architecture"
+        if (
+            self.status == PlanStatus.WAITING
+            and self.phase == PlanPhase.REPLANNING
+            and self.active_cycle is not None
+            and self.intent_proposal is None
+        ):
+            # Cyclic conversational replan before a candidate exists (unfreeze #10):
+            # the source cycle is retained but planning artifacts are cleared.
+            return "replan_discovery"
         cycle = self.active_cycle
         if cycle is None:
             return "intent_discovery" if self.status == PlanStatus.WAITING else "idle"
