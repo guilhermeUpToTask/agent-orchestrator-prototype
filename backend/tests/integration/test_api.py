@@ -834,6 +834,9 @@ def test_runner_status_walk_over_http(client):
     assert body["valid"] is True
     assert {b["name"] for b in body["binaries"]} == {"git", "pi", "claude", "gemini"}
     assert body["agents"] == []
+    # ROADMAP item 33: NoSandbox reports honestly, never as a healthy sandbox
+    assert body["sandbox"]["ok"] is True
+    assert "disabled" in body["sandbox"]["message"].lower()
 
     # real mode with an unbound pi agent: invalid with the agent's detail
     agent = client.post(

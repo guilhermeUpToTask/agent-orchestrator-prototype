@@ -239,30 +239,27 @@ Take these up only when real usage demonstrates the need.
     stale `AGENT_MODE` terminal env (the config key replaced it) and align
     the image's Python with CI (3.12). `gemini` remains a factory
     `runtime_type` with no binary anywhere — decide to provision or delist it.
-33. **Sandbox abstraction — keep confinement out of the domain** [WALK] —
-    evaluate the boundary BEFORE any bubblewrap code exists: the frozen
-    domain must never know what a sandbox is, and even `ExecutionHandler`
-    should only see "attempts run confined or not". Likely shape: a
-    `Sandbox` port at the app/infra seam (peer of `AgentRunner`, not a
-    domain concept) with `wrap(cmd, policy) -> cmd` + `probe()` semantics,
-    adapters `NoSandbox` (today's behavior, the permanent fallback) and
-    later `BubblewrapSandbox`; the CLI runners/`supervise_process` consume
-    it blindly; probe status surfaces through `dependency_checker` /
-    `GET /api/runner/status` like the binary probes. Deliverable is a short
-    design note + the port skeleton with the no-op adapter wired — zero
-    behavior change — so item 34 becomes a pure adapter drop-in.
-34. **True FS sandboxing per attempt (bubblewrap)** [WALK] — parked with
-    evidence (2026-07-19): bwrap 0.11.0 installs but cannot create namespaces
-    in the current devcontainer (Docker default seccomp blocks `unshare`,
-    userns and plain modes both fail) — a sandbox that can't start where the
-    orchestrator runs delivers zero coverage. Blocked on item 32's container
-    capability work, and on items 2–3 (a bwrap mount plan needs pointer-free
-    workspaces and a scrubbed env anyway). Design when unblocked: a
-    sandbox-when-available wrapper — probe at worker boot alongside the
-    existing binary probes, run attempts under bwrap (bind: attempt workspace
-    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on),
-    loud `sandbox=disabled` fallback to the post-run guard elsewhere.
-35. **Per-role model quality bindings** [WALK] — the free reasoning model
+33. **True FS sandboxing per attempt (bubblewrap)** [WALK] — item 32's
+    devcontainer fix (2026-07-22: seccomp profile + AppArmor policy for safe
+    nested bubblewrap) unblocked this: bwrap 0.11.0 now creates the
+    unprivileged user namespace successfully in this container (re-verified
+    live, 2026-07-22 — `--unshare-user` + a bound writable worktree + real
+    read-only enforcement elsewhere, `pi`/`claude` both resolve inside the
+    sandbox). The `Sandbox` port + `NoSandbox` adapter landed the same day
+    (peer of `AgentRunner`, explicitly not a domain concept — the frozen
+    domain and `ExecutionHandler` never see this type; `wrap(cmd, policy) ->
+    cmd` + `probe()`, consumed blindly by the CLI runners/
+    `supervise_process`; probe status surfaces through `GET
+    /api/runner/status` alongside the binary probes). Remaining scope is
+    purely the real `BubblewrapSandbox` adapter: bind the attempt worktree
+    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on;
+    config-gated (default off, mirrors `agent_runner.mode`) so nothing
+    changes for an existing real-mode setup until explicitly enabled; loud
+    `sandbox=disabled` fallback when the probe fails, never a silent
+    downgrade or a refusal to run. Items 2–3 (pointer-free workspaces, a
+    scrubbed env) remain open hardening follow-ups, not blockers for a first
+    `--ro-bind / /`-shaped cut.
+34. **Per-role model quality bindings** [WALK] — the free reasoning model
     follows task descriptions over role instructions; the registry already
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the

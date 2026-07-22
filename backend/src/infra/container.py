@@ -26,7 +26,7 @@ from pathlib import Path
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.app.ports import AgentRunner, Clock, Reasoner
+from src.app.ports import AgentRunner, Clock, Reasoner, Sandbox
 from src.infra.clock import SystemClock
 from src.infra.db.engine import build_engine, db_url_for_home, make_session_factory
 from src.infra.db.observation_repository import SqliteProcessObservationRepository
@@ -49,6 +49,7 @@ from src.infra.git.project_workspace import (
 )
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
+from src.infra.runtime.sandbox import NoSandbox
 from src.infra.runtime.verification_executor import LocalVerificationExecutor
 
 
@@ -137,6 +138,13 @@ class AppContainer:
         return SqliteChatRepository(self.session_factory)
 
     @cached_property
+    def sandbox(self) -> Sandbox:
+        """ROADMAP item 33: NoSandbox is today's behavior and the permanent
+        fallback — a real adapter (e.g. BubblewrapSandbox, item 34) is a
+        drop-in swap here, not a change to any caller."""
+        return NoSandbox()
+
+    @cached_property
     def agent_runner(self) -> AgentRunner:
         """Catalog-resolved: config key agent_runner.mode selects dry-run
         (default, no secrets needed — the dummy IS the dry-run runtime, same
@@ -151,6 +159,7 @@ class AppContainer:
             lambda: self.secret_store,
             self.orchestrator_home,
             self.observation_repository,
+            self.sandbox,
         )
 
     @cached_property
