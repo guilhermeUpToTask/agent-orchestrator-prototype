@@ -1,0 +1,29 @@
+{
+  "runtimes": [
+    {
+      "duration_seconds_median": 250.0,
+      "duration_seconds_p90": 400.0,
+      "escalation_rate": 0.0,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": 1.0,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "codex",
+      "tasks_routed_initially": 4,
+      "verified_completions": 4
+    },
+    {
+      "duration_seconds_median": 91.0,
+      "duration_seconds_p90": 91.0,
+      "escalation_rate": null,
+      "estimated_cost_usd": "unavailable",
+      "first_pass_success_rate": null,
+      "human_interventions": 0,
+      "quota_tokens_total": "unavailable",
+      "runtime": "claude_sonnet",
+      "tasks_routed_initially": 0,
+      "verified_completions": 1
+    }
+  ],
+  "task_count": 4
+}

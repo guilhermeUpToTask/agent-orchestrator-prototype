@@ -1,0 +1,23 @@
+Implemented graceful handling for submitted intents with unresolved questions:
+
+- Returns a question-turn `ReasonerReply` with `intent=None`.
+- Uses unresolved questions as fallback text.
+- Preserves request/turn counters.
+- Updated the existing regression test.
+- No commit created.
+
+```text
+backend/src/infra/reasoner/openai_reasoner.py       |  6 +++++-
+backend/tests/unit/reasoner/test_openai_reasoner.py | 10 +++++++---
+2 files changed, 12 insertions(+), 4 deletions(-)
+```
+
+Verification:
+
+```text
+43 passed in 1.40s
+All checks passed!
+Success: no issues found in 1 source file
+```
+
+Graph refresh was skipped because the `graphify` executable is unavailable.

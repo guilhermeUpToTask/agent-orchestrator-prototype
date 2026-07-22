@@ -1,0 +1,29 @@
+Implemented both runtime fixes without committing.
+
+- Bug A: `PiAgentRunner` now strips only an exact leading `provider_id:` prefix before passing `--model`. Bare model names and suffixes such as `:free` remain unchanged. Pi backend/API-key selection is untouched.
+- Claude and Gemini already receive `model.name` from the factory, so no equivalent change was needed.
+- Bug B: added `SqliteProcessObservationRepository`, supporting process telemetry serialization and round trips through `agent_events`.
+- Wired the container to the process-capable repository.
+- Preserved the base repository guard for unsupported process observations.
+- Added three focused regression tests.
+
+Verification:
+
+```text
+68 passed, 1 warning in 3.93s
+Ruff: All checks passed!
+mypy: Success: no issues found in 10 source files
+git diff --check: passed
+```
+
+Diff stat, including the untracked test:
+
+```text
+backend/src/infra/container.py                 |  6 +-
+backend/src/infra/db/observation_repository.py | 85 ++++++++++++++++++++------
+backend/src/infra/runtime/cli_runner.py        | 11 +++-
+backend/tests/unit/runtime/test_runtime_regressions.py | 77 ++++++++++++++++++++++
+4 files changed, 155 insertions(+), 24 deletions(-)
+```
+
+`graphify update .` could not run because the `graphify` executable is not installed in this environment. No commit was created.
