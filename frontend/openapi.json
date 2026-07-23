@@ -6366,6 +6366,29 @@
         ],
         "title": "RunnerBinaryStatus"
       },
+      "RunnerSandboxStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ok",
+          "message"
+        ],
+        "title": "RunnerSandboxStatus"
+      },
       "RunnerStatusResponse": {
         "properties": {
           "mode": {
@@ -6400,6 +6423,9 @@
             },
             "type": "array",
             "title": "Agents"
+          },
+          "sandbox": {
+            "$ref": "#/components/schemas/RunnerSandboxStatus"
           }
         },
         "type": "object",
@@ -6407,7 +6433,8 @@
           "mode",
           "valid",
           "binaries",
-          "agents"
+          "agents",
+          "sandbox"
         ],
         "title": "RunnerStatusResponse"
       },
