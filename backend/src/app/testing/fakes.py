@@ -396,7 +396,7 @@ class DummyBehavior:
     output: str = "ok"
     fail_times: int = 0  # fail the first N attempts, then succeed
     fail_reason: str = "transient"
-    fail_kind: FailureKind = FailureKind.CONNECTION_ERROR  # retryable by default
+    fail_kind: FailureKind = FailureKind.TOOL_ERROR  # retryable by default
     always_fail: bool = False
     emit_events: int = 0  # number of fake agent events to stream
     crash_after_success: bool = False  # simulate worker death AFTER agent returned

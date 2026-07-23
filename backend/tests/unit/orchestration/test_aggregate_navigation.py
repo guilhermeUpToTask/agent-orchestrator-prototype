@@ -249,7 +249,7 @@ def test_retry_cycle_requeue_then_succeed():
     p = exec_plan([goal("g1", 0, [task(0)])])
     p.start_task("g1", "t0")  # attempts 1
     p.fail_task("g1", "t0", "transient")
-    assert p.retry_policy.should_retry(1, FailureKind.CONNECTION_ERROR)  # domain decides retry
+    assert p.retry_policy.should_retry(1, FailureKind.TOOL_ERROR)  # domain decides retry
     p.requeue_task("g1", "t0")
     p.start_task("g1", "t0")  # attempts 2
     p.complete_task("g1", "t0", TaskResult.success("ok"))
@@ -263,7 +263,7 @@ def test_retry_exhaustion_becomes_terminal():
     p.start_task("g1", "t0")
     p.start_task("g1", "t0")  # 3 attempts
     p.fail_task("g1", "t0", "transient")
-    assert rp.should_retry(3, FailureKind.CONNECTION_ERROR) is False  # exhausted -> stays FAILED
+    assert rp.should_retry(3, FailureKind.TOOL_ERROR) is False  # exhausted -> stays FAILED
 
 
 # ===== EDIT service =====

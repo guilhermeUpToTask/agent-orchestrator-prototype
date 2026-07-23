@@ -476,7 +476,7 @@ class PlanningHandler:
                 uow.plans.save(plan)
                 return Signal.FAILED
 
-            delay = plan.retry_policy.backoff_for(next_attempt + 1)
+            delay = plan.retry_policy.backoff_for(next_attempt + 1, kind=None)
             not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
             plan.record_planning_retry(not_before)
             plan.bump_version()

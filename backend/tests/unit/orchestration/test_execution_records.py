@@ -265,7 +265,25 @@ def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factor
     assert drive() == "not_ready"
     assert env.runner.calls == {"t1": 1}
 
-    env.clock.advance(2)
+    env.clock.advance(5)
+    assert drive() == "continue"
+    env.clock.advance(5)
+    assert drive() == "continue"
+    stored = env.stored("p1")
+    assert stored.block is None
+    assert stored.goal_blocks == {}
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    assert env.runner.calls == {"t1": 3}
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
+    assert circuit is not None and not circuit.manual_intervention
+
+    for _ in range(2):
+        env.clock.advance(5)
+        assert drive() == "continue"
+
+    env.clock.advance(5)
     assert drive() == "paused"
     stored = env.stored("p1")
     assert stored.block is None  # per-goal block, not the legacy scalar
@@ -278,7 +296,7 @@ def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factor
     ]
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
-    assert env.runner.calls == {"t1": 2}
+    assert env.runner.calls == {"t1": 6}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and circuit.manual_intervention
