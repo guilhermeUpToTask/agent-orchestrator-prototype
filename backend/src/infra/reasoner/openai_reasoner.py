@@ -21,10 +21,12 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Sequence, TypeVar
 
 import structlog
+from pydantic import BaseModel, ValidationError
 
+from src.app.ports import ReasonerUnavailable
 from src.app.observations import (
     ModelUsagePayload,
     ObservationCorrelation,
@@ -67,6 +69,31 @@ from src.infra.reasoner.runtime.tool_profiles import (
 )
 
 log = structlog.get_logger(__name__)
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+def _validate_submission(model_cls: type[_ModelT], data: object, *, context: str) -> _ModelT:
+    """The ONE place a submitted tool-call's args are turned into a domain
+    DTO. A weak/free-tier model can submit a schema-shaped-but-wrong payload
+    (e.g. a markdown bullet list string where the schema calls for
+    list[str]) — `run_tool_session`'s own arg validation catches malformed
+    JSON/missing-required-field shapes and lets the model retry within the
+    turn budget, but a value that parses fine yet fails a stricter Pydantic
+    type (a str where a list is expected) reaches here uncaught otherwise,
+    escaping as a raw, unhandled exception all the way to the API (found via
+    a real walkthrough against nvidia/nemotron-3-ultra-550b-a55b:free).
+    Re-raised as `ReasonerUnavailable(transient=True)` so it flows through
+    the SAME planning-failure/backoff/block machinery every other reasoner
+    failure already does, instead of crashing the request."""
+    try:
+        return model_cls.model_validate(data)
+    except ValidationError as exc:
+        raise ReasonerUnavailable(
+            f"{context}: model submitted a schema-invalid payload: {exc}",
+            transient=True,
+        ) from exc
+
 
 MAX_HISTORY_MESSAGES = 30  # context-growth cap: replay only the recent tail
 
@@ -425,7 +452,9 @@ class OpenAIReasoner:
                 tool_turn_count=result.turns,
             )
 
-        candidate = IntentCandidate.model_validate(collector.value or result.submit_args)
+        candidate = _validate_submission(
+            IntentCandidate, collector.value or result.submit_args, context="submit_intent_proposal"
+        )
         if candidate.unresolved_questions:
             return ReasonerReply(
                 message=result.text or " ".join(candidate.unresolved_questions),
@@ -545,7 +574,10 @@ class OpenAIReasoner:
         )
         await self._emit_usage(plan, "cycle_architecture", result)
         value = collector.value or result.submit_args
-        goals = [GoalOutline.model_validate(item) for item in value.get("goals", [])]
+        goals = [
+            _validate_submission(GoalOutline, item, context="submit_cycle_draft")
+            for item in value.get("goals", [])
+        ]
         # Reuse CycleDraft's validator at the application boundary; the adapter
         # returns only candidate DTOs and cannot activate anything.
         return goals
@@ -618,7 +650,7 @@ class OpenAIReasoner:
             task["id"] = new_id()
             task["position"] = position
             task["revision"] = 1
-        return GoalContract.model_validate(value)
+        return _validate_submission(GoalContract, value, context="submit_goal_contract")
 
 
 def _only_capability_errors(errors: list[str]) -> bool:
