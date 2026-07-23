@@ -39,6 +39,7 @@ _HEARTBEAT_SQL = text(
     WHERE plan_id = :plan_id
       AND goal_id = :goal_id
       AND claimed_by = :worker_id
+      AND lease_expires_at >= :now_epoch
     """
 )
 
@@ -102,21 +103,24 @@ class SqliteGoalLeaseRepository:
         worker_id: str,
         lease_seconds: int,
         now: datetime,
-    ) -> None:
+    ) -> bool:
         now_epoch = int(now.timestamp())
-        run_in_session(
-            self._session_factory,
-            lambda session: session.execute(
+
+        def heartbeat(session: Session) -> bool:
+            result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
                 _HEARTBEAT_SQL,
                 {
                     "plan_id": plan_id,
                     "goal_id": goal_id,
                     "worker_id": worker_id,
+                    "now_epoch": now_epoch,
                     "expires_epoch": now_epoch + lease_seconds,
                     "lease_seconds": lease_seconds,
                 },
-            ),
-        )
+            )
+            return result.rowcount == 1
+
+        return run_in_session(self._session_factory, heartbeat)
 
     def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
         run_in_session(

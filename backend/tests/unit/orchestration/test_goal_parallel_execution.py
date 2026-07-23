@@ -105,6 +105,38 @@ def test_drive_goal_progresses_only_its_own_goal(env_factory):
     assert other_task.status == Status.PENDING  # untouched by the other goal's drive
 
 
+def test_drive_goal_finishes_unit_then_stops_when_goal_lease_is_lost(
+    env_factory, monkeypatch
+):
+    env = env_factory()
+    plan = _two_independent_ready_goals_plan(env.clock.now(), tasks_per_goal=2)
+    env.seed(plan)
+    assert env.uow.goal_leases.claim_one_ready_goal(
+        "p1", "g1", "w1", 60, env.clock.now()
+    )
+    original_run = env.runner.run
+
+    async def steal_during_run(*args, **kwargs):
+        env.clock.advance(61)
+        assert env.uow.goal_leases.claim_one_ready_goal(
+            "p1", "g1", "w2", 60, env.clock.now()
+        )
+        return await original_run(*args, **kwargs)
+
+    monkeypatch.setattr(env.runner, "run", steal_during_run)
+
+    result = asyncio.run(
+        drive_goal("p1", "g1", env.uow, *env.args[1:], "w1")
+    )
+
+    assert result == ("lease_lost", 1)
+    assert env.runner.calls == {"g1-0": 1}
+    stored = env.stored("p1")
+    goals_by_id = {goal.id: goal for goal in stored.active_cycle.goals}
+    assert goals_by_id["g1"].tasks[0].status == Status.DONE
+    assert goals_by_id["g1"].tasks[1].status == Status.PENDING
+
+
 def test_both_goals_can_be_driven_concurrently_by_different_workers(env_factory):
     # Two tasks per goal: completing the first task never triggers goal
     # promotion (can_promote_goal needs EVERY task DONE-with-evidence), so

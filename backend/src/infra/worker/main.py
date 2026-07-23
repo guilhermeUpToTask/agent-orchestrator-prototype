@@ -114,7 +114,7 @@ async def run_worker_forever(
     async def _run_goal(plan_id: str, goal_id: str) -> tuple[str, int]:
         goal_uow = container.new_unit_of_work()
         try:
-            return await drive_goal(
+            result = await drive_goal(
                 plan_id,
                 goal_id,
                 goal_uow,
@@ -127,6 +127,14 @@ async def run_worker_forever(
                 lease_seconds=lease_seconds,
                 verifier=container.verification_executor,
             )
+            if result[0] == "lease_lost":
+                log.info(
+                    "worker.goal_lease_lost",
+                    worker_id=worker_id,
+                    plan_id=plan_id,
+                    goal_id=goal_id,
+                )
+            return result
         finally:
             # drive_goal does not release its own lease (goal_tick used to be
             # the caller responsible for that) -- always release here so a

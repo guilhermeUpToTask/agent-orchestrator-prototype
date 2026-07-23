@@ -29,8 +29,8 @@ class GoalLeaseRepository(Protocol):
         worker_id: str,
         lease_seconds: int,
         now: datetime,
-    ) -> None:
-        """Renew the pair's lease only while it is still owned by the worker."""
+    ) -> bool:
+        """Renew an unexpired lease owned by the worker and report success."""
         ...
 
     def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
