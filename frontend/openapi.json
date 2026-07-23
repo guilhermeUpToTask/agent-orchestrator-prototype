@@ -3548,6 +3548,13 @@
               "backoff_multiplier": 2.0,
               "max_backoff_seconds": 900.0,
               "jitter_ratio": 0.2,
+              "kind_max_attempts": {
+                "connection_error": 5,
+                "rate_limit": 6
+              },
+              "kind_backoff_scale": {
+                "rate_limit": 4.0
+              },
               "non_retryable_kinds": [
                 "auth_error",
                 "token_limit",
@@ -6097,6 +6104,26 @@
             "type": "number",
             "title": "Jitter Ratio",
             "default": 0.2
+          },
+          "kind_max_attempts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Max Attempts"
+          },
+          "kind_backoff_scale": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Backoff Scale"
           },
           "non_retryable_kinds": {
             "items": {

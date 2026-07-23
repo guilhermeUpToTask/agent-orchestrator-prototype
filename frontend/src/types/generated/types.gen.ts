@@ -1472,6 +1472,18 @@ export type RetryPolicy = {
      */
     jitter_ratio?: number;
     /**
+     * Kind Max Attempts
+     */
+    kind_max_attempts?: {
+        [key in FailureKind]?: number;
+    };
+    /**
+     * Kind Backoff Scale
+     */
+    kind_backoff_scale?: {
+        [key in FailureKind]?: number;
+    };
+    /**
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
