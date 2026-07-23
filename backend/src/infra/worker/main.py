@@ -39,6 +39,7 @@ import structlog
 
 from src.app.handlers.planning_handler import PlanningHandler
 from src.app.use_cases.reconcile_runtime import reconcile_stale_attempts
+from src.domain.errors.tasks_errors import StaleVersionError
 from src.infra.container import AppContainer
 from src.infra.runtime.dependency_checker import check_dependencies
 from src.infra.runtime.factory import validate_agent_runner_mode
@@ -135,6 +136,14 @@ async def run_worker_forever(
                     goal_id=goal_id,
                 )
             return result
+        except StaleVersionError:
+            log.info(
+                "worker.goal_claim_contention",
+                worker_id=worker_id,
+                plan_id=plan_id,
+                goal_id=goal_id,
+            )
+            return ("contention", 0)
         finally:
             # drive_goal does not release its own lease (goal_tick used to be
             # the caller responsible for that) -- always release here so a
