@@ -728,10 +728,20 @@ class Plan(BaseModel):
                 "message": "Promoting verified code at an atomic boundary.",
             }
         if self.block is not None and self.block.active:
+            # A plan-wide block is the headline, but never hide coexisting
+            # per-goal blocks from the coarse summary -- operators would
+            # otherwise only discover them after resolving the scalar one.
+            message = self.block.explanation
+            also_blocked = len(self._active_goal_blocks)
+            if also_blocked:
+                message = (
+                    f"{message} ({also_blocked} goal(s) independently blocked; "
+                    "see goal_blocks)"
+                )
             return {
                 "kind": "block",
                 "code": self.block.kind,
-                "message": self.block.explanation,
+                "message": message,
             }
         active_goal_blocks = self._active_goal_blocks
         if active_goal_blocks:
@@ -773,7 +783,14 @@ class Plan(BaseModel):
         if self.goal_promotion_reservations:
             return ["pause"] if self.status == PlanStatus.RUNNING else []
         if self.block is not None and self.block.active:
-            return list(self.block.legal_resolutions)
+            # Same coexistence rule as status_reason: the scalar block's
+            # resolutions lead, but per-goal blocks stay discoverable.
+            actions = list(self.block.legal_resolutions)
+            for goal_block in self._active_goal_blocks:
+                for resolution in goal_block.legal_resolutions:
+                    if resolution not in actions:
+                        actions.append(resolution)
+            return actions
         active_goal_blocks = self._active_goal_blocks
         if active_goal_blocks:
             union: list[str] = []

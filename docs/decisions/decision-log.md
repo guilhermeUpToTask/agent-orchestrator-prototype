@@ -274,3 +274,10 @@ goals concurrently via its own asyncio tasks, each with its own fresh
 `orchestrate worker start` process is now sufficient for real goal-level
 parallelism; running more processes remains supported for horizontal/
 multi-host scaling but is no longer required to demonstrate it.
+
+**Addendum (2026-07-23, same unfreeze):** `status_reason`/`legal_actions` no
+longer mask coexisting per-goal blocks behind an active plan-wide scalar
+block — the scalar block stays the headline (its kind/code/resolutions lead),
+but the summary message notes how many goals are independently blocked and
+the per-goal blocks' legal resolutions are unioned in. Presentation-only
+change to derived read-model properties; no state shape or transition change.

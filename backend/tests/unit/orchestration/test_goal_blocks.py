@@ -184,3 +184,31 @@ def test_reopening_the_same_goals_block_still_raises():
 
     with pytest.raises(InvalidEditError):
         plan.open_block(_block("g1"))
+
+
+def test_plan_wide_block_summary_still_surfaces_coexisting_goal_blocks():
+    """A plan-wide scalar block is the headline, but coexisting per-goal
+    blocks must stay visible in status_reason/legal_actions -- operators
+    would otherwise only discover them after resolving the scalar one."""
+    plan = _cyclic_plan([_goal("g1", 0, [_task("t1")]), _goal("g2", 1, [_task("t2")])])
+    plan.open_block(_block("g1"))
+    plan.open_block(
+        PlanBlock(
+            id="block-plan-wide",
+            kind="reasoner_failure",
+            explanation="planner down",
+            stage="planning",
+            legal_resolutions=["retry_planning_stage"],
+            created_at=NOW,
+        )
+    )
+
+    reason = plan.status_reason
+    assert reason["kind"] == "block"
+    assert reason["code"] == "reasoner_failure"
+    assert "1 goal(s) independently blocked" in (reason["message"] or "")
+
+    actions = plan.legal_actions
+    assert actions[0] == "retry_planning_stage"  # the scalar block leads
+    for resolution in plan.goal_blocks["g1"].legal_resolutions:
+        assert resolution in actions
