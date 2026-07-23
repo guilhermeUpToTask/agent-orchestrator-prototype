@@ -72,21 +72,22 @@ accelerate run (router-logic inventory with line refs; `app/ports.py` is a
 justified re-export facade — collapsing it would invert the dependency arrow;
 `observations.py` currently has zero live consumers). The decisions remain
 open:
-- Audit `src/api/routers/plans.py` (1088 lines) for embedded use-case logic
-  (branching, validation, orchestration) that belongs in `src/app/`; routers
-  are supposed to be thin per the architectural invariants.
-- Decide whether app-layer ports (`src/app/ports.py`, 158 lines) are justified
-  as a separate layer from domain ports, or whether they should collapse into
-  the domain ports package.
+- Audit `src/api/routers/plans.py` (1185 lines, 2026-07-23) for embedded
+  use-case logic (branching, validation, orchestration) that belongs in
+  `src/app/`; routers are supposed to be thin per the architectural
+  invariants.
+- Decide whether app-layer ports (`src/app/ports.py`, 170 lines, 2026-07-23)
+  are justified as a separate layer from domain ports, or whether they should
+  collapse into the domain ports package.
 - Decide whether `src/app/observations.py` (201 lines) is still needed, or
   whether domain telemetry + domain events (outbox/agent_events) already
   cover its job.
 
 ### 4. Refactor orchestration (after 3 lands)
-- Decompose `src/domain/aggregates/planner_orchestrator.py` (882 lines) — the
-  single-authority aggregate is correct as a boundary, but its size makes
-  review and change risky; split by responsibility (transitions vs.
-  navigation vs. gate logic) without breaking the "only caller of
+- Decompose `src/domain/aggregates/planner_orchestrator.py` (1153 lines,
+  2026-07-23) — the single-authority aggregate is correct as a boundary, but
+  its size makes review and change risky; split by responsibility (transitions
+  vs. navigation vs. gate logic) without breaking the "only caller of
   Goal/Task transitions" invariant.
 - Remove legacy/backward-compat code (e.g. the compat branches in
   `src/app/use_cases/advance_plan.py` and similar call sites) — the test
@@ -99,8 +100,9 @@ open:
   case of.
 
 ### 5. Refactor handlers, in dependency order (after 3–4)
-`execution_handler.py` (1249 lines) first, then `planning_handler.py` (514
-lines) — execution is upstream of planning in the dependency graph and carries
+`execution_handler.py` (1434 lines, 2026-07-23) first, then
+`planning_handler.py` (532 lines, 2026-07-23) — execution is upstream of
+planning in the dependency graph and carries
 more risk. Share only mechanisms proven common to both (not speculative
 abstraction). Refactoring prompts already exist from the PR #20 review; do not
 start until item 3's decisions land — the API-layer safety net exists; the point is
@@ -167,16 +169,14 @@ architecture item — a skill-repo hygiene follow-up.
 
 ## Then — project ownership and output isolation [LIVE]
 
-17. Require a `project_id` on plans and route through a project workspace
-    resolver.
-18. Store repositories under the orchestrator home at
+17. Store repositories under the orchestrator home at
     `projects/<immutable-project-id-or-slug>/repo`; do not use a mutable
     display name as the filesystem identity.
-19. Define migration or quarantine behavior for the legacy global
+18. Define migration or quarantine behavior for the legacy global
     workspace-repo.
-20. Add project delete guards for active plans and dual-project isolation
+19. Add project delete guards for active plans and dual-project isolation
     tests.
-21. Add an explicit plan output disposition so DONE says whether the branch
+20. Add an explicit plan output disposition so DONE says whether the branch
     was merged, opened as a PR, kept, or discarded. Partially informed by
     known-issues.md: `open_pr`/`merge` dispositions already record the
     reference of an externally-completed operation; there is still no
@@ -215,7 +215,7 @@ Take these up only when real usage demonstrates the need.
 27. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
     repository port *only if* multi-machine workers become real. Deliberately
     unnecessary for local-first. Re-evaluated 2026-07-22 alongside goal-level
-    parallelism landing (item 23's old slot, now implemented — see
+    parallelism landing (now implemented — see
     [ADR-001](docs/decisions/adr-001-concurrency-lease.md)): the SQLite
     `goal_leases` table already delivers real cross-*process* concurrency on
     one machine, which is what actually needed solving; Redis only becomes
@@ -256,18 +256,12 @@ Take these up only when real usage demonstrates the need.
     but still doesn't settle the failure-UX question on its own — the
     dependency stays open.
 
-32. **Devcontainer runtime parity** [WALK] — the live container carries
-    runtimes the `.devcontainer` config never installs (ad-hoc installs, lost
-    on every rebuild): `codex` (the acceleration flow's primary implementer),
-    `grok`, `mimo`, the `gh` CLI (used for all PR/issue automation), and
-    `bubblewrap`. Add them to the Dockerfile with pinned versions; persist
-    their auth/config dirs (`~/.codex`, `~/.grok`, `~/.mimocode`, gh auth)
-    via mounts like the existing `~/.orchestrator` pattern; for bubblewrap
-    also add the container `runArgs` (seccomp profile / userns capability)
-    without which it cannot create namespaces at all. While there: drop the
-    stale `AGENT_MODE` terminal env (the config key replaced it) and align
-    the image's Python with CI (3.12). `gemini` remains a factory
-    `runtime_type` with no binary anywhere — decide to provision or delist it.
+32. **Devcontainer runtime parity** [WALK] — mostly landed (PR #38): the
+    Dockerfile now installs Python 3.12, `codex`, `grok`, `mimo`, the `gh`
+    CLI, and `bubblewrap` + a seccomp profile, the stale `AGENT_MODE` env is
+    gone, and auth/config dirs are mounted. Only residual: rebuild the
+    container image; then provision a `gemini` binary or delist `gemini` from
+    `runtime_type` in `agent_spec.py`.
 33. **Sandbox abstraction — keep confinement out of the domain** [WALK] —
     evaluate the boundary BEFORE any bubblewrap code exists: the frozen
     domain must never know what a sandbox is, and even `ExecutionHandler`
@@ -284,9 +278,9 @@ Take these up only when real usage demonstrates the need.
     evidence (2026-07-19): bwrap 0.11.0 installs but cannot create namespaces
     in the current devcontainer (Docker default seccomp blocks `unshare`,
     userns and plain modes both fail) — a sandbox that can't start where the
-    orchestrator runs delivers zero coverage. Blocked on item 32's container
-    capability work, and on items 2–3 (a bwrap mount plan needs pointer-free
-    workspaces and a scrubbed env anyway). Design when unblocked: a
+    orchestrator runs delivers zero coverage. Blocked on items 2 and 33 (a
+    bwrap mount plan needs pointer-free workspaces and the sandbox port
+    abstraction first). Design when unblocked: a
     sandbox-when-available wrapper — probe at worker boot alongside the
     existing binary probes, run attempts under bwrap (bind: attempt workspace
     rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on),
@@ -296,6 +290,17 @@ Take these up only when real usage demonstrates the need.
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the
     registry-profiles item above.
+
+## Block-experience workstream (2026-07-23)
+
+Blocks are automation's give-up signal; the goal is fewer of them and cheaper triage for the survivors, without ever auto-resolving (blocks stay explicit, evidence-carrying, operator-resolved — see decision 54's motivation note).
+
+- **Measure before tuning**: run `backend/scripts/block_report.py` (landing with this wave) against real walkthrough databases; record the kind×stage distribution in the decision log before adjusting any further budget. Tuning without this data is guesswork.
+- **Escalate-before-block ladder**: when a task exhausts retries on its bound agent, retry once on a stronger agent binding (mirroring the runtime-pool escalation ladder) before opening a block — a block then means "two different agents failed", which genuinely merits an operator. Needs design: binding selection, cost guard, evidence trail. Do NOT conflate with the per-role model bindings item; this is a failure-path escalation, not a planning-time binding.
+- **Block triage UX**: group concurrently-open blocks by root cause (same provider/kind cluster renders as ONE operator card with resolve-all), one-click legal resolutions from the card, SSE-driven notification on block open. Depends on the frontend picking up `goal_blocks` (already in the API detail model).
+- **Provider-circuit auto-reprobe**: a provider-circuit block may arm a scheduled re-probe and surface "provider recovered — retry?" as a suggested (still explicit) resolution, reusing the existing wait_and_retry machinery. Never resolves itself.
+
+(Per-kind retry budgets themselves are NOT a roadmap item — they land as domain unfreeze #14 in the same wave.)
 
 ## Deferred features — shelved with designed seams [LEG]
 
