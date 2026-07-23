@@ -840,6 +840,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RetryStageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -5553,6 +5570,13 @@
               }
             ]
           },
+          "goal_blocks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanBlock"
+            },
+            "type": "object",
+            "title": "Goal Blocks"
+          },
           "goals": {
             "items": {
               "$ref": "#/components/schemas/Goal"
@@ -5643,6 +5667,7 @@
           "active_cycle",
           "pending_gate",
           "block",
+          "goal_blocks",
           "goals",
           "cycles",
           "intent_proposal",
@@ -6090,6 +6115,23 @@
         "type": "object",
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
+      },
+      "RetryStageRequest": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          }
+        },
+        "type": "object",
+        "title": "RetryStageRequest"
       },
       "RetryTaskRequest": {
         "properties": {

@@ -216,6 +216,10 @@ export interface Plan {
   active_cycle: ActiveCycle | null;
   pending_gate: PendingGate | null;
   block: PlanBlock | null;
+  /** Domain unfreeze #13: per-goal execution blocks, keyed by goal id.
+   *  The plan-wide `block` above stays the coarse headline; these carry
+   *  the per-goal detail while sibling goals keep running. */
+  goal_blocks: Record<string, PlanBlock>;
   cycles: Cycle[];
   intent_proposal: IntentProposal | null;
   cycle_draft: CycleDraft | null;

@@ -1201,6 +1201,12 @@ export type PlanDetailResponse = {
     pending_gate: ReviewGate | null;
     block: PlanBlock | null;
     /**
+     * Goal Blocks
+     */
+    goal_blocks: {
+        [key: string]: PlanBlock;
+    };
+    /**
      * Goals
      */
     goals: Array<Goal>;
@@ -1469,6 +1475,16 @@ export type RetryPolicy = {
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
+};
+
+/**
+ * RetryStageRequest
+ */
+export type RetryStageRequest = {
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
 };
 
 /**
@@ -2570,7 +2586,10 @@ export type PlansRetryBlockedTaskResponses = {
 export type PlansRetryBlockedTaskResponse = PlansRetryBlockedTaskResponses[keyof PlansRetryBlockedTaskResponses];
 
 export type PlansRetryBlockedPlanningStageData = {
-    body?: never;
+    /**
+     * Body
+     */
+    body?: RetryStageRequest | null;
     path: {
         /**
          * Plan Id
