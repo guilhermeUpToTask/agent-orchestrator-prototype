@@ -857,6 +857,52 @@
         }
       }
     },
+    "/api/plans/{plan_id}/retry-policy": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Update Retry Policy Route",
+        "description": "Retune an EXISTING plan's retry/backoff budget (un-freeze #12) \u2014 e.g.\nraise max_attempts/max_backoff_seconds so a plan stuck on a rate-limited\nprovider keeps retrying automatically for longer before opening a block.\nDistinct from the execution.retry_* config keys, which only seed a NEW\nplan's policy at creation and never touch one already persisted.",
+        "operationId": "plans-update_retry_policy_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryPolicyUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/approve": {
       "post": {
         "tags": [
@@ -6090,6 +6136,68 @@
         "type": "object",
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
+      },
+      "RetryPolicyUpdateRequest": {
+        "properties": {
+          "max_attempts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Attempts"
+          },
+          "initial_backoff_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Backoff Seconds"
+          },
+          "backoff_multiplier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backoff Multiplier"
+          },
+          "max_backoff_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Backoff Seconds"
+          },
+          "jitter_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jitter Ratio"
+          }
+        },
+        "type": "object",
+        "title": "RetryPolicyUpdateRequest",
+        "description": "All fields optional: only the ones an operator sets are changed (partial\nmerge over the plan's current retry policy); the rest keep their current\nvalue. Mirrors execution.retry_* config field-for-field."
       },
       "RetryTaskRequest": {
         "properties": {

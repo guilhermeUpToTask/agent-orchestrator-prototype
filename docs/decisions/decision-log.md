@@ -172,3 +172,27 @@ settled — it is superseded on activation). `Task.skip()`/`Goal.skip()`/
 maintainer-directed codex `gpt-5.6-sol` analysis chose this direction. Composes
 with unfreezes #9/#10. Full navigation `GOAL_UNPROMOTABLE` typing and cyclic
 stale-result ledger settlement remain scoped follow-ups.
+
+52. **Domain unfreeze #12 (2026-07-22): operator-tunable retry policy on an
+already-persisted plan.** `Plan.retry_policy` was captured once at creation
+(`RetryPolicy()` bare defaults: `max_attempts=3`, `max_backoff_seconds=900`)
+and never revisited, so a plan stuck on a persistent transient failure (a
+rate-limited provider observed during a live walkthrough, `provider_capacity`
+blocks recurring for ~38 minutes across repeated manual `wait_and_retry`
+resolutions) had no way to widen its backoff budget short of a replan — the
+new `execution.retry_*` config keys (`src/infra/policies/retry_policy_factory.py`)
+only seed a plan's policy AT CREATION and are deliberately never consulted
+again for an existing plan (config is a live global; a plan's policy is
+persisted, per-plan state — conflating the two would let a global config edit
+retroactively reinterpret an attempt count or backoff already computed under
+the old policy for an in-flight task). Fix: a new guarded mutation
+`Plan.update_retry_policy(retry_policy)` (`planner_orchestrator.py`) — legal at
+any status (including blocked/paused; only a legacy-terminal plan rejects it,
+same `_assert_not_terminal()` guard as the planning-retry gate), touching only
+the plan's own `retry_policy` field and never any in-flight task's attempt
+count or armed `retry_not_before`. `POST /api/plans/{id}/retry-policy` accepts
+a partial body (only the fields an operator sets are changed) and merges over
+the plan's current policy in the same transaction as the version bump — same
+"editorial mutation, no outbox event" shape as `apply_edit`. Composes with
+unfreeze #11's `can_promote_goal()` cleanup; touches no goal/task/navigation
+state.
