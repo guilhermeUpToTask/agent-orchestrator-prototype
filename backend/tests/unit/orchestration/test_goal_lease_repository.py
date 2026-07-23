@@ -13,7 +13,13 @@ from src.infra.db.goal_lease_repository import SqliteGoalLeaseRepository
 from src.infra.db.tables import Base
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 
-from src.app.testing.fakes import FakeClock
+from src.app.testing.fakes import (
+    FakeClock,
+    InMemoryGoalLeaseRepository,
+    InMemoryOutbox,
+    InMemoryPlanRepository,
+    InMemoryUnitOfWork,
+)
 
 
 def _seed_running_plan(env) -> None:
@@ -80,6 +86,35 @@ def test_release_clears_only_the_current_workers_goal_lease(env_factory) -> None
     leases.release("p1", "g1", "w1")
     assert not leases.is_claim_live("p1", "g1", env.clock.now())
     assert leases.claim_one_ready_goal("p1", "g1", "w2", 60, env.clock.now())
+
+
+def test_shared_lease_repo_lets_a_second_uow_steal_after_expiry() -> None:
+    """Two InMemoryUnitOfWork instances constructed over the SAME plan repo and
+    SAME goal-lease repo simulate two worker processes sharing one SQLite DB
+    file. Without a shared goal_leases instance this scenario is structurally
+    untestable (each UoW would get its own private lease dict) — this is the
+    gap a real double-claim bug exploited before it was caught."""
+    clock = FakeClock()
+    plans = InMemoryPlanRepository(clock)
+    plans.add(Plan(project_id="project-1", id="p1", brief="cross-uow steal", phase=PlanPhase.RUNNING))
+    goal_leases = InMemoryGoalLeaseRepository()
+
+    uow_a = InMemoryUnitOfWork(plans, InMemoryOutbox(), goal_leases=goal_leases)
+    uow_b = InMemoryUnitOfWork(plans, InMemoryOutbox(), goal_leases=goal_leases)
+    assert uow_a.goal_leases is uow_b.goal_leases is goal_leases
+
+    # worker A claims the goal; worker B's simultaneous claim attempt loses.
+    assert uow_a.goal_leases.claim_one_ready_goal("p1", "g1", "worker-a", 60, clock.now())
+    assert not uow_b.goal_leases.claim_one_ready_goal("p1", "g1", "worker-b", 60, clock.now())
+
+    # worker A stalls/crashes; its lease expires.
+    clock.advance(61)
+
+    # worker B steals the now-expired lease through its OWN UoW instance.
+    assert uow_b.goal_leases.claim_one_ready_goal("p1", "g1", "worker-b", 60, clock.now())
+    # worker A's heartbeat must fail — it no longer holds the lease.
+    assert not uow_a.goal_leases.heartbeat("p1", "g1", "worker-a", 60, clock.now())
+    assert uow_b.goal_leases.is_claim_live("p1", "g1", clock.now())
 
 
 @pytest.mark.integration

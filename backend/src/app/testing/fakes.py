@@ -238,9 +238,10 @@ class InMemoryUnitOfWork:
         repo: InMemoryPlanRepository,
         outbox: InMemoryOutbox,
         executions: InMemoryExecutionRecordRepository | None = None,
+        goal_leases: InMemoryGoalLeaseRepository | None = None,
     ) -> None:
         self.plans = repo
-        self.goal_leases = InMemoryGoalLeaseRepository()
+        self.goal_leases = goal_leases or InMemoryGoalLeaseRepository()
         self.outbox = outbox
         self.executions = executions or InMemoryExecutionRecordRepository()
 
