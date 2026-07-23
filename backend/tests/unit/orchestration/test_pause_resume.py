@@ -25,6 +25,8 @@ from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind, Status
 
 from src.app.execution_records import RuntimeCircuit
+from src.app.handlers.base import Signal
+from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.testing.fakes import DummyBehavior, InMemoryCapabilityRepository
 from src.app.use_cases.apply_edit import UpdateTask, apply_edit
 from src.app.use_cases.advance_plan import advance_plan
@@ -104,6 +106,37 @@ def test_advance_on_paused_plan_dispatches_nothing(env_factory):
 
     assert signal == "paused"
     assert env.runner.calls == {}  # no task ran
+
+
+@pytest.mark.parametrize("goal_scoped", [False, True])
+@pytest.mark.parametrize("blocked_state", ["status", "scalar"])
+def test_execution_handler_stops_beneath_plan_wide_block(
+    env_factory, goal_scoped, blocked_state
+):
+    env = env_factory()
+    plan = running_plan()
+    if blocked_state == "status":
+        plan.status = PlanStatus.BLOCKED
+    else:
+        plan.block = PlanBlock(
+            id="block-1",
+            kind="operator_stop",
+            explanation="operator intervention required",
+            stage="implementation",
+            legal_resolutions=["start_replan"],
+            created_at=env.clock.now(),
+        )
+    env.seed(plan)
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    stored = env.stored("p1")
+
+    if goal_scoped:
+        signal = asyncio.run(execution.handle_goal("p1", "g1", stored, env.uow))
+    else:
+        signal = asyncio.run(execution.handle("p1", stored, env.uow))
+
+    assert signal == Signal.PAUSED
+    assert env.runner.calls == {}
 
 
 # ---- pause command semantics ----

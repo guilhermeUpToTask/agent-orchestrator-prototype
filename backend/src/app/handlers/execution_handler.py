@@ -139,7 +139,12 @@ class ExecutionHandler:
         unit: _Unit | None = None
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.paused or plan.pause_requested:
+            if (
+                plan.paused
+                or plan.pause_requested
+                or plan.status == PlanStatus.BLOCKED
+                or (plan.block is not None and plan.block.active)
+            ):
                 return Signal.PAUSED  # pause gate armed while we were dispatched
             now = self._clock.now()
             action = (
