@@ -102,7 +102,7 @@ runtimes:
       - --skip-git-repo-check
       - "Reply with exactly one word: OK"
     probe_stdin: /dev/null
-    probe_result: "PASSED 2026-07-18T11:12Z - stdout contained OK, exit 0, model gpt-5.6-luna, ~3.8s"
+    probe_result: "PASSED 2026-07-23T12:06Z - stdout OK, exit 0, ~8.6s (prior: PASSED 2026-07-18)"
     notes: >-
       Exec mode has no interactive approval channel; actions outside the
       sandbox are auto-rejected and returned to the model as a failure, so it
@@ -265,7 +265,7 @@ runtimes:
       - -p
       - "Reply with exactly one word: OK"
     probe_stdin: /dev/null
-    probe_result: "PASSED 2026-07-18T11:19Z - stdout OK, exit 0, ~16.4s, auto-routed to grok-4.5-build-free"
+    probe_result: "PASSED 2026-07-23T12:06Z - stdout OK, exit 0, ~7.4s, auto-routed to grok-4.5-build-free (prior: PASSED 2026-07-18; one quota-exhausted day observed 2026-07-19)"
     notes: >-
       --sandbox's accepted values are not enumerated in --help (unlike
       codex's [possible values]), so for real write invocations prefer the
@@ -275,6 +275,11 @@ runtimes:
       auto-routed to the free build model.
     capabilities: [reconnaissance, implementation, review]
     allowed_risk: [low, medium]
+    risk_history: >-
+      2026-07-23: first MEDIUM-risk task (pr49-lease-hardening
+      merge-wedge-prune, bounded 2-file fix + integration test) verified
+      first-attempt in 88s with an exactly-in-scope diff. Prior verified
+      work was all LOW. One data point - keep medium packets bounded.
     quota_source: manual
     quota_remaining_percent: null
     quota_snapshot_at: "2026-07-18T11:19:00Z"

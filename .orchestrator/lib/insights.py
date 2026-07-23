@@ -79,6 +79,10 @@ def build_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
         task_id = e.get("task_id")
         if task_id and task_id not in routing_by_task:
             packet = e.get("packet") or {}
+            if isinstance(packet, str):
+                # Tolerate free-text packets (some runs log a one-line
+                # description instead of the structured object).
+                packet = {"objective": packet}
             routing_by_task[task_id] = {
                 "chosen_runtime": e.get("chosen_runtime"),
                 "risk": packet.get("risk"),
