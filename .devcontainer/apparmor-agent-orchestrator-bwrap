@@ -1,0 +1,10 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Ubuntu 24.04+ restricts unprivileged user namespaces unless the active
+# AppArmor profile grants this permission. Docker applies this profile to the
+# outer devcontainer; bubblewrap then creates an unprivileged child user
+# namespace without CAP_SYS_ADMIN.
+profile agent-orchestrator-bwrap flags=(default_allow) {
+  userns,
+}
