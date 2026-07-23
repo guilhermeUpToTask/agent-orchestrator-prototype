@@ -47,3 +47,30 @@ def ready_nodes(node_ids: set[str], edges: dict[str, list[str]], done_ids: set[s
         for node_id in node_ids
         if all(dependency in done_ids for dependency in edges.get(node_id, []))
     }
+
+
+def blocked_nodes(
+    node_ids: set[str], edges: dict[str, list[str]], directly_blocked_ids: set[str]
+) -> set[str]:
+    """Fixed-point closure of "directly blocked, or depends on something blocked"
+    over `node_ids` (domain unfreeze #13 — per-goal blocks). `edges[node_id]` is
+    the list of ids `node_id` depends on, same convention as `ready_nodes`/
+    `validate_acyclic`. A node outside `node_ids` (e.g. already DONE) never
+    propagates blockage — only entries in `directly_blocked_ids` seed it.
+
+    Pure and stateless like its siblings in this module; call fresh, never
+    cache. Since the graph is already validated acyclic (`validate_acyclic`),
+    a single forward pass over `node_ids` in any order reaches the fixed
+    point in at most `len(node_ids)` iterations; we just iterate to a stable
+    result rather than assume a particular traversal order."""
+    blocked = {node_id for node_id in directly_blocked_ids if node_id in node_ids}
+    changed = True
+    while changed:
+        changed = False
+        for node_id in node_ids:
+            if node_id in blocked:
+                continue
+            if any(dependency in blocked for dependency in edges.get(node_id, [])):
+                blocked.add(node_id)
+                changed = True
+    return blocked

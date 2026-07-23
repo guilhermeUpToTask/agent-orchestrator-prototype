@@ -34,7 +34,6 @@ from src.app.ports import (
     VerificationExecutor,
 )
 from src.app.use_cases.advance_plan import advance_plan
-from src.app.use_cases.claim_ready_goal import claim_ready_goal
 from collections.abc import Awaitable, Callable
 
 from src.domain.repositories.agent_repo import AgentRepository
@@ -209,39 +208,3 @@ async def drive_goal(
     return signal, progressed
 
 
-async def goal_tick(
-    uow: UnitOfWork,
-    runner: AgentRunner,
-    agents: AgentRepository,
-    workspace: Workspace,
-    event_sink: AgentEventSink,
-    clock: Clock,
-    worker_id: str,
-    lease_seconds: int = 60,
-    verifier: VerificationExecutor | None = None,
-    scan_limit: int = 20,
-) -> bool:
-    """One claim-and-drive cycle at GOAL granularity — the goal-level analog
-    of `worker_tick`. Returns True only if actual work advanced, matching
-    `worker_tick`'s no-progress -> sleep contract exactly."""
-    claimed = claim_ready_goal(uow, worker_id, lease_seconds, clock, scan_limit)
-    if claimed is None:
-        return False
-    plan_id, goal_id = claimed
-    try:
-        signal, progressed = await drive_goal(
-            plan_id,
-            goal_id,
-            uow,
-            runner,
-            agents,
-            workspace,
-            event_sink,
-            clock,
-            worker_id,
-            verifier=verifier,
-            lease_seconds=lease_seconds,
-        )
-    finally:
-        uow.goal_leases.release(plan_id, goal_id, worker_id)
-    return progressed > 0 or signal in ("done", "failed")

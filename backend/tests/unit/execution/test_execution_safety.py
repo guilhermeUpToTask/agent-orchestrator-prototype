@@ -336,5 +336,9 @@ def test_goal_merge_runs_outside_transaction_and_conflict_blocks_plan(tmp_path) 
     assert workspace.called_outside_transaction
     assert stored.goal_promotion_reservations == {}
     assert stored.status == PlanStatus.BLOCKED
-    assert stored.block is not None
-    assert stored.block.kind == "goal_promotion_failure"
+    # Domain unfreeze #13: goal_promotion_failure routes into goal_blocks now.
+    assert stored.block is None
+    block = stored.goal_blocks.get("goal-1")
+    assert block is not None
+    assert block.active
+    assert block.kind == "goal_promotion_failure"

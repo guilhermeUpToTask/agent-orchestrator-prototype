@@ -40,6 +40,29 @@ def request_replan(plan_id: str, uow: UnitOfWork) -> None:
                 )
             )
 
+        # Domain unfreeze #13: a replan is a holistic, plan-wide mutation --
+        # resolve EVERY active per-goal block too (not just the legacy scalar
+        # above), since the source cycle they belong to is about to be frozen
+        # and superseded anyway (activate_cycle wipes goal_blocks wholesale
+        # once the replacement cycle lands; resolving them now keeps
+        # status_reason/legal_actions/activity coherent for the WAITING
+        # window in between, rather than reporting a stale "partially
+        # blocked" fact during an active replan conversation). "start_replan"
+        # is in every execution-triggered block's legal_resolutions, so this
+        # never raises.
+        for goal_id, goal_block in list(plan.goal_blocks.items()):
+            if not goal_block.active:
+                continue
+            block_id = goal_block.id
+            plan.resolve_block("start_replan", goal_block.created_at, goal_id=goal_id)
+            uow.outbox.add(
+                BlockResolved(
+                    plan_id=plan_id,
+                    block_id=block_id,
+                    resolution="start_replan",
+                )
+            )
+
         plan.begin_replanning()
 
         # unfreeze #11: do NOT rewrite the still-active source cycle's task

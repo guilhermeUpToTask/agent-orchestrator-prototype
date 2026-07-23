@@ -96,8 +96,20 @@ def worker() -> None:
     show_default=True,
     help="Plan lease duration; active actions renew it every one-third interval.",
 )
+@click.option(
+    "--max-concurrent-goals",
+    default=4,
+    show_default=True,
+    help=(
+        "This process's own in-process goal-worker pool cap (domain unfreeze #13) -- "
+        "how many independent, ready goals this single `worker start` process drives "
+        "concurrently. Not derived from load testing yet; tune empirically."
+    ),
+)
 @catch_domain_errors
-def worker_start(worker_id: str, poll_seconds: float, lease_seconds: int) -> None:
+def worker_start(
+    worker_id: str, poll_seconds: float, lease_seconds: int, max_concurrent_goals: int
+) -> None:
     """Run the claim-and-drive loop (config key agent_runner.mode selects
     dry-run or real; each agent's runtime_type picks its CLI runtime)."""
     from src.infra.container import AppContainer
@@ -111,6 +123,7 @@ def worker_start(worker_id: str, poll_seconds: float, lease_seconds: int) -> Non
                 worker_id=worker_id,
                 poll_seconds=poll_seconds,
                 lease_seconds=lease_seconds,
+                max_concurrent_goals=max_concurrent_goals,
             )
         )
     except KeyboardInterrupt:

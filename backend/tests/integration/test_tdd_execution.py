@@ -183,9 +183,11 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path, main
     if main_repo_write:
         assert implementer_signal.value == "paused"
         assert after_impl.status == PlanStatus.BLOCKED
-        assert after_impl.block is not None
-        assert "stray paths: ['stray.txt']" in after_impl.block.explanation
-        assert after_impl.block.kind == "execution_failure"
+        assert after_impl.block is None  # domain unfreeze #13: routes per-goal now
+        block = after_impl.goal_blocks.get("goal-1")
+        assert block is not None and block.active
+        assert "stray paths: ['stray.txt']" in block.explanation
+        assert block.kind == "execution_failure"
         failed_task = after_impl.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
         assert failed_task.status.value == "failed"
         # attempt.failure_kind is populated only from RuntimeFailure metadata;
@@ -408,9 +410,11 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
     assert signal.value == "paused"
     blocked = plans.get(plan.id)
     assert blocked.status == PlanStatus.BLOCKED
-    assert blocked.block is not None
-    assert blocked.block.kind == "execution_failure"
-    assert "deleted or renamed" in blocked.block.explanation
+    assert blocked.block is None  # domain unfreeze #13: routes per-goal now
+    block = blocked.goal_blocks.get("goal-1")
+    assert block is not None and block.active
+    assert block.kind == "execution_failure"
+    assert "deleted or renamed" in block.explanation
     failed_task = blocked.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert failed_task.status.value == "failed"
     assert uow.executions.list_open_attempts(plan.id) == []

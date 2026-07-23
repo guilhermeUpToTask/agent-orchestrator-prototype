@@ -326,6 +326,56 @@ def test_replan_from_blocked_cycle_settles_work_before_message(env_factory):
     assert result.phase == PlanPhase.REPLANNING
 
 
+def test_replanning_message_stays_legal_while_only_partially_blocked(env_factory):
+    """Domain unfreeze #13: a per-goal block leaves the plan status RUNNING
+    (not BLOCKED) when a sibling goal can still progress. _start_operation's
+    REPLAN precondition must recognize that as still eligible for
+    replanning_message -- not just the legacy BLOCKED/PAUSED/IDLE statuses --
+    since goal_blocks always advertises "start_replan" as a legal resolution
+    and a chat message is one legitimate way to act on it."""
+    env = env_factory()
+    blocked_task = task("blocked-task")
+    blocked_goal = goal("g1", 0, [blocked_task])
+    other_goal = goal("g2", 1, [task("other-task")])
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-old",
+        draft_id="draft-old",
+        status=CycleStatus.ACTIVE,
+        goals=[blocked_goal, other_goal],
+        started_at=env.clock.now(),
+    )
+    plan = plan_in(PlanPhase.RUNNING)
+    plan.status = PlanStatus.RUNNING  # partially blocked, NOT the legacy BLOCKED
+    plan.cycles = [cycle]
+    plan.goal_blocks = {
+        "g1": PlanBlock(
+            id="block-1",
+            kind="execution_failure",
+            explanation="terminal failure",
+            stage="implementation",
+            goal_id="g1",
+            task_id="blocked-task",
+            legal_resolutions=["retry_stage", "edit_task", "start_replan"],
+            created_at=env.clock.now(),
+        )
+    }
+    env.seed(plan)
+    assert env.stored("p1").status == PlanStatus.RUNNING
+    assert "start_replan" in env.stored("p1").legal_actions
+
+    chat = InMemoryChatStore()
+    reasoner = ScriptedReasoner(replies=[ReasonerReply(message="what should we change?")])
+
+    # Must NOT raise InvalidEditError("replan discovery requires settled
+    # active-cycle work") -- that check is for the legacy all-terminal-tasks
+    # eligibility path, which doesn't apply here (g2 is still mid-flight).
+    result = turn(env, chat, reasoner, "g1 keeps failing", replanning=True)
+
+    assert result.reply == "what should we change?"
+    assert result.committed is False
+
+
 # ---------------------------------------------------------------------------
 # ARCHITECTURE — the no-LLM passthrough
 # ---------------------------------------------------------------------------

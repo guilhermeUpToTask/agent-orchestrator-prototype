@@ -25,8 +25,13 @@ from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.services.capability_matching import match_agent
 from src.domain.services.lookups import find_goal, find_task
-from src.domain.services.navigation import action_for_goal, next_action, NextAction
-from src.domain.value_objects.lifecycle import FailureKind, Status
+from src.domain.services.navigation import (
+    action_for_goal,
+    next_action,
+    NextAction,
+    plan_can_progress,
+)
+from src.domain.value_objects.lifecycle import FailureKind, Status, TERMINAL
 from src.domain.value_objects.tasks_vos import TaskResult
 
 
@@ -92,6 +97,18 @@ class Plan(BaseModel):
     cycle_draft: CycleDraft | None = None
     review_gate: ReviewGate | None = None
     block: PlanBlock | None = None
+    # Per-goal blocks (domain unfreeze #13 — goal-level parallelism v2): every
+    # execution-triggered PlanBlock already carries a goal_id
+    # (planning_artifacts.py); an active cycle routes those into this dict
+    # instead of the scalar `block` above, so one goal's failure never stops
+    # an unrelated, independent sibling goal. The scalar `block` remains the
+    # ONLY block surface for legacy (non-cyclic) plans and for the few
+    # genuinely plan-wide block kinds that carry no goal_id (reasoner_failure
+    # during ARCHITECTURE/ENRICHING, project_binding) — see open_block/
+    # resolve_block. New field, additive, defaults empty: no persisted-JSON
+    # migration shim needed (contrast goal_promotion_reservations above,
+    # which replaced an existing field's shape).
+    goal_blocks: dict[str, PlanBlock] = {}
     pause_requested: bool = False
     # Durable check-to-merge reservation, PER GOAL (domain unfreeze #12 —
     # goal-level parallelism, ADR-001): while a goal's slot is set, pause
@@ -263,8 +280,23 @@ class Plan(BaseModel):
         (a goal-scoped worker, already holding that goal's lease) has already
         selected which goal to drive — this does NOT re-derive goal selection
         or dependency readiness the way `peek_next` does; it only computes
-        the per-goal action for the ONE goal the caller names."""
-        return action_for_goal(self._goal(goal_id), now)
+        the per-goal action for the ONE goal the caller names.
+
+        Domain unfreeze #13 (symmetric per-goal leases): a goal that is
+        already terminal (typically just-promoted DONE, since `drive_goal`'s
+        loop calls this again immediately after a promotion returns CONTINUE)
+        returns None -- the same "nothing left" signal `next_action` gives
+        for a plan with no non-terminal goal at all. Without this check,
+        `action_for_goal` would blindly re-derive "close it" for an
+        already-DONE goal (its tasks are still DONE-with-evidence, so
+        `can_promote_goal` would pass again) and attempt to re-promote/
+        re-merge a goal that's already merged. Callers MUST NOT treat this
+        None the same as `next_action`'s plan-wide None (see
+        ExecutionHandler.handle's goal_id branch)."""
+        goal = self._goal(goal_id)
+        if goal.status in TERMINAL:
+            return None
+        return action_for_goal(goal, now)
 
     # ---- task transitions (aggregate calls entity methods) ----
     def start_task(self, goal_id: str, task_id: str) -> None:
@@ -316,6 +348,28 @@ class Plan(BaseModel):
     def complete_goal(self, goal_id: str) -> None:
         self._assert_not_terminal()
         self._goal(goal_id).complete()
+        self._recompute_cyclic_status(datetime.now(timezone.utc))
+
+    def _recompute_cyclic_status(self, now: datetime) -> None:
+        """Domain unfreeze #13: re-derive whether a CYCLIC plan can still make
+        progress, after a mutation that could change it (a goal block opened
+        or resolved, or a goal completed). Legacy (non-cyclic) plans are
+        untouched — they have no `goal_blocks` concept.
+
+        Zero non-terminal goals means the cycle just finished, NOT that it's
+        stuck — that case belongs to the "all goals terminal -> enter review"
+        path in advance_plan.py, so it is short-circuited here rather than
+        left to `plan_can_progress`'s vacuous-True-non-terminal-set case."""
+        if self.active_cycle is None:
+            return
+        goals = self.execution_goals
+        if not any(goal.status not in TERMINAL for goal in goals):
+            return  # cycle just finished -- not stuck; advance_plan's own path handles it
+        blocked_ids = {goal_id for goal_id, block in self.goal_blocks.items() if block.active}
+        if not plan_can_progress(goals, blocked_ids, now):
+            self.status = PlanStatus.BLOCKED
+        elif self.status == PlanStatus.BLOCKED:
+            self.status = PlanStatus.RUNNING
 
     # ---- graceful human pause gate ----
     def request_pause(self, active_action: bool, reason: str | None = None) -> None:
@@ -375,42 +429,52 @@ class Plan(BaseModel):
         Return the block resolution when retrying from a structured block. A
         legacy paused plan has no block and therefore returns None; callers must
         still issue the separate resume command to release its pause gate.
+
+        Domain unfreeze #13: the relevant block may be `goal_blocks[goal_id]`
+        (a cyclic plan's per-goal block) or the legacy plan-wide `self.block`
+        — never both for the same goal. Resolving a per-goal block only
+        re-derives THIS plan's overall status (other goals' blocks, if any,
+        are untouched); resolving the legacy scalar keeps forcing RUNNING
+        exactly as before.
         """
-        blocked = self.block is not None and self.block.active
+        goal_block = self.goal_blocks.get(goal_id) if self.active_cycle is not None else None
+        per_goal_blocked = goal_block is not None and goal_block.active
+        scalar_blocked = self.block is not None and self.block.active
+        blocked = per_goal_blocked or scalar_blocked
         if not self.paused and not blocked:
             raise InvalidTransitionError("Plan", self.id, self.status.value, "retry")
+        active_block = goal_block if per_goal_blocked else (self.block if scalar_blocked else None)
         resolution: str | None = None
-        if blocked and (
-            self.block is None
-            or self.block.goal_id != goal_id
-            or self.block.task_id != task_id
-            or not {"retry_stage", "wait_and_retry"}.intersection(self.block.legal_resolutions)
+        if active_block is not None and (
+            active_block.goal_id != goal_id
+            or active_block.task_id != task_id
+            or not {"retry_stage", "wait_and_retry"}.intersection(active_block.legal_resolutions)
         ):
             raise InvalidEditError("retry does not target the active plan block")
-        if blocked:
-            assert self.block is not None
+        if active_block is not None:
             resolution = (
                 "wait_and_retry"
-                if "wait_and_retry" in self.block.legal_resolutions
+                if "wait_and_retry" in active_block.legal_resolutions
                 else "retry_stage"
             )
         goal = self._goal(goal_id)
         task = self._task(goal, task_id)
         edited_pending = bool(
-            blocked
+            active_block is not None
             and task.status == Status.PENDING
-            and self.block is not None
-            and "edit_task" in self.block.legal_resolutions
+            and "edit_task" in active_block.legal_resolutions
         )
         if edited_pending:
             resolution = "edit_task"
         else:
             task.retry()
-        if blocked:
-            assert self.block is not None
-            self.block.resolution = resolution
-            self.block.resolved_at = resolved_at
-            self.status = PlanStatus.RUNNING
+        if active_block is not None:
+            active_block.resolution = resolution
+            active_block.resolved_at = resolved_at
+            if per_goal_blocked:
+                self._recompute_cyclic_status(resolved_at)
+            else:
+                self.status = PlanStatus.RUNNING
         return resolution
 
     def retry_planning_stage(self, resolved_at: datetime) -> None:
@@ -433,8 +497,16 @@ class Plan(BaseModel):
         role_agent_ids_by_task: dict[str, dict[str, str]],
         resolved_at: datetime,
     ) -> None:
-        """Atomically bind every frozen task after the user repairs the registry."""
-        block = self.block
+        """Atomically bind every frozen task after the user repairs the registry.
+
+        Domain unfreeze #13: a goal-enrichment `agent_capability` block always
+        carries `goal_id` and, going forward, routes into `goal_blocks` (see
+        `open_block`) — checked first here, falling back to the legacy scalar
+        `self.block` only for a block that was already open before this
+        unfreeze deployed (never both for the same goal)."""
+        goal_block = self.goal_blocks.get(goal_id) if self.active_cycle is not None else None
+        per_goal = goal_block is not None and goal_block.active and goal_block.kind == "agent_capability"
+        block = goal_block if per_goal else self.block
         if (
             block is None
             or not block.active
@@ -462,6 +534,8 @@ class Plan(BaseModel):
         block.resolved_at = resolved_at
         self.clear_planning_retry()
         self._set_phase(PlanPhase.RUNNING)
+        if per_goal:
+            self._recompute_cyclic_status(resolved_at)
 
     # ---- worker-driven planning retry gate (un-freeze 2026-07-08) ----
     def record_planning_retry(self, not_before: datetime | None) -> None:
@@ -635,6 +709,17 @@ class Plan(BaseModel):
         )
 
     @property
+    def _active_goal_blocks(self) -> list[PlanBlock]:
+        """Domain unfreeze #13: every currently-active per-goal block,
+        deterministically ordered oldest-first (used wherever a single
+        representative block must be picked for a coarse top-level summary —
+        the full per-goal detail is always available via `goal_blocks`)."""
+        return sorted(
+            (block for block in self.goal_blocks.values() if block.active),
+            key=lambda block: block.created_at,
+        )
+
+    @property
     def status_reason(self) -> dict[str, str | None]:
         if self.goal_promotion_reservations:
             return {
@@ -647,6 +732,21 @@ class Plan(BaseModel):
                 "kind": "block",
                 "code": self.block.kind,
                 "message": self.block.explanation,
+            }
+        active_goal_blocks = self._active_goal_blocks
+        if active_goal_blocks:
+            if self.status == PlanStatus.BLOCKED:
+                # Every non-terminal goal is blocked or depends on one that
+                # is -- report the oldest block as representative, same shape
+                # as the legacy scalar case above.
+                earliest = active_goal_blocks[0]
+                return {"kind": "block", "code": earliest.kind, "message": earliest.explanation}
+            return {
+                "kind": "partially_blocked",
+                "code": None,
+                "message": (
+                    f"{len(active_goal_blocks)} goal(s) blocked; other goals continue."
+                ),
             }
         if self.review_gate is not None and self.review_gate.unresolved:
             return {
@@ -674,6 +774,22 @@ class Plan(BaseModel):
             return ["pause"] if self.status == PlanStatus.RUNNING else []
         if self.block is not None and self.block.active:
             return list(self.block.legal_resolutions)
+        active_goal_blocks = self._active_goal_blocks
+        if active_goal_blocks:
+            union: list[str] = []
+            for block in active_goal_blocks:
+                for resolution in block.legal_resolutions:
+                    if resolution not in union:
+                        union.append(resolution)
+            if self.status == PlanStatus.BLOCKED:
+                return union
+            # Partially blocked: still RUNNING overall, so pause/start_replan
+            # remain legal too -- prepend the per-goal resolutions so callers
+            # can discover them without inspecting goal_blocks separately.
+            for extra in ("pause", "start_replan"):
+                if extra not in union:
+                    union.append(extra)
+            return union
         if self.review_gate is not None and self.review_gate.unresolved:
             return [f"review:{decision}" for decision in self.review_gate.allowed_decisions]
         if self.pause_requested:
@@ -706,6 +822,11 @@ class Plan(BaseModel):
         """Derived activity; never persisted as a second lifecycle enum."""
         if self.block is not None and self.block.active:
             return f"blocked:{self.block.stage}"
+        active_goal_blocks = self._active_goal_blocks
+        if active_goal_blocks:
+            if self.status == PlanStatus.BLOCKED:
+                return f"blocked:{active_goal_blocks[0].stage}"
+            return "partially_blocked"
         if self.review_gate is not None and self.review_gate.unresolved:
             return f"review:{self.review_gate.subject_type.value}"
         if self.intent_proposal is not None and self.intent_proposal.approved_at is None:
@@ -903,6 +1024,7 @@ class Plan(BaseModel):
         self.cycle_draft = None
         self.review_gate = None
         self.block = None
+        self.goal_blocks = {}
         self.paused = False
         self.pause_requested = False
         self.status = PlanStatus.RUNNING
@@ -918,12 +1040,43 @@ class Plan(BaseModel):
         self.status = PlanStatus.PAUSED if self.active_cycle is not None else PlanStatus.IDLE
 
     def open_block(self, block: PlanBlock) -> None:
+        """Domain unfreeze #13: a block with a `goal_id`, opened while an
+        active cycle exists, is scoped to that goal only — it never freezes
+        an unrelated sibling goal's progress. Every other block (no goal_id —
+        e.g. `reasoner_failure`/`project_binding`, or any block on a legacy
+        non-cyclic plan) keeps the original plan-wide scalar behavior,
+        byte-identical to before this unfreeze."""
+        if self.active_cycle is not None and block.goal_id is not None:
+            current = self.goal_blocks.get(block.goal_id)
+            if current is not None and current.active:
+                raise InvalidEditError(f"goal '{block.goal_id}' already has an active block")
+            self.goal_blocks[block.goal_id] = block
+            self._recompute_cyclic_status(block.created_at)
+            return
         if self.block is not None and self.block.active:
             raise InvalidEditError("a plan block is already active")
         self.block = block
         self.status = PlanStatus.BLOCKED
 
-    def resolve_block(self, resolution: str, resolved_at: datetime) -> None:
+    def resolve_block(
+        self, resolution: str, resolved_at: datetime, goal_id: str | None = None
+    ) -> None:
+        """`goal_id=None` resolves the legacy plan-wide scalar block
+        (byte-identical to pre-#13 behavior). `goal_id=<x>` resolves only
+        that goal's block, leaving any other active goal_blocks (and
+        whatever those goals are doing) untouched — the plan's overall
+        status is re-derived, not unconditionally forced to PAUSED/IDLE,
+        since other goals may still be running."""
+        if goal_id is not None:
+            block = self.goal_blocks.get(goal_id)
+            if block is None or not block.active:
+                raise InvalidEditError(f"no active block for goal '{goal_id}'")
+            if resolution not in block.legal_resolutions:
+                raise InvalidEditError(f"block resolution '{resolution}' is not legal")
+            block.resolution = resolution
+            block.resolved_at = resolved_at
+            self._recompute_cyclic_status(resolved_at)
+            return
         if self.block is None or not self.block.active:
             raise InvalidEditError("no active plan block")
         if resolution not in self.block.legal_resolutions:

@@ -102,11 +102,23 @@ def _start_operation(
             PlanStatus.WAITING,
         }:
             raise InvalidEditError("initial discovery is not legal in the current state")
-        if kind == ProposalKind.REPLAN and plan.status not in {
-            PlanStatus.PAUSED,
-            PlanStatus.BLOCKED,
-            PlanStatus.IDLE,
-        }:
+        # Domain unfreeze #13: a cyclic plan with an active per-goal block
+        # stays status=RUNNING (other goals may still be progressing) rather
+        # than BLOCKED -- start_replan is still an advertised resolution for
+        # that block (Plan.legal_actions), so the precondition below must
+        # accept "RUNNING but partially blocked" too, not just the BLOCKED
+        # status a plan-wide legacy block still produces.
+        partially_blocked = plan.status == PlanStatus.RUNNING and bool(plan.goal_blocks)
+        if (
+            kind == ProposalKind.REPLAN
+            and plan.status
+            not in {
+                PlanStatus.PAUSED,
+                PlanStatus.BLOCKED,
+                PlanStatus.IDLE,
+            }
+            and not partially_blocked
+        ):
             # A plan already in conversational replan (unfreeze #10/#11:
             # status=WAITING, phase=REPLANNING) may proceed regardless of whether
             # the frozen source cycle's tasks are terminal — replanning no longer

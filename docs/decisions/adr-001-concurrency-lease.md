@@ -1,11 +1,16 @@
 # ADR: Concurrency model — the per-plan lease IS the unit of parallelism
 
-Status: **implemented at goal granularity (2026-07-22, domain unfreeze #12)**.
-Originally accepted 2026-07-02 (Phase-0 domain freeze) as a seam, not yet
-built; see "What shipped" below for what moved from design to code and
-where. Task-granularity remains explicitly out of scope (ROADMAP's
-do-not-do list: "breaks the plan-document CAS model for a speculative
-gain") — this ADR's own table already named that tradeoff.
+Status: **implemented at goal granularity, symmetric leases
+(2026-07-23, domain unfreeze #13)**. Originally accepted 2026-07-02
+(Phase-0 domain freeze) as a seam, not yet built; first implemented
+additively 2026-07-22 (unfreeze #12, one privileged plan-level goal +
+a second goal-lease for the rest); made fully symmetric 2026-07-23
+(unfreeze #13) after a live walkthrough of #12 surfaced both a real
+concurrency bug in that asymmetry and three deliberate compromises the
+user asked to remove outright — see "What changed in #13" below.
+Task-granularity remains explicitly out of scope (ROADMAP's do-not-do
+list: "breaks the plan-document CAS model for a speculative gain") —
+this ADR's own table already named that tradeoff.
 
 ## Decision
 
@@ -14,25 +19,51 @@ a plan at a time via the lease (`PlanRepository.claim_one_unit / heartbeat /
 release`); within a claimed plan, `next_action` returns exactly ONE ready
 unit and the worker drives units one at a time.
 
-**As of 2026-07-22**, that plan-level lease still exists and still drives
-planning/gates/legacy execution/the single earliest-ready goal (a lone
-worker process's behavior is byte-identical to before this unfreeze — see
-`app/use_cases/advance_plan.py::PlanDispatcher.advance`), but a SECOND,
-purely additive lease now exists at goal granularity
-(`infra/db/goal_lease_repository.py`, table `goal_leases`): different
-worker PROCESSES each independently claim and drive a different,
-dependency-ready, already-enriched goal of the same plan concurrently
-(`app/use_cases/claim_ready_goal.py`, `drive_goal`/`goal_tick` in
-`app/use_cases/run_worker.py`). `run_worker_forever` runs both the
-plan-level and goal-level tick every cycle, so a single-process deployment
-needs no operational change to keep working exactly as before.
+**2026-07-22 (unfreeze #12, superseded by #13 below):** the plan-level lease
+still drove planning/gates/legacy execution AND the single earliest-ready
+goal (a lone worker process's behavior was byte-identical to before the
+unfreeze), while a second, purely additive lease existed at goal granularity
+for every OTHER ready goal. This asymmetry required the goal-lease scan to
+explicitly exclude the plan-level goal to avoid colliding with it — and a
+live walkthrough with two real worker processes found that exclusion was
+briefly missing its full scope, causing a genuine duplicate-dispatch race
+(two real agent runs for the identical task).
+
+**As of 2026-07-23 (unfreeze #13)**, the plan-level lease no longer
+dispatches execution at all for a cyclic plan — it drives only planning
+(JIT enrichment fan-out) and the "every goal terminal → enter review"
+transition (`app/use_cases/advance_plan.py::PlanDispatcher.advance`). EVERY
+ready, already-enriched goal — including the position-earliest one — is
+claimed and driven exclusively through the goal lease
+(`infra/db/goal_lease_repository.py`, table `goal_leases`;
+`app/use_cases/claim_ready_goal.py` + `drive_goal` in
+`app/use_cases/run_worker.py`), symmetrically, by whichever worker gets
+there first. There is no more privileged goal for the scan to carve out.
+Real parallelism also no longer requires an operator to hand-start a second
+OS process: `infra/worker/main.py::run_worker_forever` runs its own bounded
+in-process goal-worker pool (`max_concurrent_goals`, default 4) alongside
+the plan-level tick, so a single `orchestrate worker start` process drives
+multiple independent goals concurrently on its own; running additional
+processes remains supported (the lease is a real cross-process DB row) for
+horizontal/multi-host scaling, but is no longer required to get the
+concurrency itself.
+
+`Plan.block` also stopped being a single plan-wide scalar for a cyclic
+plan's execution-time blocks — see `docs/decisions/decision-log.md`'s
+unfreeze #13 entry for the `goal_blocks` per-goal design. That part is a
+block-semantics change, not a lease-granularity change, but it was required
+alongside the lease symmetry fix: without it, the instant any one goal
+blocked, the plan-wide `status` flip to `BLOCKED` made the ENTIRE plan
+unclaimable (the claim SQL filters `status = 'running'`), silently
+defeating the whole point of symmetric per-goal leases for every OTHER
+still-progressing goal.
 
 The lease **granularity** is deliberately the future parallelism switch:
 
 | Lease on | Concurrency you get | Status |
 |---|---|---|
-| plan | none — sequential, one worker per plan | still the default, unchanged |
-| goal | goals run concurrently, tasks within a goal sequential | **implemented, 2026-07-22** |
+| plan | none — sequential, one worker per plan | still the default for planning/gates |
+| goal | goals run concurrently, tasks within a goal sequential | **implemented, symmetric, 2026-07-23** |
 | task | full task parallelism | explicitly rejected (ROADMAP do-not-do) |
 
 ## Why sequential now (historical — kept as the record of what this traded off)

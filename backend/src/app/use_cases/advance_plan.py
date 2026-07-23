@@ -68,32 +68,13 @@ class PlanDispatcher:
             plan: Plan = uow.plans.get(plan_id)
             phase = plan.phase
 
-        if plan.active_cycle is not None:
-            if plan.status.value != "running" or plan.pause_requested:
-                return Signal.PAUSED
-            goals = plan.execution_goals
-            # Goal-level parallelism (ADR-001, domain unfreeze #12) is PURELY
-            # ADDITIVE here: this plan-level tick keeps driving execution
-            # exactly as it always has (next_action's single-earliest-ready
-            # result, unchanged since Phase 1) so a lone worker process (no
-            # separate goal-lease worker running) behaves byte-identically to
-            # before this unfreeze. The only change is routing to planning
-            # when ANY ready goal needs enrichment (not just the
-            # earliest-position one — the actual fix for the fan-out gap
-            # Phase 2 addressed inside PlanningHandler, but the DISPATCHER
-            # must also stop assuming "earliest non-terminal goal has no
-            # tasks yet" is the only case that needs a planning tick).
-            # Separate goal_tick workers (run_worker.py) ADDITIONALLY claim
-            # and drive OTHER ready-and-enriched goals concurrently — this
-            # tick never needs to know whether any exist.
-            ready_ids = ready_goal_ids(goals, self._clock.now())
-            needs_enrichment = any(goal.id in ready_ids and not goal.tasks for goal in goals)
-            if needs_enrichment:
-                if self._planning is None:
-                    return Signal.PAUSED
-                return await self._planning.handle(plan_id, plan, uow)
-            return await self._execution.handle(plan_id, plan, uow)
-
+        # An approved intent with no cycle_draft yet always needs
+        # architect_cycle next, checked BEFORE active_cycle for the exact
+        # same reason as PlanningHandler.handle's own routing (see that
+        # docstring): a REPLAN's SOURCE cycle stays `active_cycle` for the
+        # whole drafting window, so this dispatcher must not drive the
+        # source cycle's execution/enrichment instead of drafting the
+        # replacement while an approved replan intent is waiting.
         if (
             plan.status.value == "running"
             and plan.intent_proposal is not None
@@ -103,6 +84,41 @@ class PlanDispatcher:
             if self._planning is None:
                 return Signal.PAUSED
             return await self._planning.handle(plan_id, plan, uow)
+
+        if plan.active_cycle is not None:
+            if plan.status.value != "running" or plan.pause_requested:
+                return Signal.PAUSED
+            goals = plan.execution_goals
+            now = self._clock.now()
+            # Domain unfreeze #13 (goal-level parallelism v2 — symmetric
+            # per-goal leases): the plan-level tick NO LONGER dispatches task
+            # execution for a cyclic plan at all — that was the "privileged
+            # goal" asymmetry (unfreeze #12) this unfreeze removes. Every
+            # ready+enriched goal, including the position-earliest one, is
+            # claimed and driven exclusively through goal_leases
+            # (claim_ready_goal / drive_goal / ExecutionHandler.handle_goal),
+            # by this same worker process's own goal-worker pool
+            # (infra/worker/main.py) and/or other processes. This tick keeps
+            # exactly two jobs: (1) route to planning when any ready goal
+            # needs JIT enrichment (unchanged from #12 — still routes on the
+            # full ready set, not just the earliest-position goal), and
+            # (2) detect "every goal is terminal" and enter the completion
+            # gate, since that transition has nowhere else to live once
+            # execution dispatch itself moves entirely to goal_leases.
+            ready_ids = ready_goal_ids(goals, now)
+            needs_enrichment = any(goal.id in ready_ids and not goal.tasks for goal in goals)
+            if needs_enrichment:
+                if self._planning is None:
+                    return Signal.PAUSED
+                return await self._planning.handle(plan_id, plan, uow)
+            if plan.peek_next(now) is None:
+                # No non-terminal goal remains: peek_next's own "action is
+                # None" branch inside ExecutionHandler.handle is exactly the
+                # "-> enter review" transition; goal_id=None so it takes that
+                # branch rather than trying to dispatch a task (there is none
+                # left to dispatch).
+                return await self._execution.handle(plan_id, plan, uow)
+            return Signal.NOT_READY
 
         if phase in _TERMINAL_PHASES:
             return Signal.DONE if phase == PlanPhase.DONE else Signal.FAILED

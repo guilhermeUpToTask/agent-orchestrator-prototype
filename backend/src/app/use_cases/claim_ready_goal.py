@@ -1,4 +1,5 @@
-"""claim_ready_goal — the goal-level claim scan (ADR-001, domain unfreeze #12).
+"""claim_ready_goal — the goal-level claim scan (ADR-001, domain unfreeze #12;
+symmetric-leases redesign, domain unfreeze #13).
 
 `GoalLeaseRepository.claim_one_ready_goal` (src/domain/repositories/goal_lease_repo.py)
 is a pure claim primitive over ONE already-identified `(plan_id, goal_id)`
@@ -14,20 +15,29 @@ candidate on a lost race.
 testing yet (ROADMAP-flagged: tune empirically once real contention is
 observable, don't guess further).
 
-CONFIRMED BUG, fixed here (found via a live walkthrough with two real worker
-processes, not caught by any fake/single-event-loop unit test): the
-plan-level tick (`advance_plan.py::PlanDispatcher.advance`, when no goal
-needs enrichment) always drives `ExecutionHandler.handle()` -> `next_action`,
-which targets the single EARLIEST non-terminal goal REGARDLESS of readiness
-— that goal was never excluded from THIS scan's candidates, so a
-goal-lease-holding worker could claim and dispatch a REAL agent run for the
-exact same goal a plan-lease-holding worker was independently also driving.
-Observed live: two real `pi` subprocesses started ~1 second apart for the
-identical task; the first (268s, genuinely successful) was discarded as
-stale once the second worker's retries had moved the task's identity on.
-Fix: the plan's earliest non-terminal goal (by position) is exactly what
-the plan-level tick already owns exclusively — never offer it as a
-goal-lease candidate here.
+Domain unfreeze #13 removed the "privileged plan-level goal" this scan used
+to have to exclude (a bug found live last session: the plan-level tick always
+drove the position-earliest goal directly via `next_action`, regardless of
+its own readiness, and this scan had to carve that one goal out of its
+candidate set to avoid a genuine double-dispatch race with it — see git
+history for that fix's full account). `advance_plan.py`'s cyclic branch no
+longer dispatches execution at all; EVERY ready+enriched goal, including
+position 0, is now claimed and driven exclusively through this scan,
+symmetrically, by whichever worker gets there first.
+
+One exclusion DOES remain, for a different reason: a goal with an active
+`Plan.goal_blocks` entry must never be offered as a candidate here. None of
+`ExecutionHandler`'s five block-opening call sites transition the GOAL itself
+to a terminal status when they open a block (only the plan-wide scalar used
+to matter for that, by making the whole plan unclaimable) — under the new
+per-goal design the plan often stays claimable while one goal is blocked, so
+without this exclusion a blocked goal would be re-claimed and re-driven on
+the very next scan, immediately colliding with its own still-active block
+(`open_block`'s "already active" guard) in a hot poll-cadence-bounded loop.
+`navigation.ready_goal_ids` has no concept of blocks (it is Plan-agnostic,
+built only from `Goal.depends_on`), so this exclusion is applied here, using
+the `Plan` this scan already has in hand — not pushed into the shared
+navigation primitive.
 """
 
 from __future__ import annotations
@@ -55,20 +65,12 @@ def claim_ready_goal(
         if plan.active_cycle is None or plan.paused or plan.pause_requested:
             continue
         goals = plan.execution_goals
-        # The plan-level tick's next_action always targets this one
-        # (regardless of its own readiness) -- never contend with it here.
-        plan_level_goal = min(
-            (goal for goal in goals if not goal.is_terminal),
-            key=lambda goal: goal.position,
-            default=None,
-        )
         ready_ids = ready_goal_ids(goals, now)
+        blocked_goal_ids = {gid for gid, block in plan.goal_blocks.items() if block.active}
         enriched_ready_goal_ids = [
             goal.id
             for goal in goals
-            if goal.id in ready_ids
-            and goal.tasks
-            and (plan_level_goal is None or goal.id != plan_level_goal.id)
+            if goal.id in ready_ids and goal.tasks and goal.id not in blocked_goal_ids
         ]
         for goal_id in enriched_ready_goal_ids:
             # goal_leases manages its own transaction per call (unlike

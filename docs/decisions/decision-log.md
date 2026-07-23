@@ -214,3 +214,63 @@ layer, not domain, and is not folded into this unfreeze entry — the
 decision log's convention is specifically about FROZEN-domain changes. See
 [ADR-001](adr-001-concurrency-lease.md)'s updated status for the full
 picture of what shipped.
+
+53. **Domain unfreeze #13 (2026-07-23): symmetric per-goal leases, per-goal
+blocks, single-process goal-worker pool.** A live walkthrough of unfreeze
+#12 (real two-worker-process run) surfaced and fixed one genuine concurrency
+bug (a goal-lease worker racing the plan-lease worker for the same task —
+see the `claim_ready_goal.py` git history) and, in the process, exposed
+three deliberate compromises from #12's additive/legacy-safe shape that the
+user asked to remove outright rather than keep living with: (a) the lease
+model was asymmetric — one "plan-level" lease always drove the single
+position-earliest goal via `next_action` regardless of its own readiness,
+forcing the goal-lease scan to carve that one goal out of its own candidate
+set to avoid colliding with it; (b) `Plan.block` was a single plan-wide
+scalar, so the instant ANY goal opened a block, the whole plan's `status`
+flipped to `BLOCKED` — and since the claim SQL (`_CLAIM_SQL` /
+`list_running_ids`) filters `status = 'running'`, that also made the ENTIRE
+plan unclaimable, forcing every other independent, still-progressing goal to
+abandon its in-flight work (observed live as a task flipping to `SKIPPED`
+mid-run for a reason unrelated to that goal); (c) real parallelism required
+hand-starting a second OS worker process, since one process's own loop drove
+`worker_tick` and one goal via `goal_tick` strictly sequentially.
+
+Domain-layer changes: `Plan.goal_blocks: dict[str, PlanBlock] = {}`, additive
+alongside the legacy scalar `block` — `open_block`/`resolve_block` route a
+block with a `goal_id`, opened while an active cycle exists, into this dict
+instead (raising only on a genuine same-goal double-open, never a different
+goal's); every other block (no `goal_id`, or a legacy non-cyclic plan) keeps
+the original scalar behavior, byte-identical. A new shared DAG primitive,
+`dependency_graph.blocked_nodes` (same shape as the existing `ready_nodes`),
+and `navigation.plan_can_progress` compute whether ANY non-terminal goal can
+still make progress; `Plan._recompute_cyclic_status` (called after
+`open_block`/`resolve_block`/`complete_goal`) sets `status = BLOCKED` only
+when every non-terminal goal is blocked or transitively depends on one that
+is — not the instant any single goal blocks — with an explicit short-circuit
+for "zero non-terminal goals" (a finished cycle, not a stuck one).
+`retry_task`/`retry_agent_binding` were extended to resolve whichever
+location (scalar or per-goal) actually holds the relevant block, since a
+goal-enrichment `agent_capability` block now also routes per-goal.
+`peek_next_for_goal` gained a terminal-goal short-circuit (returns `None`
+once its own goal is already DONE/terminal) paired with a fix in
+`ExecutionHandler.handle`'s shared body so a goal-lease worker's `None`
+never triggers the plan-wide `_enter_review` transition just because ITS
+goal finished while siblings are still running — a latent gap from #12's
+original `handle_goal` sharing that only surfaces once every goal (not just
+the non-privileged ones) drives through the goal-lease path.
+
+App/infra layer (not itself domain, noted here for the full picture):
+`advance_plan.py`'s cyclic branch no longer dispatches execution at all —
+only enrichment fan-out and the "every goal terminal → enter review"
+transition; ALL execution dispatch, including the position-earliest goal,
+goes through `claim_ready_goal` symmetrically (the #12 exclusion carve-out
+is dead code, removed). `claim_ready_goal` also excludes any goal with an
+active `goal_blocks` entry, so a blocked goal is never re-claimed and
+re-collided with its own still-open block. `infra/worker/main.py` gained an
+in-process goal-worker pool (`max_concurrent_goals`, new CLI flag, default
+4): each `run_worker_forever` process now claims and drives multiple ready
+goals concurrently via its own asyncio tasks, each with its own fresh
+`UnitOfWork` (never the shared one `worker_tick` uses) — a single
+`orchestrate worker start` process is now sufficient for real goal-level
+parallelism; running more processes remains supported for horizontal/
+multi-host scaling but is no longer required to demonstrate it.

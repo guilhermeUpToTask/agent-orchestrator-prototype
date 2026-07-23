@@ -147,6 +147,16 @@ class ExecutionHandler:
             )
 
             if action is None:
+                if goal_id is not None:
+                    # Domain unfreeze #13: None here means "THIS goal is
+                    # already terminal" (peek_next_for_goal's own contract),
+                    # NOT "the whole plan is done" -- entering review is a
+                    # plan-wide transition that must never fire just because
+                    # one goal-lease worker's goal happens to be finished
+                    # while siblings are still running. The plan-level tick
+                    # (advance_plan.py) is what checks "every goal terminal"
+                    # and calls handle(goal_id=None) for that.
+                    return Signal.PAUSED
                 return self._enter_review(plan_id, plan, uow)
             if action == NOT_READY:
                 return Signal.NOT_READY
@@ -754,16 +764,14 @@ class ExecutionHandler:
         # pending), so a goal wedged by a SKIPPED/evidence-less-DONE task is
         # recoverable only via edit_task or start_replan — offering retry_stage
         # there is a nominal-only resolution that 422s when the operator tries it.
-        if plan.block is not None and plan.block.active:
-            # Goal-level parallelism (domain unfreeze #12): Plan.block is
-            # still a single plan-wide scalar (unlike goal_promotion_reservations,
-            # deliberately NOT reshaped per-goal in this phase — BLOCKED is a
-            # whole-plan operator-facing status by design). If a DIFFERENT
-            # goal already opened a block this same tick, don't crash on
-            # open_block's "already active" guard — the plan is already
-            # correctly BLOCKED; this goal's own problem surfaces once the
-            # first block is resolved and navigation re-selects it.
-            return Signal.PAUSED
+        #
+        # Domain unfreeze #13: each goal opens its OWN block now
+        # (`Plan.goal_blocks[goal.id]`) -- a different goal's block never
+        # collides here (separate dict entries), and `claim_ready_goal`'s
+        # candidate scan excludes any goal with an active block from ever
+        # being re-selected, so this goal's own block can't collide with
+        # itself on a later tick either. No pre-check needed; open_block's
+        # "already active" guard is a genuine-bug detector now, not routine.
         resolutions = ["edit_task", "start_replan"]
         if offending.status == Status.FAILED:
             resolutions = ["retry_stage", *resolutions]
@@ -888,10 +896,8 @@ class ExecutionHandler:
         failed = next(task for task in goal.tasks if task.status == Status.FAILED)
         reason = f"goal {goal.id} has a failed task"
         if plan.active_cycle is not None:
-            if plan.block is not None and plan.block.active:
-                # Same "plan.block is a plan-wide scalar" reasoning as
-                # _block_on_unpromotable_goal — see its comment.
-                return Signal.PAUSED
+            # Domain unfreeze #13: see _block_on_unpromotable_goal's comment —
+            # this goal opens its own goal_blocks entry; no pre-check needed.
             block = PlanBlock(
                 id=new_id(),
                 kind="execution_failure",
@@ -1275,15 +1281,13 @@ class ExecutionHandler:
                         kind=exc.kind.value if exc.kind else None,
                     )
                 )
-                if plan.active_cycle is not None and (plan.block is None or not plan.block.active):
-                    # Goal-level parallelism (domain unfreeze #12): if a
-                    # DIFFERENT goal already opened a block this same tick,
-                    # don't crash on open_block's "already active" guard --
-                    # same reasoning as _block_on_unpromotable_goal /
-                    # _pause_on_failed_goal. This goal's own failure reason
-                    # is dropped in favor of whichever block already exists;
-                    # it resurfaces once that block is resolved and
-                    # navigation re-selects this goal.
+                if plan.active_cycle is not None:
+                    # Domain unfreeze #13: this goal opens its own
+                    # goal_blocks entry -- a different goal's concurrently
+                    # opened block never collides here (separate dict
+                    # entries; before #13 this branch had to no-op and drop
+                    # this goal's own failure reason when ANY block was
+                    # already active anywhere in the plan).
                     provider_capacity = circuit_manual and exc.kind == FailureKind.RATE_LIMIT
                     block = PlanBlock(
                         id=new_id(),
@@ -1322,8 +1326,6 @@ class ExecutionHandler:
                             run_id=unit.execution.run_id,
                         )
                     )
-                elif plan.active_cycle is not None:
-                    pass  # already blocked by a different goal this tick -- no-op
                 # A human pause landing during a legacy in-flight attempt keeps its
                 # manual semantics. Cyclic failures instead become explicit blocks.
                 elif plan.pause_requested:

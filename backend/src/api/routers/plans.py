@@ -127,6 +127,12 @@ class PlanDetailResponse(BaseModel):
     active_cycle: Cycle | None
     pending_gate: ReviewGate | None
     block: PlanBlock | None
+    # Domain unfreeze #13 — per-goal blocks: goal_id -> that goal's own active
+    # (or resolved-but-recent) PlanBlock, independent of the plan-wide `block`
+    # scalar above. Only entries with `.active` True are currently unresolved;
+    # callers resolving one pass its goal_id to POST /retry (or the relevant
+    # resolution endpoint) exactly as they already do for `block.goal_id`.
+    goal_blocks: dict[str, PlanBlock]
     goals: list[Goal]
     cycles: list[Cycle]
     intent_proposal: IntentProposal | None
@@ -577,6 +583,9 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
             else None
         ),
         block=(plan.block if plan.block is not None and plan.block.active else None),
+        goal_blocks={
+            goal_id: block for goal_id, block in plan.goal_blocks.items() if block.active
+        },
         goals=goals,
         cycles=plan.cycles,
         intent_proposal=plan.intent_proposal,
@@ -893,9 +902,19 @@ def retry_blocked_task(
     )
 
 
+class RetryStageRequest(BaseModel):
+    # Domain unfreeze #13: disambiguates which goal's agent_capability block
+    # to retry when more than one goal is independently blocked at once.
+    # Omit it when unambiguous (a plan-wide reasoner_failure block, or
+    # exactly one active per-goal block) -- unset body stays backward
+    # compatible with callers that send none at all.
+    goal_id: str | None = None
+
+
 @router.post("/{plan_id}/retry-stage", status_code=204)
 def retry_blocked_planning_stage(
     plan_id: str,
+    body: RetryStageRequest | None = None,
     container: AppContainer = Depends(get_container),
 ) -> None:
     """Retry a blocked reasoner stage or agent binding after registry repair."""
@@ -904,6 +923,7 @@ def retry_blocked_planning_stage(
         container.new_unit_of_work(),
         container.clock,
         container.agent_repo,
+        goal_id=body.goal_id if body is not None else None,
     )
 
 

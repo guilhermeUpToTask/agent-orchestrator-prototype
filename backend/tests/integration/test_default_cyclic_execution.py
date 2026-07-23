@@ -13,7 +13,8 @@ from src.app.use_cases.cyclic_planning import (
     approve_intent,
     propose_intent,
 )
-from src.app.use_cases.run_worker import drive_plan
+from src.app.use_cases.claim_ready_goal import claim_ready_goal
+from src.app.use_cases.run_worker import drive_goal, drive_plan
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.planning_artifacts import (
     PlanStatus,
@@ -139,10 +140,47 @@ def test_shipped_stub_and_dry_run_execute_a_cycle_to_publication_gate(
         container.new_unit_of_work(),
         container.clock,
     )
-    execution_signal, progressed = asyncio.run(drive())
 
-    assert execution_signal == "paused"
-    assert progressed >= 4
+    # Domain unfreeze #13 (symmetric per-goal leases): the plan-level tick
+    # only drives enrichment/gates for a cyclic plan now, never execution --
+    # drive() settles JIT enrichment and then has nothing left to do at the
+    # plan level (every ready goal is enriched, none are all-terminal yet).
+    enrichment_signal, enrichment_progressed = asyncio.run(drive())
+    assert enrichment_signal == "not_ready"
+    assert enrichment_progressed >= 1
+
+    with container.new_unit_of_work() as uow:
+        enriched = uow.plans.get(plan.id)
+    assert enriched.active_cycle is not None
+    goal_id = enriched.active_cycle.goals[0].id
+
+    claimed = claim_ready_goal(container.new_unit_of_work(), "worker-1", 60, container.clock)
+    assert claimed == (plan.id, goal_id)
+
+    async def drive_goal_() -> tuple[str, int]:
+        return await drive_goal(
+            plan.id,
+            goal_id,
+            container.new_unit_of_work(),
+            container.agent_runner,
+            container.agent_repo,
+            container.workspace,
+            container.agent_event_sink,
+            container.clock,
+            "worker-1",
+            verifier=container.verification_executor,
+        )
+
+    goal_signal, goal_progressed = asyncio.run(drive_goal_())
+    # The goal drives to DONE-and-promoted (CONTINUE), then peek_next_for_goal
+    # recognizes it's already terminal and stops (PAUSED) rather than
+    # incorrectly opening the plan-wide completion gate itself -- that's the
+    # plan-level tick's job, exercised next.
+    assert goal_signal == "paused"
+    assert goal_progressed >= 1
+
+    review_signal, _ = asyncio.run(drive())
+    assert review_signal == "paused"
     with container.new_unit_of_work() as uow:
         completed = uow.plans.get(plan.id)
     assert completed.status == PlanStatus.WAITING

@@ -9,7 +9,9 @@ from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
     Cycle,
+    IntentProposal,
     PlanStatus,
+    ProposalKind,
     ReviewSubjectType,
 )
 from src.domain.entities.task import Task
@@ -86,7 +88,13 @@ def test_ready_later_goal_routes_to_planning_past_blocked_head(env_factory) -> N
     assert env.runner.calls == {}
 
 
-def test_enriched_ready_goals_fall_back_to_execution(env_factory) -> None:
+def test_enriched_ready_goal_no_longer_dispatched_by_plan_level_tick(env_factory) -> None:
+    """Domain unfreeze #13 (symmetric per-goal leases): the plan-level tick
+    stops dispatching execution entirely for a cyclic plan -- an
+    enriched-and-ready goal (nothing needs enrichment, not all goals
+    terminal) is left for a goal-lease worker (claim_ready_goal / drive_goal)
+    to pick up. Before #13 this fell back to ExecutionHandler.handle() and
+    ran the task directly here; that fallback is gone."""
     env = env_factory()
     planning = RecordingPlanningHandler()
     task = Task(
@@ -104,9 +112,52 @@ def test_enriched_ready_goals_fall_back_to_execution(env_factory) -> None:
 
     signal = asyncio.run(_dispatcher(env, planning).advance(plan.id, env.uow))
 
-    assert signal == Signal.CONTINUE
+    assert signal == Signal.NOT_READY
     assert planning.calls == []
-    assert env.runner.calls == {task.id: 1}
+    assert env.runner.calls == {}
+
+
+def test_approved_replan_intent_routes_to_architecture_not_the_source_cycle(env_factory) -> None:
+    """Real bug found via a live walkthrough (predates domain unfreeze #13 --
+    this routing existed unchanged since unfreeze #12, just never exercised
+    by a real reasoner replan on a plan whose source cycle was still active,
+    since prior walkthroughs used the stub reasoner via direct CycleDraft
+    PUT). A REPLAN's SOURCE cycle stays `active_cycle` for the entire
+    drafting window (source-preserving replan: it is superseded only when
+    the replacement cycle activates) -- so `active_cycle is not None` being
+    checked before "does this plan have an approved intent still waiting on
+    architect_cycle" meant an approved replan intent could NEVER reach
+    architect_cycle: the dispatcher (and PlanningHandler.handle's own
+    routing) kept driving the source cycle's already-enriched goals instead,
+    forever, even including re-selecting and re-blocking a goal that had
+    already failed there. The approved-intent-needs-architecture check must
+    win regardless of active_cycle."""
+    env = env_factory()
+    planning = RecordingPlanningHandler()
+    # source cycle still has a goal with a FAILED task -- exactly the state
+    # that used to keep getting re-selected/re-blocked instead of the
+    # dispatcher ever reaching architect_cycle for the replacement.
+    failed_task = Task(id="t1", name="t1", position=0, description="", agent_id="a1")
+    failed_task.status = Status.FAILED
+    plan = _cyclic_plan(
+        [Goal(id="goal-1", name="Goal 1", position=0, description="source", tasks=[failed_task])],
+        env.clock.now(),
+    )
+    plan.intent_proposal = IntentProposal(
+        id="intent-2",
+        kind=ProposalKind.REPLAN,
+        base_plan_version=plan.version,
+        source_cycle_id="cycle-1",
+        objective="replan objective",
+        approved_at=env.clock.now(),
+    )
+    env.seed(plan)
+
+    signal = asyncio.run(_dispatcher(env, planning).advance(plan.id, env.uow))
+
+    assert signal == Signal.CONTINUE
+    assert planning.calls == [(plan.id, plan.id)]  # routed to architect_cycle, not enrich/execution
+    assert env.runner.calls == {}
 
 
 def test_missing_planning_handler_pauses_when_ready_goal_needs_enrichment(env_factory) -> None:

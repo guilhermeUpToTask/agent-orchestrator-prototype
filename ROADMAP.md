@@ -222,7 +222,11 @@ Take these up only when real usage demonstrates the need.
     the right answer for cross-*machine* deployment, a different problem
     this system's single-SQLite-file persistence model doesn't attempt to
     solve either. Still deliberately unnecessary until multi-machine is the
-    actual goal.
+    actual goal. Re-confirmed 2026-07-23 (domain unfreeze #13, symmetric
+    per-goal leases + the in-process goal-worker pool): real single-process
+    concurrency needed no new coordination primitive either, just removing
+    the plan-level lease's execution-dispatch privilege — another point in
+    favor of "this problem was never actually about the transport."
 28. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
     ruff/mypy; nightly/merge-only: the paid real-model smoke. Still open —
     the split matters, don't burn money per push.
@@ -231,19 +235,26 @@ Take these up only when real usage demonstrates the need.
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
 31. **Proactive goal-scope-disjointness guard** [MRF, ADR-001 follow-up] —
-    goal-level parallelism (implemented 2026-07-22, domain unfreeze #12)
-    ships with only a REACTIVE safety net for concurrent goals touching
-    overlapping files (the existing `goal_promotion_failure` block, hit at
-    git-merge time). A proactive guard would check, at goal-enrichment time,
-    whether a goal's frozen `allowed_scope` overlaps any OTHER
-    concurrently-reachable goal's (no dependency edge either way) and reject/
-    re-prompt before either ever runs. Deliberately deferred, not an
-    oversight: the failure-UX decision (auto-reprompt the reasoner vs. open a
-    block vs. just log) isn't settled, and "could legitimately run
+    goal-level parallelism (implemented 2026-07-22, domain unfreeze #12;
+    made fully symmetric 2026-07-23, domain unfreeze #13) ships with only a
+    REACTIVE safety net for concurrent goals touching overlapping files (the
+    existing `goal_promotion_failure` block, hit at git-merge time — now
+    per-goal, see `Plan.goal_blocks`, so one goal's merge conflict no longer
+    stalls unrelated goals either). A proactive guard would check, at
+    goal-enrichment time, whether a goal's frozen `allowed_scope` overlaps
+    any OTHER concurrently-reachable goal's (no dependency edge either way)
+    and reject/re-prompt before either ever runs. Deliberately deferred, not
+    an oversight: the failure-UX decision (auto-reprompt the reasoner vs.
+    open a block vs. just log) isn't settled, and "could legitimately run
     concurrently" is a static approximation that could produce false-positive
     friction on a deployment that never actually contends (single worker
     pool, e.g.) — needs real usage evidence first, same as the other
-    evidence-gated items on this list.
+    evidence-gated items on this list. Unfreeze #13's in-process goal-worker
+    pool (`max_concurrent_goals`, default 4, not load-tested) makes real
+    contention MORE likely to actually occur in a live deployment than #12's
+    additive shape did, which raises the value of real usage evidence here
+    but still doesn't settle the failure-UX question on its own — the
+    dependency stays open.
 
 32. **Devcontainer runtime parity** [WALK] — the live container carries
     runtimes the `.devcontainer` config never installs (ad-hoc installs, lost

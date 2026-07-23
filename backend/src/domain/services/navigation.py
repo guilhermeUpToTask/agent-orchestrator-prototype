@@ -5,7 +5,7 @@ from typing import Literal, Union
 
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
-from src.domain.services.dependency_graph import ready_nodes
+from src.domain.services.dependency_graph import blocked_nodes, ready_nodes
 from src.domain.value_objects.lifecycle import Status, TERMINAL
 
 GoalFailed = Literal["GOAL_FAILED"]
@@ -99,3 +99,23 @@ def ready_goal_ids(goals: list[Goal], now: datetime) -> set[str]:
     edges = {goal.id: list(goal.depends_on) for goal in goals}
     candidate_ids = {goal.id for goal in goals if goal.status not in TERMINAL}
     return ready_nodes(candidate_ids, edges, done_goal_ids)
+
+
+def plan_can_progress(goals: list[Goal], goal_blocked_ids: set[str], now: datetime) -> bool:
+    """True iff at least one non-terminal goal can still make progress on its
+    own — i.e. is not itself blocked and does not transitively depend on a
+    blocked goal (domain unfreeze #13 — per-goal blocks replace "any active
+    block freezes the whole plan"). `goal_blocked_ids` is the set of goal ids
+    with an active `PlanBlock` (`Plan.goal_blocks`), supplied by the caller.
+
+    Callers MUST treat "zero non-terminal goals" as a separate case (the
+    cycle finished, not a blockage) — this function does not special-case it:
+    with no non-terminal goals to check, it correctly returns False, but that
+    is NOT the same thing as "stuck." `Plan._recompute_cyclic_status` short-
+    circuits before calling this when `execution_goals` has no non-terminal
+    entries; do the same in any other caller."""
+    del now  # symmetry with ready_goal_ids/action_for_goal; no time component today
+    non_terminal_ids = {goal.id for goal in goals if goal.status not in TERMINAL}
+    edges = {goal.id: list(goal.depends_on) for goal in goals}
+    stuck = blocked_nodes(non_terminal_ids, edges, goal_blocked_ids & non_terminal_ids)
+    return bool(non_terminal_ids - stuck)
