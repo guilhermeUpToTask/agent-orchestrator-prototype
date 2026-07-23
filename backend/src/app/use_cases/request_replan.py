@@ -13,6 +13,7 @@ request_replan is the holistic conversational re-plan.
 
 from __future__ import annotations
 
+from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.events.outbox import BlockResolved, ReplanRequested
 
 from src.app.ports import UnitOfWork
@@ -48,11 +49,20 @@ def request_replan(plan_id: str, uow: UnitOfWork) -> None:
         # status_reason/legal_actions/activity coherent for the WAITING
         # window in between, rather than reporting a stale "partially
         # blocked" fact during an active replan conversation). "start_replan"
-        # is in every execution-triggered block's legal_resolutions, so this
-        # never raises.
+        # is expected in every execution-triggered block's legal_resolutions,
+        # but that is an invariant of the block-opening call sites, not of
+        # this use case -- verify it explicitly rather than let a mismatch
+        # silently skip a goal (a stale block with a bad resolution set
+        # would otherwise leave that goal permanently, invisibly stuck).
         for goal_id, goal_block in list(plan.goal_blocks.items()):
             if not goal_block.active:
                 continue
+            if "start_replan" not in goal_block.legal_resolutions:
+                raise InvalidEditError(
+                    f"goal '{goal_id}' has an active block at stage "
+                    f"'{goal_block.stage}' that cannot resolve via 'start_replan' "
+                    f"(legal resolutions: {goal_block.legal_resolutions})"
+                )
             block_id = goal_block.id
             plan.resolve_block("start_replan", goal_block.created_at, goal_id=goal_id)
             uow.outbox.add(

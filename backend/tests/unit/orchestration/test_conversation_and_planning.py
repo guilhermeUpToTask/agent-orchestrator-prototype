@@ -326,6 +326,48 @@ def test_replan_from_blocked_cycle_settles_work_before_message(env_factory):
     assert result.phase == PlanPhase.REPLANNING
 
 
+def test_request_replan_fails_loud_when_goal_block_forbids_start_replan(env_factory):
+    """Code-review guard: request_replan must never assume "start_replan" is
+    in an active goal block's legal_resolutions -- a block that forbids it
+    (e.g. a stage that only permits retry_stage/edit_task) must raise
+    InvalidEditError naming the goal and its stage/legal resolutions instead
+    of silently resolving it (or skipping it) anyway."""
+    env = env_factory()
+    blocked_task = task("blocked-task")
+    blocked_goal = goal("g1", 0, [blocked_task])
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-old",
+        draft_id="draft-old",
+        status=CycleStatus.ACTIVE,
+        goals=[blocked_goal],
+        started_at=env.clock.now(),
+    )
+    plan = plan_in(PlanPhase.RUNNING)
+    plan.status = PlanStatus.RUNNING
+    plan.cycles = [cycle]
+    plan.goal_blocks = {
+        "g1": PlanBlock(
+            id="block-1",
+            kind="execution_failure",
+            explanation="agent binding is broken",
+            stage="agent_binding",
+            goal_id="g1",
+            task_id="blocked-task",
+            legal_resolutions=["retry_stage", "edit_task"],
+            created_at=env.clock.now(),
+        )
+    }
+    env.seed(plan)
+
+    with pytest.raises(InvalidEditError) as excinfo:
+        request_replan("p1", env.uow)
+
+    assert excinfo.value.code == "INVALID_EDIT"
+    assert "g1" in str(excinfo.value)
+    assert "agent_binding" in str(excinfo.value)
+
+
 def test_replanning_message_stays_legal_while_only_partially_blocked(env_factory):
     """Domain unfreeze #13: a per-goal block leaves the plan status RUNNING
     (not BLOCKED) when a sibling goal can still progress. _start_operation's
