@@ -55,6 +55,7 @@ from src.app.use_cases.pause_resume import (
     retry_task,
 )
 from src.app.use_cases.request_replan import request_replan
+from src.app.use_cases.update_retry_policy import update_retry_policy
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
     Cycle,
@@ -381,6 +382,7 @@ async def create(
         body.project_id,
         request_id,
         container.new_unit_of_work(),
+        retry_policy=container.default_retry_policy,
     )
     if opened.request_replayed:
         with container.new_unit_of_work() as uow:
@@ -925,6 +927,33 @@ def retry_blocked_planning_stage(
         container.agent_repo,
         goal_id=body.goal_id if body is not None else None,
     )
+
+
+class RetryPolicyUpdateRequest(BaseModel):
+    """All fields optional: only the ones an operator sets are changed (partial
+    merge over the plan's current retry policy); the rest keep their current
+    value. Mirrors execution.retry_* config field-for-field."""
+
+    max_attempts: int | None = None
+    initial_backoff_seconds: float | None = None
+    backoff_multiplier: float | None = None
+    max_backoff_seconds: float | None = None
+    jitter_ratio: float | None = None
+
+
+@router.post("/{plan_id}/retry-policy", status_code=204)
+def update_retry_policy_route(
+    plan_id: str,
+    body: RetryPolicyUpdateRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retune an EXISTING plan's retry/backoff budget (un-freeze #12) — e.g.
+    raise max_attempts/max_backoff_seconds so a plan stuck on a rate-limited
+    provider keeps retrying automatically for longer before opening a block.
+    Distinct from the execution.retry_* config keys, which only seed a NEW
+    plan's policy at creation and never touch one already persisted."""
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    update_retry_policy(plan_id, updates, container.new_unit_of_work())
 
 
 @router.post("/{plan_id}/approve", status_code=204)

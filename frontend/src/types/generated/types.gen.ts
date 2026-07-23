@@ -1490,13 +1490,33 @@ export type RetryPolicy = {
 };
 
 /**
- * RetryStageRequest
+ * RetryPolicyUpdateRequest
+ *
+ * All fields optional: only the ones an operator sets are changed (partial
+ * merge over the plan's current retry policy); the rest keep their current
+ * value. Mirrors execution.retry_* config field-for-field.
  */
-export type RetryStageRequest = {
+export type RetryPolicyUpdateRequest = {
     /**
-     * Goal Id
+     * Max Attempts
      */
-    goal_id?: string | null;
+    max_attempts?: number | null;
+    /**
+     * Initial Backoff Seconds
+     */
+    initial_backoff_seconds?: number | null;
+    /**
+     * Backoff Multiplier
+     */
+    backoff_multiplier?: number | null;
+    /**
+     * Max Backoff Seconds
+     */
+    max_backoff_seconds?: number | null;
+    /**
+     * Jitter Ratio
+     */
+    jitter_ratio?: number | null;
 };
 
 /**
@@ -2629,6 +2649,36 @@ export type PlansRetryBlockedPlanningStageResponses = {
 };
 
 export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningStageResponses[keyof PlansRetryBlockedPlanningStageResponses];
+
+export type PlansUpdateRetryPolicyRouteData = {
+    body: RetryPolicyUpdateRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/retry-policy';
+};
+
+export type PlansUpdateRetryPolicyRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansUpdateRetryPolicyRouteError = PlansUpdateRetryPolicyRouteErrors[keyof PlansUpdateRetryPolicyRouteErrors];
+
+export type PlansUpdateRetryPolicyRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansUpdateRetryPolicyRouteResponse = PlansUpdateRetryPolicyRouteResponses[keyof PlansUpdateRetryPolicyRouteResponses];
 
 export type PlansApproveData = {
     body?: never;
