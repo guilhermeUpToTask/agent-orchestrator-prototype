@@ -266,7 +266,19 @@ class GitBranchWorkspace:
         with self._cycle_merge_lock(cycle_id):
             merge_wt = tempfile.mkdtemp(prefix="cycle-merge-")
             os.rmdir(merge_wt)
-            _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+            # A crash between `worktree add` and `worktree remove` leaves a
+            # stale registration that wedges later merges ("already checked
+            # out"). Prune once and retry once inside the held flock.
+            try:
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+            except subprocess.CalledProcessError:
+                self._prune_sync()
+                log.info(
+                    "workspace.merge_worktree_pruned",
+                    cycle_id=cycle_id,
+                    cycle_branch=cycle_branch,
+                )
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
             try:
                 _git(
                     Path(merge_wt),
