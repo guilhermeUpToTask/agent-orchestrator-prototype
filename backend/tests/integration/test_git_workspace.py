@@ -4,7 +4,9 @@ discard is a true rollback, retries begin clean (stateless task execution)."""
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -239,6 +241,36 @@ def test_workspace_prune_and_audit_keep_live_refs_visible(repo):
     assert "plan/p1" in after["branches"]
     assert "task/t1/a1" not in after["branches"]
     assert not any(handle.path in row for row in after["worktrees"])
+
+
+def test_merge_goal_self_heals_stale_cycle_merge_worktree(repo):
+    """Crash between worktree add and remove leaves a stale registration that
+    would wedge every later merge_goal into the same cycle branch. The
+    prune-then-retry path in _merge_goal_sync must clear it and succeed."""
+    ws = GitBranchWorkspace(repo)
+
+    async def setup():
+        h1 = await ws.begin("p1", "t1", 1, cycle_id="c1", goal_id="g1", run_id="run-1")
+        (Path(h1.path) / "feature_a.py").write_text("a\n")
+        await ws.commit(h1)
+
+        h2 = await ws.begin("p1", "t2", 1, cycle_id="c1", goal_id="g2", run_id="run-2")
+        (Path(h2.path) / "feature_b.py").write_text("b\n")
+        await ws.commit(h2)
+
+    asyncio.run(setup())
+
+    # Simulate crash: register a merge worktree for the cycle branch, then
+    # delete its directory WITHOUT `git worktree remove`.
+    stale_wt = tempfile.mkdtemp(prefix="cycle-merge-stale-")
+    Path(stale_wt).rmdir()
+    _git(repo, "worktree", "add", stale_wt, "cycle/c1")
+    shutil.rmtree(stale_wt)
+
+    sha = asyncio.run(ws.merge_goal("p1", "c1", "g1"))
+    assert sha
+    files = _git(repo, "ls-tree", "-r", "--name-only", "cycle/c1").splitlines()
+    assert "feature_a.py" in files
 
 
 def test_concurrent_merge_goal_for_same_cycle_succeeds_for_both_goals(repo, monkeypatch):
