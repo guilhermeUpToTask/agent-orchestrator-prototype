@@ -179,11 +179,18 @@ class InMemoryGoalLeaseRepository:
         worker_id: str,
         lease_seconds: int,
         now: datetime,
-    ) -> None:
+    ) -> bool:
+        now_epoch = int(now.timestamp())
         claim = self._claims.get((plan_id, goal_id))
-        if claim is not None and claim.worker_id == worker_id:
-            claim.expires_at_epoch = int(now.timestamp()) + lease_seconds
-            claim.lease_seconds = lease_seconds
+        if (
+            claim is None
+            or claim.worker_id != worker_id
+            or claim.expires_at_epoch < now_epoch
+        ):
+            return False
+        claim.expires_at_epoch = now_epoch + lease_seconds
+        claim.lease_seconds = lease_seconds
+        return True
 
     def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
         key = (plan_id, goal_id)

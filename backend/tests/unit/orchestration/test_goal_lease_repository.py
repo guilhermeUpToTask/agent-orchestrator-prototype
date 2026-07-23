@@ -48,12 +48,24 @@ def test_heartbeat_extends_only_the_current_workers_goal_lease(env_factory) -> N
 
     assert leases.claim_one_ready_goal("p1", "g1", "w1", 60, env.clock.now())
     env.clock.advance(50)
-    leases.heartbeat("p1", "g1", "w2", 60, env.clock.now())
-    leases.heartbeat("p1", "g1", "w1", 60, env.clock.now())
+    assert not leases.heartbeat("p1", "g1", "w2", 60, env.clock.now())
+    assert leases.heartbeat("p1", "g1", "w1", 60, env.clock.now())
     env.clock.advance(11)
 
     assert leases.is_claim_live("p1", "g1", env.clock.now())
     assert not leases.claim_one_ready_goal("p1", "g1", "w2", 60, env.clock.now())
+
+
+def test_heartbeat_after_expiry_returns_false_without_extending_lease(env_factory) -> None:
+    env = env_factory()
+    _seed_running_plan(env)
+    leases = env.uow.goal_leases
+
+    assert leases.claim_one_ready_goal("p1", "g1", "w1", 60, env.clock.now())
+    env.clock.advance(61)
+
+    assert not leases.heartbeat("p1", "g1", "w1", 60, env.clock.now())
+    assert leases.claim_one_ready_goal("p1", "g1", "w2", 60, env.clock.now())
 
 
 def test_release_clears_only_the_current_workers_goal_lease(env_factory) -> None:

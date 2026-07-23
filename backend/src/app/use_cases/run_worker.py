@@ -41,9 +41,9 @@ from src.domain.repositories.agent_repo import AgentRepository
 
 async def _advance_with_heartbeats(
     heartbeat_interval_seconds: float,
-    heartbeat: Callable[[], None],
+    heartbeat: Callable[[], bool | None],
     advance: Awaitable[str],
-) -> str:
+) -> tuple[str, bool]:
     """Renew a lease (via the given `heartbeat` callback) while one atomic
     action is still running. Generalized (domain unfreeze #12 / Phase 3c) so
     both the plan-level (`drive_plan`) and goal-level (`drive_goal`) loops
@@ -53,8 +53,9 @@ async def _advance_with_heartbeats(
         while True:
             done, _ = await asyncio.wait({task}, timeout=heartbeat_interval_seconds)
             if task in done:
-                return await task
-            heartbeat()
+                return await task, False
+            if heartbeat() is False:
+                return await task, True
     except BaseException:
         if not task.done():
             task.cancel()
@@ -94,7 +95,7 @@ async def drive_plan(
     )
     progressed = 0
     while signal == "continue" and progressed < max_steps:
-        signal = await _advance_with_heartbeats(
+        signal, _ = await _advance_with_heartbeats(
             heartbeat_interval_seconds,
             lambda: uow.plans.heartbeat(plan_id, worker_id),
             advance_plan(
@@ -195,16 +196,20 @@ async def drive_goal(
     )
     progressed = 0
     while signal == "continue" and progressed < max_steps:
-        signal = await _advance_with_heartbeats(
+        signal, lease_lost = await _advance_with_heartbeats(
             heartbeat_interval_seconds,
             lambda: uow.goal_leases.heartbeat(
                 plan_id, goal_id, worker_id, lease_seconds, clock.now()
             ),
             _advance_goal(plan_id, goal_id, uow, execution),
         )
-        uow.goal_leases.heartbeat(plan_id, goal_id, worker_id, lease_seconds, clock.now())
+        if not lease_lost:
+            lease_lost = not uow.goal_leases.heartbeat(
+                plan_id, goal_id, worker_id, lease_seconds, clock.now()
+            )
         if signal == "continue":
             progressed += 1
+        if lease_lost:
+            return "lease_lost", progressed
     return signal, progressed
-
 
