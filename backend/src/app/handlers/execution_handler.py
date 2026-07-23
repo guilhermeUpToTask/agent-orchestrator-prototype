@@ -1196,6 +1196,7 @@ class ExecutionHandler:
                 delay = unit.retry_policy.backoff_for(
                     unit.policy_attempt + 1,
                     jitter_unit=self._jitter_unit(unit.execution.id),
+                    kind=exc.kind,
                 )
                 if exc.failure.retry_after_seconds is not None:
                     delay = max(delay, exc.failure.retry_after_seconds)
@@ -1220,7 +1221,10 @@ class ExecutionHandler:
                         unit.spec.model_id,
                     )
                     failure_count = (existing.failure_count if existing else 0) + 1
-                    circuit_manual = failure_count >= unit.retry_policy.max_attempts
+                    kind_budget = unit.retry_policy.kind_max_attempts.get(
+                        exc.kind, unit.retry_policy.max_attempts
+                    )
+                    circuit_manual = failure_count >= kind_budget
                     uow.executions.upsert_runtime_circuit(
                         RuntimeCircuit(
                             runtime=unit.spec.runtime_type,

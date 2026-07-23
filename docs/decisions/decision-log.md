@@ -281,3 +281,16 @@ block — the scalar block stays the headline (its kind/code/resolutions lead),
 but the summary message notes how many goals are independently blocked and
 the per-goal blocks' legal resolutions are unioned in. Presentation-only
 change to derived read-model properties; no state shape or transition change.
+
+---
+
+**Decision 54 (2026-07-23) — domain unfreeze #14: per-kind retry budgets.**
+`RetryPolicy` gains `kind_max_attempts` and `kind_backoff_scale` so
+self-healing failure kinds stop exhausting into operator-facing blocks:
+`rate_limit` now retries up to 6 attempts on a 4x-scaled (patient) backoff
+curve and ceiling, `connection_error` up to 5; all other kinds keep the
+uniform `max_attempts` budget and curve, and `non_retryable_kinds` is
+untouched. Additive Pydantic fields with defaults — persisted pre-#14
+policies rehydrate unchanged. Motivation: block-frequency UX (blocks are
+automation's give-up signal; a kind that heals by waiting should almost
+never produce one).
