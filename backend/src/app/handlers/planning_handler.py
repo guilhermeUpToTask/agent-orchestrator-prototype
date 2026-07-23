@@ -154,8 +154,19 @@ class PlanningHandler:
         )
 
     async def handle(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
-        if plan.active_cycle is not None:
-            return await self._enrich(plan_id, plan, uow)
+        # An approved intent with no cycle_draft yet always needs
+        # architect_cycle next, checked BEFORE active_cycle: a REPLAN's
+        # SOURCE cycle stays `active_cycle` (CycleStatus.ACTIVE) for the
+        # entire drafting window (it is only superseded when the
+        # replacement activates — source-preserving replan, see
+        # docs/architecture/plan-lifecycle.md), so checking active_cycle
+        # first would route every tick to `_enrich` on the SOURCE cycle's
+        # already-enriched goals instead of drafting the replacement,
+        # leaving the approved replan intent permanently stuck (found via a
+        # real walkthrough: a real reasoner replan on a plan with an
+        # execution-blocked source cycle never reached architect_cycle at
+        # all, and the source cycle's failed goal kept getting re-selected
+        # and re-blocked instead).
         if (
             plan.status == PlanStatus.RUNNING
             and plan.intent_proposal is not None
@@ -163,6 +174,8 @@ class PlanningHandler:
             and plan.cycle_draft is None
         ):
             return await self._architect_cycle(plan_id, plan, uow)
+        if plan.active_cycle is not None:
+            return await self._enrich(plan_id, plan, uow)
         if plan.phase == PlanPhase.ARCHITECTURE:
             return await self._architect(plan_id, plan, uow)
         if plan.phase == PlanPhase.ENRICHING:
