@@ -1201,6 +1201,12 @@ export type PlanDetailResponse = {
     pending_gate: ReviewGate | null;
     block: PlanBlock | null;
     /**
+     * Goal Blocks
+     */
+    goal_blocks: {
+        [key: string]: PlanBlock;
+    };
+    /**
      * Goals
      */
     goals: Array<Goal>;
@@ -1466,9 +1472,61 @@ export type RetryPolicy = {
      */
     jitter_ratio?: number;
     /**
+     * Kind Max Attempts
+     */
+    kind_max_attempts?: {
+        [key in FailureKind]?: number;
+    };
+    /**
+     * Kind Backoff Scale
+     */
+    kind_backoff_scale?: {
+        [key in FailureKind]?: number;
+    };
+    /**
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
+};
+
+/**
+ * RetryPolicyUpdateRequest
+ *
+ * All fields optional: only the ones an operator sets are changed (partial
+ * merge over the plan's current retry policy); the rest keep their current
+ * value. Mirrors execution.retry_* config field-for-field.
+ */
+export type RetryPolicyUpdateRequest = {
+    /**
+     * Max Attempts
+     */
+    max_attempts?: number | null;
+    /**
+     * Initial Backoff Seconds
+     */
+    initial_backoff_seconds?: number | null;
+    /**
+     * Backoff Multiplier
+     */
+    backoff_multiplier?: number | null;
+    /**
+     * Max Backoff Seconds
+     */
+    max_backoff_seconds?: number | null;
+    /**
+     * Jitter Ratio
+     */
+    jitter_ratio?: number | null;
+};
+
+/**
+ * RetryStageRequest
+ */
+export type RetryStageRequest = {
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
 };
 
 /**
@@ -1631,6 +1689,24 @@ export type RunnerBinaryStatus = {
 };
 
 /**
+ * RunnerSandboxStatus
+ */
+export type RunnerSandboxStatus = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Ok
+     */
+    ok: boolean;
+    /**
+     * Message
+     */
+    message: string;
+};
+
+/**
  * RunnerStatusResponse
  */
 export type RunnerStatusResponse = {
@@ -1654,6 +1730,7 @@ export type RunnerStatusResponse = {
      * Agents
      */
     agents: Array<RunnerAgentStatus>;
+    sandbox: RunnerSandboxStatus;
 };
 
 /**
@@ -2570,7 +2647,10 @@ export type PlansRetryBlockedTaskResponses = {
 export type PlansRetryBlockedTaskResponse = PlansRetryBlockedTaskResponses[keyof PlansRetryBlockedTaskResponses];
 
 export type PlansRetryBlockedPlanningStageData = {
-    body?: never;
+    /**
+     * Body
+     */
+    body?: RetryStageRequest | null;
     path: {
         /**
          * Plan Id
@@ -2598,6 +2678,36 @@ export type PlansRetryBlockedPlanningStageResponses = {
 };
 
 export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningStageResponses[keyof PlansRetryBlockedPlanningStageResponses];
+
+export type PlansUpdateRetryPolicyRouteData = {
+    body: RetryPolicyUpdateRequest;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/retry-policy';
+};
+
+export type PlansUpdateRetryPolicyRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansUpdateRetryPolicyRouteError = PlansUpdateRetryPolicyRouteErrors[keyof PlansUpdateRetryPolicyRouteErrors];
+
+export type PlansUpdateRetryPolicyRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansUpdateRetryPolicyRouteResponse = PlansUpdateRetryPolicyRouteResponses[keyof PlansUpdateRetryPolicyRouteResponses];
 
 export type PlansApproveData = {
     body?: never;

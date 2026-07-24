@@ -12,7 +12,7 @@ from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
 from src.domain.services.capability_matching import match_agent
 from datetime import datetime, timezone
-from src.domain.services.navigation import next_action
+from src.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
 
 from src.domain.services import edit_service as ed
 from src.domain.factories.plan_factory import PlanFactory
@@ -103,6 +103,44 @@ def test_multiple_unready_goals_no_noise():
     g3 = goal("g3", 2, [task(0)], deps=["g2"])
     go, _ = next_action([g1, g2, g3], _NOW)
     assert go.id == "g1"
+
+
+# ===== goal-parallelism readiness primitives (domain unfreeze #13) =====
+
+
+def test_ready_goal_ids_returns_all_independent_ready_goals():
+    # g1 and g2 are both ready (no deps); g3 depends on g1 (not done) -> not ready
+    g1 = goal("g1", 0, [task(0)])
+    g2 = goal("g2", 1, [task(0)])
+    g3 = goal("g3", 2, [task(0)], deps=["g1"])
+    assert ready_goal_ids([g1, g2, g3], _NOW) == {"g1", "g2"}
+
+
+def test_ready_goal_ids_diamond_dependency():
+    # d depends on b and c, which both depend on a
+    a = goal("a", 0, [task(0, Status.DONE)], status=Status.DONE)
+    b = goal("b", 1, [task(0)], deps=["a"])
+    c = goal("c", 2, [task(0)], deps=["a"])
+    d = goal("d", 3, [task(0)], deps=["b", "c"])
+    # a is DONE, so b and c are both ready; d needs BOTH b and c done, neither is
+    assert ready_goal_ids([a, b, c, d], _NOW) == {"b", "c"}
+
+
+def test_ready_goal_ids_excludes_terminal_goals():
+    g1 = goal("g1", 0, [task(0, Status.DONE)], status=Status.DONE)
+    g2 = goal("g2", 1, [task(0)])
+    assert ready_goal_ids([g1, g2], _NOW) == {"g2"}
+
+
+def test_action_for_goal_matches_next_action_tail():
+    # action_for_goal, called directly on a goal, must agree with what
+    # next_action would have returned for that same goal — same shared tail.
+    g1 = goal("g1", 0, [task(0)])
+    assert action_for_goal(g1, _NOW) == next_action([g1], _NOW)
+
+    g2 = goal("g2", 0, [task(0, Status.FAILED)])
+    goal_out, second = action_for_goal(g2, _NOW)
+    assert goal_out.id == "g2" and second == "GOAL_FAILED"
 
 
 # ===== FAILED-LOOP FIX =====
@@ -211,7 +249,7 @@ def test_retry_cycle_requeue_then_succeed():
     p = exec_plan([goal("g1", 0, [task(0)])])
     p.start_task("g1", "t0")  # attempts 1
     p.fail_task("g1", "t0", "transient")
-    assert p.retry_policy.should_retry(1, FailureKind.CONNECTION_ERROR)  # domain decides retry
+    assert p.retry_policy.should_retry(1, FailureKind.TOOL_ERROR)  # domain decides retry
     p.requeue_task("g1", "t0")
     p.start_task("g1", "t0")  # attempts 2
     p.complete_task("g1", "t0", TaskResult.success("ok"))
@@ -225,7 +263,7 @@ def test_retry_exhaustion_becomes_terminal():
     p.start_task("g1", "t0")
     p.start_task("g1", "t0")  # 3 attempts
     p.fail_task("g1", "t0", "transient")
-    assert rp.should_retry(3, FailureKind.CONNECTION_ERROR) is False  # exhausted -> stays FAILED
+    assert rp.should_retry(3, FailureKind.TOOL_ERROR) is False  # exhausted -> stays FAILED
 
 
 # ===== EDIT service =====
@@ -324,3 +362,44 @@ def test_factory_reconstruct_roundtrip():
     assert restored.id == p.id and restored.goals[0].id == "g1"
     # reconstruct must NOT regenerate identity or reset state
     assert restored.version == p.version
+
+
+# ===== legacy promotion_reservation migration shim (domain unfreeze #13) =====
+
+
+def _legacy_plan_json(promotion_reservation):
+    """A plan JSON blob shaped as it would have been persisted BEFORE
+    unfreeze #13 introduced goal_promotion_reservations — i.e. it carries the
+    old `promotion_reservation` key and has no `goal_promotion_reservations`
+    key at all."""
+    base = PlanFactory.create("build x", "project-1").model_dump()
+    del base["goal_promotion_reservations"]
+    base["promotion_reservation"] = promotion_reservation
+    return base
+
+
+def test_legacy_plan_with_no_reservation_reconstructs_to_empty_dict():
+    restored = PlanFactory.reconstruct(_legacy_plan_json(None))
+    assert restored.goal_promotion_reservations == {}
+
+
+def test_legacy_goal_promotion_token_migrates_to_the_correct_goal_key():
+    legacy_token = "goal:cycle-1:goal-42"
+    restored = PlanFactory.reconstruct(_legacy_plan_json(legacy_token))
+    assert restored.goal_promotion_reservations == {"goal-42": legacy_token}
+
+
+def test_legacy_opaque_execution_id_reservation_is_dropped_not_misassigned():
+    # a task-attempt-in-flight reservation (an opaque execution id, not a
+    # "goal:{cycle}:{goal}" token) has no recoverable goal_id -- dropping it
+    # is the only coherent choice under the new per-goal keying (see the
+    # migration validator's docstring for the full reasoning).
+    restored = PlanFactory.reconstruct(_legacy_plan_json("execution-attempt-abc123"))
+    assert restored.goal_promotion_reservations == {}
+
+
+def test_plan_already_in_the_new_shape_is_left_untouched():
+    p = PlanFactory.create("build x", "project-1")
+    p.goal_promotion_reservations = {"g1": "goal:c1:g1"}
+    restored = PlanFactory.reconstruct(p.model_dump())
+    assert restored.goal_promotion_reservations == {"g1": "goal:c1:g1"}

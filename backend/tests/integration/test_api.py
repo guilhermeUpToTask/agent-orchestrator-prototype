@@ -469,13 +469,17 @@ def test_blocked_task_retry_over_http(client):
 
     blocked = client.get(f"/api/plans/{plan_id}").json()
     assert blocked["status"] == "blocked"
-    assert blocked["block"]["legal_resolutions"] == [
+    # Domain unfreeze #14: a cyclic goal's block is exposed via goal_blocks,
+    # not the legacy scalar `block` (which stays null for it).
+    assert blocked["block"] is None
+    goal_block = blocked["goal_blocks"][goal.id]
+    assert goal_block["legal_resolutions"] == [
         "retry_stage",
         "edit_task",
         "start_replan",
     ]
-    goal_id = blocked["block"]["goal_id"]
-    task_id = blocked["block"]["task_id"]
+    goal_id = goal_block["goal_id"]
+    task_id = goal_block["task_id"]
 
     response = client.post(
         f"/api/plans/{plan_id}/retry",
@@ -485,6 +489,7 @@ def test_blocked_task_retry_over_http(client):
     recovered = client.get(f"/api/plans/{plan_id}").json()
     assert recovered["status"] == "running"
     assert recovered["block"] is None
+    assert recovered["goal_blocks"] == {}
     retried = recovered["goals"][0]["tasks"][0]
     assert retried["status"] == "pending"
     assert retried["retry_cycle"] == 1
@@ -834,6 +839,9 @@ def test_runner_status_walk_over_http(client):
     assert body["valid"] is True
     assert {b["name"] for b in body["binaries"]} == {"git", "pi", "claude", "gemini"}
     assert body["agents"] == []
+    # ROADMAP item 33: NoSandbox reports honestly, never as a healthy sandbox
+    assert body["sandbox"]["ok"] is True
+    assert "disabled" in body["sandbox"]["message"].lower()
 
     # real mode with an unbound pi agent: invalid with the agent's detail
     agent = client.post(

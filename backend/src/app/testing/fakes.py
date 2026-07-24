@@ -54,6 +54,13 @@ class _Claim:
     lease_seconds: int
 
 
+@dataclass
+class _GoalClaim:
+    worker_id: str
+    expires_at_epoch: int
+    lease_seconds: int
+
+
 # ---- in-memory plan repository with version-CAS + lease semantics ----
 class InMemoryPlanRepository:
     """Mirrors the real adapter's contracts: detached aggregates (deep copy on
@@ -132,6 +139,69 @@ class InMemoryPlanRepository:
         if claim is not None and claim.worker_id == worker_id:
             self._claims.pop(plan_id, None)
 
+    def list_running_ids(self, limit: int) -> list[str]:
+        running = [plan for plan in self._store.values() if plan.status.value == "running"]
+        running.sort(key=lambda plan: plan.id)  # deterministic; real adapter orders by updated_at
+        return [plan.id for plan in running[:limit]]
+
+
+# ---- in-memory goal-lease repository with the SQLite predicate semantics ----
+class InMemoryGoalLeaseRepository:
+    """Mirror the indexed SQLite claim primitive for one plan/goal pair."""
+
+    def __init__(self) -> None:
+        self._claims: dict[tuple[str, str], _GoalClaim] = {}
+
+    def claim_one_ready_goal(
+        self,
+        plan_id: str,
+        goal_id: str,
+        worker_id: str,
+        lease_seconds: int,
+        now: datetime,
+    ) -> bool:
+        key = (plan_id, goal_id)
+        now_epoch = int(now.timestamp())
+        claim = self._claims.get(key)
+        if claim is not None and claim.expires_at_epoch >= now_epoch:
+            return False
+        self._claims[key] = _GoalClaim(
+            worker_id=worker_id,
+            expires_at_epoch=now_epoch + lease_seconds,
+            lease_seconds=lease_seconds,
+        )
+        return True
+
+    def heartbeat(
+        self,
+        plan_id: str,
+        goal_id: str,
+        worker_id: str,
+        lease_seconds: int,
+        now: datetime,
+    ) -> bool:
+        now_epoch = int(now.timestamp())
+        claim = self._claims.get((plan_id, goal_id))
+        if (
+            claim is None
+            or claim.worker_id != worker_id
+            or claim.expires_at_epoch < now_epoch
+        ):
+            return False
+        claim.expires_at_epoch = now_epoch + lease_seconds
+        claim.lease_seconds = lease_seconds
+        return True
+
+    def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
+        key = (plan_id, goal_id)
+        claim = self._claims.get(key)
+        if claim is not None and claim.worker_id == worker_id:
+            self._claims.pop(key, None)
+
+    def is_claim_live(self, plan_id: str, goal_id: str, now: datetime) -> bool:
+        claim = self._claims.get((plan_id, goal_id))
+        return claim is not None and claim.expires_at_epoch > int(now.timestamp())
+
 
 # ---- in-memory outbox ----
 class InMemoryOutbox:
@@ -168,8 +238,10 @@ class InMemoryUnitOfWork:
         repo: InMemoryPlanRepository,
         outbox: InMemoryOutbox,
         executions: InMemoryExecutionRecordRepository | None = None,
+        goal_leases: InMemoryGoalLeaseRepository | None = None,
     ) -> None:
         self.plans = repo
+        self.goal_leases = goal_leases or InMemoryGoalLeaseRepository()
         self.outbox = outbox
         self.executions = executions or InMemoryExecutionRecordRepository()
 
@@ -324,7 +396,7 @@ class DummyBehavior:
     output: str = "ok"
     fail_times: int = 0  # fail the first N attempts, then succeed
     fail_reason: str = "transient"
-    fail_kind: FailureKind = FailureKind.CONNECTION_ERROR  # retryable by default
+    fail_kind: FailureKind = FailureKind.TOOL_ERROR  # retryable by default
     always_fail: bool = False
     emit_events: int = 0  # number of fake agent events to stream
     crash_after_success: bool = False  # simulate worker death AFTER agent returned
@@ -376,6 +448,7 @@ class DummyAgentRunner:
 __all__ = [
     "FakeClock",
     "InMemoryPlanRepository",
+    "InMemoryGoalLeaseRepository",
     "InMemoryOutbox",
     "InMemoryExecutionRecordRepository",
     "InMemoryUnitOfWork",

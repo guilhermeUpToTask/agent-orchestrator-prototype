@@ -30,8 +30,9 @@ from pathlib import Path
 
 import structlog
 
-from src.app.ports import AgentEventSink, TaskFailed, WorkspaceHandle
+from src.app.ports import AgentEventSink, Sandbox, SandboxPolicy, TaskFailed, WorkspaceHandle
 from src.app.runtime_failures import safe_runtime_tail
+from src.infra.runtime.sandbox import NoSandbox
 from src.app.observations import (
     ObservationRepository,
     ProcessObservationPayload,
@@ -189,11 +190,16 @@ class CliAgentRunner(ABC):
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._provider_id = provider_id
         self._model_id = model_id
         self._observation_repository = observation_repository
+        # ROADMAP item 33: NoSandbox is today's behavior and the permanent
+        # fallback, not a placeholder — real confinement (item 34) is a
+        # drop-in adapter swap here, never a change to this call site.
+        self._sandbox: Sandbox = sandbox if sandbox is not None else NoSandbox()
         # Default matches AppContainer.from_env()'s resolution, without
         # constructing a composition root here — CliAgentRunner is an
         # adapter, not the place environment gets read (CLAUDE.md invariant
@@ -397,7 +403,7 @@ class CliAgentRunner(ABC):
         execution_env: dict[str, str],
         observations: list[TelemetryObservation],
     ) -> tuple[TaskResult, str]:
-        cmd = self._build_cmd(prompt)
+        cmd = self._sandbox.wrap(self._build_cmd(prompt), SandboxPolicy(workdir=cwd))
         log.info(f"{self.log_prefix}.running", cwd=cwd, timeout=self._timeout)
 
         def on_observation(observation: TelemetryObservation) -> None:
@@ -553,6 +559,7 @@ class PiAgentRunner(CliAgentRunner):
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -566,6 +573,7 @@ class PiAgentRunner(CliAgentRunner):
             model_id=model_id,
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
+            sandbox=sandbox,
         )
         self._api_key = api_key
         self._model = _pi_model_name(model, provider_id)
@@ -623,6 +631,7 @@ class ClaudeCodeRunner(CliAgentRunner):
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         super().__init__(
             timeout_seconds,
@@ -630,6 +639,7 @@ class ClaudeCodeRunner(CliAgentRunner):
             model_id=model_id,
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
+            sandbox=sandbox,
         )
         self._api_key = api_key
         self._model = model
@@ -662,6 +672,7 @@ class GeminiRunner(CliAgentRunner):
         model_id: str | None = None,
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         super().__init__(
             timeout_seconds,
@@ -669,6 +680,7 @@ class GeminiRunner(CliAgentRunner):
             model_id=model_id,
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
+            sandbox=sandbox,
         )
         self._api_key = api_key
         self._model = model

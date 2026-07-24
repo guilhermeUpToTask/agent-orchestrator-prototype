@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 
 from src.app.handlers.base import PhaseHandler
+from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.ports import (
     AgentEventSink,
     AgentRunner,
@@ -33,27 +34,28 @@ from src.app.ports import (
     VerificationExecutor,
 )
 from src.app.use_cases.advance_plan import advance_plan
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 
 from src.domain.repositories.agent_repo import AgentRepository
 
 
 async def _advance_with_heartbeats(
-    plan_id: str,
-    worker_id: str,
-    lease_seconds: int,
     heartbeat_interval_seconds: float,
-    uow: UnitOfWork,
+    heartbeat: Callable[[], bool | None],
     advance: Awaitable[str],
-) -> str:
-    """Renew the plan lease while one atomic action is still running."""
+) -> tuple[str, bool]:
+    """Renew a lease (via the given `heartbeat` callback) while one atomic
+    action is still running. Generalized (domain unfreeze #13 / Phase 3c) so
+    both the plan-level (`drive_plan`) and goal-level (`drive_goal`) loops
+    share this, instead of each hardcoding its own lease repository call."""
     task = asyncio.ensure_future(advance)
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=heartbeat_interval_seconds)
             if task in done:
-                return await task
-            uow.plans.heartbeat(plan_id, worker_id)
+                return await task, False
+            if heartbeat() is False:
+                return await task, True
     except BaseException:
         if not task.done():
             task.cancel()
@@ -93,12 +95,9 @@ async def drive_plan(
     )
     progressed = 0
     while signal == "continue" and progressed < max_steps:
-        signal = await _advance_with_heartbeats(
-            plan_id,
-            worker_id,
-            lease_seconds,
+        signal, _ = await _advance_with_heartbeats(
             heartbeat_interval_seconds,
-            uow,
+            lambda: uow.plans.heartbeat(plan_id, worker_id),
             advance_plan(
                 plan_id,
                 uow,
@@ -154,3 +153,63 @@ async def worker_tick(
     finally:
         uow.plans.release(plan.id, worker_id)  # free on pause/done/fail/crash
     return progressed > 0 or signal in ("done", "failed")
+
+
+async def _advance_goal(
+    plan_id: str,
+    goal_id: str,
+    uow: UnitOfWork,
+    execution: ExecutionHandler,
+) -> str:
+    with uow:
+        plan = uow.plans.get(plan_id)
+    signal = await execution.handle_goal(plan_id, goal_id, plan, uow)
+    return signal.value
+
+
+async def drive_goal(
+    plan_id: str,
+    goal_id: str,
+    uow: UnitOfWork,
+    runner: AgentRunner,
+    agents: AgentRepository,
+    workspace: Workspace,
+    event_sink: AgentEventSink,
+    clock: Clock,
+    worker_id: str,
+    max_steps: int = 10_000,
+    lease_seconds: int = 60,
+    heartbeat_interval_seconds: float | None = None,
+    verifier: VerificationExecutor | None = None,
+) -> tuple[str, int]:
+    """Goal-level analog of `drive_plan` (ADR-001, domain unfreeze #13 /
+    Phase 3c): advance ONE goal (within an active cycle) until it stops
+    making progress, holding that goal's lease instead of the whole plan's.
+    Never routes to planning/gates — a goal-lease holder only ever drives
+    execution for its one goal."""
+    execution = ExecutionHandler(runner, agents, workspace, event_sink, clock, verifier)
+    signal = "continue"
+    heartbeat_interval_seconds = (
+        max(1.0, lease_seconds / 3)
+        if heartbeat_interval_seconds is None
+        else heartbeat_interval_seconds
+    )
+    progressed = 0
+    while signal == "continue" and progressed < max_steps:
+        signal, lease_lost = await _advance_with_heartbeats(
+            heartbeat_interval_seconds,
+            lambda: uow.goal_leases.heartbeat(
+                plan_id, goal_id, worker_id, lease_seconds, clock.now()
+            ),
+            _advance_goal(plan_id, goal_id, uow, execution),
+        )
+        if not lease_lost:
+            lease_lost = not uow.goal_leases.heartbeat(
+                plan_id, goal_id, worker_id, lease_seconds, clock.now()
+            )
+        if signal == "continue":
+            progressed += 1
+        if lease_lost:
+            return "lease_lost", progressed
+    return signal, progressed
+

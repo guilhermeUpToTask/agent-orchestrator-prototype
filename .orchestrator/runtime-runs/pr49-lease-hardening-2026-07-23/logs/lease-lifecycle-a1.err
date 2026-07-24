@@ -1,0 +1,4 @@
+Reading additional input from stdin...
+2026-07-23T12:13:37.268824Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_request\", error_description=\"No access token was provided in this request\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+2026-07-23T12:20:19.045470Z ERROR codex_core::session: failed to record rollout items: thread 019f8ee5-3fec-73a1-8f7b-33e9c484ae02 not found
+2026-07-23T12:20:19.045510Z ERROR codex_core::session: failed to record rollout items: thread 019f8ee5-3fec-73a1-8f7b-33e9c484ae02 not found

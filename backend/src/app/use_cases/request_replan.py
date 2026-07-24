@@ -13,6 +13,7 @@ request_replan is the holistic conversational re-plan.
 
 from __future__ import annotations
 
+from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.events.outbox import BlockResolved, ReplanRequested
 
 from src.app.ports import UnitOfWork
@@ -32,6 +33,38 @@ def request_replan(plan_id: str, uow: UnitOfWork) -> None:
         if block is not None and block.active:
             block_id = block.id
             plan.resolve_block("start_replan", block.created_at)
+            uow.outbox.add(
+                BlockResolved(
+                    plan_id=plan_id,
+                    block_id=block_id,
+                    resolution="start_replan",
+                )
+            )
+
+        # Domain unfreeze #14: a replan is a holistic, plan-wide mutation --
+        # resolve EVERY active per-goal block too (not just the legacy scalar
+        # above), since the source cycle they belong to is about to be frozen
+        # and superseded anyway (activate_cycle wipes goal_blocks wholesale
+        # once the replacement cycle lands; resolving them now keeps
+        # status_reason/legal_actions/activity coherent for the WAITING
+        # window in between, rather than reporting a stale "partially
+        # blocked" fact during an active replan conversation). "start_replan"
+        # is expected in every execution-triggered block's legal_resolutions,
+        # but that is an invariant of the block-opening call sites, not of
+        # this use case -- verify it explicitly rather than let a mismatch
+        # silently skip a goal (a stale block with a bad resolution set
+        # would otherwise leave that goal permanently, invisibly stuck).
+        for goal_id, goal_block in list(plan.goal_blocks.items()):
+            if not goal_block.active:
+                continue
+            if "start_replan" not in goal_block.legal_resolutions:
+                raise InvalidEditError(
+                    f"goal '{goal_id}' has an active block at stage "
+                    f"'{goal_block.stage}' that cannot resolve via 'start_replan' "
+                    f"(legal resolutions: {goal_block.legal_resolutions})"
+                )
+            block_id = goal_block.id
+            plan.resolve_block("start_replan", goal_block.created_at, goal_id=goal_id)
             uow.outbox.add(
                 BlockResolved(
                     plan_id=plan_id,

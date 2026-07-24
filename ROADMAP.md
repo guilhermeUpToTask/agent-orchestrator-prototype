@@ -189,11 +189,7 @@ Take these up only when real usage demonstrates the need.
 22. **Multi-worker deployment, documented + truth-tested** [EVO] — add a
     two-worker truth test and operator docs now that decision 45's stale-claim
     startup handling exists.
-23. **Goal-level parallelism** [MRF, ADR-001] — the lease *granularity* is the
-    designed parallelism switch (plan → goal → task). Requires `next_action`
-    returning a set of ready units and a workspace merge-conflict strategy.
-    Do **not** bolt a queue on top; move the lease.
-24. **Registry-defined execution profiles and coverage preflight** [LIVE] —
+23. **Registry-defined execution profiles and coverage preflight** [LIVE] —
     let users create stable execution-role profiles and capability policies in
     the registry instead of keeping the TDD role vocabulary in
     `_ROLE_CAPABILITY`. Contracts should reference versioned role/profile ids;
@@ -203,29 +199,62 @@ Take these up only when real usage demonstrates the need.
     without silently rebinding work. Decision 47 already preserves explicit
     role-capability checks and transactional retry binding — build on that,
     don't replace it.
-25. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
+24. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
     claims, and restart counts (a `/api/workers` endpoint). The lease is the
     recovery *mechanism*; this is *visibility*.
-26. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
+25. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
     (systemd or process manager) that restarts a dead worker; the lease
     handles the takeover. Document failure modes; no distributed consensus.
-27. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
+26. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
     runner now runs `--mode json`, the NDJSON stream tails into the bounded
     per-attempt runtime log (atomic rotation; readable mid-run via
     `GET /plans/{id}/attempts/{id}/log`), tool/usage events are promoted to
     agent_events, and the final assistant message becomes the task output
     (`src/infra/runtime/pi_protocol.py`). Remaining scope is only the full
     rpc/stdio handshake if bidirectional control is ever needed.
-28. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
+27. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
     repository port *only if* multi-machine workers become real. Deliberately
-    unnecessary for local-first.
-29. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
+    unnecessary for local-first. Re-evaluated 2026-07-22 alongside goal-level
+    parallelism landing (item 23's old slot, now implemented — see
+    [ADR-001](docs/decisions/adr-001-concurrency-lease.md)): the SQLite
+    `goal_leases` table already delivers real cross-*process* concurrency on
+    one machine, which is what actually needed solving; Redis only becomes
+    the right answer for cross-*machine* deployment, a different problem
+    this system's single-SQLite-file persistence model doesn't attempt to
+    solve either. Still deliberately unnecessary until multi-machine is the
+    actual goal. Re-confirmed 2026-07-23 (domain unfreeze #14, symmetric
+    per-goal leases + the in-process goal-worker pool): real single-process
+    concurrency needed no new coordination primitive either, just removing
+    the plan-level lease's execution-dispatch privilege — another point in
+    favor of "this problem was never actually about the transport."
+28. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
     ruff/mypy; nightly/merge-only: the paid real-model smoke. Still open —
     the split matters, don't burn money per push.
-30. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
-31. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
+29. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
+30. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
+31. **Proactive goal-scope-disjointness guard** [MRF, ADR-001 follow-up] —
+    goal-level parallelism (implemented 2026-07-22, domain unfreeze #13;
+    made fully symmetric 2026-07-23, domain unfreeze #14) ships with only a
+    REACTIVE safety net for concurrent goals touching overlapping files (the
+    existing `goal_promotion_failure` block, hit at git-merge time — now
+    per-goal, see `Plan.goal_blocks`, so one goal's merge conflict no longer
+    stalls unrelated goals either). A proactive guard would check, at
+    goal-enrichment time, whether a goal's frozen `allowed_scope` overlaps
+    any OTHER concurrently-reachable goal's (no dependency edge either way)
+    and reject/re-prompt before either ever runs. Deliberately deferred, not
+    an oversight: the failure-UX decision (auto-reprompt the reasoner vs.
+    open a block vs. just log) isn't settled, and "could legitimately run
+    concurrently" is a static approximation that could produce false-positive
+    friction on a deployment that never actually contends (single worker
+    pool, e.g.) — needs real usage evidence first, same as the other
+    evidence-gated items on this list. Unfreeze #13's in-process goal-worker
+    pool (`max_concurrent_goals`, default 4, not load-tested) makes real
+    contention MORE likely to actually occur in a live deployment than #12's
+    additive shape did, which raises the value of real usage evidence here
+    but still doesn't settle the failure-UX question on its own — the
+    dependency stays open.
 
 32. **Devcontainer runtime parity** [WALK] — the live container carries
     runtimes the `.devcontainer` config never installs (ad-hoc installs, lost
@@ -239,30 +268,27 @@ Take these up only when real usage demonstrates the need.
     stale `AGENT_MODE` terminal env (the config key replaced it) and align
     the image's Python with CI (3.12). `gemini` remains a factory
     `runtime_type` with no binary anywhere — decide to provision or delist it.
-33. **Sandbox abstraction — keep confinement out of the domain** [WALK] —
-    evaluate the boundary BEFORE any bubblewrap code exists: the frozen
-    domain must never know what a sandbox is, and even `ExecutionHandler`
-    should only see "attempts run confined or not". Likely shape: a
-    `Sandbox` port at the app/infra seam (peer of `AgentRunner`, not a
-    domain concept) with `wrap(cmd, policy) -> cmd` + `probe()` semantics,
-    adapters `NoSandbox` (today's behavior, the permanent fallback) and
-    later `BubblewrapSandbox`; the CLI runners/`supervise_process` consume
-    it blindly; probe status surfaces through `dependency_checker` /
-    `GET /api/runner/status` like the binary probes. Deliverable is a short
-    design note + the port skeleton with the no-op adapter wired — zero
-    behavior change — so item 34 becomes a pure adapter drop-in.
-34. **True FS sandboxing per attempt (bubblewrap)** [WALK] — parked with
-    evidence (2026-07-19): bwrap 0.11.0 installs but cannot create namespaces
-    in the current devcontainer (Docker default seccomp blocks `unshare`,
-    userns and plain modes both fail) — a sandbox that can't start where the
-    orchestrator runs delivers zero coverage. Blocked on item 32's container
-    capability work, and on items 2–3 (a bwrap mount plan needs pointer-free
-    workspaces and a scrubbed env anyway). Design when unblocked: a
-    sandbox-when-available wrapper — probe at worker boot alongside the
-    existing binary probes, run attempts under bwrap (bind: attempt workspace
-    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on),
-    loud `sandbox=disabled` fallback to the post-run guard elsewhere.
-35. **Per-role model quality bindings** [WALK] — the free reasoning model
+33. **True FS sandboxing per attempt (bubblewrap)** [WALK] — item 32's
+    devcontainer fix (2026-07-22: seccomp profile + AppArmor policy for safe
+    nested bubblewrap) unblocked this: bwrap 0.11.0 now creates the
+    unprivileged user namespace successfully in this container (re-verified
+    live, 2026-07-22 — `--unshare-user` + a bound writable worktree + real
+    read-only enforcement elsewhere, `pi`/`claude` both resolve inside the
+    sandbox). The `Sandbox` port + `NoSandbox` adapter landed the same day
+    (peer of `AgentRunner`, explicitly not a domain concept — the frozen
+    domain and `ExecutionHandler` never see this type; `wrap(cmd, policy) ->
+    cmd` + `probe()`, consumed blindly by the CLI runners/
+    `supervise_process`; probe status surfaces through `GET
+    /api/runner/status` alongside the binary probes). Remaining scope is
+    purely the real `BubblewrapSandbox` adapter: bind the attempt worktree
+    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on;
+    config-gated (default off, mirrors `agent_runner.mode`) so nothing
+    changes for an existing real-mode setup until explicitly enabled; loud
+    `sandbox=disabled` fallback when the probe fails, never a silent
+    downgrade or a refusal to run. Items 2–3 (pointer-free workspaces, a
+    scrubbed env) remain open hardening follow-ups, not blockers for a first
+    `--ro-bind / /`-shaped cut.
+34. **Per-role model quality bindings** [WALK] — the free reasoning model
     follows task descriptions over role instructions; the registry already
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the

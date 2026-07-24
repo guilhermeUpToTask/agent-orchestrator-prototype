@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
 
 from src.domain.value_objects.lifecycle import FailureKind
 
@@ -17,6 +19,15 @@ class RetryPolicy(BaseModel):
     backoff_multiplier: float = 2.0
     max_backoff_seconds: float = 900.0
     jitter_ratio: float = 0.2
+    kind_max_attempts: dict[FailureKind, int] = Field(
+        default_factory=lambda: {
+            FailureKind.RATE_LIMIT: 6,
+            FailureKind.CONNECTION_ERROR: 5,
+        }
+    )
+    kind_backoff_scale: dict[FailureKind, float] = Field(
+        default_factory=lambda: {FailureKind.RATE_LIMIT: 4.0}
+    )
     # Typed classification (shared failure taxonomy): a token-limit or auth failure
     # will fail identically on every retry, so it is terminal immediately.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(
@@ -30,9 +41,20 @@ class RetryPolicy(BaseModel):
     def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:
         if kind is not None and kind in self.non_retryable_kinds:
             return False
-        return attempts < self.max_attempts
+        budget = (
+            self.kind_max_attempts.get(kind, self.max_attempts)
+            if kind is not None
+            else self.max_attempts
+        )
+        return attempts < budget
 
-    def backoff_for(self, attempt: int, *, jitter_unit: float = 0.5) -> float:
+    def backoff_for(
+        self,
+        attempt: int,
+        *,
+        jitter_unit: float = 0.5,
+        kind: FailureKind | None = None,
+    ) -> float:
         """Backoff to wait BEFORE the given attempt (1-based attempt number).
 
         attempt 1 is the first try -> no backoff (0.0).
@@ -43,9 +65,14 @@ class RetryPolicy(BaseModel):
         if attempt <= 1:
             return 0.0
         retry_index = attempt - 1  # attempt 2 -> retry 1, attempt 3 -> retry 2
+        scale = self.kind_backoff_scale.get(kind, 1.0) if kind is not None else 1.0
         # exponent retry_index-1 so the FIRST retry pays the base delay (multiplier**0):
         # initial=2, mult=2 -> attempt2=2s, attempt3=4s, attempt4=8s.
-        delay = self.initial_backoff_seconds * (self.backoff_multiplier ** (retry_index - 1))
+        delay = (
+            self.initial_backoff_seconds
+            * scale
+            * (self.backoff_multiplier ** (retry_index - 1))
+        )
         bounded_unit = max(0.0, min(1.0, jitter_unit))
         jitter = 1.0 + self.jitter_ratio * ((bounded_unit * 2.0) - 1.0)
-        return min(delay * jitter, self.max_backoff_seconds)
+        return min(delay * jitter, self.max_backoff_seconds * scale)

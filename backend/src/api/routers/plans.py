@@ -55,6 +55,7 @@ from src.app.use_cases.pause_resume import (
     retry_task,
 )
 from src.app.use_cases.request_replan import request_replan
+from src.app.use_cases.update_retry_policy import update_retry_policy
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
     Cycle,
@@ -127,6 +128,12 @@ class PlanDetailResponse(BaseModel):
     active_cycle: Cycle | None
     pending_gate: ReviewGate | None
     block: PlanBlock | None
+    # Domain unfreeze #14 — per-goal blocks: goal_id -> that goal's own active
+    # (or resolved-but-recent) PlanBlock, independent of the plan-wide `block`
+    # scalar above. Only entries with `.active` True are currently unresolved;
+    # callers resolving one pass its goal_id to POST /retry (or the relevant
+    # resolution endpoint) exactly as they already do for `block.goal_id`.
+    goal_blocks: dict[str, PlanBlock]
     goals: list[Goal]
     cycles: list[Cycle]
     intent_proposal: IntentProposal | None
@@ -375,6 +382,7 @@ async def create(
         body.project_id,
         request_id,
         container.new_unit_of_work(),
+        retry_policy=container.default_retry_policy,
     )
     if opened.request_replayed:
         with container.new_unit_of_work() as uow:
@@ -577,6 +585,9 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
             else None
         ),
         block=(plan.block if plan.block is not None and plan.block.active else None),
+        goal_blocks={
+            goal_id: block for goal_id, block in plan.goal_blocks.items() if block.active
+        },
         goals=goals,
         cycles=plan.cycles,
         intent_proposal=plan.intent_proposal,
@@ -893,9 +904,19 @@ def retry_blocked_task(
     )
 
 
+class RetryStageRequest(BaseModel):
+    # Domain unfreeze #14: disambiguates which goal's agent_capability block
+    # to retry when more than one goal is independently blocked at once.
+    # Omit it when unambiguous (a plan-wide reasoner_failure block, or
+    # exactly one active per-goal block) -- unset body stays backward
+    # compatible with callers that send none at all.
+    goal_id: str | None = None
+
+
 @router.post("/{plan_id}/retry-stage", status_code=204)
 def retry_blocked_planning_stage(
     plan_id: str,
+    body: RetryStageRequest | None = None,
     container: AppContainer = Depends(get_container),
 ) -> None:
     """Retry a blocked reasoner stage or agent binding after registry repair."""
@@ -904,7 +925,35 @@ def retry_blocked_planning_stage(
         container.new_unit_of_work(),
         container.clock,
         container.agent_repo,
+        goal_id=body.goal_id if body is not None else None,
     )
+
+
+class RetryPolicyUpdateRequest(BaseModel):
+    """All fields optional: only the ones an operator sets are changed (partial
+    merge over the plan's current retry policy); the rest keep their current
+    value. Mirrors execution.retry_* config field-for-field."""
+
+    max_attempts: int | None = None
+    initial_backoff_seconds: float | None = None
+    backoff_multiplier: float | None = None
+    max_backoff_seconds: float | None = None
+    jitter_ratio: float | None = None
+
+
+@router.post("/{plan_id}/retry-policy", status_code=204)
+def update_retry_policy_route(
+    plan_id: str,
+    body: RetryPolicyUpdateRequest,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Retune an EXISTING plan's retry/backoff budget (un-freeze #12) — e.g.
+    raise max_attempts/max_backoff_seconds so a plan stuck on a rate-limited
+    provider keeps retrying automatically for longer before opening a block.
+    Distinct from the execution.retry_* config keys, which only seed a NEW
+    plan's policy at creation and never touch one already persisted."""
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    update_retry_policy(plan_id, updates, container.new_unit_of_work())
 
 
 @router.post("/{plan_id}/approve", status_code=204)

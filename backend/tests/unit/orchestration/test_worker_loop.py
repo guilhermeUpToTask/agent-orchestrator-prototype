@@ -7,15 +7,19 @@ tests on sqlite are the truth-test for lease-based recovery."""
 import asyncio
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
+from src.domain.errors.tasks_errors import StaleVersionError
 from src.domain.value_objects.lifecycle import Status
 
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.control import finish_review
 from src.app.use_cases.run_worker import _advance_with_heartbeats, drive_plan, worker_tick
+from src.infra.runtime.factory import RunnerModeStatus
+from src.infra.worker.main import run_worker_forever
 
 
 def plan_with_chain():
@@ -178,8 +182,7 @@ def test_worker_tick_reports_progress_not_claiming(env_factory):
     assert env.runner.calls.get("g1t0") == 1
 
 
-def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
-    env = env_factory()
+def test_heartbeat_failure_cancels_and_awaits_the_advance_task():
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -194,17 +197,13 @@ def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
         task = asyncio.create_task(pending_advance())
         await started.wait()
 
-        def fail_heartbeat(plan_id: str, worker_id: str) -> None:
+        def fail_heartbeat() -> None:
             raise RuntimeError("lease renewal failed")
 
-        env.uow.plans.heartbeat = fail_heartbeat
         try:
             await _advance_with_heartbeats(
-                "p1",
-                "w1",
-                60,
                 0,
-                env.uow,
+                fail_heartbeat,
                 task,
             )
         except RuntimeError as exc:
@@ -216,3 +215,81 @@ def test_heartbeat_failure_cancels_and_awaits_the_advance_task(env_factory):
         assert cancelled.is_set()
 
     asyncio.run(scenario())
+
+
+def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
+    from src.app.use_cases import claim_ready_goal as claim_module
+    from src.app.use_cases import run_worker as worker_module
+    from src.infra.worker import main as worker_main
+
+    releases: list[tuple[str, str, str]] = []
+    spawned: list[asyncio.Task[tuple[str, int]]] = []
+    stop = asyncio.Event()
+    tick_count = 0
+    claim_count = 0
+
+    class GoalLeases:
+        def release(self, plan_id: str, goal_id: str, worker_id: str) -> None:
+            releases.append((plan_id, goal_id, worker_id))
+
+    goal_uow = SimpleNamespace(goal_leases=GoalLeases())
+    container = SimpleNamespace(
+        new_unit_of_work=lambda: goal_uow,
+        reasoner=object(),
+        agent_repo=object(),
+        capability_repo=object(),
+        clock=object(),
+        config_store=object(),
+        workspace=object(),
+        agent_runner=object(),
+        agent_event_sink=object(),
+        verification_executor=None,
+    )
+
+    async def fake_worker_tick(*args, **kwargs):
+        nonlocal tick_count
+        tick_count += 1
+        await asyncio.sleep(0)
+        if tick_count == 2:
+            stop.set()
+        return False
+
+    def fake_claim(*args, **kwargs):
+        nonlocal claim_count
+        claim_count += 1
+        return ("p1", "g1") if claim_count == 1 else None
+
+    async def stale_drive(*args, **kwargs):
+        raise StaleVersionError("p1", 1, 2)
+
+    original_ensure_future = asyncio.ensure_future
+
+    def capture_task(coro):
+        task = original_ensure_future(coro)
+        spawned.append(task)
+        return task
+
+    monkeypatch.setattr(worker_module, "worker_tick", fake_worker_tick)
+    monkeypatch.setattr(worker_module, "drive_goal", stale_drive)
+    monkeypatch.setattr(claim_module, "claim_ready_goal", fake_claim)
+    monkeypatch.setattr(worker_main, "reconcile_stale_attempts", lambda *args: [])
+    monkeypatch.setattr(
+        worker_main,
+        "validate_agent_runner_mode",
+        lambda config_store: RunnerModeStatus(mode="dry-run", valid=True),
+    )
+    monkeypatch.setattr(worker_main.asyncio, "ensure_future", capture_task)
+
+    asyncio.run(
+        run_worker_forever(
+            container,
+            worker_id="w1",
+            poll_seconds=0,
+            stop=stop,
+            max_concurrent_goals=1,
+        )
+    )
+
+    assert len(spawned) == 1
+    assert spawned[0].result() == ("contention", 0)
+    assert releases == [("p1", "g1", "w1")]

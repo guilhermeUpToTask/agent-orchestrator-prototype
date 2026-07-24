@@ -83,12 +83,17 @@ def test_unpromotable_done_goal_blocks_instead_of_raising() -> None:
     assert signal == Signal.PAUSED
     blocked = plans.get(plan.id)
     assert blocked.status == PlanStatus.BLOCKED
-    assert blocked.block is not None
-    assert blocked.block.kind == "execution_failure"
-    assert blocked.block.goal_id == "goal-1"
-    assert blocked.block.task_id == "task-1"
-    assert "edit_task" in blocked.block.legal_resolutions
-    assert "start_replan" in blocked.block.legal_resolutions
+    # Domain unfreeze #14: a cyclic goal's block routes into goal_blocks, not
+    # the legacy scalar `block` (which stays None for cyclic per-goal blocks).
+    assert blocked.block is None
+    block = blocked.goal_blocks.get("goal-1")
+    assert block is not None
+    assert block.active
+    assert block.kind == "execution_failure"
+    assert block.goal_id == "goal-1"
+    assert block.task_id == "task-1"
+    assert "edit_task" in block.legal_resolutions
+    assert "start_replan" in block.legal_resolutions
     # The goal never merges/completes on this path.
     still_open_goal = blocked.active_cycle.goals[0]  # type: ignore[union-attr]
     assert still_open_goal.status != Status.DONE

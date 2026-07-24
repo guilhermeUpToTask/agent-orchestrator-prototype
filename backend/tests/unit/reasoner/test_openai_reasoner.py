@@ -100,6 +100,36 @@ def test_submit_intent_returns_normalized_review_candidate():
     ]
 
 
+def test_schema_invalid_submission_raises_reasoner_unavailable_not_a_crash():
+    """Found via a real walkthrough against a free-tier model
+    (nvidia/nemotron-3-ultra-550b-a55b:free): the model submitted
+    constraints/exclusions/assumptions/unresolved_questions as markdown
+    bullet-list STRINGS instead of the schema's list[str] -- a value that
+    parses as valid JSON and satisfies `run_tool_session`'s own required-arg
+    check, but fails IntentCandidate's stricter Pydantic type, at which
+    point it used to escape as an unhandled ValidationError all the way to
+    an API 500. It must instead surface as the same ReasonerUnavailable
+    every other reasoner failure does, so PlanningHandler's existing
+    backoff/block machinery handles it."""
+    import pytest
+
+    from src.app.ports import ReasonerUnavailable
+
+    client = FakeLLMClient(
+        [
+            tool_turn(
+                "submit_intent_proposal",
+                intent_args(constraints="- one\n- two", exclusions="- three"),
+            )
+        ]
+    )
+
+    with pytest.raises(ReasonerUnavailable) as excinfo:
+        converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
+
+    assert excinfo.value.transient is True
+
+
 def test_submitted_intent_with_unresolved_questions_remains_a_question_turn():
     client = FakeLLMClient(
         [

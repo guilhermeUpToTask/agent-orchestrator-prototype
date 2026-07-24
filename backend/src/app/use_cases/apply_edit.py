@@ -117,11 +117,26 @@ def apply_edit(
 ) -> None:
     with uow:
         plan = uow.plans.get(plan_id)
+        # Unchanged from before #13: this stays a plan-wide guard (any open
+        # promotion reservation blocks any edit) -- scoping IT per-goal is a
+        # separate, unaudited change not part of this unfreeze.
         plan.assert_lifecycle_mutation_allowed()
+        # Domain unfreeze #14: recovery-edit eligibility is scoped to THIS
+        # edit's own goal -- an active edit_task block on goal A must not
+        # grant recovery-edit permission for an edit targeting unrelated
+        # goal B (which may still be RUNNING normally). Legacy scalar
+        # `plan.block` remains the source for non-cyclic plans and the few
+        # genuinely plan-wide block kinds (no goal_id).
+        goal_block = (
+            plan.goal_blocks.get(edit.goal_id) if plan.active_cycle is not None else None
+        )
+        active_block = (
+            goal_block
+            if goal_block is not None and goal_block.active
+            else (plan.block if plan.block is not None and plan.block.active else None)
+        )
         recovery_edit = bool(
-            plan.block is not None
-            and plan.block.active
-            and "edit_task" in plan.block.legal_resolutions
+            active_block is not None and "edit_task" in active_block.legal_resolutions
         )
         # RUNNING goals + FAILED tasks are editable only in a settled recovery
         # window: a manual pause or an explicit structured block that advertises

@@ -840,6 +840,69 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RetryStageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/retry-policy": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Update Retry Policy Route",
+        "description": "Retune an EXISTING plan's retry/backoff budget (un-freeze #12) \u2014 e.g.\nraise max_attempts/max_backoff_seconds so a plan stuck on a rate-limited\nprovider keeps retrying automatically for longer before opening a block.\nDistinct from the execution.retry_* config keys, which only seed a NEW\nplan's policy at creation and never touch one already persisted.",
+        "operationId": "plans-update_retry_policy_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryPolicyUpdateRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -3531,6 +3594,13 @@
               "backoff_multiplier": 2.0,
               "max_backoff_seconds": 900.0,
               "jitter_ratio": 0.2,
+              "kind_max_attempts": {
+                "connection_error": 5,
+                "rate_limit": 6
+              },
+              "kind_backoff_scale": {
+                "rate_limit": 4.0
+              },
               "non_retryable_kinds": [
                 "auth_error",
                 "token_limit",
@@ -5553,6 +5623,13 @@
               }
             ]
           },
+          "goal_blocks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanBlock"
+            },
+            "type": "object",
+            "title": "Goal Blocks"
+          },
           "goals": {
             "items": {
               "$ref": "#/components/schemas/Goal"
@@ -5643,6 +5720,7 @@
           "active_cycle",
           "pending_gate",
           "block",
+          "goal_blocks",
           "goals",
           "cycles",
           "intent_proposal",
@@ -6073,6 +6151,26 @@
             "title": "Jitter Ratio",
             "default": 0.2
           },
+          "kind_max_attempts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Max Attempts"
+          },
+          "kind_backoff_scale": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Backoff Scale"
+          },
           "non_retryable_kinds": {
             "items": {
               "$ref": "#/components/schemas/FailureKind"
@@ -6090,6 +6188,85 @@
         "type": "object",
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
+      },
+      "RetryPolicyUpdateRequest": {
+        "properties": {
+          "max_attempts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Attempts"
+          },
+          "initial_backoff_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Backoff Seconds"
+          },
+          "backoff_multiplier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backoff Multiplier"
+          },
+          "max_backoff_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Backoff Seconds"
+          },
+          "jitter_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jitter Ratio"
+          }
+        },
+        "type": "object",
+        "title": "RetryPolicyUpdateRequest",
+        "description": "All fields optional: only the ones an operator sets are changed (partial\nmerge over the plan's current retry policy); the rest keep their current\nvalue. Mirrors execution.retry_* config field-for-field."
+      },
+      "RetryStageRequest": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          }
+        },
+        "type": "object",
+        "title": "RetryStageRequest"
       },
       "RetryTaskRequest": {
         "properties": {
@@ -6366,6 +6543,29 @@
         ],
         "title": "RunnerBinaryStatus"
       },
+      "RunnerSandboxStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ok",
+          "message"
+        ],
+        "title": "RunnerSandboxStatus"
+      },
       "RunnerStatusResponse": {
         "properties": {
           "mode": {
@@ -6400,6 +6600,9 @@
             },
             "type": "array",
             "title": "Agents"
+          },
+          "sandbox": {
+            "$ref": "#/components/schemas/RunnerSandboxStatus"
           }
         },
         "type": "object",
@@ -6407,7 +6610,8 @@
           "mode",
           "valid",
           "binaries",
-          "agents"
+          "agents",
+          "sandbox"
         ],
         "title": "RunnerStatusResponse"
       },

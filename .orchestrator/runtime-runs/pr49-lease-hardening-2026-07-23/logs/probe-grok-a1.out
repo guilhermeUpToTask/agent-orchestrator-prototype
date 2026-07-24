@@ -1,0 +1,23 @@
+{
+  "text": "OK",
+  "stopReason": "EndTurn",
+  "sessionId": "019f8edd-2c51-7ea2-bc60-8e64624456db",
+  "requestId": "98b697fc-8133-4324-bf64-dadad39e75f8",
+  "thought": "The user wants me to reply with exactly one word: OK. This is a simple request with no need for tools.",
+  "usage": {
+    "input_tokens": 18910,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 25,
+    "reasoning_tokens": 24,
+    "total_tokens": 18935
+  },
+  "num_turns": 1,
+  "modelUsage": {
+    "grok-4.5-build-free": {
+      "inputTokens": 18910,
+      "outputTokens": 25,
+      "cacheReadInputTokens": 0,
+      "modelCalls": 1
+    }
+  }
+}

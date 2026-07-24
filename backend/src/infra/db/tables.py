@@ -92,6 +92,26 @@ class PlanRequestTable(Base):
 
 
 # ---------------------------------------------------------------------------
+# Goal leases — per-goal worker claims beside the Plan aggregate document
+# ---------------------------------------------------------------------------
+
+
+class GoalLeaseTable(Base):
+    __tablename__ = "goal_leases"
+
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), primary_key=True
+    )
+    goal_id: Mapped[str] = mapped_column(String, primary_key=True)
+    claimed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    claimed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (Index("ix_goal_leases_claim", "claimed_by", "lease_expires_at"),)
+
+
+# ---------------------------------------------------------------------------
 # Transactional outbox (coarse domain events) — written in the SAME transaction
 # as the plan state; a relay delivers rows and marks delivered_at. Consumers
 # dedup on event_id (delivery is at-least-once).

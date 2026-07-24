@@ -15,12 +15,20 @@ Create every change from current `main` on a short-lived branch:
 - `docs/<description>` for documentation
 - `ci/<description>` for delivery automation
 
-Humans and agents follow the same rule. Open a pull request to `main`, keep it
-small, and use squash merge. Do not push directly to `main`. Required CI checks
-must pass and the branch must be up to date before merge. Reviews are not required
-while the repository has one maintainer; to enable them later, set
-`required_pull_request_reviews.required_approving_review_count` to `1` in the
-`main` branch-protection rule.
+Branches and pull requests are deliberately decoupled. A branch, worktree,
+task, or completed feature does not automatically become a pull request.
+Agents first implement and validate work, then present the user with a feature
+inventory: completed features, commits/branches, dependencies, overlap, CI
+status, and a recommended grouping. The user alone chooses whether to create a
+pull request and which features belong in it.
+
+Agents must not open, close, combine, retarget, or merge a pull request without
+explicit authorization for that exact action and grouping. A user-approved pull
+request targets `main` and uses squash merge. Do not push directly to `main`.
+Required CI checks must pass and the PR branch must be up to date before merge.
+Reviews are not required while the repository has one maintainer; to enable
+them later, set `required_pull_request_reviews.required_approving_review_count`
+to `1` in the `main` branch-protection rule.
 
 ## Conventional Commits
 
@@ -53,6 +61,44 @@ Every pull request to `main` runs these checks in parallel:
 - semantic PR title validation
 
 Integration tests use local adapters and do not require a Redis service.
+Starlette's synchronous `TestClient` must run through the supported `httpx2`
+transport declared in the backend dev dependencies; do not remove it and rely
+on Starlette's deprecated plain-`httpx` compatibility fallback.
+
+## Recovering conflicting pull requests
+
+Treat each pull request's last independently green commit as its source of
+truth. If a manual merge from `main` corrupts a branch, do not repair the
+result by repeatedly combining the affected pull requests. Restore the branch
+to its last green commit, then reapply only the required upstream changes.
+
+Generated API artifacts are never conflict-resolution inputs:
+
+- resolve backend route and schema source files first
+- discard conflict-marker or hand-edited versions of `frontend/openapi.json`
+  and `frontend/src/types/generated/`
+- run `npm run generate:api` from `frontend/`
+- commit the regenerated output only after the frontend build and generated
+  drift check pass
+
+Do not fold two independently green feature pull requests together merely to
+avoid a generated-file conflict. That changes the test composition and makes
+the combined branch a new, unreviewed integration target. Merge one feature,
+update the remaining branch from the new `main`, regenerate once, and rerun
+CI. If one pull request is explicitly selected as the source of truth, close
+the superseded pull request and keep its branch until the surviving pull
+request has merged.
+
+Recovery checklist:
+
+1. Record the last green SHA for every affected pull request.
+2. Inspect merge commits with `git show --remerge-diff`.
+3. Restore the selected branch to its last green SHA.
+4. Resolve only source files; regenerate derived files.
+5. Run Ruff, Mypy, focused backend tests, the frontend build, and type
+   generation locally.
+6. Push and wait for a completely new CI run before declaring the branch
+   merge-ready.
 
 ## Release PRs
 
