@@ -47,6 +47,29 @@ class CapabilityNoLongerSatisfiedError(DomainError):
         )
 
 
+class RoleUnsatisfiableError(DomainError):
+    """No registered agent covers a mandatory run role's capability set.
+
+    Raised by role resolution, which is reached both during enrichment (where
+    it becomes an `agent_capability` block) and from `retry_stage`, whose whole
+    purpose is rebinding that block from a repaired registry. It must be a
+    CODED DomainError: a bare builtin cannot be mapped by the API's single
+    status table and surfaces to the operator as an opaque 500 instead of
+    naming the capabilities they need to register.
+    """
+
+    code = "ROLE_UNSATISFIABLE"
+
+    def __init__(self, role: str, required: list[str]) -> None:
+        self.role = role
+        self.required = required
+        super().__init__(
+            f"No configured agent covers {role}: {sorted(set(required))}. "
+            "Register an agent with these capabilities, then retry the stage.",
+            context={"role": role, "required": sorted(set(required))},
+        )
+
+
 class NoDefaultAgentError(DomainError):
     code = "NO_DEFAULT_AGENT"
 

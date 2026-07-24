@@ -6,6 +6,7 @@ from src.app.use_cases.pause_resume import retry_planning_stage
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
+from src.domain.errors.agent_errors import RoleUnsatisfiableError
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
 from src.domain.entities.task import Task
@@ -113,7 +114,10 @@ def test_retry_agent_binding_is_atomic_while_registry_has_a_gap(env_factory):
     )
     env.seed(blocked_plan(env.clock.now()))
 
-    with pytest.raises(ValueError, match="implementer"):
+    # A coded DomainError, not a bare ValueError: the API's single status table
+    # maps it to 422 so `POST /retry-stage` names the missing capabilities
+    # instead of returning an opaque 500.
+    with pytest.raises(RoleUnsatisfiableError, match="implementer"):
         retry_planning_stage("p1", env.uow, env.clock, env.agents)
 
     stored = env.stored("p1")

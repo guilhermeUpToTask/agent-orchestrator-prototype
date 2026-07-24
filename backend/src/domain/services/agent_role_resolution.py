@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import Enum
 
 from src.domain.entities.agent_spec import AgentSpec
+from src.domain.errors.agent_errors import RoleUnsatisfiableError
 from src.domain.repositories.agent_repo import AgentRepository
 from src.domain.services.capability_matching import matching_agent_id
 
@@ -32,7 +33,7 @@ def resolve_role_agent(
     catalog = agents.list()
     agent_id = matching_agent_id(required, catalog)
     if agent_id is None:
-        raise ValueError(f"no configured agent covers {role.value}: {sorted(set(required))}")
+        raise RoleUnsatisfiableError(role.value, required)
     return agents.get(agent_id)
 
 
