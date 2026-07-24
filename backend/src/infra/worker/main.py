@@ -152,6 +152,33 @@ async def run_worker_forever(
             goal_uow.goal_leases.release(plan_id, goal_id, worker_id)
 
     while stop is None or not stop.is_set():
+        # SQLite access is synchronous. Do not let the coordinator perform a
+        # plan claim (or another goal-claim scan) while goal tasks are in
+        # flight: an unlucky writer-lock handoff can block this event-loop
+        # thread inside SQLite while the lock owner's coroutine is waiting for
+        # the same loop to resume, producing a self-deadlock. Goals already
+        # claimed in this wave still run concurrently; coordination resumes
+        # after the wave drains.
+        if inflight:
+            done, _pending = await asyncio.wait(
+                inflight.keys(),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                plan_id, goal_id = inflight.pop(task)
+                try:
+                    task.result()
+                except Exception:
+                    log.error(
+                        "worker.goal_worker_failed",
+                        worker_id=worker_id,
+                        plan_id=plan_id,
+                        goal_id=goal_id,
+                        exc_info=True,
+                    )
+            if inflight:
+                continue
+
         try:
             progressed = await worker_tick(
                 uow,
@@ -172,30 +199,13 @@ async def run_worker_forever(
             log.error("worker.tick_failed", worker_id=worker_id, exc_info=True)
             progressed = False
 
-        # Reap finished goal-worker tasks first, so their slots are free
-        # again before this iteration's claim attempts below.
-        goal_progressed = False
-        for task in [t for t in inflight if t.done()]:
-            plan_id, goal_id = inflight.pop(task)
-            try:
-                signal, count = task.result()
-                if count > 0 or signal in ("done", "failed"):
-                    goal_progressed = True
-            except Exception:
-                log.error(
-                    "worker.goal_worker_failed",
-                    worker_id=worker_id,
-                    plan_id=plan_id,
-                    goal_id=goal_id,
-                    exc_info=True,
-                )
-
         # Claim and spawn new goal-workers up to this process's own cap.
         # claim_ready_goal manages its own short-lived transaction per call
         # (see its own docstring) -- using the shared `uow` here is fine
         # since this claim scan is sequential with worker_tick above, never
         # concurrent with itself or with the spawned tasks' own UoWs.
-        free_slots = max_concurrent_goals - len(inflight)
+        goal_progressed = False
+        free_slots = max_concurrent_goals
         for _ in range(max(0, free_slots)):
             claimed = claim_ready_goal(uow, worker_id, lease_seconds, container.clock)
             if claimed is None:

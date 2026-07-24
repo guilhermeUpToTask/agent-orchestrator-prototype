@@ -53,6 +53,9 @@ Every pull request to `main` runs these checks in parallel:
 - semantic PR title validation
 
 Integration tests use local adapters and do not require a Redis service.
+Starlette's synchronous `TestClient` must run through the supported `httpx2`
+transport declared in the backend dev dependencies; do not remove it and rely
+on Starlette's deprecated plain-`httpx` compatibility fallback.
 
 ## Recovering conflicting pull requests
 
