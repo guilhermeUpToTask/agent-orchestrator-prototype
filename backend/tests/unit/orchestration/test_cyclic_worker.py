@@ -17,7 +17,13 @@ from src.app.use_cases.cyclic_planning import activate_cycle
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
-from src.domain.entities.planning_artifacts import IntentProposal, PlanStatus, ProposalKind
+from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import (
+    Cycle,
+    IntentProposal,
+    PlanStatus,
+    ProposalKind,
+)
 from src.domain.policies.retry_policies import RetryPolicy
 from src.infra.reasoner.stub_reasoner import StubReasoner
 
@@ -102,3 +108,64 @@ def test_worker_architects_then_jit_enriches_with_role_bindings() -> None:
     assert by_purpose["cycle_architecture"].target_goal_id is None
     assert by_purpose["goal_contract"].target_goal_id == goal.id
     assert all(operation.status.value == "committed" for operation in operations)
+
+
+def test_enrichment_skips_dependency_blocked_head_goal_for_ready_later_goal() -> None:
+    """Goal-parallelism fan-out (ADR-001): a goal stuck behind an unmet
+    `depends_on` must not starve a later, independently-ready goal from JIT
+    enrichment. Goal A (position 0) depends on a goal that is not DONE; goal B
+    (position 1) has no dependencies and is ready right now. The handler must
+    pick goal B, not the earliest-position goal overall."""
+    clock = FakeClock(NOW)
+    repo = InMemoryPlanRepository(clock)
+    outbox = InMemoryOutbox()
+    uow = InMemoryUnitOfWork(repo, outbox)
+    agents = InMemoryAgentRepository(
+        [
+            agent("test-author", "test_authoring"),
+            agent("implementer", "implementation"),
+        ],
+        default_id="implementer",
+    )
+    handler = PlanningHandler(
+        StubReasoner(),
+        agents,
+        InMemoryCapabilityRepository(),
+        clock,
+    )
+    goal_a = Goal(
+        id="goal-a",
+        name="Goal A",
+        position=0,
+        description="blocked on an unmet dependency",
+        depends_on=["some-not-done-goal"],
+    )
+    goal_b = Goal(
+        id="goal-b",
+        name="Goal B",
+        position=1,
+        description="independently ready",
+    )
+    cycle = Cycle(
+        id="cycle-1",
+        intent_proposal_id="intent-1",
+        draft_id="draft-1",
+        goals=[goal_a, goal_b],
+        started_at=NOW,
+    )
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="ship",
+        status=PlanStatus.RUNNING,
+        cycles=[cycle],
+    )
+    repo.add(plan)
+
+    assert asyncio.run(handler.handle(plan.id, plan, uow)) == Signal.CONTINUE
+
+    enriched = repo.get(plan.id)
+    assert enriched.active_cycle is not None
+    goals_by_id = {g.id: g for g in enriched.active_cycle.goals}
+    assert goals_by_id["goal-b"].tasks  # goal B was enriched
+    assert not goals_by_id["goal-a"].tasks  # goal A stays untouched (still blocked)

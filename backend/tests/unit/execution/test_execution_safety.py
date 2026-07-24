@@ -191,7 +191,7 @@ def test_verification_commands_cannot_mutate_the_validated_tree(tmp_path) -> Non
     assert verifier.changed_calls == 2
     assert workspace.commits == 0
     assert workspace.discards == 1
-    assert plans.get(plan.id).promotion_reservation is None
+    assert plans.get(plan.id).goal_promotion_reservations == {}
 
 
 class ReplanRacingWorkspace(RecordingWorkspace):
@@ -235,7 +235,7 @@ def test_candidate_promotion_reservation_rejects_racing_replan(tmp_path) -> None
     stored = plans.get(plan.id)
     assert workspace.replan_rejected
     assert workspace.commits == 1
-    assert stored.promotion_reservation is None
+    assert stored.goal_promotion_reservations == {}
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[0].status == Status.DONE
 
@@ -334,7 +334,11 @@ def test_goal_merge_runs_outside_transaction_and_conflict_blocks_plan(tmp_path) 
     assert asyncio.run(handler.handle(plan.id, plan, uow)).value == "paused"
     stored = plans.get(plan.id)
     assert workspace.called_outside_transaction
-    assert stored.promotion_reservation is None
+    assert stored.goal_promotion_reservations == {}
     assert stored.status == PlanStatus.BLOCKED
-    assert stored.block is not None
-    assert stored.block.kind == "goal_promotion_failure"
+    # Domain unfreeze #14: goal_promotion_failure routes into goal_blocks now.
+    assert stored.block is None
+    block = stored.goal_blocks.get("goal-1")
+    assert block is not None
+    assert block.active
+    assert block.kind == "goal_promotion_failure"

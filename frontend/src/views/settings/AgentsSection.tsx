@@ -46,6 +46,8 @@ const RETRY_DEFAULTS: Required<RetryPolicy> = {
   backoff_multiplier: 2.0,
   max_backoff_seconds: 900.0,
   jitter_ratio: 0.2,
+  kind_max_attempts: {},
+  kind_backoff_scale: {},
   non_retryable_kinds: [],
 };
 

@@ -26,12 +26,15 @@ isolation, no rollback (discard is a no-op) — for trivial/dry runs only.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 import structlog
 
@@ -224,6 +227,34 @@ class GitBranchWorkspace:
             _git(wt, "commit", "-m", f"task: {handle.task_branch}")
         return _git(wt, "rev-parse", "HEAD")
 
+    @contextmanager
+    def _cycle_merge_lock(self, cycle_id: str) -> Iterator[None]:
+        """Cross-process advisory lock serializing merges into ONE cycle branch.
+
+        `git worktree add` refuses to check out a branch that is already
+        checked out in another worktree. Goal-level parallelism (ADR-001) runs
+        one worker PROCESS per goal, so two goals finishing around the same
+        time can each call merge_goal and race to check out the SAME
+        cycle/<cycle_id> branch into a throwaway merge worktree. An in-process
+        asyncio.Lock would not help — these are separate OS processes, and
+        this local-first architecture has no network-coordinated locking
+        (no Redis). A POSIX advisory flock on a per-cycle lock file under the
+        repo's own .git directory (never part of the working tree, so it
+        never dirties `git status`) serializes exactly the worktree-add
+        through worktree-remove window, scoped to the cycle_id so unrelated
+        cycles never block each other. This runs inside asyncio.to_thread
+        already, so a blocking flock here is off the event loop and safe.
+        """
+        lock_dir = self._repo / ".git" / "cycle-locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(lock_dir / f"{cycle_id}.lock"), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
     def _merge_goal_sync(self, cycle_id: str, goal_id: str) -> str:
         cycle_branch = f"cycle/{cycle_id}"
         goal_branch = f"goal/{goal_id}"
@@ -232,21 +263,34 @@ class GitBranchWorkspace:
                 f"goal branch is missing: {goal_branch}",
                 FailureKind.TOOL_ERROR,
             )
-        merge_wt = tempfile.mkdtemp(prefix="cycle-merge-")
-        os.rmdir(merge_wt)
-        _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
-        try:
-            _git(
-                Path(merge_wt),
-                "merge",
-                "--no-ff",
-                goal_branch,
-                "-m",
-                f"merge: {goal_branch} into {cycle_branch}",
-            )
-            return _git(Path(merge_wt), "rev-parse", "HEAD")
-        finally:
-            _git(self._repo, "worktree", "remove", "--force", merge_wt)
+        with self._cycle_merge_lock(cycle_id):
+            merge_wt = tempfile.mkdtemp(prefix="cycle-merge-")
+            os.rmdir(merge_wt)
+            # A crash between `worktree add` and `worktree remove` leaves a
+            # stale registration that wedges later merges ("already checked
+            # out"). Prune once and retry once inside the held flock.
+            try:
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+            except subprocess.CalledProcessError:
+                self._prune_sync()
+                log.info(
+                    "workspace.merge_worktree_pruned",
+                    cycle_id=cycle_id,
+                    cycle_branch=cycle_branch,
+                )
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+            try:
+                _git(
+                    Path(merge_wt),
+                    "merge",
+                    "--no-ff",
+                    goal_branch,
+                    "-m",
+                    f"merge: {goal_branch} into {cycle_branch}",
+                )
+                return _git(Path(merge_wt), "rev-parse", "HEAD")
+            finally:
+                _git(self._repo, "worktree", "remove", "--force", merge_wt)
 
     def _commit_sync(self, handle: GitWorkspaceHandle) -> None:
         self._snapshot_sync(handle)

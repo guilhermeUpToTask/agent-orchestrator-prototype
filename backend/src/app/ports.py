@@ -4,8 +4,11 @@ The five execution/side-channel contracts (Clock, AgentEventSink,
 WorkspaceHandle/Workspace, AgentRunner, Reasoner) are DOMAIN ports —
 they live in src/domain/ports/ and are re-exported here so use cases,
 adapters, and tests keep one import path. What remains defined here is
-app-specific: the TaskFailed signal and the transaction machinery
-(Outbox, UnitOfWork).
+app-specific: the TaskFailed signal, the transaction machinery
+(Outbox, UnitOfWork), and Sandbox (src/app/sandbox_port.py) — deliberately
+an APP port, not a domain one, per ROADMAP item 33: task-attempt OS
+confinement is an infra/execution concern the frozen domain must never know
+about.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from typing import Protocol, runtime_checkable
 
 from src.app.execution_records import ExecutionRecordRepository
 from src.app.runtime_failures import RuntimeFailure
+from src.app.sandbox_port import Sandbox, SandboxPolicy, SandboxProbeResult
 from src.domain.events.base import DomainEvent
 from src.domain.ports import (
     AgentEventSink,
@@ -30,6 +34,7 @@ from src.domain.ports.reasoner_port import (
     ConversationMode,
     ReasonerReply,
 )
+from src.domain.repositories.goal_lease_repo import GoalLeaseRepository
 from src.domain.repositories.planner_repo import PlanRepository
 from src.domain.value_objects.lifecycle import FailureKind
 
@@ -41,10 +46,14 @@ __all__ = [
     "Clock",
     "ConversationMode",
     "ExecutionRecordRepository",
+    "GoalLeaseRepository",
     "Outbox",
     "Reasoner",
     "ReasonerReply",
     "ReasonerUnavailable",
+    "Sandbox",
+    "SandboxPolicy",
+    "SandboxProbeResult",
     "TaskFailed",
     "UnitOfWork",
     "Workspace",
@@ -148,11 +157,11 @@ class Outbox(Protocol):
 
 @runtime_checkable
 class UnitOfWork(Protocol):
-    """Transaction boundary. Owns Plan, execution-ledger, and Outbox repositories;
-    entering starts a transaction and exiting commits (or rolls back on exception).
-    This is how state + execution identity + outbox become atomic.
+    """Transaction boundary. Owns Plan, goal-lease, execution-ledger, and Outbox
+    repositories; entering starts a transaction and exiting commits (or rolls back
+    on exception). This is how state + execution identity + outbox become atomic.
 
-    plans/outbox are read-only properties on the protocol so concrete
+    Repository attributes are read-only properties on the protocol so concrete
     implementations' narrower attribute types remain assignable (covariance)."""
 
     @property
@@ -161,6 +170,8 @@ class UnitOfWork(Protocol):
     def outbox(self) -> Outbox: ...
     @property
     def executions(self) -> ExecutionRecordRepository: ...
+    @property
+    def goal_leases(self) -> GoalLeaseRepository: ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...

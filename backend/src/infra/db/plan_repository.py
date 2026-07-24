@@ -213,6 +213,20 @@ class SqlitePlanRepository:
             ),
         )
 
+    def list_running_ids(self, limit: int) -> list[str]:
+        rows = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT id FROM plans WHERE status = 'running' "
+                    "ORDER BY updated_at ASC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
+            .all()
+        )
+        return [row[0] for row in rows]
+
     def list_summaries(self) -> list[dict[str, object]]:
         with self._session_factory() as session:
             rows = session.execute(

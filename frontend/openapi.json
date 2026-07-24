@@ -840,6 +840,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RetryStageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -3577,6 +3594,13 @@
               "backoff_multiplier": 2.0,
               "max_backoff_seconds": 900.0,
               "jitter_ratio": 0.2,
+              "kind_max_attempts": {
+                "connection_error": 5,
+                "rate_limit": 6
+              },
+              "kind_backoff_scale": {
+                "rate_limit": 4.0
+              },
               "non_retryable_kinds": [
                 "auth_error",
                 "token_limit",
@@ -5599,6 +5623,13 @@
               }
             ]
           },
+          "goal_blocks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanBlock"
+            },
+            "type": "object",
+            "title": "Goal Blocks"
+          },
           "goals": {
             "items": {
               "$ref": "#/components/schemas/Goal"
@@ -5689,6 +5720,7 @@
           "active_cycle",
           "pending_gate",
           "block",
+          "goal_blocks",
           "goals",
           "cycles",
           "intent_proposal",
@@ -6119,6 +6151,26 @@
             "title": "Jitter Ratio",
             "default": 0.2
           },
+          "kind_max_attempts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Max Attempts"
+          },
+          "kind_backoff_scale": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Backoff Scale"
+          },
           "non_retryable_kinds": {
             "items": {
               "$ref": "#/components/schemas/FailureKind"
@@ -6198,6 +6250,23 @@
         "type": "object",
         "title": "RetryPolicyUpdateRequest",
         "description": "All fields optional: only the ones an operator sets are changed (partial\nmerge over the plan's current retry policy); the rest keep their current\nvalue. Mirrors execution.retry_* config field-for-field."
+      },
+      "RetryStageRequest": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          }
+        },
+        "type": "object",
+        "title": "RetryStageRequest"
       },
       "RetryTaskRequest": {
         "properties": {
@@ -6474,6 +6543,29 @@
         ],
         "title": "RunnerBinaryStatus"
       },
+      "RunnerSandboxStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ok",
+          "message"
+        ],
+        "title": "RunnerSandboxStatus"
+      },
       "RunnerStatusResponse": {
         "properties": {
           "mode": {
@@ -6508,6 +6600,9 @@
             },
             "type": "array",
             "title": "Agents"
+          },
+          "sandbox": {
+            "$ref": "#/components/schemas/RunnerSandboxStatus"
           }
         },
         "type": "object",
@@ -6515,7 +6610,8 @@
           "mode",
           "valid",
           "binaries",
-          "agents"
+          "agents",
+          "sandbox"
         ],
         "title": "RunnerStatusResponse"
       },

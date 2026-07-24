@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 
 from src.app.execution_records import ExecutionAttemptStatus, ExecutionRunStatus
+from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.pause_resume import resume_plan, retry_task
@@ -206,6 +207,10 @@ def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, mon
 
 
 def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
+    """Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick no
+    longer dispatches cyclic execution at all, so this drives the single goal
+    directly via ExecutionHandler.handle_goal — the same entry point a
+    goal-lease worker (claim_ready_goal / drive_goal) uses in production."""
     agent = make_agent_spec().model_copy(
         update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
     )
@@ -250,22 +255,48 @@ def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factor
     ]
     env.seed(plan)
 
-    assert asyncio.run(advance_plan("p1", *env.args)) == "continue"
-    assert asyncio.run(advance_plan("p1", *env.args)) == "not_ready"
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    def drive() -> str:
+        stored = env.stored("p1")
+        return asyncio.run(execution.handle_goal("p1", "g1", stored, env.uow)).value
+
+    assert drive() == "continue"
+    assert drive() == "not_ready"
     assert env.runner.calls == {"t1": 1}
 
-    env.clock.advance(2)
-    assert asyncio.run(advance_plan("p1", *env.args)) == "paused"
+    env.clock.advance(5)
+    assert drive() == "continue"
+    env.clock.advance(5)
+    assert drive() == "continue"
     stored = env.stored("p1")
-    assert stored.block is not None and stored.block.kind == "provider_capacity"
-    assert stored.block.legal_resolutions == [
+    assert stored.block is None
+    assert stored.goal_blocks == {}
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    assert env.runner.calls == {"t1": 3}
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
+    assert circuit is not None and not circuit.manual_intervention
+
+    for _ in range(2):
+        env.clock.advance(5)
+        assert drive() == "continue"
+
+    env.clock.advance(5)
+    assert drive() == "paused"
+    stored = env.stored("p1")
+    assert stored.block is None  # per-goal block, not the legacy scalar
+    block = stored.goal_blocks.get("g1")
+    assert block is not None and block.active and block.kind == "provider_capacity"
+    assert block.legal_resolutions == [
         "wait_and_retry",
         "edit_task",
         "start_replan",
     ]
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
-    assert env.runner.calls == {"t1": 2}
+    assert env.runner.calls == {"t1": 6}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and circuit.manual_intervention

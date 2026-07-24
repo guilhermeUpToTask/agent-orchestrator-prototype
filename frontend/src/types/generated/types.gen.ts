@@ -1201,6 +1201,12 @@ export type PlanDetailResponse = {
     pending_gate: ReviewGate | null;
     block: PlanBlock | null;
     /**
+     * Goal Blocks
+     */
+    goal_blocks: {
+        [key: string]: PlanBlock;
+    };
+    /**
      * Goals
      */
     goals: Array<Goal>;
@@ -1466,6 +1472,18 @@ export type RetryPolicy = {
      */
     jitter_ratio?: number;
     /**
+     * Kind Max Attempts
+     */
+    kind_max_attempts?: {
+        [key in FailureKind]?: number;
+    };
+    /**
+     * Kind Backoff Scale
+     */
+    kind_backoff_scale?: {
+        [key in FailureKind]?: number;
+    };
+    /**
      * Non Retryable Kinds
      */
     non_retryable_kinds?: Array<FailureKind>;
@@ -1499,6 +1517,16 @@ export type RetryPolicyUpdateRequest = {
      * Jitter Ratio
      */
     jitter_ratio?: number | null;
+};
+
+/**
+ * RetryStageRequest
+ */
+export type RetryStageRequest = {
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
 };
 
 /**
@@ -1661,6 +1689,24 @@ export type RunnerBinaryStatus = {
 };
 
 /**
+ * RunnerSandboxStatus
+ */
+export type RunnerSandboxStatus = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Ok
+     */
+    ok: boolean;
+    /**
+     * Message
+     */
+    message: string;
+};
+
+/**
  * RunnerStatusResponse
  */
 export type RunnerStatusResponse = {
@@ -1684,6 +1730,7 @@ export type RunnerStatusResponse = {
      * Agents
      */
     agents: Array<RunnerAgentStatus>;
+    sandbox: RunnerSandboxStatus;
 };
 
 /**
@@ -2600,7 +2647,10 @@ export type PlansRetryBlockedTaskResponses = {
 export type PlansRetryBlockedTaskResponse = PlansRetryBlockedTaskResponses[keyof PlansRetryBlockedTaskResponses];
 
 export type PlansRetryBlockedPlanningStageData = {
-    body?: never;
+    /**
+     * Body
+     */
+    body?: RetryStageRequest | null;
     path: {
         /**
          * Plan Id

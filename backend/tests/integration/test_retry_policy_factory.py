@@ -100,9 +100,7 @@ def test_retry_policy_endpoint_partially_updates_an_existing_plan(container):
     """POST /{plan_id}/retry-policy (un-freeze #12) is a DIFFERENT lever from
     execution.retry_* config: config only seeds a NEW plan at creation; this
     endpoint retunes one ALREADY-persisted plan, live, without a replan."""
-    from fastapi.testclient import TestClient
-
-    from src.api.server import create_app
+    from src.api.routers.plans import RetryPolicyUpdateRequest, update_retry_policy_route
     from src.app.use_cases.create_plan import open_project_plan
     from src.domain.entities.project_definition import ProjectDefinition
 
@@ -114,13 +112,11 @@ def test_retry_policy_endpoint_partially_updates_an_existing_plan(container):
         "brief", project_id, "req-1", container.new_unit_of_work()
     )
 
-    app = create_app(container)
-    with TestClient(app) as client:
-        resp = client.post(
-            f"/api/plans/{opened.plan_id}/retry-policy",
-            json={"max_attempts": 20, "max_backoff_seconds": 3600},
-        )
-    assert resp.status_code == 204
+    update_retry_policy_route(
+        opened.plan_id,
+        RetryPolicyUpdateRequest(max_attempts=20, max_backoff_seconds=3600),
+        container,
+    )
 
     with container.new_unit_of_work() as uow:
         plan = uow.plans.get(opened.plan_id)

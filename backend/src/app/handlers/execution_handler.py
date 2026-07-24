@@ -19,9 +19,11 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Callable, TypeVar
 from uuid import uuid4
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from src.domain.errors.tasks_errors import StaleVersionError
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.execution_contracts import (
     TestBundle,
@@ -83,6 +85,8 @@ from src.app.ports import (
 )
 from src.app.verification import sha256_file, validate_candidate
 
+_T = TypeVar("_T")
+
 
 @dataclass(frozen=True)
 class _Unit:
@@ -94,7 +98,6 @@ class _Unit:
     attempt: int
     policy_attempt: int
     task_revision: int
-    plan_version: int
     retry_policy: RetryPolicy
     task_snapshot: Task
     spec: AgentSpec
@@ -119,17 +122,46 @@ class ExecutionHandler:
         self._clock = clock
         self._verifier = verifier
 
-    async def handle(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
+    async def handle_goal(
+        self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork
+    ) -> Signal:
+        """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
+        a goal-scoped worker that already holds `goal_id`'s lease. Drives that
+        ONE goal via the identical body `handle()` uses for the plan-level
+        (legacy/pre-goal-parallelism) path — see `handle`'s `goal_id` param."""
+        return await self.handle(plan_id, plan, uow, goal_id=goal_id)
+
+    async def handle(
+        self, plan_id: str, plan: Plan, uow: UnitOfWork, goal_id: str | None = None
+    ) -> Signal:
         # ---- txn1: pick the unit, mark RUNNING, persist + outbox atomically ----
         goal_promotion: tuple[str, str, str] | None = None
         unit: _Unit | None = None
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.paused or plan.pause_requested:
+            if (
+                plan.paused
+                or plan.pause_requested
+                or plan.status == PlanStatus.BLOCKED
+                or (plan.block is not None and plan.block.active)
+            ):
                 return Signal.PAUSED  # pause gate armed while we were dispatched
-            action = plan.peek_next(self._clock.now())
+            now = self._clock.now()
+            action = (
+                plan.peek_next_for_goal(goal_id, now) if goal_id is not None else plan.peek_next(now)
+            )
 
             if action is None:
+                if goal_id is not None:
+                    # Domain unfreeze #14: None here means "THIS goal is
+                    # already terminal" (peek_next_for_goal's own contract),
+                    # NOT "the whole plan is done" -- entering review is a
+                    # plan-wide transition that must never fire just because
+                    # one goal-lease worker's goal happens to be finished
+                    # while siblings are still running. The plan-level tick
+                    # (advance_plan.py) is what checks "every goal terminal"
+                    # and calls handle(goal_id=None) for that.
+                    return Signal.PAUSED
                 return self._enter_review(plan_id, plan, uow)
             if action == NOT_READY:
                 return Signal.NOT_READY
@@ -364,48 +396,56 @@ class ExecutionHandler:
             red_or_baseline_evidence_refs=evidence_refs,
             frozen_at=self._clock.now(),
         )
-        with uow:
-            plan = uow.plans.get(plan_id)
-            task = self._unit_task(plan, unit)
-            if (
-                plan.promotion_reservation != unit.execution.id
-                or task.status != Status.RUNNING
-                or task.revision != unit.task_revision
-                or task.attempt != unit.attempt
-            ):
+        def finalize() -> Signal:
+            with uow:
+                plan = uow.plans.get(plan_id)
+                task = self._unit_task(plan, unit)
+                if (
+                    plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
+                    or task.status != Status.RUNNING
+                    or task.revision != unit.task_revision
+                    or task.attempt != unit.attempt
+                ):
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
+                    )
+                    if plan.goal_promotion_reservations.get(unit.goal_id) == unit.execution.id:
+                        plan.release_promotion(unit.goal_id, unit.execution.id)
+                        plan.bump_version()
+                        uow.plans.save(plan)
+                    return Signal.PAUSED
+                plan.release_promotion(unit.goal_id, unit.execution.id)
+                task.freeze_test_bundle(bundle)
+                plan.requeue_task(unit.goal_id, unit.task_id)
                 self._finish_execution(
                     uow,
                     unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
+                    ExecutionAttemptStatus.SUCCEEDED,
+                    ExecutionRunStatus.SUCCEEDED,
                 )
-                if plan.promotion_reservation == unit.execution.id:
-                    plan.release_promotion(unit.execution.id)
-                    plan.bump_version()
-                    uow.plans.save(plan)
-                return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
-            task.freeze_test_bundle(bundle)
-            plan.requeue_task(unit.goal_id, unit.task_id)
-            self._finish_execution(
-                uow,
-                unit,
-                ExecutionAttemptStatus.SUCCEEDED,
-                ExecutionRunStatus.SUCCEEDED,
-            )
-            paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
-            plan.bump_version()
-            uow.outbox.add(
-                TestBundleFrozen(
-                    plan_id=plan_id,
-                    goal_id=unit.goal_id,
-                    task_id=unit.task_id,
-                    task_revision=unit.task_revision,
-                    test_commit_sha=test_commit_sha,
+                paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
+                plan.bump_version()
+                uow.outbox.add(
+                    TestBundleFrozen(
+                        plan_id=plan_id,
+                        goal_id=unit.goal_id,
+                        task_id=unit.task_id,
+                        task_revision=unit.task_revision,
+                        test_commit_sha=test_commit_sha,
+                    )
                 )
-            )
-            uow.plans.save(plan)
-        return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
+                uow.plans.save(plan)
+                return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
+
+        # StaleVersionError here means a concurrent GOAL's write landed in
+        # this block's own get()-to-save() window (domain unfreeze #13); the
+        # `with uow:` block above rolls back atomically on any exception
+        # (SqliteUnitOfWork.__exit__), so retrying from scratch — including
+        # re-running _finish_execution — is safe, not a double-write.
+        return self._run_with_cas_retry(finalize)
 
     async def _finalize_verified_implementation(
         self,
@@ -479,127 +519,134 @@ class ExecutionHandler:
             self._abandon_stale(plan_id, unit, uow)
             return Signal.PAUSED
         await self._workspace.commit(workspace_handle)
-        with uow:
-            plan = uow.plans.get(plan_id)
-            task = self._unit_task(plan, unit)
-            if (
-                plan.promotion_reservation != unit.execution.id
-                or task.status != Status.RUNNING
-                or task.revision != unit.task_revision
-                or task.attempt != unit.attempt
-            ):
+
+        def finalize() -> Signal:
+            with uow:
+                plan = uow.plans.get(plan_id)
+                task = self._unit_task(plan, unit)
+                if (
+                    plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
+                    or task.status != Status.RUNNING
+                    or task.revision != unit.task_revision
+                    or task.attempt != unit.attempt
+                ):
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
+                    )
+                    if plan.goal_promotion_reservations.get(unit.goal_id) == unit.execution.id:
+                        plan.release_promotion(unit.goal_id, unit.execution.id)
+                        plan.bump_version()
+                        uow.plans.save(plan)
+                    return Signal.PAUSED
+                plan.release_promotion(unit.goal_id, unit.execution.id)
+                task.accept_verification(evidence)
+                plan.complete_task(
+                    unit.goal_id,
+                    unit.task_id,
+                    TaskResult.success(
+                        "orchestrator-owned deterministic verification accepted",
+                        metadata={"candidate_commit_sha": candidate_sha},
+                    ),
+                )
                 self._finish_execution(
                     uow,
                     unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
+                    ExecutionAttemptStatus.SUCCEEDED,
+                    ExecutionRunStatus.SUCCEEDED,
                 )
-                if plan.promotion_reservation == unit.execution.id:
-                    plan.release_promotion(unit.execution.id)
-                    plan.bump_version()
-                    uow.plans.save(plan)
-                return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
-            task.accept_verification(evidence)
-            plan.complete_task(
-                unit.goal_id,
-                unit.task_id,
-                TaskResult.success(
-                    "orchestrator-owned deterministic verification accepted",
-                    metadata={"candidate_commit_sha": candidate_sha},
-                ),
-            )
-            self._finish_execution(
-                uow,
-                unit,
-                ExecutionAttemptStatus.SUCCEEDED,
-                ExecutionRunStatus.SUCCEEDED,
-            )
-            paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
-            plan.bump_version()
-            uow.outbox.add(
-                TaskVerificationAccepted(
-                    plan_id=plan_id,
-                    goal_id=unit.goal_id,
-                    task_id=unit.task_id,
-                    task_revision=unit.task_revision,
-                    evidence_refs=[item.bounded_output_ref for item in evidence],
+                paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
+                plan.bump_version()
+                uow.outbox.add(
+                    TaskVerificationAccepted(
+                        plan_id=plan_id,
+                        goal_id=unit.goal_id,
+                        task_id=unit.task_id,
+                        task_revision=unit.task_revision,
+                        evidence_refs=[item.bounded_output_ref for item in evidence],
+                    )
                 )
-            )
-            uow.outbox.add(
-                TaskCompleted(
-                    plan_id=plan_id,
-                    goal_id=unit.goal_id,
-                    task_id=unit.task_id,
+                uow.outbox.add(
+                    TaskCompleted(
+                        plan_id=plan_id,
+                        goal_id=unit.goal_id,
+                        task_id=unit.task_id,
+                    )
                 )
-            )
-            uow.plans.save(plan)
-        return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
+                uow.plans.save(plan)
+                return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
 
-    def _candidate_is_current(self, plan_id: str, unit: _Unit, uow: UnitOfWork) -> bool:
-        """Re-read every identity that authorizes a branch merge/finalize."""
-        with uow:
-            plan = uow.plans.get(plan_id)
-            if plan.phase != PlanPhase.RUNNING or plan.status != PlanStatus.RUNNING:
-                return False
-            if unit.cycle_id is not None and (
-                plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
-            ):
-                return False
-            task = self._unit_task(plan, unit)
-            if (
-                task.status != Status.RUNNING
-                or task.revision != unit.task_revision
-                or task.attempt != unit.attempt
-            ):
-                return False
-            safe_pause_version = plan.pause_requested and plan.version == unit.plan_version + 1
-            if plan.version != unit.plan_version and not safe_pause_version:
-                return False
-            open_attempts = [
-                attempt
-                for attempt in uow.executions.list_open_attempts(plan_id)
-                if attempt.task_id == unit.task_id
-            ]
-            if not open_attempts:
-                return False
-            latest = max(open_attempts, key=lambda attempt: attempt.number)
-            return latest.id == unit.execution.id
+        # See _finalize_test_author's identical comment on why re-running the
+        # whole block (including _finish_execution) is safe on retry.
+        return self._run_with_cas_retry(finalize)
+
+    @staticmethod
+    def _run_with_cas_retry(body: Callable[[], _T], max_attempts: int = 5) -> _T:
+        """Retry `body` (which opens its own fresh `with uow:` transaction,
+        re-fetching current plan/task state each call) on StaleVersionError —
+        a concurrent GOAL's write landing in the narrow window between this
+        call's own read and write (domain unfreeze #13 / Phase 4: goal-level
+        parallelism means more than one worker can legitimately bump the
+        same plan's version between this call's get() and save()). `body`
+        must be safe to re-run from scratch; every caller here already
+        re-derives its state fresh from `uow.plans.get(...)` rather than
+        closing over a stale `plan` object, so retrying is exactly "try the
+        same idempotent check-and-mutate again on current state."
+        Task-identity (status/revision/attempt) is the real fencing token —
+        `plan.version` equality was never the right check here and is not
+        reintroduced by this retry."""
+        for attempt in range(max_attempts):
+            try:
+                return body()
+            except StaleVersionError:
+                if attempt == max_attempts - 1:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def _reserve_candidate(self, plan_id: str, unit: _Unit, uow: UnitOfWork) -> bool:
-        """Atomically guard the candidate and reserve its Git promotion."""
-        with uow:
-            plan = uow.plans.get(plan_id)
-            if plan.phase != PlanPhase.RUNNING or plan.status != PlanStatus.RUNNING:
-                return False
-            if unit.cycle_id is not None and (
-                plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
-            ):
-                return False
-            task = self._unit_task(plan, unit)
-            if (
-                task.status != Status.RUNNING
-                or task.revision != unit.task_revision
-                or task.attempt != unit.attempt
-            ):
-                return False
-            safe_pause_version = plan.pause_requested and plan.version == unit.plan_version + 1
-            if plan.version != unit.plan_version and not safe_pause_version:
-                return False
-            open_attempts = [
-                attempt
-                for attempt in uow.executions.list_open_attempts(plan_id)
-                if attempt.task_id == unit.task_id
-            ]
-            if not open_attempts:
-                return False
-            latest = max(open_attempts, key=lambda attempt: attempt.number)
-            if latest.id != unit.execution.id:
-                return False
-            plan.reserve_promotion(unit.execution.id)
-            plan.bump_version()
-            uow.plans.save(plan)
-            return True
+        """Atomically guard the candidate and reserve its Git promotion.
+        Retries on StaleVersionError; exhaustion degrades to False (the
+        existing "couldn't reserve, abandon this attempt gracefully" path
+        every caller already has — safe, since nothing has been mutated yet,
+        unlike a task-completion finalize where the real work is precious)."""
+
+        def attempt() -> bool:
+            with uow:
+                plan = uow.plans.get(plan_id)
+                if plan.phase != PlanPhase.RUNNING or plan.status != PlanStatus.RUNNING:
+                    return False
+                if unit.cycle_id is not None and (
+                    plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
+                ):
+                    return False
+                task = self._unit_task(plan, unit)
+                if (
+                    task.status != Status.RUNNING
+                    or task.revision != unit.task_revision
+                    or task.attempt != unit.attempt
+                ):
+                    return False
+                open_attempts = [
+                    execution_attempt
+                    for execution_attempt in uow.executions.list_open_attempts(plan_id)
+                    if execution_attempt.task_id == unit.task_id
+                ]
+                if not open_attempts:
+                    return False
+                latest = max(open_attempts, key=lambda execution_attempt: execution_attempt.number)
+                if latest.id != unit.execution.id:
+                    return False
+                plan.reserve_promotion(unit.goal_id, unit.execution.id)
+                plan.bump_version()
+                uow.plans.save(plan)
+                return True
+
+        try:
+            return self._run_with_cas_retry(attempt)
+        except StaleVersionError:
+            return False
 
     @staticmethod
     def _unit_task(plan: Plan, unit: _Unit) -> Task:
@@ -722,6 +769,14 @@ class ExecutionHandler:
         # pending), so a goal wedged by a SKIPPED/evidence-less-DONE task is
         # recoverable only via edit_task or start_replan — offering retry_stage
         # there is a nominal-only resolution that 422s when the operator tries it.
+        #
+        # Domain unfreeze #14: each goal opens its OWN block now
+        # (`Plan.goal_blocks[goal.id]`) -- a different goal's block never
+        # collides here (separate dict entries), and `claim_ready_goal`'s
+        # candidate scan excludes any goal with an active block from ever
+        # being re-selected, so this goal's own block can't collide with
+        # itself on a later tick either. No pre-check needed; open_block's
+        # "already active" guard is a genuine-bug detector now, not routine.
         resolutions = ["edit_task", "start_replan"]
         if offending.status == Status.FAILED:
             resolutions = ["retry_stage", *resolutions]
@@ -765,7 +820,7 @@ class ExecutionHandler:
                 FailureKind.VERIFICATION_ERROR,
             )
         reservation = f"goal:{cycle.id}:{goal.id}"
-        plan.reserve_promotion(reservation)
+        plan.reserve_promotion(goal.id, reservation)
         plan.bump_version()
         uow.plans.save(plan)
         return reservation, cycle.id, goal.id
@@ -782,9 +837,9 @@ class ExecutionHandler:
         except Exception as exc:
             with uow:
                 plan = uow.plans.get(plan_id)
-                if plan.promotion_reservation != reservation:
+                if plan.goal_promotion_reservations.get(goal_id) != reservation:
                     return Signal.PAUSED
-                plan.release_promotion(reservation)
+                plan.release_promotion(goal_id, reservation)
                 block = PlanBlock(
                     id=new_id(),
                     kind="goal_promotion_failure",
@@ -809,7 +864,7 @@ class ExecutionHandler:
 
         with uow:
             plan = uow.plans.get(plan_id)
-            if plan.promotion_reservation != reservation:
+            if plan.goal_promotion_reservations.get(goal_id) != reservation:
                 return Signal.PAUSED
             cycle = next(
                 (item for item in plan.cycles if item.id == cycle_id),
@@ -830,7 +885,7 @@ class ExecutionHandler:
                 )
             cycle.evidence_refs.append(f"git:{commit_sha}")
             plan.complete_goal(goal_id)
-            plan.release_promotion(reservation)
+            plan.release_promotion(goal_id, reservation)
             plan.bump_version()
             uow.outbox.add(GoalCompleted(plan_id=plan_id, goal_id=goal_id))
             uow.plans.save(plan)
@@ -846,6 +901,8 @@ class ExecutionHandler:
         failed = next(task for task in goal.tasks if task.status == Status.FAILED)
         reason = f"goal {goal.id} has a failed task"
         if plan.active_cycle is not None:
+            # Domain unfreeze #14: see _block_on_unpromotable_goal's comment —
+            # this goal opens its own goal_blocks entry; no pre-check needed.
             block = PlanBlock(
                 id=new_id(),
                 kind="execution_failure",
@@ -913,7 +970,7 @@ class ExecutionHandler:
         if was_reclaimed:
             for open_attempt in uow.executions.list_open_attempts(plan_id):
                 if open_attempt.goal_id == goal.id and open_attempt.task_id == task.id:
-                    plan.release_promotion(open_attempt.id)
+                    plan.release_promotion(goal.id, open_attempt.id)
                     uow.executions.finalize_attempt(
                         open_attempt.id,
                         attempt_status=ExecutionAttemptStatus.ABANDONED,
@@ -958,7 +1015,6 @@ class ExecutionHandler:
             attempt=task.attempt,
             policy_attempt=task.cycle_attempt,
             task_revision=task.revision,
-            plan_version=plan.version + 1,
             retry_policy=plan.retry_policy.model_copy(deep=True),
             task_snapshot=task.model_copy(deep=True),
             spec=spec,
@@ -1103,259 +1159,280 @@ class ExecutionHandler:
     def _finalize_failure(
         self, plan_id: str, unit: _Unit, exc: TaskFailed, uow: UnitOfWork
     ) -> Signal:
-        with uow:
-            plan = uow.plans.get(plan_id)
-            plan.release_promotion(unit.execution.id)
+        def finalize() -> Signal:
+            with uow:
+                plan = uow.plans.get(plan_id)
+                plan.release_promotion(unit.goal_id, unit.execution.id)
 
-            # TOLERANT FINALIZE: the iteration was abandoned while we ran — a late
-            # failure terminal-skips; it must NEVER requeue into the abandoned
-            # iteration (the resurrection bug).
-            abandoned = self._abandoned_task_status(plan, unit)
-            if abandoned is not None:
-                self._finish_execution(
-                    uow,
-                    unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
-                )
-                if not abandoned.is_terminal:
-                    plan.abandon_execution_task(
-                        unit.cycle_id,
-                        unit.goal_id,
-                        unit.task_id,
+                # TOLERANT FINALIZE: the iteration was abandoned while we ran — a late
+                # failure terminal-skips; it must NEVER requeue into the abandoned
+                # iteration (the resurrection bug).
+                abandoned = self._abandoned_task_status(plan, unit)
+                if abandoned is not None:
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
                     )
+                    if not abandoned.is_terminal:
+                        plan.abandon_execution_task(
+                            unit.cycle_id,
+                            unit.goal_id,
+                            unit.task_id,
+                        )
+                        plan.bump_version()
+                        uow.outbox.add(
+                            TaskAbandoned(
+                                plan_id=plan_id,
+                                goal_id=unit.goal_id,
+                                task_id=unit.task_id,
+                                reason=exc.reason,
+                            )
+                        )
+                        uow.plans.save(plan)
+                    return Signal.PAUSED
+
+                delay = unit.retry_policy.backoff_for(
+                    unit.policy_attempt + 1,
+                    jitter_unit=self._jitter_unit(unit.execution.id),
+                    kind=exc.kind,
+                )
+                if exc.failure.retry_after_seconds is not None:
+                    delay = max(delay, exc.failure.retry_after_seconds)
+                if (
+                    exc.failure.limit_scope is not None
+                    and exc.failure.limit_scope.value == "daily_quota"
+                    and exc.failure.retry_after_seconds is None
+                ):
+                    delay = max(delay, 3_600.0)
+                not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
+
+                circuit_manual = False
+                if (
+                    exc.kind == FailureKind.RATE_LIMIT
+                    and unit.spec.provider_id
+                    and unit.spec.model_id
+                    and not_before is not None
+                ):
+                    existing = uow.executions.get_runtime_circuit(
+                        unit.spec.runtime_type,
+                        unit.spec.provider_id,
+                        unit.spec.model_id,
+                    )
+                    failure_count = (existing.failure_count if existing else 0) + 1
+                    kind_budget = unit.retry_policy.kind_max_attempts.get(
+                        exc.kind, unit.retry_policy.max_attempts
+                    )
+                    circuit_manual = failure_count >= kind_budget
+                    uow.executions.upsert_runtime_circuit(
+                        RuntimeCircuit(
+                            runtime=unit.spec.runtime_type,
+                            provider_id=unit.spec.provider_id,
+                            model_id=unit.spec.model_id,
+                            failure_count=failure_count,
+                            opened_at=self._clock.now(),
+                            retry_at=not_before,
+                            last_failure_kind=exc.kind.value,
+                            safe_message=exc.reason,
+                            manual_intervention=circuit_manual,
+                        )
+                    )
+
+                if (
+                    exc.failure.retryable
+                    and not circuit_manual
+                    and unit.retry_policy.should_retry(unit.policy_attempt, exc.kind)
+                ):
+                    plan.requeue_task(unit.goal_id, unit.task_id, not_before)
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.FAILED,
+                        ExecutionRunStatus.RETRYING,
+                        failure=exc.failure,
+                        retry_at=not_before,
+                    )
+                    paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
                     plan.bump_version()
                     uow.outbox.add(
-                        TaskAbandoned(
+                        TaskRequeued(
                             plan_id=plan_id,
                             goal_id=unit.goal_id,
                             task_id=unit.task_id,
+                            attempt=unit.attempt,
                             reason=exc.reason,
+                            kind=exc.kind.value if exc.kind else None,
                         )
                     )
                     uow.plans.save(plan)
-                return Signal.PAUSED
+                    return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
 
-            delay = unit.retry_policy.backoff_for(
-                unit.policy_attempt + 1,
-                jitter_unit=self._jitter_unit(unit.execution.id),
-            )
-            if exc.failure.retry_after_seconds is not None:
-                delay = max(delay, exc.failure.retry_after_seconds)
-            if (
-                exc.failure.limit_scope is not None
-                and exc.failure.limit_scope.value == "daily_quota"
-                and exc.failure.retry_after_seconds is None
-            ):
-                delay = max(delay, 3_600.0)
-            not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
-
-            circuit_manual = False
-            if (
-                exc.kind == FailureKind.RATE_LIMIT
-                and unit.spec.provider_id
-                and unit.spec.model_id
-                and not_before is not None
-            ):
-                existing = uow.executions.get_runtime_circuit(
-                    unit.spec.runtime_type,
-                    unit.spec.provider_id,
-                    unit.spec.model_id,
-                )
-                failure_count = (existing.failure_count if existing else 0) + 1
-                circuit_manual = failure_count >= unit.retry_policy.max_attempts
-                uow.executions.upsert_runtime_circuit(
-                    RuntimeCircuit(
-                        runtime=unit.spec.runtime_type,
-                        provider_id=unit.spec.provider_id,
-                        model_id=unit.spec.model_id,
-                        failure_count=failure_count,
-                        opened_at=self._clock.now(),
-                        retry_at=not_before,
-                        last_failure_kind=exc.kind.value,
-                        safe_message=exc.reason,
-                        manual_intervention=circuit_manual,
-                    )
-                )
-
-            if (
-                exc.failure.retryable
-                and not circuit_manual
-                and unit.retry_policy.should_retry(unit.policy_attempt, exc.kind)
-            ):
-                plan.requeue_task(unit.goal_id, unit.task_id, not_before)
+                # Terminal task failure (retry budget exhausted or non-retryable kind):
+                # record the FAILED task and AUTO-PAUSE the plan in the same txn
+                # (un-freeze #3) — recoverable via edit-while-paused + resume, instead
+                # of the old terminal plan FAILED.
+                reason = f"task {unit.task_id} failed after {unit.policy_attempt} policy attempt(s): {exc.reason}"
+                plan.fail_task(unit.goal_id, unit.task_id, exc.reason, exc.kind)
                 self._finish_execution(
                     uow,
                     unit,
                     ExecutionAttemptStatus.FAILED,
-                    ExecutionRunStatus.RETRYING,
+                    ExecutionRunStatus.FAILED,
                     failure=exc.failure,
-                    retry_at=not_before,
                 )
-                paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
-                plan.bump_version()
                 uow.outbox.add(
-                    TaskRequeued(
+                    TaskFailedEvent(
                         plan_id=plan_id,
                         goal_id=unit.goal_id,
                         task_id=unit.task_id,
-                        attempt=unit.attempt,
                         reason=exc.reason,
                         kind=exc.kind.value if exc.kind else None,
                     )
                 )
-                uow.plans.save(plan)
-                return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
-
-            # Terminal task failure (retry budget exhausted or non-retryable kind):
-            # record the FAILED task and AUTO-PAUSE the plan in the same txn
-            # (un-freeze #3) — recoverable via edit-while-paused + resume, instead
-            # of the old terminal plan FAILED.
-            reason = f"task {unit.task_id} failed after {unit.policy_attempt} policy attempt(s): {exc.reason}"
-            plan.fail_task(unit.goal_id, unit.task_id, exc.reason, exc.kind)
-            self._finish_execution(
-                uow,
-                unit,
-                ExecutionAttemptStatus.FAILED,
-                ExecutionRunStatus.FAILED,
-                failure=exc.failure,
-            )
-            uow.outbox.add(
-                TaskFailedEvent(
-                    plan_id=plan_id,
-                    goal_id=unit.goal_id,
-                    task_id=unit.task_id,
-                    reason=exc.reason,
-                    kind=exc.kind.value if exc.kind else None,
-                )
-            )
-            if plan.active_cycle is not None:
-                provider_capacity = circuit_manual and exc.kind == FailureKind.RATE_LIMIT
-                block = PlanBlock(
-                    id=new_id(),
-                    kind=("provider_capacity" if provider_capacity else "execution_failure"),
-                    explanation=reason,
-                    stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
-                    goal_id=unit.goal_id,
-                    task_id=unit.task_id,
-                    task_revision=unit.task_revision,
-                    run_id=unit.execution.run_id,
-                    legal_resolutions=(
-                        ["wait_and_retry", "edit_task", "start_replan"]
-                        if provider_capacity
-                        else ["retry_stage", "edit_task", "start_replan"]
-                    ),
-                    evidence_refs=(
-                        [
-                            f"execution-attempt://{unit.execution.id}",
-                            "runtime-circuit://"
-                            f"{unit.spec.runtime_type}/{unit.spec.provider_id}/{unit.spec.model_id}",
-                        ]
-                        if provider_capacity
-                        else [f"execution-attempt://{unit.execution.id}"]
-                    ),
-                    created_at=self._clock.now(),
-                )
-                plan.open_block(block)
-                uow.outbox.add(
-                    PlanBlocked(
-                        plan_id=plan_id,
-                        block_id=block.id,
-                        stage=block.stage,
+                if plan.active_cycle is not None:
+                    # Domain unfreeze #14: this goal opens its own
+                    # goal_blocks entry -- a different goal's concurrently
+                    # opened block never collides here (separate dict
+                    # entries; before #13 this branch had to no-op and drop
+                    # this goal's own failure reason when ANY block was
+                    # already active anywhere in the plan).
+                    provider_capacity = circuit_manual and exc.kind == FailureKind.RATE_LIMIT
+                    block = PlanBlock(
+                        id=new_id(),
+                        kind=("provider_capacity" if provider_capacity else "execution_failure"),
+                        explanation=reason,
+                        stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
                         goal_id=unit.goal_id,
                         task_id=unit.task_id,
                         task_revision=unit.task_revision,
                         run_id=unit.execution.run_id,
+                        legal_resolutions=(
+                            ["wait_and_retry", "edit_task", "start_replan"]
+                            if provider_capacity
+                            else ["retry_stage", "edit_task", "start_replan"]
+                        ),
+                        evidence_refs=(
+                            [
+                                f"execution-attempt://{unit.execution.id}",
+                                "runtime-circuit://"
+                                f"{unit.spec.runtime_type}/{unit.spec.provider_id}/{unit.spec.model_id}",
+                            ]
+                            if provider_capacity
+                            else [f"execution-attempt://{unit.execution.id}"]
+                        ),
+                        created_at=self._clock.now(),
                     )
-                )
-            # A human pause landing during a legacy in-flight attempt keeps its
-            # manual semantics. Cyclic failures instead become explicit blocks.
-            elif plan.pause_requested:
-                self._settle_requested_pause(plan_id, plan, uow)
-            elif not plan.paused:
-                plan.pause(reason)
-                uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=True))
-            plan.bump_version()
-            uow.plans.save(plan)
-            return Signal.PAUSED
+                    plan.open_block(block)
+                    uow.outbox.add(
+                        PlanBlocked(
+                            plan_id=plan_id,
+                            block_id=block.id,
+                            stage=block.stage,
+                            goal_id=unit.goal_id,
+                            task_id=unit.task_id,
+                            task_revision=unit.task_revision,
+                            run_id=unit.execution.run_id,
+                        )
+                    )
+                # A human pause landing during a legacy in-flight attempt keeps its
+                # manual semantics. Cyclic failures instead become explicit blocks.
+                elif plan.pause_requested:
+                    self._settle_requested_pause(plan_id, plan, uow)
+                elif not plan.paused:
+                    plan.pause(reason)
+                    uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=True))
+                plan.bump_version()
+                uow.plans.save(plan)
+                return Signal.PAUSED
+
+        # See _finalize_test_author's identical comment on why re-running
+        # the whole block (including _finish_execution / open_block) is
+        # safe on retry -- the with-uow block rolls back atomically.
+        return self._run_with_cas_retry(finalize)
 
     def _finalize_success(
         self, plan_id: str, unit: _Unit, result: TaskResult, uow: UnitOfWork
     ) -> Signal:
-        # ---- txn2: persist result + DONE atomically with the event ----
-        with uow:
-            plan = uow.plans.get(plan_id)
+        def finalize() -> Signal:
+            # ---- txn2: persist result + DONE atomically with the event ----
+            with uow:
+                plan = uow.plans.get(plan_id)
 
-            if unit.cycle_id is not None and (
-                plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
-            ):
-                superseded = self._unit_task(plan, unit)
-                self._finish_execution(
-                    uow,
-                    unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
-                )
-                plan.release_promotion(unit.execution.id)
-                if not superseded.is_terminal:
-                    plan.abandon_execution_task(
-                        unit.cycle_id,
-                        unit.goal_id,
-                        unit.task_id,
+                if unit.cycle_id is not None and (
+                    plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
+                ):
+                    superseded = self._unit_task(plan, unit)
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
                     )
-                    plan.bump_version()
-                    uow.outbox.add(
-                        TaskAbandoned(
-                            plan_id=plan_id,
-                            goal_id=unit.goal_id,
-                            task_id=unit.task_id,
-                            reason="cycle superseded while task was running",
+                    plan.release_promotion(unit.goal_id, unit.execution.id)
+                    if not superseded.is_terminal:
+                        plan.abandon_execution_task(
+                            unit.cycle_id,
+                            unit.goal_id,
+                            unit.task_id,
                         )
+                        plan.bump_version()
+                        uow.outbox.add(
+                            TaskAbandoned(
+                                plan_id=plan_id,
+                                goal_id=unit.goal_id,
+                                task_id=unit.task_id,
+                                reason="cycle superseded while task was running",
+                            )
+                        )
+                        uow.plans.save(plan)
+                    return Signal.PAUSED
+
+                # TOLERANT FINALIZE (success side): if the finalize-abandon already
+                # closed this task, drop the late result (harmless — the iteration is
+                # abandoned). If the task is still RUNNING, complete it normally:
+                # a late success is harmless history for the next re-plan.
+                abandoned = self._abandoned_task_status(plan, unit)
+                if abandoned is not None and abandoned.is_terminal:
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
                     )
-                    uow.plans.save(plan)
-                return Signal.PAUSED
+                    return Signal.PAUSED
 
-            # TOLERANT FINALIZE (success side): if the finalize-abandon already
-            # closed this task, drop the late result (harmless — the iteration is
-            # abandoned). If the task is still RUNNING, complete it normally:
-            # a late success is harmless history for the next re-plan.
-            abandoned = self._abandoned_task_status(plan, unit)
-            if abandoned is not None and abandoned.is_terminal:
+                if plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id:
+                    self._finish_execution(
+                        uow,
+                        unit,
+                        ExecutionAttemptStatus.ABANDONED,
+                        ExecutionRunStatus.ABANDONED,
+                    )
+                    return Signal.PAUSED
+                plan.release_promotion(unit.goal_id, unit.execution.id)
+                plan.complete_task(unit.goal_id, unit.task_id, result)
+                if unit.spec.provider_id and unit.spec.model_id:
+                    uow.executions.clear_runtime_circuit(
+                        unit.spec.runtime_type,
+                        unit.spec.provider_id,
+                        unit.spec.model_id,
+                    )
                 self._finish_execution(
                     uow,
                     unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
+                    ExecutionAttemptStatus.SUCCEEDED,
+                    ExecutionRunStatus.SUCCEEDED,
+                    stdout_tail=safe_runtime_tail(result.output),
                 )
-                return Signal.PAUSED
+                paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
+                plan.bump_version()
+                uow.outbox.add(
+                    TaskCompleted(plan_id=plan_id, goal_id=unit.goal_id, task_id=unit.task_id)
+                )
+                uow.plans.save(plan)
+                return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
 
-            if plan.promotion_reservation != unit.execution.id:
-                self._finish_execution(
-                    uow,
-                    unit,
-                    ExecutionAttemptStatus.ABANDONED,
-                    ExecutionRunStatus.ABANDONED,
-                )
-                return Signal.PAUSED
-            plan.release_promotion(unit.execution.id)
-            plan.complete_task(unit.goal_id, unit.task_id, result)
-            if unit.spec.provider_id and unit.spec.model_id:
-                uow.executions.clear_runtime_circuit(
-                    unit.spec.runtime_type,
-                    unit.spec.provider_id,
-                    unit.spec.model_id,
-                )
-            self._finish_execution(
-                uow,
-                unit,
-                ExecutionAttemptStatus.SUCCEEDED,
-                ExecutionRunStatus.SUCCEEDED,
-                stdout_tail=safe_runtime_tail(result.output),
-            )
-            paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
-            plan.bump_version()
-            uow.outbox.add(
-                TaskCompleted(plan_id=plan_id, goal_id=unit.goal_id, task_id=unit.task_id)
-            )
-            uow.plans.save(plan)
-        return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
+        # See _finalize_test_author's identical comment on why re-running
+        # the whole block is safe on retry.
+        return self._run_with_cas_retry(finalize)
