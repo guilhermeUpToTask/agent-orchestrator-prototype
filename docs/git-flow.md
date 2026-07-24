@@ -15,12 +15,20 @@ Create every change from current `main` on a short-lived branch:
 - `docs/<description>` for documentation
 - `ci/<description>` for delivery automation
 
-Humans and agents follow the same rule. Open a pull request to `main`, keep it
-small, and use squash merge. Do not push directly to `main`. Required CI checks
-must pass and the branch must be up to date before merge. Reviews are not required
-while the repository has one maintainer; to enable them later, set
-`required_pull_request_reviews.required_approving_review_count` to `1` in the
-`main` branch-protection rule.
+Branches and pull requests are deliberately decoupled. A branch, worktree,
+task, or completed feature does not automatically become a pull request.
+Agents first implement and validate work, then present the user with a feature
+inventory: completed features, commits/branches, dependencies, overlap, CI
+status, and a recommended grouping. The user alone chooses whether to create a
+pull request and which features belong in it.
+
+Agents must not open, close, combine, retarget, or merge a pull request without
+explicit authorization for that exact action and grouping. A user-approved pull
+request targets `main` and uses squash merge. Do not push directly to `main`.
+Required CI checks must pass and the PR branch must be up to date before merge.
+Reviews are not required while the repository has one maintainer; to enable
+them later, set `required_pull_request_reviews.required_approving_review_count`
+to `1` in the `main` branch-protection rule.
 
 ## Conventional Commits
 

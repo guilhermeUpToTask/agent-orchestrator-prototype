@@ -51,12 +51,19 @@ class RunnerAgentStatus(BaseModel):
     model_name: str | None = None
 
 
+class RunnerSandboxStatus(BaseModel):
+    name: str
+    ok: bool
+    message: str
+
+
 class RunnerStatusResponse(BaseModel):
     mode: str
     valid: bool
     detail: str | None = None
     binaries: list[RunnerBinaryStatus]
     agents: list[RunnerAgentStatus]
+    sandbox: RunnerSandboxStatus
 
 
 @router.get("/status")
@@ -104,10 +111,16 @@ def runner_status(
         if broken is not None:
             valid = False
             detail = broken.detail
+    sandbox_probe = container.sandbox.probe()
     return RunnerStatusResponse(
         mode=mode_status.mode,
         valid=valid,
         detail=detail,
         binaries=binaries,
         agents=agents,
+        sandbox=RunnerSandboxStatus(
+            name=sandbox_probe.name,
+            ok=sandbox_probe.ok,
+            message=sandbox_probe.message,
+        ),
     )

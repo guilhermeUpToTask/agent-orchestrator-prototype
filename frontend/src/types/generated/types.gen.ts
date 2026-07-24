@@ -1689,6 +1689,24 @@ export type RunnerBinaryStatus = {
 };
 
 /**
+ * RunnerSandboxStatus
+ */
+export type RunnerSandboxStatus = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Ok
+     */
+    ok: boolean;
+    /**
+     * Message
+     */
+    message: string;
+};
+
+/**
  * RunnerStatusResponse
  */
 export type RunnerStatusResponse = {
@@ -1712,6 +1730,7 @@ export type RunnerStatusResponse = {
      * Agents
      */
     agents: Array<RunnerAgentStatus>;
+    sandbox: RunnerSandboxStatus;
 };
 
 /**

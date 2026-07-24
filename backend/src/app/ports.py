@@ -4,8 +4,11 @@ The five execution/side-channel contracts (Clock, AgentEventSink,
 WorkspaceHandle/Workspace, AgentRunner, Reasoner) are DOMAIN ports —
 they live in src/domain/ports/ and are re-exported here so use cases,
 adapters, and tests keep one import path. What remains defined here is
-app-specific: the TaskFailed signal and the transaction machinery
-(Outbox, UnitOfWork).
+app-specific: the TaskFailed signal, the transaction machinery
+(Outbox, UnitOfWork), and Sandbox (src/app/sandbox_port.py) — deliberately
+an APP port, not a domain one, per ROADMAP item 33: task-attempt OS
+confinement is an infra/execution concern the frozen domain must never know
+about.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from typing import Protocol, runtime_checkable
 
 from src.app.execution_records import ExecutionRecordRepository
 from src.app.runtime_failures import RuntimeFailure
+from src.app.sandbox_port import Sandbox, SandboxPolicy, SandboxProbeResult
 from src.domain.events.base import DomainEvent
 from src.domain.ports import (
     AgentEventSink,
@@ -47,6 +51,9 @@ __all__ = [
     "Reasoner",
     "ReasonerReply",
     "ReasonerUnavailable",
+    "Sandbox",
+    "SandboxPolicy",
+    "SandboxProbeResult",
     "TaskFailed",
     "UnitOfWork",
     "Workspace",
