@@ -183,7 +183,7 @@ def test_tdd_stages_and_branch_barriers_use_orchestrator_evidence(tmp_path, main
     if main_repo_write:
         assert implementer_signal.value == "paused"
         assert after_impl.status == PlanStatus.BLOCKED
-        assert after_impl.block is None  # domain unfreeze #13: routes per-goal now
+        assert after_impl.block is None  # domain unfreeze #14: routes per-goal now
         block = after_impl.goal_blocks.get("goal-1")
         assert block is not None and block.active
         assert "stray paths: ['stray.txt']" in block.explanation
@@ -410,7 +410,7 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
     assert signal.value == "paused"
     blocked = plans.get(plan.id)
     assert blocked.status == PlanStatus.BLOCKED
-    assert blocked.block is None  # domain unfreeze #13: routes per-goal now
+    assert blocked.block is None  # domain unfreeze #14: routes per-goal now
     block = blocked.goal_blocks.get("goal-1")
     assert block is not None and block.active
     assert block.kind == "execution_failure"

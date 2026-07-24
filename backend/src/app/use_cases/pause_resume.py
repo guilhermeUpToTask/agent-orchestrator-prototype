@@ -53,7 +53,7 @@ def retry_task(
     """Reset policy budget only for the selected failed task."""
     with uow:
         plan = uow.plans.get(plan_id)
-        # Domain unfreeze #13: the block about to be resolved by plan.retry_task
+        # Domain unfreeze #14: the block about to be resolved by plan.retry_task
         # below may be this goal's own entry in goal_blocks (a cyclic plan) or
         # the legacy plan-wide scalar -- never both. Grabbed here (before the
         # call mutates/resolves it) so its evidence_refs/id are still readable
@@ -102,7 +102,7 @@ def retry_task(
 
 def _resolve_retryable_block(plan: Plan, goal_id: str | None) -> tuple[PlanBlock, str | None]:
     """The block `retry_planning_stage` should act on, and the goal_id (if
-    any) it belongs to. Domain unfreeze #13: `reasoner_failure` blocks are
+    any) it belongs to. Domain unfreeze #14: `reasoner_failure` blocks are
     always plan-wide (no goal_id) and live on the legacy scalar `plan.block`.
     `agent_capability` blocks from goal enrichment route into
     `plan.goal_blocks[goal_id]`, and since MULTIPLE goals can be

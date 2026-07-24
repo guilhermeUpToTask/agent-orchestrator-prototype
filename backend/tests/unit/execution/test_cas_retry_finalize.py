@@ -1,4 +1,4 @@
-"""CAS-retry-safe finalize (domain unfreeze #12 / Phase 4): the plan.version
+"""CAS-retry-safe finalize (domain unfreeze #13 / Phase 4): the plan.version
 hard-equality check that used to gate `_reserve_candidate` is gone — task
 identity (status/revision/attempt) is the real fencing token. A concurrent
 GOAL's write landing in the narrow get()-to-save() window now transparently

@@ -469,7 +469,7 @@ def test_blocked_task_retry_over_http(client):
 
     blocked = client.get(f"/api/plans/{plan_id}").json()
     assert blocked["status"] == "blocked"
-    # Domain unfreeze #13: a cyclic goal's block is exposed via goal_blocks,
+    # Domain unfreeze #14: a cyclic goal's block is exposed via goal_blocks,
     # not the legacy scalar `block` (which stays null for it).
     assert blocked["block"] is None
     goal_block = blocked["goal_blocks"][goal.id]

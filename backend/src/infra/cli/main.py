@@ -101,7 +101,7 @@ def worker() -> None:
     default=4,
     show_default=True,
     help=(
-        "This process's own in-process goal-worker pool cap (domain unfreeze #13) -- "
+        "This process's own in-process goal-worker pool cap (domain unfreeze #14) -- "
         "how many independent, ready goals this single `worker start` process drives "
         "concurrently. Not derived from load testing yet; tune empirically."
     ),

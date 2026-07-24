@@ -1,5 +1,5 @@
-"""claim_ready_goal — the goal-level claim scan (ADR-001, domain unfreeze #12;
-symmetric-leases redesign, domain unfreeze #13).
+"""claim_ready_goal — the goal-level claim scan (ADR-001, domain unfreeze #13;
+symmetric-leases redesign, domain unfreeze #14).
 
 `GoalLeaseRepository.claim_one_ready_goal` (src/domain/repositories/goal_lease_repo.py)
 is a pure claim primitive over ONE already-identified `(plan_id, goal_id)`
@@ -15,7 +15,7 @@ candidate on a lost race.
 testing yet (ROADMAP-flagged: tune empirically once real contention is
 observable, don't guess further).
 
-Domain unfreeze #13 removed the "privileged plan-level goal" this scan used
+Domain unfreeze #14 removed the "privileged plan-level goal" this scan used
 to have to exclude (a bug found live last session: the plan-level tick always
 drove the position-earliest goal directly via `next_action`, regardless of
 its own readiness, and this scan had to carve that one goal out of its

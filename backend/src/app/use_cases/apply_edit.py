@@ -121,7 +121,7 @@ def apply_edit(
         # promotion reservation blocks any edit) -- scoping IT per-goal is a
         # separate, unaudited change not part of this unfreeze.
         plan.assert_lifecycle_mutation_allowed()
-        # Domain unfreeze #13: recovery-edit eligibility is scoped to THIS
+        # Domain unfreeze #14: recovery-edit eligibility is scoped to THIS
         # edit's own goal -- an active edit_task block on goal A must not
         # grant recovery-edit permission for an edit targeting unrelated
         # goal B (which may still be RUNNING normally). Legacy scalar

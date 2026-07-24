@@ -97,7 +97,7 @@ class Plan(BaseModel):
     cycle_draft: CycleDraft | None = None
     review_gate: ReviewGate | None = None
     block: PlanBlock | None = None
-    # Per-goal blocks (domain unfreeze #13 — goal-level parallelism v2): every
+    # Per-goal blocks (domain unfreeze #14 — goal-level parallelism v2): every
     # execution-triggered PlanBlock already carries a goal_id
     # (planning_artifacts.py); an active cycle routes those into this dict
     # instead of the scalar `block` above, so one goal's failure never stops
@@ -110,7 +110,7 @@ class Plan(BaseModel):
     # which replaced an existing field's shape).
     goal_blocks: dict[str, PlanBlock] = {}
     pause_requested: bool = False
-    # Durable check-to-merge reservation, PER GOAL (domain unfreeze #12 —
+    # Durable check-to-merge reservation, PER GOAL (domain unfreeze #13 —
     # goal-level parallelism, ADR-001): while a goal's slot is set, pause
     # requests may land, but lifecycle/artifact mutations that could
     # supersede that goal's in-flight candidate may not. Keyed by goal_id so
@@ -166,7 +166,7 @@ class Plan(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _migrate_legacy_promotion_reservation(cls, data: object) -> object:
-        """Domain unfreeze #12: `promotion_reservation: str | None` (a single
+        """Domain unfreeze #13: `promotion_reservation: str | None` (a single
         plan-wide scalar) became `goal_promotion_reservations: dict[str, str]`
         (per goal_id). A persisted plan written before this unfreeze carries
         the old key with a token of the form `goal:{cycle_id}:{goal_id}` (the
@@ -224,7 +224,7 @@ class Plan(BaseModel):
         mutation legitimately must not race a live merge/finalize of any goal.
         `goal_id=<x>` (a goal-scoped mutation) blocks only on that goal's own
         reservation, so an in-flight task/promotion on goal A never blocks an
-        edit that only touches goal B (domain unfreeze #12)."""
+        edit that only touches goal B (domain unfreeze #13)."""
         if goal_id is None:
             if self.goal_promotion_reservations:
                 raise InvalidEditError("a verified Git promotion is in progress")
@@ -243,8 +243,9 @@ class Plan(BaseModel):
         self._assert_not_terminal()
         self.retry_policy = retry_policy
 
-    def reserve_promotion(self, reservation: str) -> None:
-        if self.promotion_reservation not in (None, reservation):
+    def reserve_promotion(self, goal_id: str, reservation: str) -> None:
+        current = self.goal_promotion_reservations.get(goal_id)
+        if current not in (None, reservation):
             raise InvalidEditError("another verified Git promotion is in progress")
         self.goal_promotion_reservations[goal_id] = reservation
 
@@ -286,13 +287,13 @@ class Plan(BaseModel):
         return next_action(self.execution_goals, now)
 
     def peek_next_for_goal(self, goal_id: str, now: datetime) -> NextAction:
-        """Goal-level parallelism (ADR-001, domain unfreeze #12): the caller
+        """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller
         (a goal-scoped worker, already holding that goal's lease) has already
         selected which goal to drive — this does NOT re-derive goal selection
         or dependency readiness the way `peek_next` does; it only computes
         the per-goal action for the ONE goal the caller names.
 
-        Domain unfreeze #13 (symmetric per-goal leases): a goal that is
+        Domain unfreeze #14 (symmetric per-goal leases): a goal that is
         already terminal (typically just-promoted DONE, since `drive_goal`'s
         loop calls this again immediately after a promotion returns CONTINUE)
         returns None -- the same "nothing left" signal `next_action` gives
@@ -361,7 +362,7 @@ class Plan(BaseModel):
         self._recompute_cyclic_status(datetime.now(timezone.utc))
 
     def _recompute_cyclic_status(self, now: datetime) -> None:
-        """Domain unfreeze #13: re-derive whether a CYCLIC plan can still make
+        """Domain unfreeze #14: re-derive whether a CYCLIC plan can still make
         progress, after a mutation that could change it (a goal block opened
         or resolved, or a goal completed). Legacy (non-cyclic) plans are
         untouched — they have no `goal_blocks` concept.
@@ -440,7 +441,7 @@ class Plan(BaseModel):
         legacy paused plan has no block and therefore returns None; callers must
         still issue the separate resume command to release its pause gate.
 
-        Domain unfreeze #13: the relevant block may be `goal_blocks[goal_id]`
+        Domain unfreeze #14: the relevant block may be `goal_blocks[goal_id]`
         (a cyclic plan's per-goal block) or the legacy plan-wide `self.block`
         — never both for the same goal. Resolving a per-goal block only
         re-derives THIS plan's overall status (other goals' blocks, if any,
@@ -509,7 +510,7 @@ class Plan(BaseModel):
     ) -> None:
         """Atomically bind every frozen task after the user repairs the registry.
 
-        Domain unfreeze #13: a goal-enrichment `agent_capability` block always
+        Domain unfreeze #14: a goal-enrichment `agent_capability` block always
         carries `goal_id` and, going forward, routes into `goal_blocks` (see
         `open_block`) — checked first here, falling back to the legacy scalar
         `self.block` only for a block that was already open before this
@@ -720,7 +721,7 @@ class Plan(BaseModel):
 
     @property
     def _active_goal_blocks(self) -> list[PlanBlock]:
-        """Domain unfreeze #13: every currently-active per-goal block,
+        """Domain unfreeze #14: every currently-active per-goal block,
         deterministically ordered oldest-first (used wherever a single
         representative block must be picked for a coarse top-level summary —
         the full per-goal detail is always available via `goal_blocks`)."""
@@ -1067,7 +1068,7 @@ class Plan(BaseModel):
         self.status = PlanStatus.PAUSED if self.active_cycle is not None else PlanStatus.IDLE
 
     def open_block(self, block: PlanBlock) -> None:
-        """Domain unfreeze #13: a block with a `goal_id`, opened while an
+        """Domain unfreeze #14: a block with a `goal_id`, opened while an
         active cycle exists, is scoped to that goal only — it never freezes
         an unrelated sibling goal's progress. Every other block (no goal_id —
         e.g. `reasoner_failure`/`project_binding`, or any block on a legacy

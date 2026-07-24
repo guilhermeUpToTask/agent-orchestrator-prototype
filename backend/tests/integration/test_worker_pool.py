@@ -1,4 +1,4 @@
-"""Domain unfreeze #13 (symmetric per-goal leases + dynamic goal-worker
+"""Domain unfreeze #14 (symmetric per-goal leases + dynamic goal-worker
 pool): the actual operational promise this unfreeze makes — a SINGLE
 `orchestrate worker start` process drives multiple independent, ready goals
 CONCURRENTLY, without an operator hand-starting a second OS process the way

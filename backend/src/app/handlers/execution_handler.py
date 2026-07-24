@@ -125,7 +125,7 @@ class ExecutionHandler:
     async def handle_goal(
         self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork
     ) -> Signal:
-        """Goal-level parallelism (ADR-001, domain unfreeze #12): the caller is
+        """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
         a goal-scoped worker that already holds `goal_id`'s lease. Drives that
         ONE goal via the identical body `handle()` uses for the plan-level
         (legacy/pre-goal-parallelism) path — see `handle`'s `goal_id` param."""
@@ -153,7 +153,7 @@ class ExecutionHandler:
 
             if action is None:
                 if goal_id is not None:
-                    # Domain unfreeze #13: None here means "THIS goal is
+                    # Domain unfreeze #14: None here means "THIS goal is
                     # already terminal" (peek_next_for_goal's own contract),
                     # NOT "the whole plan is done" -- entering review is a
                     # plan-wide transition that must never fire just because
@@ -441,7 +441,7 @@ class ExecutionHandler:
                 return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
 
         # StaleVersionError here means a concurrent GOAL's write landed in
-        # this block's own get()-to-save() window (domain unfreeze #12); the
+        # this block's own get()-to-save() window (domain unfreeze #13); the
         # `with uow:` block above rolls back atomically on any exception
         # (SqliteUnitOfWork.__exit__), so retrying from scratch — including
         # re-running _finish_execution — is safe, not a double-write.
@@ -587,7 +587,7 @@ class ExecutionHandler:
         """Retry `body` (which opens its own fresh `with uow:` transaction,
         re-fetching current plan/task state each call) on StaleVersionError —
         a concurrent GOAL's write landing in the narrow window between this
-        call's own read and write (domain unfreeze #12 / Phase 4: goal-level
+        call's own read and write (domain unfreeze #13 / Phase 4: goal-level
         parallelism means more than one worker can legitimately bump the
         same plan's version between this call's get() and save()). `body`
         must be safe to re-run from scratch; every caller here already
@@ -770,7 +770,7 @@ class ExecutionHandler:
         # recoverable only via edit_task or start_replan — offering retry_stage
         # there is a nominal-only resolution that 422s when the operator tries it.
         #
-        # Domain unfreeze #13: each goal opens its OWN block now
+        # Domain unfreeze #14: each goal opens its OWN block now
         # (`Plan.goal_blocks[goal.id]`) -- a different goal's block never
         # collides here (separate dict entries), and `claim_ready_goal`'s
         # candidate scan excludes any goal with an active block from ever
@@ -901,7 +901,7 @@ class ExecutionHandler:
         failed = next(task for task in goal.tasks if task.status == Status.FAILED)
         reason = f"goal {goal.id} has a failed task"
         if plan.active_cycle is not None:
-            # Domain unfreeze #13: see _block_on_unpromotable_goal's comment —
+            # Domain unfreeze #14: see _block_on_unpromotable_goal's comment —
             # this goal opens its own goal_blocks entry; no pre-check needed.
             block = PlanBlock(
                 id=new_id(),
@@ -1291,7 +1291,7 @@ class ExecutionHandler:
                     )
                 )
                 if plan.active_cycle is not None:
-                    # Domain unfreeze #13: this goal opens its own
+                    # Domain unfreeze #14: this goal opens its own
                     # goal_blocks entry -- a different goal's concurrently
                     # opened block never collides here (separate dict
                     # entries; before #13 this branch had to no-op and drop

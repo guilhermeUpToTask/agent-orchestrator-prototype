@@ -141,7 +141,7 @@ def test_shipped_stub_and_dry_run_execute_a_cycle_to_publication_gate(
         container.clock,
     )
 
-    # Domain unfreeze #13 (symmetric per-goal leases): the plan-level tick
+    # Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick
     # only drives enrichment/gates for a cyclic plan now, never execution --
     # drive() settles JIT enrichment and then has nothing left to do at the
     # plan level (every ready goal is enriched, none are all-terminal yet).

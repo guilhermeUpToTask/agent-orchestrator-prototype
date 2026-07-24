@@ -1520,6 +1520,16 @@ export type RetryPolicyUpdateRequest = {
 };
 
 /**
+ * RetryStageRequest
+ */
+export type RetryStageRequest = {
+    /**
+     * Goal Id
+     */
+    goal_id?: string | null;
+};
+
+/**
  * RetryTaskRequest
  */
 export type RetryTaskRequest = {

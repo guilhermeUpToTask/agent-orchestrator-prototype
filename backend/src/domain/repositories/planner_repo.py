@@ -43,7 +43,7 @@ class PlanRepository(Protocol):
     def heartbeat(self, plan_id: str, worker_id: str) -> None: ...
     def release(self, plan_id: str, worker_id: str) -> None: ...
 
-    # --- goal-level parallelism scan (ADR-001, domain unfreeze #12) ---
+    # --- goal-level parallelism scan (ADR-001, domain unfreeze #13) ---
     def list_running_ids(self, limit: int) -> list[str]:
         """Cheap, indexed candidate scan (oldest-updated first, so one busy
         plan can't starve the rest) for the goal-lease claim use case to

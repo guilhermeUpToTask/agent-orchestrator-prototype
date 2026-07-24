@@ -369,7 +369,7 @@ def test_request_replan_fails_loud_when_goal_block_forbids_start_replan(env_fact
 
 
 def test_replanning_message_stays_legal_while_only_partially_blocked(env_factory):
-    """Domain unfreeze #13: a per-goal block leaves the plan status RUNNING
+    """Domain unfreeze #14: a per-goal block leaves the plan status RUNNING
     (not BLOCKED) when a sibling goal can still progress. _start_operation's
     REPLAN precondition must recognize that as still eligible for
     replanning_message -- not just the legacy BLOCKED/PAUSED/IDLE statuses --

@@ -90,10 +90,10 @@ class PlanDispatcher:
                 return Signal.PAUSED
             goals = plan.execution_goals
             now = self._clock.now()
-            # Domain unfreeze #13 (goal-level parallelism v2 — symmetric
+            # Domain unfreeze #14 (goal-level parallelism v2 — symmetric
             # per-goal leases): the plan-level tick NO LONGER dispatches task
             # execution for a cyclic plan at all — that was the "privileged
-            # goal" asymmetry (unfreeze #12) this unfreeze removes. Every
+            # goal" asymmetry (unfreeze #13) this unfreeze removes. Every
             # ready+enriched goal, including the position-earliest one, is
             # claimed and driven exclusively through goal_leases
             # (claim_ready_goal / drive_goal / ExecutionHandler.handle_goal),

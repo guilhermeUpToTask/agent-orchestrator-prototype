@@ -83,7 +83,7 @@ def test_unpromotable_done_goal_blocks_instead_of_raising() -> None:
     assert signal == Signal.PAUSED
     blocked = plans.get(plan.id)
     assert blocked.status == PlanStatus.BLOCKED
-    # Domain unfreeze #13: a cyclic goal's block routes into goal_blocks, not
+    # Domain unfreeze #14: a cyclic goal's block routes into goal_blocks, not
     # the legacy scalar `block` (which stays None for cyclic per-goal blocks).
     assert blocked.block is None
     block = blocked.goal_blocks.get("goal-1")

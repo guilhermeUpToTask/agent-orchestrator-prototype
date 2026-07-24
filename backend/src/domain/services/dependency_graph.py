@@ -7,7 +7,7 @@ cycle detection and ready-set computation — once, rather than each call
 site re-deriving its own traversal. `CycleDraft.validate_dependencies`
 (planning_artifacts.py) and `navigation.ready_goal_ids` both build their own
 edge map from their own entity's `depends_on` field and call these pure
-functions; neither owns graph traversal itself (domain unfreeze #12).
+functions; neither owns graph traversal itself (domain unfreeze #13).
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def blocked_nodes(
     node_ids: set[str], edges: dict[str, list[str]], directly_blocked_ids: set[str]
 ) -> set[str]:
     """Fixed-point closure of "directly blocked, or depends on something blocked"
-    over `node_ids` (domain unfreeze #13 — per-goal blocks). `edges[node_id]` is
+    over `node_ids` (domain unfreeze #14 — per-goal blocks). `edges[node_id]` is
     the list of ids `node_id` depends on, same convention as `ready_nodes`/
     `validate_acyclic`. A node outside `node_ids` (e.g. already DONE) never
     propagates blockage — only entries in `directly_blocked_ids` seed it.

@@ -1,8 +1,8 @@
-"""Goal-level parallelism end-to-end (ADR-001, domain unfreeze #12; symmetric
-per-goal leases + per-goal blocks, domain unfreeze #13): claim_ready_goal +
+"""Goal-level parallelism end-to-end (ADR-001, domain unfreeze #13; symmetric
+per-goal leases + per-goal blocks, domain unfreeze #14): claim_ready_goal +
 drive_goal + ExecutionHandler.handle_goal, on both backends via env_factory.
 
-Domain unfreeze #13 removed the "privileged plan-level goal" asymmetry:
+Domain unfreeze #14 removed the "privileged plan-level goal" asymmetry:
 EVERY ready+enriched goal, including the position-earliest one, is claimable
 through claim_ready_goal, symmetrically, by any worker — the plan-level tick
 (advance_plan.py) no longer dispatches execution at all for a cyclic plan.
@@ -55,7 +55,7 @@ def _two_independent_ready_goals_plan(now, *, tasks_per_goal: int = 1) -> Plan:
 
 
 def test_claim_ready_goal_gives_each_worker_a_different_goal(env_factory):
-    """Symmetric leases (unfreeze #13): BOTH goals, including position-0 g1,
+    """Symmetric leases (unfreeze #14): BOTH goals, including position-0 g1,
     are claimable through goal_leases — there is no privileged goal left to
     exclude."""
     env = env_factory()
@@ -172,7 +172,7 @@ def test_both_goals_can_be_driven_concurrently_by_different_workers(env_factory)
 
 
 def test_two_goals_concurrently_unpromotable_each_get_their_own_block(env_factory):
-    """Domain unfreeze #13: Plan.block is no longer a single plan-wide
+    """Domain unfreeze #14: Plan.block is no longer a single plan-wide
     scalar for cyclic plans -- each goal that discovers a block-worthy
     problem opens its OWN entry in goal_blocks, independent of any sibling
     goal's block. (Before #13 the second goal's failure reason was silently
@@ -226,7 +226,7 @@ def test_two_goals_concurrently_unpromotable_each_get_their_own_block(env_factor
 
 
 def test_blocked_goal_never_stops_an_independent_sibling_goal(env_factory):
-    """The actual point of domain unfreeze #13: one goal blocking must not
+    """The actual point of domain unfreeze #14: one goal blocking must not
     stop an unrelated, independent sibling goal from finishing. g1 becomes
     unpromotable (DONE task, no verification evidence) and opens its own
     block; g2 is untouched and can still be claimed, driven, and reach DONE
@@ -319,7 +319,7 @@ def _n_independent_ready_goals_plan(now, n: int) -> Plan:
 
 
 def test_cas_retry_converges_under_four_way_concurrent_goal_finalize(env_factory):
-    """Plan document's flagged risk: before domain unfreeze #13, at most two
+    """Plan document's flagged risk: before domain unfreeze #14, at most two
     writers per process (worker_tick + one goal_tick) ever contended on one
     plan's version. Symmetric per-goal leases let every ready goal dispatch
     at once -- this drives FOUR independent goals to completion fully

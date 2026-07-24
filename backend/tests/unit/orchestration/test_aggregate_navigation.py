@@ -105,7 +105,7 @@ def test_multiple_unready_goals_no_noise():
     assert go.id == "g1"
 
 
-# ===== goal-parallelism readiness primitives (domain unfreeze #12) =====
+# ===== goal-parallelism readiness primitives (domain unfreeze #13) =====
 
 
 def test_ready_goal_ids_returns_all_independent_ready_goals():
@@ -364,12 +364,12 @@ def test_factory_reconstruct_roundtrip():
     assert restored.version == p.version
 
 
-# ===== legacy promotion_reservation migration shim (domain unfreeze #12) =====
+# ===== legacy promotion_reservation migration shim (domain unfreeze #13) =====
 
 
 def _legacy_plan_json(promotion_reservation):
     """A plan JSON blob shaped as it would have been persisted BEFORE
-    unfreeze #12 introduced goal_promotion_reservations — i.e. it carries the
+    unfreeze #13 introduced goal_promotion_reservations — i.e. it carries the
     old `promotion_reservation` key and has no `goal_promotion_reservations`
     key at all."""
     base = PlanFactory.create("build x", "project-1").model_dump()

@@ -1,13 +1,13 @@
 # ADR: Concurrency model — the per-plan lease IS the unit of parallelism
 
 Status: **implemented at goal granularity, symmetric leases
-(2026-07-23, domain unfreeze #13)**. Originally accepted 2026-07-02
+(2026-07-23, domain unfreeze #14)**. Originally accepted 2026-07-02
 (Phase-0 domain freeze) as a seam, not yet built; first implemented
-additively 2026-07-22 (unfreeze #12, one privileged plan-level goal +
+additively 2026-07-22 (unfreeze #13, one privileged plan-level goal +
 a second goal-lease for the rest); made fully symmetric 2026-07-23
-(unfreeze #13) after a live walkthrough of #12 surfaced both a real
+(unfreeze #14) after a live walkthrough of #13 surfaced both a real
 concurrency bug in that asymmetry and three deliberate compromises the
-user asked to remove outright — see "What changed in #13" below.
+user asked to remove outright — see "What changed in #14" below.
 Task-granularity remains explicitly out of scope (ROADMAP's do-not-do
 list: "breaks the plan-document CAS model for a speculative gain") —
 this ADR's own table already named that tradeoff.
@@ -19,7 +19,7 @@ a plan at a time via the lease (`PlanRepository.claim_one_unit / heartbeat /
 release`); within a claimed plan, `next_action` returns exactly ONE ready
 unit and the worker drives units one at a time.
 
-**2026-07-22 (unfreeze #12, superseded by #13 below):** the plan-level lease
+**2026-07-22 (unfreeze #13, superseded by #14 below):** the plan-level lease
 still drove planning/gates/legacy execution AND the single earliest-ready
 goal (a lone worker process's behavior was byte-identical to before the
 unfreeze), while a second, purely additive lease existed at goal granularity
@@ -29,7 +29,7 @@ live walkthrough with two real worker processes found that exclusion was
 briefly missing its full scope, causing a genuine duplicate-dispatch race
 (two real agent runs for the identical task).
 
-**As of 2026-07-23 (unfreeze #13)**, the plan-level lease no longer
+**As of 2026-07-23 (unfreeze #14)**, the plan-level lease no longer
 dispatches execution at all for a cyclic plan — it drives only planning
 (JIT enrichment fan-out) and the "every goal terminal → enter review"
 transition (`app/use_cases/advance_plan.py::PlanDispatcher.advance`). EVERY
@@ -50,7 +50,7 @@ concurrency itself.
 
 `Plan.block` also stopped being a single plan-wide scalar for a cyclic
 plan's execution-time blocks — see `docs/decisions/decision-log.md`'s
-unfreeze #13 entry for the `goal_blocks` per-goal design. That part is a
+unfreeze #14 entry for the `goal_blocks` per-goal design. That part is a
 block-semantics change, not a lease-granularity change, but it was required
 alongside the lease symmetry fix: without it, the instant any one goal
 blocked, the plan-wide `status` flip to `BLOCKED` made the ENTIRE plan
@@ -75,7 +75,7 @@ The lease **granularity** is deliberately the future parallelism switch:
   per `plan_id` — crash recovery is still trivial, just at finer grain.
 - The version-CAS on the plan aggregate is the single write gate; parallel task
   writers would contend on it constantly (every finalize bumps the plan version).
-  **Resolved by:** domain unfreeze #12 removed the `plan.version` equality
+  **Resolved by:** domain unfreeze #13 removed the `plan.version` equality
   check that made this contention a correctness problem (it was never the
   real fencing token — task identity was) — see the CAS-retry-safe finalize
   work (`ExecutionHandler._run_with_cas_retry`), which retries a

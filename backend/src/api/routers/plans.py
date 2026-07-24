@@ -128,7 +128,7 @@ class PlanDetailResponse(BaseModel):
     active_cycle: Cycle | None
     pending_gate: ReviewGate | None
     block: PlanBlock | None
-    # Domain unfreeze #13 — per-goal blocks: goal_id -> that goal's own active
+    # Domain unfreeze #14 — per-goal blocks: goal_id -> that goal's own active
     # (or resolved-but-recent) PlanBlock, independent of the plan-wide `block`
     # scalar above. Only entries with `.active` True are currently unresolved;
     # callers resolving one pass its goal_id to POST /retry (or the relevant
@@ -905,7 +905,7 @@ def retry_blocked_task(
 
 
 class RetryStageRequest(BaseModel):
-    # Domain unfreeze #13: disambiguates which goal's agent_capability block
+    # Domain unfreeze #14: disambiguates which goal's agent_capability block
     # to retry when more than one goal is independently blocked at once.
     # Omit it when unambiguous (a plan-wide reasoner_failure block, or
     # exactly one active per-goal block) -- unset body stays backward

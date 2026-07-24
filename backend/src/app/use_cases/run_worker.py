@@ -45,7 +45,7 @@ async def _advance_with_heartbeats(
     advance: Awaitable[str],
 ) -> tuple[str, bool]:
     """Renew a lease (via the given `heartbeat` callback) while one atomic
-    action is still running. Generalized (domain unfreeze #12 / Phase 3c) so
+    action is still running. Generalized (domain unfreeze #13 / Phase 3c) so
     both the plan-level (`drive_plan`) and goal-level (`drive_goal`) loops
     share this, instead of each hardcoding its own lease repository call."""
     task = asyncio.ensure_future(advance)
@@ -182,7 +182,7 @@ async def drive_goal(
     heartbeat_interval_seconds: float | None = None,
     verifier: VerificationExecutor | None = None,
 ) -> tuple[str, int]:
-    """Goal-level analog of `drive_plan` (ADR-001, domain unfreeze #12 /
+    """Goal-level analog of `drive_plan` (ADR-001, domain unfreeze #13 /
     Phase 3c): advance ONE goal (within an active cycle) until it stops
     making progress, holding that goal's lease instead of the whole plan's.
     Never routes to planning/gates — a goal-lease holder only ever drives

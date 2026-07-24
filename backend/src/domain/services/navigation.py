@@ -47,7 +47,7 @@ def next_action(goals: list[Goal], now: datetime) -> NextAction:
     cursor.
 
     Behavior is unchanged by the additive goal-parallelism primitives below
-    (`ready_goal_ids`/`action_for_goal`, domain unfreeze #12) — this function's
+    (`ready_goal_ids`/`action_for_goal`, domain unfreeze #13) — this function's
     signature and every existing caller/test stay byte-identical; it now just
     shares its per-goal tail with `action_for_goal` instead of owning it alone.
     """
@@ -88,7 +88,7 @@ def action_for_goal(goal: Goal, now: datetime) -> NextAction:
 
 def ready_goal_ids(goals: list[Goal], now: datetime) -> set[str]:
     """Every non-terminal goal whose `depends_on` is entirely DONE — the
-    goal-parallelism readiness primitive (ADR-001, domain unfreeze #12).
+    goal-parallelism readiness primitive (ADR-001, domain unfreeze #13).
     `now` is accepted for signature symmetry with `action_for_goal`/
     `next_action` (a future backoff-aware readiness refinement might need it)
     but is unused today: goal-level dependency readiness has no time
@@ -104,7 +104,7 @@ def ready_goal_ids(goals: list[Goal], now: datetime) -> set[str]:
 def plan_can_progress(goals: list[Goal], goal_blocked_ids: set[str], now: datetime) -> bool:
     """True iff at least one non-terminal goal can still make progress on its
     own — i.e. is not itself blocked and does not transitively depend on a
-    blocked goal (domain unfreeze #13 — per-goal blocks replace "any active
+    blocked goal (domain unfreeze #14 — per-goal blocks replace "any active
     block freezes the whole plan"). `goal_blocked_ids` is the set of goal ids
     with an active `PlanBlock` (`Plan.goal_blocks`), supplied by the caller.
 

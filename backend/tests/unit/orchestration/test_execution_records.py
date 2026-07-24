@@ -207,7 +207,7 @@ def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, mon
 
 
 def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
-    """Domain unfreeze #13 (symmetric per-goal leases): the plan-level tick no
+    """Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick no
     longer dispatches cyclic execution at all, so this drives the single goal
     directly via ExecutionHandler.handle_goal — the same entry point a
     goal-lease worker (claim_ready_goal / drive_goal) uses in production."""

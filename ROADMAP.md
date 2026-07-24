@@ -222,7 +222,7 @@ Take these up only when real usage demonstrates the need.
     the right answer for cross-*machine* deployment, a different problem
     this system's single-SQLite-file persistence model doesn't attempt to
     solve either. Still deliberately unnecessary until multi-machine is the
-    actual goal. Re-confirmed 2026-07-23 (domain unfreeze #13, symmetric
+    actual goal. Re-confirmed 2026-07-23 (domain unfreeze #14, symmetric
     per-goal leases + the in-process goal-worker pool): real single-process
     concurrency needed no new coordination primitive either, just removing
     the plan-level lease's execution-dispatch privilege — another point in
@@ -235,8 +235,8 @@ Take these up only when real usage demonstrates the need.
     agent_events + API request logs. Build on the existing two streams; **no
     second event system**.
 31. **Proactive goal-scope-disjointness guard** [MRF, ADR-001 follow-up] —
-    goal-level parallelism (implemented 2026-07-22, domain unfreeze #12;
-    made fully symmetric 2026-07-23, domain unfreeze #13) ships with only a
+    goal-level parallelism (implemented 2026-07-22, domain unfreeze #13;
+    made fully symmetric 2026-07-23, domain unfreeze #14) ships with only a
     REACTIVE safety net for concurrent goals touching overlapping files (the
     existing `goal_promotion_failure` block, hit at git-merge time — now
     per-goal, see `Plan.goal_blocks`, so one goal's merge conflict no longer

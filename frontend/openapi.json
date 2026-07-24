@@ -6189,12 +6189,12 @@
         "title": "RetryPolicy",
         "description": "Domain rule for retry/terminal decisions.\n\nOwns the *decision* (should we retry? how long to back off?); the adapter\nowns the *mechanism* (actually sleeping, re-invoking). Persisted per-plan so\nit is configurable and survives crashes. This is also what makes\n\"retries exhausted -> terminal FAILED\" a domain rule rather than adapter magic."
       },
-      "RetryStageRequest": {
+      "RetryPolicyUpdateRequest": {
         "properties": {
-          "goal_id": {
+          "max_attempts": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -6250,6 +6250,23 @@
         "type": "object",
         "title": "RetryPolicyUpdateRequest",
         "description": "All fields optional: only the ones an operator sets are changed (partial\nmerge over the plan's current retry policy); the rest keep their current\nvalue. Mirrors execution.retry_* config field-for-field."
+      },
+      "RetryStageRequest": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          }
+        },
+        "type": "object",
+        "title": "RetryStageRequest"
       },
       "RetryTaskRequest": {
         "properties": {

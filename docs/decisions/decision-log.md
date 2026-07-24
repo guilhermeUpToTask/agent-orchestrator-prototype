@@ -196,3 +196,125 @@ the plan's current policy in the same transaction as the version bump — same
 "editorial mutation, no outbox event" shape as `apply_edit`. Composes with
 unfreeze #11's `can_promote_goal()` cleanup; touches no goal/task/navigation
 state.
+
+53. **Domain unfreeze #13 (2026-07-22): goal-level parallelism domain
+primitives — shared dependency graph, additive readiness, per-goal
+promotion reservation.** [ADR-001](adr-001-concurrency-lease.md) (decision
+10, 2026-07-02) designed the lease granularity as the deliberate future
+parallelism switch (plan → goal → task) without yet implementing it. This
+unfreeze does the domain-layer third: (a) `CycleDraft.validate_dependencies`'s
+inline cycle-detection DFS is lifted into a shared, pure
+`domain/services/dependency_graph.py` (`validate_acyclic` + a new
+`ready_nodes` primitive) so goal-parallelism scheduling and cycle-draft
+validation share one DAG implementation instead of two independently
+maintained traversals; (b) `navigation.py` gains **additive** functions
+`ready_goal_ids` (which non-terminal goals have every `depends_on`
+dependency DONE — the ADR's "next_action must return a set" requirement,
+satisfied without changing `next_action`'s own signature so every existing
+caller/test and all legacy-plan behavior stay byte-identical) and
+`action_for_goal` (the per-goal tail `next_action` already had, now shared
+rather than duplicated for goal-selected dispatch); (c) `Plan.promotion_reservation`
+(a single plan-wide `str | None` scalar guarding BOTH task-attempt-in-flight
+and goal-merge-in-flight, whichever needed it at the time) becomes
+`goal_promotion_reservations: dict[str, str]` keyed by `goal_id`, so two
+different goals' task attempts/promotions no longer contend on the same
+slot — the actual blocker to running them concurrently. `reserve_promotion`/
+`release_promotion` take `goal_id` explicitly; `assert_lifecycle_mutation_allowed(goal_id=None)`
+keeps today's "any goal reserved blocks a plan-wide mutation" behavior by
+default for existing callers (`propose_intent`/`revise_intent`/etc., all
+unchanged call sites) while allowing a goal-scoped check for future use. A
+`model_validator(mode="before")` migrates a persisted plan's legacy
+`promotion_reservation` field (a parseable `goal:{cycle_id}:{goal_id}` token
+maps to `{goal_id: token}`; an unparseable opaque execution-id token has no
+recoverable goal_id under the new keying and is dropped — there is no
+consistent key a later `release_promotion` call could ever find it under
+anyway, so dropping is the only coherent choice, not a corner cut for
+convenience).
+
+Everything else in the goal-parallelism work (the `goal_leases` lease/claim
+schema and repository, the worker/dispatcher wiring, the cross-process
+CAS-retry-safe finalize, and the cross-process git-merge lock) is app/infra-
+layer, not domain, and is not folded into this unfreeze entry — the
+decision log's convention is specifically about FROZEN-domain changes. See
+[ADR-001](adr-001-concurrency-lease.md)'s updated status for the full
+picture of what shipped.
+
+54. **Domain unfreeze #14 (2026-07-23): symmetric per-goal leases, per-goal
+blocks, single-process goal-worker pool.** A live walkthrough of unfreeze
+#13 (real two-worker-process run) surfaced and fixed one genuine concurrency
+bug (a goal-lease worker racing the plan-lease worker for the same task —
+see the `claim_ready_goal.py` git history) and, in the process, exposed
+three deliberate compromises from #13's additive/legacy-safe shape that the
+user asked to remove outright rather than keep living with: (a) the lease
+model was asymmetric — one "plan-level" lease always drove the single
+position-earliest goal via `next_action` regardless of its own readiness,
+forcing the goal-lease scan to carve that one goal out of its own candidate
+set to avoid colliding with it; (b) `Plan.block` was a single plan-wide
+scalar, so the instant ANY goal opened a block, the whole plan's `status`
+flipped to `BLOCKED` — and since the claim SQL (`_CLAIM_SQL` /
+`list_running_ids`) filters `status = 'running'`, that also made the ENTIRE
+plan unclaimable, forcing every other independent, still-progressing goal to
+abandon its in-flight work (observed live as a task flipping to `SKIPPED`
+mid-run for a reason unrelated to that goal); (c) real parallelism required
+hand-starting a second OS worker process, since one process's own loop drove
+`worker_tick` and one goal via `goal_tick` strictly sequentially.
+
+Domain-layer changes: `Plan.goal_blocks: dict[str, PlanBlock] = {}`, additive
+alongside the legacy scalar `block` — `open_block`/`resolve_block` route a
+block with a `goal_id`, opened while an active cycle exists, into this dict
+instead (raising only on a genuine same-goal double-open, never a different
+goal's); every other block (no `goal_id`, or a legacy non-cyclic plan) keeps
+the original scalar behavior, byte-identical. A new shared DAG primitive,
+`dependency_graph.blocked_nodes` (same shape as the existing `ready_nodes`),
+and `navigation.plan_can_progress` compute whether ANY non-terminal goal can
+still make progress; `Plan._recompute_cyclic_status` (called after
+`open_block`/`resolve_block`/`complete_goal`) sets `status = BLOCKED` only
+when every non-terminal goal is blocked or transitively depends on one that
+is — not the instant any single goal blocks — with an explicit short-circuit
+for "zero non-terminal goals" (a finished cycle, not a stuck one).
+`retry_task`/`retry_agent_binding` were extended to resolve whichever
+location (scalar or per-goal) actually holds the relevant block, since a
+goal-enrichment `agent_capability` block now also routes per-goal.
+`peek_next_for_goal` gained a terminal-goal short-circuit (returns `None`
+once its own goal is already DONE/terminal) paired with a fix in
+`ExecutionHandler.handle`'s shared body so a goal-lease worker's `None`
+never triggers the plan-wide `_enter_review` transition just because ITS
+goal finished while siblings are still running — a latent gap from #13's
+original `handle_goal` sharing that only surfaces once every goal (not just
+the non-privileged ones) drives through the goal-lease path.
+
+App/infra layer (not itself domain, noted here for the full picture):
+`advance_plan.py`'s cyclic branch no longer dispatches execution at all —
+only enrichment fan-out and the "every goal terminal → enter review"
+transition; ALL execution dispatch, including the position-earliest goal,
+goes through `claim_ready_goal` symmetrically (the #13 exclusion carve-out
+is dead code, removed). `claim_ready_goal` also excludes any goal with an
+active `goal_blocks` entry, so a blocked goal is never re-claimed and
+re-collided with its own still-open block. `infra/worker/main.py` gained an
+in-process goal-worker pool (`max_concurrent_goals`, new CLI flag, default
+4): each `run_worker_forever` process now claims and drives multiple ready
+goals concurrently via its own asyncio tasks, each with its own fresh
+`UnitOfWork` (never the shared one `worker_tick` uses) — a single
+`orchestrate worker start` process is now sufficient for real goal-level
+parallelism; running more processes remains supported for horizontal/
+multi-host scaling but is no longer required to demonstrate it.
+
+**Addendum (2026-07-23, same unfreeze):** `status_reason`/`legal_actions` no
+longer mask coexisting per-goal blocks behind an active plan-wide scalar
+block — the scalar block stays the headline (its kind/code/resolutions lead),
+but the summary message notes how many goals are independently blocked and
+the per-goal blocks' legal resolutions are unioned in. Presentation-only
+change to derived read-model properties; no state shape or transition change.
+
+---
+
+**Decision 55 (2026-07-23) — domain unfreeze #15: per-kind retry budgets.**
+`RetryPolicy` gains `kind_max_attempts` and `kind_backoff_scale` so
+self-healing failure kinds stop exhausting into operator-facing blocks:
+`rate_limit` now retries up to 6 attempts on a 4x-scaled (patient) backoff
+curve and ceiling, `connection_error` up to 5; all other kinds keep the
+uniform `max_attempts` budget and curve, and `non_retryable_kinds` is
+untouched. Additive Pydantic fields with defaults — persisted pre-#15
+policies rehydrate unchanged. Motivation: block-frequency UX (blocks are
+automation's give-up signal; a kind that heals by waiting should almost
+never produce one).

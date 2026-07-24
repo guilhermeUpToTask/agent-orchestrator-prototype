@@ -1,4 +1,4 @@
-"""Per-goal blocks (domain unfreeze #13 — goal-level parallelism v2): a block
+"""Per-goal blocks (domain unfreeze #14 — goal-level parallelism v2): a block
 on one goal must never stop an unrelated, independent sibling goal from
 progressing, and the plan-wide `status` only becomes BLOCKED when EVERY
 non-terminal goal is blocked or transitively depends on one that is."""

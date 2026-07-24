@@ -9,7 +9,7 @@ the ONLY polling in the system — and only between plans, never within one
 Crash recovery needs no supervisor logic here: a dead worker's lease expires
 and any other worker's next tick reclaims the plan from persisted state.
 
-Domain unfreeze #13 (symmetric per-goal leases) removed the plan-level tick's
+Domain unfreeze #14 (symmetric per-goal leases) removed the plan-level tick's
 execution fallback entirely for a cyclic plan — a lone `worker_tick` no
 longer drives ANY task execution once a cycle is active; every ready goal is
 claimed and driven exclusively through `claim_ready_goal`/`drive_goal`. So

@@ -89,7 +89,7 @@ def test_ready_later_goal_routes_to_planning_past_blocked_head(env_factory) -> N
 
 
 def test_enriched_ready_goal_no_longer_dispatched_by_plan_level_tick(env_factory) -> None:
-    """Domain unfreeze #13 (symmetric per-goal leases): the plan-level tick
+    """Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick
     stops dispatching execution entirely for a cyclic plan -- an
     enriched-and-ready goal (nothing needs enrichment, not all goals
     terminal) is left for a goal-lease worker (claim_ready_goal / drive_goal)
@@ -118,8 +118,8 @@ def test_enriched_ready_goal_no_longer_dispatched_by_plan_level_tick(env_factory
 
 
 def test_approved_replan_intent_routes_to_architecture_not_the_source_cycle(env_factory) -> None:
-    """Real bug found via a live walkthrough (predates domain unfreeze #13 --
-    this routing existed unchanged since unfreeze #12, just never exercised
+    """Real bug found via a live walkthrough (predates domain unfreeze #14 --
+    this routing existed unchanged since unfreeze #13, just never exercised
     by a real reasoner replan on a plan whose source cycle was still active,
     since prior walkthroughs used the stub reasoner via direct CycleDraft
     PUT). A REPLAN's SOURCE cycle stays `active_cycle` for the entire

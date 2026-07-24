@@ -1,4 +1,4 @@
-"""Shared DAG algorithms (domain unfreeze #12): cycle detection lifted
+"""Shared DAG algorithms (domain unfreeze #13): cycle detection lifted
 verbatim out of CycleDraft.validate_dependencies, and the new ready_nodes
 primitive goal-parallelism scheduling needs. Pure, plain dict[str, list[str]]
 edge maps — no Goal/GoalOutline involved."""

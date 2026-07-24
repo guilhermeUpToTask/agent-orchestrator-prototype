@@ -41,7 +41,7 @@ def request_replan(plan_id: str, uow: UnitOfWork) -> None:
                 )
             )
 
-        # Domain unfreeze #13: a replan is a holistic, plan-wide mutation --
+        # Domain unfreeze #14: a replan is a holistic, plan-wide mutation --
         # resolve EVERY active per-goal block too (not just the legacy scalar
         # above), since the source cycle they belong to is about to be frozen
         # and superseded anyway (activate_cycle wipes goal_blocks wholesale
