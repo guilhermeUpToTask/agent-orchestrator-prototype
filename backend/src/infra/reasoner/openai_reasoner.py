@@ -271,17 +271,50 @@ def _validate_task_item(item: Any, where: str, known_caps: set[str]) -> list[str
     if not isinstance(item.get("description"), str):
         errors.append(f"{where}: task 'description' must be a string")
     errors.extend(_validate_tdd_task_granularity(item, where))
-    caps = item.get("required_capabilities", [])
-    if not isinstance(caps, list) or not all(isinstance(c, str) for c in caps):
-        errors.append(f"{where}: 'required_capabilities' must be a list of strings")
-    else:
-        unknown = [c for c in caps if c not in known_caps]
-        if unknown:
-            errors.append(
-                f"{where}: unknown capability id(s) {unknown} — use only ids "
-                "from the catalog (or omit required_capabilities)"
-            )
+    errors.extend(_validate_capability_ids(item, where, known_caps))
     return errors
+
+
+def _validate_capability_ids(item: Any, where: str, known_caps: set[str]) -> list[str]:
+    """Reject capability ids that are not in the catalog.
+
+    Shared by the legacy `submit_tasks` path and the current
+    `submit_goal_contract` one. The provider's JSON schema types
+    required_capabilities as "array of string" and cannot constrain it to the
+    catalog, so this is the only enforcement point -- never trust provider
+    schema enforcement (CLAUDE.md).
+    """
+    if not isinstance(item, dict):
+        return []
+    caps = item.get("required_capabilities", [])
+    if caps in (None, []):
+        return []
+    if not isinstance(caps, list) or not all(isinstance(c, str) for c in caps):
+        return [f"{where}: 'required_capabilities' must be a list of strings"]
+    unknown = [c for c in caps if c not in known_caps]
+    if not unknown:
+        return []
+    return [
+        f"{where}: unknown capability id(s) {unknown} — use only ids "
+        f"from the catalog {sorted(known_caps)} (or omit required_capabilities)"
+    ]
+
+
+def _filter_capability_ids(item: Any, known_caps: set[str], where: str) -> None:
+    """Drop uncatalogued capability ids in place, after the rejection budget."""
+    if not isinstance(item, dict):
+        return
+    caps = item.get("required_capabilities")
+    if not isinstance(caps, list):
+        return
+    kept = [c for c in caps if isinstance(c, str) and c in known_caps]
+    if kept != caps:
+        log.warning(
+            "reasoner.unknown_capabilities_filtered",
+            where=where,
+            dropped=[c for c in caps if c not in kept],
+        )
+        item["required_capabilities"] = kept
 
 
 def _validate_tdd_task_granularity(item: dict[str, Any], where: str) -> list[str]:
@@ -604,16 +637,36 @@ class OpenAIReasoner:
             "read_prior_evidence": lambda: json.dumps(proposal.evidence_refs if proposal else []),
         }
 
+        caps = list(capabilities)
+        known_caps = {capability.id for capability in caps}
+        state: dict[str, Any] = {"rejections": 0}
+
         def handle_submit_goal_contract(args: dict[str, Any]) -> str:
             tasks_raw = args.get("tasks")
             if not isinstance(tasks_raw, list) or not tasks_raw:
                 return _rejected(["'tasks' must be a non-empty array"])
             errors: list[str] = []
+            capability_errors: list[str] = []
             for ti, task_raw in enumerate(tasks_raw):
                 if isinstance(task_raw, dict):
                     errors.extend(_validate_tdd_task_granularity(task_raw, f"tasks[{ti}]"))
+                    capability_errors.extend(
+                        _validate_capability_ids(task_raw, f"tasks[{ti}]", known_caps)
+                    )
+            capability_errors.extend(
+                _validate_capability_ids(args, "goal_contract", known_caps)
+            )
             if errors:
-                return _rejected(errors)
+                return _rejected(errors + capability_errors)
+            if capability_errors:
+                # Same budget as the legacy submit_tasks path: give the model a
+                # bounded number of chances to pick real catalog ids, then accept
+                # and filter on build. An unsatisfiable capability set frozen into
+                # a TaskContract hard-blocks the goal at role resolution
+                # (agent_capability), which no retry can clear.
+                state["rejections"] += 1
+                if state["rejections"] <= MAX_CAPABILITY_REJECTIONS:
+                    return _rejected(capability_errors)
             return collector.submit(args)
 
         tools = build_tool_profile(
@@ -631,7 +684,10 @@ class OpenAIReasoner:
                     "criterion must map to atomic ordered tasks. Use TDD for new "
                     "behavior, characterization for preserving behavior, and "
                     "executable_check where RED is meaningless. "
-                    f"{TDD_TASK_GRANULARITY_GUIDANCE} Submit exactly once."
+                    f"{TDD_TASK_GRANULARITY_GUIDANCE} "
+                    "required_capabilities, where given, must use ONLY these "
+                    f"catalog ids: {sorted(known_caps)}. Omit the field if none "
+                    "apply — never invent an id. Submit exactly once."
                 ),
             },
         ]
@@ -646,10 +702,12 @@ class OpenAIReasoner:
         value = dict(collector.value or result.submit_args)
         value["id"] = goal.id
         value["frozen_at"] = datetime.min.replace(tzinfo=timezone.utc)
+        _filter_capability_ids(value, known_caps, "goal_contract")
         for position, task in enumerate(value.get("tasks", [])):
             task["id"] = new_id()
             task["position"] = position
             task["revision"] = 1
+            _filter_capability_ids(task, known_caps, f"tasks[{position}]")
         return _validate_submission(GoalContract, value, context="submit_goal_contract")
 
 

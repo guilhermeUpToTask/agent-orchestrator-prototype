@@ -424,6 +424,92 @@ def test_goal_contract_tdd_step_submission_is_rejected_then_accepted():
     assert contract.tasks[0].objective == "Deliver validated Item schemas with passing tests"
 
 
+def test_goal_contract_unknown_capability_rejected_then_filtered_after_budget():
+    """`submit_goal_contract` must validate required_capabilities against the
+    catalog, exactly as the legacy `submit_tasks` path already does.
+
+    Observed live: a real reasoner invented 'file_operations' and 'python',
+    nothing rejected them, they were frozen into the TaskContract, and the
+    plan hard-blocked at goal_enrichment with
+    `agent_capability: no configured agent covers test_author:
+    ['file_operations', 'python', 'test_authoring']`. The capability guard
+    existed only on the quarantined legacy transform and was never carried
+    forward to the cyclic lifecycle, so the CURRENT path was less robust than
+    the legacy one it replaced.
+    """
+
+    def contract_task(caps: list[str]) -> dict[str, object]:
+        return {
+            "objective": "Deliver validated Item schemas with passing tests",
+            "acceptance_criteria": [{"id": "t-1", "description": "Item works"}],
+            "goal_criterion_ids": ["g-1"],
+            "allowed_scope": ["backend/"],
+            "verification_commands": ["pytest -q"],
+            "verification_strategy": "tdd",
+            "required_capabilities": caps,
+        }
+
+    invented = {
+        "objective": "Build Item",
+        "acceptance_criteria": [{"id": "g-1", "description": "Item works"}],
+        "tasks": [contract_task(["file_operations", "python"])],
+    }
+    corrected = {**invented, "tasks": [contract_task(["backend"])]}
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_goal_contract", invented, "bad"),
+            tool_turn("submit_goal_contract", corrected, "good"),
+        ]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    contract = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    assert rejection["accepted"] is False
+    assert "unknown capability id" in rejection["errors"][0]
+    assert "file_operations" in rejection["errors"][0]
+    # The corrected submission survives intact.
+    assert contract.tasks[0].required_capabilities == ["backend"]
+
+
+def test_goal_contract_filters_unknown_capabilities_once_the_budget_is_spent():
+    """A model that will not correct itself must never freeze an unsatisfiable
+    contract: past the rejection budget the unknown ids are dropped, so the
+    goal degrades to a resolvable role instead of hard-blocking the plan."""
+
+    def contract_task() -> dict[str, object]:
+        return {
+            "objective": "Deliver validated Item schemas with passing tests",
+            "acceptance_criteria": [{"id": "t-1", "description": "Item works"}],
+            "goal_criterion_ids": ["g-1"],
+            "allowed_scope": ["backend/"],
+            "verification_commands": ["pytest -q"],
+            "verification_strategy": "tdd",
+            "required_capabilities": ["python", "backend"],
+        }
+
+    stubborn = {
+        "objective": "Build Item",
+        "acceptance_criteria": [{"id": "g-1", "description": "Item works"}],
+        "tasks": [contract_task()],
+    }
+    client = FakeLLMClient(
+        [tool_turn("submit_goal_contract", stubborn, f"c{i}") for i in range(12)]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    contract = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    assert contract.tasks[0].required_capabilities == ["backend"], (
+        "unknown ids must be filtered on build so role resolution can succeed"
+    )
+
+
 # ---- runtime-neutral model usage observations ----
 def test_converse_records_reported_usage_with_provenance():
     from src.app.observations import ObservationQuality, ObservationSource
