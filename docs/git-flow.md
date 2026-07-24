@@ -54,6 +54,41 @@ Every pull request to `main` runs these checks in parallel:
 
 Integration tests use local adapters and do not require a Redis service.
 
+## Recovering conflicting pull requests
+
+Treat each pull request's last independently green commit as its source of
+truth. If a manual merge from `main` corrupts a branch, do not repair the
+result by repeatedly combining the affected pull requests. Restore the branch
+to its last green commit, then reapply only the required upstream changes.
+
+Generated API artifacts are never conflict-resolution inputs:
+
+- resolve backend route and schema source files first
+- discard conflict-marker or hand-edited versions of `frontend/openapi.json`
+  and `frontend/src/types/generated/`
+- run `npm run generate:api` from `frontend/`
+- commit the regenerated output only after the frontend build and generated
+  drift check pass
+
+Do not fold two independently green feature pull requests together merely to
+avoid a generated-file conflict. That changes the test composition and makes
+the combined branch a new, unreviewed integration target. Merge one feature,
+update the remaining branch from the new `main`, regenerate once, and rerun
+CI. If one pull request is explicitly selected as the source of truth, close
+the superseded pull request and keep its branch until the surviving pull
+request has merged.
+
+Recovery checklist:
+
+1. Record the last green SHA for every affected pull request.
+2. Inspect merge commits with `git show --remerge-diff`.
+3. Restore the selected branch to its last green SHA.
+4. Resolve only source files; regenerate derived files.
+5. Run Ruff, Mypy, focused backend tests, the frontend build, and type
+   generation locally.
+6. Push and wait for a completely new CI run before declaring the branch
+   merge-ready.
+
 ## Release PRs
 
 After a conventional commit reaches `main`, release-please opens or updates a
