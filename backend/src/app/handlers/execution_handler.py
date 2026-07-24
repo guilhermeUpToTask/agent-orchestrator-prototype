@@ -420,6 +420,7 @@ class ExecutionHandler:
                 plan.release_promotion(unit.goal_id, unit.execution.id)
                 task.freeze_test_bundle(bundle)
                 plan.requeue_task(unit.goal_id, unit.task_id)
+                self._clear_runtime_circuit(uow, unit)
                 self._finish_execution(
                     uow,
                     unit,
@@ -551,6 +552,7 @@ class ExecutionHandler:
                         metadata={"candidate_commit_sha": candidate_sha},
                     ),
                 )
+                self._clear_runtime_circuit(uow, unit)
                 self._finish_execution(
                     uow,
                     unit,
@@ -1120,6 +1122,23 @@ class ExecutionHandler:
             return None
         return self._unit_task(plan, unit)
 
+    @staticmethod
+    def _clear_runtime_circuit(uow: UnitOfWork, unit: _Unit) -> None:
+        """A successful run proves the provider recovered — retire its circuit.
+
+        Must be called from EVERY success finalizer. It used to live only in
+        `_finalize_success` (the legacy, non-cyclic path), so a cyclic plan
+        never cleared it: `failure_count` accumulated transient rate limits
+        across an entire run until it latched `manual_intervention`, opening a
+        provider_capacity block that only a human `wait_and_retry` could reset.
+        """
+        if unit.spec.provider_id and unit.spec.model_id:
+            uow.executions.clear_runtime_circuit(
+                unit.spec.runtime_type,
+                unit.spec.provider_id,
+                unit.spec.model_id,
+            )
+
     def _finish_execution(
         self,
         uow: UnitOfWork,
@@ -1412,12 +1431,7 @@ class ExecutionHandler:
                     return Signal.PAUSED
                 plan.release_promotion(unit.goal_id, unit.execution.id)
                 plan.complete_task(unit.goal_id, unit.task_id, result)
-                if unit.spec.provider_id and unit.spec.model_id:
-                    uow.executions.clear_runtime_circuit(
-                        unit.spec.runtime_type,
-                        unit.spec.provider_id,
-                        unit.spec.model_id,
-                    )
+                self._clear_runtime_circuit(uow, unit)
                 self._finish_execution(
                     uow,
                     unit,

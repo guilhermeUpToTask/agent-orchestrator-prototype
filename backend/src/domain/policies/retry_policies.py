@@ -41,8 +41,14 @@ class RetryPolicy(BaseModel):
     def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:
         if kind is not None and kind in self.non_retryable_kinds:
             return False
+        # A per-kind budget GRANTS a transient kind extra attempts; it is never a
+        # ceiling. `max_attempts` is operator-configured (execution.retry_max_attempts)
+        # precisely so a provider capacity outage can be ridden out on automatic
+        # backoff instead of opening a human-gated block -- taking the kind entry
+        # verbatim would let the hardcoded default (6) silently cut a configured
+        # baseline of, say, 10 back down for the exact kind that key targets.
         budget = (
-            self.kind_max_attempts.get(kind, self.max_attempts)
+            max(self.kind_max_attempts.get(kind, self.max_attempts), self.max_attempts)
             if kind is not None
             else self.max_attempts
         )

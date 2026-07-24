@@ -12,6 +12,15 @@ deliberately tunes it:
   execution.retry_max_backoff_seconds      float  (default 900.0)
   execution.retry_jitter_ratio             float  (default 0.2)
 
+PER-KIND SCALING applies ON TOP of these (RetryPolicy.kind_backoff_scale /
+kind_max_attempts). A RATE_LIMIT failure multiplies BOTH the backoff curve and
+the max_backoff_seconds ceiling by 4.0, so `retry_max_backoff_seconds=900`
+means 900s for an ordinary failure and up to 3600s for a rate limit — the
+ceiling is per-kind, not absolute. Divide by the scale if you need a hard cap.
+`retry_max_attempts` is a FLOOR, never a ceiling: a per-kind budget only ever
+grants a transient kind extra attempts (see RetryPolicy.should_retry), so
+raising this key always raises the rate-limit budget with it.
+
 Called fresh at plan-creation time (never cached) so `orchestrate config set`
 takes effect on the next created plan without an API restart — mirrors
 reasoner.mode/agent_runner.mode's read-from-config-store pattern
