@@ -612,3 +612,118 @@ def test_no_observation_repository_is_a_silent_noop():
     client = FakeLLMClient([text_turn("hi")])
     reply = converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
     assert reply.message == "hi"
+
+
+def _coverage_task(goal_ids: list[str], objective: str = "Deliver it") -> dict[str, object]:
+    return {
+        "objective": objective,
+        "acceptance_criteria": [{"id": "t-1", "description": "works"}],
+        "goal_criterion_ids": goal_ids,
+        "allowed_scope": ["backend/"],
+        "verification_commands": ["pytest -q"],
+        "verification_strategy": "tdd",
+        "required_capabilities": ["backend"],
+    }
+
+
+def test_uncovered_goal_criterion_is_rejected_in_session_not_after_it():
+    """Observed live against nvidia/nemotron-3-ultra-550b-a55b:free: the model left
+    one acceptance criterion unmapped, GoalContract's model_validator rejected it
+    AFTER the session had ended, the submission was discarded, the model was never
+    told what was wrong, and the next planning attempt repeated the mistake until the
+    attempt budget opened a reasoner_failure block on the goal.
+
+    The rule must be enforced inside the session so the model can repair it.
+    """
+    uncovered = {
+        "objective": "Build Item",
+        "acceptance_criteria": [
+            {"id": "g-1", "description": "Item works"},
+            {"id": "ac-tests-pass", "description": "tests pass"},
+        ],
+        "tasks": [_coverage_task(["g-1"])],  # 'ac-tests-pass' covered by nothing
+    }
+    corrected = {**uncovered, "tasks": [_coverage_task(["g-1", "ac-tests-pass"])]}
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_goal_contract", uncovered, "bad"),
+            tool_turn("submit_goal_contract", corrected, "good"),
+        ]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    contract = asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    assert rejection["accepted"] is False
+    # the error must NAME the offending id, or the model cannot act on it
+    assert any("ac-tests-pass" in err for err in rejection["errors"])
+    assert contract.tasks[0].goal_criterion_ids == ["g-1", "ac-tests-pass"]
+
+
+def test_cross_task_integration_criterion_missing_from_final_task_is_repairable():
+    """The other live failure. `cross_task_integration_criterion_ids` is optional and
+    defaults to empty, so populating it — which the field name invites — switches on
+    an extra constraint: every id listed must ALSO appear in the LAST task. A model
+    being thorough was punished for it, with no feedback."""
+    bad = {
+        "objective": "Build Item",
+        "acceptance_criteria": [
+            {"id": "g-1", "description": "unit works"},
+            {"id": "g-2", "description": "integrated"},
+        ],
+        "tasks": [
+            _coverage_task(["g-1"], "unit work"),
+            _coverage_task(["g-2"], "more unit work"),
+        ],
+        # declared as cross-task but absent from the final task's ids
+        "cross_task_integration_criterion_ids": ["g-1"],
+    }
+    good = {**bad, "cross_task_integration_criterion_ids": []}
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_goal_contract", bad, "bad"),
+            tool_turn("submit_goal_contract", good, "good"),
+        ]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    assert rejection["accepted"] is False
+    err = " ".join(rejection["errors"])
+    assert "LAST task" in err and "g-1" in err
+    # and it must say that leaving the optional field empty is a valid way out
+    assert "empty" in err
+
+
+def test_task_referencing_an_unknown_criterion_id_is_told_the_valid_ids():
+    unknown = {
+        "objective": "Build Item",
+        "acceptance_criteria": [{"id": "g-1", "description": "works"}],
+        "tasks": [_coverage_task(["typo-1"])],
+    }
+    good = {**unknown, "tasks": [_coverage_task(["g-1"])]}
+    client = FakeLLMClient(
+        [
+            tool_turn("submit_goal_contract", unknown, "bad"),
+            tool_turn("submit_goal_contract", good, "good"),
+        ]
+    )
+    plan = make_plan(PlanPhase.RUNNING)
+    goal = Goal(id="g1", name="API", position=0, description="", tasks=[])
+
+    asyncio.run(OpenAIReasoner(client, CAPS).enrich_goal_contract(plan, goal, CAPS))
+
+    rejection = json.loads(
+        next(m["content"] for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    )
+    err = " ".join(rejection["errors"])
+    assert "typo-1" in err and "g-1" in err  # what was wrong AND what is valid

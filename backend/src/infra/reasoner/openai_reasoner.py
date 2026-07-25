@@ -209,6 +209,13 @@ SUBMIT_GOAL_CONTRACT_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "minItems": 1,
                         "items": {"type": "string"},
+                        "description": (
+                            "ids taken from this goal's top-level "
+                            "acceptance_criteria[].id that THIS task verifies. "
+                            "Across all tasks, every goal acceptance criterion id "
+                            "must appear at least once — an uncovered criterion is "
+                            "rejected. Never invent an id."
+                        ),
                     },
                     "allowed_scope": {
                         "type": "array",
@@ -246,6 +253,12 @@ SUBMIT_GOAL_CONTRACT_SCHEMA: dict[str, Any] = {
         "cross_task_integration_criterion_ids": {
             "type": "array",
             "items": {"type": "string"},
+            "description": (
+                "OPTIONAL — omit or leave empty unless needed. Goal criterion ids "
+                "that can only be verified once several tasks are integrated. Any id "
+                "listed here MUST also appear in the LAST task's goal_criterion_ids, "
+                "because the final task is the integration task that verifies them."
+            ),
         },
         "required_capabilities": {
             "type": "array",
@@ -262,6 +275,89 @@ def _rejected(errors: list[str]) -> str:
 
 def _accepted() -> str:
     return json.dumps({"accepted": True})
+
+
+def _validate_criterion_coverage(args: dict[str, Any]) -> list[str]:
+    """Pre-flight the GoalContract's cross-field referential rules INSIDE the tool
+    session, so a near-miss comes back to the model as actionable errors it can fix
+    on the next turn.
+
+    Without this the rules were enforced only by `GoalContract`'s own
+    `model_validator`, which runs AFTER the session has ended: the submission was
+    discarded, the model was never told what was wrong, and the next planning
+    attempt started fresh against a schema that states none of these rules — so it
+    reproduced the same class of mistake until the attempt budget opened a block.
+    Observed live: two consecutive enrichment failures on
+    `uncovered goal criteria` and `cross-task criteria must be covered by the final
+    integration task`.
+
+    These are HARD rejections (bounded only by the turn budget), unlike unknown
+    capability ids: a bad covering is always the model's own mistake and always
+    fixable from the error text, whereas an unsatisfiable capability set may not be.
+
+    The domain remains the authority. This mirrors it to provide feedback; if the two
+    ever drift, the domain still rejects — just without the repair turn.
+    """
+    errors: list[str] = []
+    criteria = args.get("acceptance_criteria")
+    tasks = args.get("tasks")
+    if not isinstance(criteria, list) or not isinstance(tasks, list):
+        return errors  # shape errors are reported elsewhere
+
+    raw_ids = [c.get("id") for c in criteria if isinstance(c, dict)]
+    goal_ids: list[str] = [gid for gid in raw_ids if isinstance(gid, str) and gid]
+    if len(goal_ids) != len(set(goal_ids)):
+        errors.append("acceptance_criteria: 'id' values must be unique")
+    if not goal_ids:
+        return errors
+
+    mapped: set[str] = set()
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        ids = task.get("goal_criterion_ids")
+        if not isinstance(ids, list):
+            continue
+        task_ids = {i for i in ids if isinstance(i, str)}
+        unknown = sorted(task_ids - set(goal_ids))
+        if unknown:
+            errors.append(
+                f"tasks[{index}].goal_criterion_ids references ids that are not "
+                f"acceptance_criteria ids: {unknown}. Valid ids: {sorted(goal_ids)}"
+            )
+        mapped |= task_ids
+
+    uncovered = sorted(set(goal_ids) - mapped)
+    if uncovered:
+        errors.append(
+            f"every acceptance criterion must be covered by at least one task, but "
+            f"{uncovered} are not referenced by any task's goal_criterion_ids. Add "
+            f"each of them to the goal_criterion_ids of whichever task verifies it."
+        )
+
+    integration = args.get("cross_task_integration_criterion_ids")
+    if isinstance(integration, list) and integration:
+        integration_ids = {i for i in integration if isinstance(i, str)}
+        unknown = sorted(integration_ids - set(goal_ids))
+        if unknown:
+            errors.append(
+                f"cross_task_integration_criterion_ids references ids that are not "
+                f"acceptance_criteria ids: {unknown}"
+            )
+        final = tasks[-1] if isinstance(tasks[-1], dict) else {}
+        final_ids = final.get("goal_criterion_ids")
+        final_set = (
+            {i for i in final_ids if isinstance(i, str)} if isinstance(final_ids, list) else set()
+        )
+        missing_in_final = sorted((integration_ids & set(goal_ids)) - final_set)
+        if missing_in_final:
+            errors.append(
+                f"cross_task_integration_criterion_ids {missing_in_final} must ALSO "
+                f"appear in the LAST task's goal_criterion_ids (the integration "
+                f"task verifies them). Either add them there, or leave "
+                f"cross_task_integration_criterion_ids empty — it is optional."
+            )
+    return errors
 
 
 def _validate_task_item(item: Any, where: str, known_caps: set[str]) -> list[str]:
@@ -655,9 +751,8 @@ class OpenAIReasoner:
                     capability_errors.extend(
                         _validate_capability_ids(task_raw, f"tasks[{ti}]", known_caps)
                     )
-            capability_errors.extend(
-                _validate_capability_ids(args, "goal_contract", known_caps)
-            )
+            capability_errors.extend(_validate_capability_ids(args, "goal_contract", known_caps))
+            errors.extend(_validate_criterion_coverage(args))
             if errors:
                 return _rejected(errors + capability_errors)
             if capability_errors:
@@ -683,7 +778,13 @@ class OpenAIReasoner:
                 "role": "user",
                 "content": (
                     "Freeze a complete GoalContract for the active goal. Every goal "
-                    "criterion must map to atomic ordered tasks. Use TDD for new "
+                    "acceptance criterion id must be covered by at least one task: "
+                    "each task lists in goal_criterion_ids the criterion ids it "
+                    "verifies, and no criterion may be left unreferenced. Leave "
+                    "cross_task_integration_criterion_ids EMPTY unless a criterion "
+                    "genuinely requires several tasks integrated first — anything "
+                    "listed there must also appear in the LAST task. "
+                    "Use TDD for new "
                     "behavior, characterization for preserving behavior, and "
                     "executable_check where RED is meaningless. "
                     f"{TDD_TASK_GRANULARITY_GUIDANCE} "
