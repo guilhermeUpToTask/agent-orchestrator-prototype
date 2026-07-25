@@ -2610,7 +2610,7 @@
           "reference"
         ],
         "summary": "Update Model",
-        "description": "Rename only \u2014 a model's provider binding is immutable.",
+        "description": "Rename + capacity override only \u2014 a model's provider binding is immutable.",
         "operationId": "reference-update_model",
         "parameters": [
           {
@@ -4860,6 +4860,17 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "max_inflight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Inflight"
           }
         },
         "type": "object",
@@ -5166,6 +5177,17 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "max_inflight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Inflight"
           }
         },
         "type": "object",
@@ -5198,6 +5220,28 @@
             },
             "type": "array",
             "title": "Models"
+          },
+          "max_inflight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Inflight"
+          },
+          "capacity_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Scope"
           }
         },
         "type": "object",
@@ -5570,6 +5614,16 @@
               }
             ]
           },
+          "provider_waiting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderWaitingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "planning_operation": {
             "anyOf": [
               {
@@ -5715,6 +5769,7 @@
           "paused",
           "paused_reason",
           "active_run",
+          "provider_waiting",
           "planning_operation",
           "planning_progress",
           "active_cycle",
@@ -5979,6 +6034,28 @@
           "api_key": {
             "type": "string",
             "title": "Api Key"
+          },
+          "max_inflight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Inflight"
+          },
+          "capacity_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Scope"
           }
         },
         "type": "object",
@@ -6009,6 +6086,28 @@
               }
             ],
             "title": "Api Key"
+          },
+          "max_inflight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Inflight"
+          },
+          "capacity_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Scope"
           }
         },
         "type": "object",
@@ -6017,6 +6116,74 @@
           "base_url"
         ],
         "title": "ProviderUpdateBody"
+      },
+      "ProviderWaitingResponse": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "runtime": {
+            "type": "string",
+            "title": "Runtime"
+          },
+          "limit_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Scope"
+          },
+          "retry_at": {
+            "type": "string",
+            "title": "Retry At"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "failure_count": {
+            "type": "integer",
+            "title": "Failure Count"
+          },
+          "safe_message": {
+            "type": "string",
+            "title": "Safe Message"
+          },
+          "needs_attention": {
+            "type": "boolean",
+            "title": "Needs Attention"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model_id",
+          "runtime",
+          "limit_scope",
+          "retry_at",
+          "since",
+          "failure_count",
+          "safe_message",
+          "needs_attention"
+        ],
+        "title": "ProviderWaitingResponse",
+        "description": "An open provider capacity circuit gating this plan's work.\n\nA SIBLING field, not folded into `status_reason`: that is a pure property of\nthe Plan aggregate, and the aggregate cannot see a RuntimeCircuit (it lives in\nthe execution-record store). Mixing it in would mean either a domain change or\na router overwriting a domain property. Same pattern `active_run` and\n`planning_progress` already use.\n\nThe root stays RUNNING while this is set \u2014 it IS running, merely unclaimable\nuntil `retry_at`. Waiting on a provider is not a lifecycle state."
       },
       "PublicationRequest": {
         "properties": {

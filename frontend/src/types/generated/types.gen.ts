@@ -795,6 +795,10 @@ export type IaModel = {
      * Name
      */
     name: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
 };
 
 /**
@@ -967,6 +971,10 @@ export type ModelBody = {
      * Name
      */
     name: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
 };
 
 /**
@@ -993,6 +1001,14 @@ export type ModelProvider = {
      * Models
      */
     models: Array<IaModel>;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
 };
 
 /**
@@ -1187,6 +1203,7 @@ export type PlanDetailResponse = {
      */
     paused_reason: string | null;
     active_run: ActiveRunResponse | null;
+    provider_waiting: ProviderWaitingResponse | null;
     /**
      * Planning Operation
      */
@@ -1367,6 +1384,14 @@ export type ProviderCreateBody = {
      * Api Key
      */
     api_key: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
 };
 
 /**
@@ -1385,6 +1410,67 @@ export type ProviderUpdateBody = {
      * Api Key
      */
     api_key?: string | null;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
+};
+
+/**
+ * ProviderWaitingResponse
+ *
+ * An open provider capacity circuit gating this plan's work.
+ *
+ * A SIBLING field, not folded into `status_reason`: that is a pure property of
+ * the Plan aggregate, and the aggregate cannot see a RuntimeCircuit (it lives in
+ * the execution-record store). Mixing it in would mean either a domain change or
+ * a router overwriting a domain property. Same pattern `active_run` and
+ * `planning_progress` already use.
+ *
+ * The root stays RUNNING while this is set — it IS running, merely unclaimable
+ * until `retry_at`. Waiting on a provider is not a lifecycle state.
+ */
+export type ProviderWaitingResponse = {
+    /**
+     * Provider Id
+     */
+    provider_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Runtime
+     */
+    runtime: string;
+    /**
+     * Limit Scope
+     */
+    limit_scope: string | null;
+    /**
+     * Retry At
+     */
+    retry_at: string;
+    /**
+     * Since
+     */
+    since: string;
+    /**
+     * Failure Count
+     */
+    failure_count: number;
+    /**
+     * Safe Message
+     */
+    safe_message: string;
+    /**
+     * Needs Attention
+     */
+    needs_attention: boolean;
 };
 
 /**
