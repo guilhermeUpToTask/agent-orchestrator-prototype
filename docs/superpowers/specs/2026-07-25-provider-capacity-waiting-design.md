@@ -1,8 +1,9 @@
 # Provider capacity as waiting, not blocking — design
 
 - **Date**: 2026-07-25
-- **Status**: approved, not yet implemented
-- **Scope**: `src/app`, `src/infra`, `src/api`, `alembic` — **no domain un-freeze**
+- **Status**: IMPLEMENTED (see §11 for where the build corrected this design)
+- **Scope**: `src/app`, `src/infra`, `src/api`, `alembic`, plus **domain un-freeze #16**
+  (decision 56) for provider capacity metadata — see §11
 - **Supersedes**: nothing. Related roadmap item: architect/enrichment redesign (ROADMAP item 35) is independent.
 
 ## 1. Problem
@@ -492,3 +493,64 @@ mechanical slices: the `0012` migration and column plumbing with real/fake parit
 - **Tier substitution can mask a bad binding.** If the preferred model is permanently
   broken, selection silently runs on a lower tier. The attempt records the substitute
   and a substitution emits an event, so the pattern is observable rather than invisible.
+
+## 11. What the build corrected in this design
+
+Recorded because each one was a defect in the spec, not a change of mind. A doc
+that contradicts the code is a bug in the doc.
+
+1. **Item 2 as specified would not have fixed the reported symptom.** Removing the
+   circuit latch left `should_retry` enforcing the per-task budget, so a task still
+   exhausted `kind_max_attempts` and reached `fail_task` a few attempts later,
+   opening the same goal block. Inside the ceiling, capacity failures now bypass the
+   per-task budget too. `REQUEST_CONCURRENCY` opens no circuit and therefore keeps
+   its budget as the bound, so no path is unbounded.
+
+2. **`opened_at` was being restamped on every failure**, which pegged the outage age
+   at ~0 and made any duration-based ceiling unreachable. It is now preserved as the
+   outage start.
+
+3. **The `provider_capacity` block's circuit evidence ref was hand-built from
+   `spec.model_id`**, ignoring the scope-aware key. For an account-level limit the
+   circuit is stored provider-wide, so the ref named a nonexistent row and
+   `wait_and_retry` cleared nothing, latching the circuit permanently. Both sites now
+   share a codec (`circuit_ref` / `parse_circuit_ref`), tested for round-trip. The
+   block-kind decision also hardcoded `RATE_LIMIT`, so a connection outage past the
+   ceiling advertised `retry_stage` instead of `wait_and_retry`.
+
+4. **The stale-probe bound is not the worker lease.** The spec said `lease_seconds`
+   (60s), but an attempt runs up to `agent_runner.timeout_seconds` (600s), so a
+   lease-length cutoff would let a second runner steal the probe mid-attempt and
+   rebuild the herd. It is `probe_stale_after_seconds` (900s) and must exceed the
+   attempt timeout.
+
+5. **Item 7's planning outage start could not be read the way §4 described.**
+   Scanning the ledger for `BACKING_OFF` rows finds nothing: `_start_operation` flips
+   the reused row back to `STARTED` at the top of every tick. The outage start is the
+   active `PlanningOperation`'s `created_at`, which survives reuse. The quarantined
+   legacy path records no operation at all and keeps its original attempt budget
+   rather than waiting forever.
+
+6. **Item 6 needed a domain un-freeze after all.** `ModelProvider` and `IAModel` are
+   domain entities, so "columns on provider/model rows" could not reach the app layer
+   without adding fields to them. Un-freeze #16 (decision 56) covers three optional
+   fields; the alternative was namespaced config keys, and the typed-column route was
+   chosen deliberately for catalog visibility. Migration split into `0012`
+   (circuit columns) and `0013` (provider/model capacity).
+
+7. **Item 8 routes on the admission gate without a threshold.** The spec's single
+   rule ("substitute when unavailable *and* the wait exceeds the threshold") would
+   never substitute for a saturated cap, whose projected wait is zero — the gate
+   would have serialized the work it exists to parallelize. Circuit waits use the
+   threshold; at-capacity substitutes immediately.
+
+8. **Single-flight is tested at the repository primitive**, not through two
+   `handle_goal` calls. A successful probe correctly retires the circuit, so the
+   second goal legitimately proceeds and a handler-level test cannot isolate the
+   claim. The atomicity lives in the conditional UPDATE, and the test covers it on
+   both backends.
+
+Also added along the way: `DummyBehavior.fail_limit_scope` /
+`fail_retry_after_seconds`, without which the dry-run dummy could not reach any of
+these branches; and `taxonomy.parse_retry_after_seconds`, promoted from a private
+helper rather than imported across modules.

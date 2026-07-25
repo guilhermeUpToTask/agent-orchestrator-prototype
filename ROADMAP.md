@@ -292,7 +292,12 @@ Take these up only when real usage demonstrates the need.
     follows task descriptions over role instructions; the registry already
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the
-    registry-profiles item above.
+    registry-profiles item above. NARROWED (2026-07-25): the *mechanism* now
+    exists — tier-ordered, throttle-aware selection picks among
+    capability-satisfying agents by `AgentSpec.model_role`
+    (`execution.model_role_order`), and the remaining scope is purely the
+    operator-facing decision of which role gets which tier plus the spend to
+    back it.
 35. **Architect/enrichment granularity contract** [WALK] — define goals as
     parallel workstreams and their tasks as meaningful sequential deliverables;
     TDD RED/GREEN remains an internal task lifecycle, not separate roadmap work.
