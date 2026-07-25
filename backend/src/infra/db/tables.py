@@ -429,6 +429,10 @@ class ProviderTable(Base):
     base_url: Mapped[str] = mapped_column(String, nullable=False)
     # secret URI into the secrets table — NEVER a plaintext key
     api_key_ref: Mapped[str] = mapped_column(String, nullable=False)
+    # Capacity metadata (domain unfreeze #16). NULL = fall back to the global
+    # execution.provider_max_inflight / per_model defaults.
+    max_inflight: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    capacity_scope: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class ModelTable(Base):
@@ -439,6 +443,8 @@ class ModelTable(Base):
         String, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # Per-model override of the provider's in-flight cap (unfreeze #16).
+    max_inflight: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ProjectTable(Base):

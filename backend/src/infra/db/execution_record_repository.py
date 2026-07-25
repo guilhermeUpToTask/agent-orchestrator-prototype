@@ -350,6 +350,19 @@ class SqliteExecutionRecordRepository:
         )
         return [_attempt(row) for row in rows]
 
+    def count_inflight_attempts(self, runtime: str, provider_id: str, model_id: str | None) -> int:
+        where = "WHERE status = 'running' AND runtime = :runtime AND provider_id = :provider_id"
+        params: dict[str, str] = {"runtime": runtime, "provider_id": provider_id}
+        if model_id is not None:
+            where += " AND model_id = :model_id"
+            params["model_id"] = model_id
+        row = (
+            self._bound()
+            .execute(text(f"SELECT COUNT(*) FROM execution_attempts {where}"), params)
+            .one()
+        )
+        return int(row[0])
+
     def list_runs(self, plan_id: str) -> list[ExecutionRun]:
         rows = (
             self._bound()

@@ -9,7 +9,9 @@ from uuid import UUID
 import pytest
 
 from src.app.execution_records import (
+    ExecutionAttempt,
     ExecutionAttemptStatus,
+    ExecutionRun,
     ExecutionRunStatus,
     RuntimeCircuit,
 )
@@ -457,6 +459,147 @@ def _two_goal_cycle(env) -> Plan:
         )
     ]
     return plan
+
+
+def test_inflight_count_is_cross_plan_and_scoped_to_the_model(env_factory):
+    """The gate counts against the UPSTREAM POOL, which every plan shares. A
+    plan-scoped count would let two plans each open a full cap and blow straight
+    through the provider's ceiling. Counted from attempts because ExecutionRun
+    carries no provider binding."""
+    env = env_factory()
+    started = env.clock.now()
+    # execution_runs.plan_id is a real FK, so every plan referenced must exist.
+    for plan_id in ("p1", "p2"):
+        plan = _plan()
+        plan.id = plan_id
+        plan.project_id = f"project-{plan_id}"
+        env.seed(plan)
+
+    def _attempt(attempt_id: str, plan_id: str, model_id: str, status):
+        return ExecutionAttempt(
+            id=attempt_id,
+            run_id=f"run-{attempt_id}",
+            plan_id=plan_id,
+            goal_id="g1",
+            # attempts are unique on (plan, goal, task, number)
+            task_id=f"t-{attempt_id}",
+            number=1,
+            task_attempt=1,
+            status=status,
+            started_at=started,
+            runtime="pi",
+            provider_id="openrouter",
+            model_id=model_id,
+        )
+
+    with env.uow:
+        for attempt_id, plan_id, model_id, status in [
+            ("a1", "p1", "nemotron", ExecutionAttemptStatus.RUNNING),
+            ("a2", "p2", "nemotron", ExecutionAttemptStatus.RUNNING),  # a DIFFERENT plan
+            ("a3", "p1", "other-model", ExecutionAttemptStatus.RUNNING),
+            ("a4", "p1", "nemotron", ExecutionAttemptStatus.SUCCEEDED),  # finished
+        ]:
+            env.uow.executions.add_run(
+                ExecutionRun(
+                    id=f"run-{attempt_id}",
+                    plan_id=plan_id,
+                    goal_id="g1",
+                    task_id=f"t-{attempt_id}",
+                    status=ExecutionRunStatus.RUNNING,
+                    started_at=started,
+                )
+            )
+            env.uow.executions.add_attempt(_attempt(attempt_id, plan_id, model_id, status))
+            if status != ExecutionAttemptStatus.RUNNING:
+                env.uow.executions.finalize_attempt(
+                    attempt_id,
+                    attempt_status=status,
+                    run_status=ExecutionRunStatus.SUCCEEDED,
+                    completed_at=started,
+                )
+
+    with env.uow:
+        # per-model: both plans' running nemotron attempts, not the other model,
+        # not the finished one
+        assert env.uow.executions.count_inflight_attempts("pi", "openrouter", "nemotron") == 2
+        # provider-wide (an endpoint sharing one pool): every running model
+        assert env.uow.executions.count_inflight_attempts("pi", "openrouter", None) == 3
+        assert env.uow.executions.count_inflight_attempts("pi", "other-provider", None) == 0
+
+
+def test_admission_gate_refuses_to_start_past_the_inflight_cap(env_factory):
+    """Never fire the request that would be refused. The provider's ceiling was
+    always there; it was just unmeasured, so the orchestrator discovered it by
+    being rejected."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory({"g1t0": DummyBehavior(output="ok")}, agents=[agent])
+    env.seed(_two_goal_cycle(env))
+    started = env.clock.now()
+    # A DIFFERENT plan holds the in-flight attempt: the pool is shared, so the
+    # gate must see it. execution_runs.plan_id is a real FK, hence a real plan.
+    other = _plan()
+    other.id = "p-other-plan"
+    other.project_id = "project-other"
+    env.seed(other)
+
+    # one attempt already in flight against this provider/model
+    with env.uow:
+        env.uow.executions.add_run(
+            ExecutionRun(
+                id="run-x",
+                plan_id="p-other-plan",
+                goal_id="g9",
+                task_id="t9",
+                status=ExecutionRunStatus.RUNNING,
+                started_at=started,
+            )
+        )
+        env.uow.executions.add_attempt(
+            ExecutionAttempt(
+                id="att-x",
+                run_id="run-x",
+                plan_id="p-other-plan",
+                goal_id="g9",
+                task_id="t9",
+                number=1,
+                task_attempt=1,
+                status=ExecutionAttemptStatus.RUNNING,
+                started_at=started,
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+            )
+        )
+
+    at_cap = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=1),
+    )
+    assert (
+        asyncio.run(at_cap.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == "not_ready"
+    )
+    assert env.runner.calls == {}  # never fired
+
+    # raise the cap and the same work proceeds
+    with_room = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=2),
+    )
+    assert (
+        asyncio.run(with_room.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+        == "continue"
+    )
+    assert env.runner.calls == {"g1t0": 1}
 
 
 def test_probe_claim_admits_exactly_one_holder_per_window(env_factory):

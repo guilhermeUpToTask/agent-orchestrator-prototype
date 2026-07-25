@@ -290,7 +290,12 @@ class SqliteAgentRepository:
 
 
 def _model_from_row(row: ModelTable) -> IAModel:
-    return IAModel(id=row.id, provider_id=row.provider_id, name=row.name)
+    return IAModel(
+        id=row.id,
+        provider_id=row.provider_id,
+        name=row.name,
+        max_inflight=row.max_inflight,
+    )
 
 
 def _guard_model_in_use(s: Session, model_id: str) -> None:
@@ -327,7 +332,14 @@ class SqliteModelRepository:
                 raise EntityAlreadyExistsError("Model", model.id)
             if s.get(ProviderTable, model.provider_id) is None:
                 raise ModelProviderNotFoundError(model.provider_id)
-            s.add(ModelTable(id=model.id, provider_id=model.provider_id, name=model.name))
+            s.add(
+                ModelTable(
+                    id=model.id,
+                    provider_id=model.provider_id,
+                    name=model.name,
+                    max_inflight=model.max_inflight,
+                )
+            )
 
         run_in_session(self._sf, _op)
 
@@ -338,6 +350,7 @@ class SqliteModelRepository:
                 raise ModelNotFoundError(model.id)
             row.provider_id = model.provider_id
             row.name = model.name
+            row.max_inflight = model.max_inflight
 
         run_in_session(self._sf, _op)
 
@@ -383,6 +396,8 @@ class SqliteModelProviderRepository:
             name=row.name,
             base_url=row.base_url,
             api_key_ref=row.api_key_ref,
+            max_inflight=row.max_inflight,
+            capacity_scope=row.capacity_scope,
             models=[_model_from_row(m) for m in model_rows],
         )
 
@@ -400,9 +415,17 @@ class SqliteModelProviderRepository:
         for model in provider.models:
             row = existing.get(model.id)
             if row is None:
-                s.add(ModelTable(id=model.id, provider_id=provider.id, name=model.name))
+                s.add(
+                    ModelTable(
+                        id=model.id,
+                        provider_id=provider.id,
+                        name=model.name,
+                        max_inflight=model.max_inflight,
+                    )
+                )
             else:
                 row.name = model.name
+                row.max_inflight = model.max_inflight
 
     def get(self, provider_id: str) -> ModelProvider:
         with self._sf() as s:
@@ -421,6 +444,8 @@ class SqliteModelProviderRepository:
                     name=provider.name,
                     base_url=provider.base_url,
                     api_key_ref=provider.api_key_ref,
+                    max_inflight=provider.max_inflight,
+                    capacity_scope=provider.capacity_scope,
                 )
             )
             self._reconcile_models(s, provider)
@@ -435,6 +460,8 @@ class SqliteModelProviderRepository:
             row.name = provider.name
             row.base_url = provider.base_url
             row.api_key_ref = provider.api_key_ref
+            row.max_inflight = provider.max_inflight
+            row.capacity_scope = provider.capacity_scope
             self._reconcile_models(s, provider)
 
         run_in_session(self._sf, _op)

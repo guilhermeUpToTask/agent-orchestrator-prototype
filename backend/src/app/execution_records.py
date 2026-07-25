@@ -160,6 +160,18 @@ class ExecutionRecordRepository(Protocol):
 
     def list_open_attempts(self, plan_id: str | None = None) -> list[ExecutionAttempt]: ...
 
+    def count_inflight_attempts(self, runtime: str, provider_id: str, model_id: str | None) -> int:
+        """Attempts currently running against a provider, ACROSS ALL PLANS.
+
+        Cross-plan on purpose: an upstream inference pool is shared by every plan
+        this orchestrator runs, so a plan-scoped count would let two plans each
+        open a full cap's worth and blow straight through the provider's ceiling.
+
+        `model_id=None` counts every model on the provider (an endpoint that
+        shares one pool). Counted from ATTEMPTS, not runs: ExecutionRun carries no
+        provider binding — the attempt is what records which provider/model ran."""
+        ...
+
     def list_runs(self, plan_id: str) -> list[ExecutionRun]: ...
 
     def list_attempts(self, plan_id: str) -> list[ExecutionAttempt]: ...

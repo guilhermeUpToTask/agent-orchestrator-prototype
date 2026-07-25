@@ -62,6 +62,10 @@ class ProviderCapacityPolicy:
     # This is why it is not the worker lease (60s) -- that is far shorter than an
     # attempt.
     probe_stale_after_seconds: float = 900.0
+    # Global fallback in-flight cap, used when neither the model row nor the
+    # provider row declares one. Deliberately conservative: exceeding a provider's
+    # concurrency ceiling is what produces the refusals this design absorbs.
+    max_inflight: int = 8
 
     def ceiling_for(self, limit_scope: str | None) -> float:
         """A daily allowance can legitimately take a full day to reset, so it gets
@@ -72,6 +76,20 @@ class ProviderCapacityPolicy:
 
     def outage_exceeded(self, opened_at: datetime, now: datetime, limit_scope: str | None) -> bool:
         return (now - opened_at).total_seconds() > self.ceiling_for(limit_scope)
+
+
+def resolve_capacity_scope(raw: str | None) -> CapacityScope:
+    """A provider row's declared scope, tolerating unset and unrecognized values.
+
+    An unknown string falls back to PER_MODEL rather than raising: a typo in
+    operator metadata must not take execution down, and PER_MODEL is the safe
+    default (it never lets one model's limit throttle its siblings)."""
+    if raw is None:
+        return CapacityScope.PER_MODEL
+    try:
+        return CapacityScope(raw)
+    except ValueError:
+        return CapacityScope.PER_MODEL
 
 
 class CapacityScope(str, Enum):

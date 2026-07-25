@@ -318,3 +318,31 @@ untouched. Additive Pydantic fields with defaults — persisted pre-#15
 policies rehydrate unchanged. Motivation: block-frequency UX (blocks are
 automation's give-up signal; a kind that heals by waiting should almost
 never produce one).
+
+---
+
+**Decision 56 (2026-07-25) — domain unfreeze #16: provider capacity metadata.**
+`ModelProvider` gains `max_inflight` and `capacity_scope`; `IAModel` gains
+`max_inflight`. All optional with `None` defaults, so persisted rows rehydrate
+unchanged and unset values fall back to the global config keys.
+
+An in-flight ceiling is a property of the PROVIDER, not of the orchestrator: a
+paid tier, a free aggregator, and a local single-GPU server share no sensible
+number, and one global value would either throttle the paid tier to free-tier
+levels or over-drive the local one. `capacity_scope` (`per_model` |
+`endpoint_wide`) records whether the provider's upstream limits are per routed
+model — an aggregator fans each model out to its own inference pool while
+billing and daily caps stay account-wide — or shared across a single endpoint,
+as in a self-hosted deployment serving several models from one pool.
+
+The point of putting these on the catalog entities rather than in namespaced
+config keys is that capacity is provider *data*: policy reads it, and no handler
+anywhere branches on a provider name. Same category as unfreeze #1, which added
+`runtime_type`/`provider_id`/`model_id` to `AgentSpec` so the agent registry
+could own runtime resolution.
+
+Consumed by the provider admission gate (never start an attempt that would
+exceed the ceiling — turning "fire the request, get refused, back off" into
+"never fire it") and by the scope-aware circuit key (account-level limits open a
+provider-wide circuit, upstream-level ones stay per-model). Surfaced through the
+existing provider/model CRUD API. Migration 0013 adds the columns, nullable.

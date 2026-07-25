@@ -128,6 +128,7 @@ async def run_worker_forever(
                 lease_seconds=lease_seconds,
                 verifier=container.verification_executor,
                 capacity=container.provider_capacity_policy,
+                providers=container.provider_repo,
             )
             if result[0] == "lease_lost":
                 log.info(

@@ -55,7 +55,9 @@ from src.domain.events.outbox import (
 )
 from src.domain.factories.identity import new_id
 from src.domain.policies.retry_policies import RetryPolicy
+from src.domain.errors.base import DomainError
 from src.domain.repositories.agent_repo import AgentRepository
+from src.domain.repositories.model_provider_repo import ModelProviderRepository
 from src.domain.services.lookups import find_goal, find_task
 from src.domain.services.navigation import NOT_READY, can_promote_goal
 from src.domain.value_objects.lifecycle import Status
@@ -71,9 +73,11 @@ from src.app.execution_records import (
 )
 from src.app.provider_capacity import (
     CAPACITY_KINDS,
+    CapacityScope,
     ProviderCapacityPolicy,
     circuit_model_id,
     circuit_ref,
+    resolve_capacity_scope,
 )
 from src.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
 from src.app.handlers.base import Signal
@@ -121,6 +125,7 @@ class ExecutionHandler:
         clock: Clock,
         verifier: VerificationExecutor | None = None,
         capacity: ProviderCapacityPolicy | None = None,
+        providers: ModelProviderRepository | None = None,
     ) -> None:
         self._runner = runner
         self._agents = agents
@@ -129,6 +134,9 @@ class ExecutionHandler:
         self._clock = clock
         self._verifier = verifier
         self._capacity = capacity or ProviderCapacityPolicy()
+        # Optional: without it, capacity metadata falls back to the global policy.
+        # Dry-run and unit tests need no provider catalog.
+        self._providers = providers
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -199,6 +207,12 @@ class ExecutionHandler:
                     return self._finalize_existing(plan_id, plan, goal, task, uow)
 
                 spec = self._resolve_spec(plan, task)
+                # Admission BEFORE the circuit check: if the pool is already full
+                # there is nothing to probe, and claiming the half-open probe only
+                # to be refused would burn the window for everyone.
+                admission_signal = self._admission_signal(spec, uow)
+                if admission_signal is not None:
+                    return admission_signal
                 circuit_signal = self._runtime_circuit_signal(plan_id, plan, goal, task, spec, uow)
                 if circuit_signal is not None:
                     return circuit_signal
@@ -1056,6 +1070,54 @@ class ExecutionHandler:
             else self._agents.get(self._agents.default_agent_id())
         )
 
+    def _provider_metadata(self, spec: AgentSpec) -> tuple[int, CapacityScope]:
+        """(in-flight cap, capacity scope) for this spec's provider.
+
+        Cap precedence: model row override -> provider row -> global default. The
+        cap is provider DATA because it varies enormously — a paid tier, a free
+        aggregator, and a local single-GPU server share no sensible number, and
+        one global value would throttle the first or over-drive the last.
+
+        A missing provider row is not fatal here: the runner factory already
+        fail-fasts on a broken binding, so falling back keeps this off the
+        critical path.
+        """
+        if self._providers is None or not spec.provider_id:
+            return self._capacity.max_inflight, CapacityScope.PER_MODEL
+        try:
+            provider = self._providers.get(spec.provider_id)
+        except DomainError:
+            return self._capacity.max_inflight, CapacityScope.PER_MODEL
+        scope = resolve_capacity_scope(provider.capacity_scope)
+        model = provider.get_model(spec.model_id) if spec.model_id else None
+        cap = (
+            (model.max_inflight if model is not None and model.max_inflight else None)
+            or provider.max_inflight
+            or self._capacity.max_inflight
+        )
+        return cap, scope
+
+    def _admission_signal(self, spec: AgentSpec, uow: UnitOfWork) -> Signal | None:
+        """Refuse to START an attempt that would exceed the provider's in-flight
+        ceiling. Turns "fire the 33rd request, get refused, back off" into "never
+        fire the 33rd" -- the refusals were never necessary, only unmeasured.
+
+        The count is CROSS-PLAN because the upstream pool is: a per-plan count
+        would let two plans each open a full cap.
+        """
+        if not spec.provider_id or not spec.model_id:
+            return None
+        cap, scope = self._provider_metadata(spec)
+        # An endpoint-wide provider shares one pool across its models, so count
+        # every model on it; otherwise each routed model has its own pool.
+        counted_model = None if scope is CapacityScope.ENDPOINT_WIDE else spec.model_id
+        inflight = uow.executions.count_inflight_attempts(
+            spec.runtime_type, spec.provider_id, counted_model
+        )
+        if inflight >= cap:
+            return Signal.NOT_READY
+        return None
+
     def _runtime_circuit_signal(
         self,
         plan_id: str,
@@ -1290,7 +1352,10 @@ class ExecutionHandler:
                     # Account-level limits key provider-wide; upstream-level ones
                     # key per model. Routing to a sibling model escapes the second
                     # but never the first.
-                    circuit_model = circuit_model_id(unit.spec.model_id, exc.failure.limit_scope)
+                    _, capacity_scope = self._provider_metadata(unit.spec)
+                    circuit_model = circuit_model_id(
+                        unit.spec.model_id, exc.failure.limit_scope, capacity_scope
+                    )
                     capacity_ref = circuit_ref(
                         unit.spec.runtime_type, unit.spec.provider_id, circuit_model
                     )

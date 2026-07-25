@@ -276,6 +276,17 @@ class InMemoryExecutionRecordRepository:
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
         self._circuits_bound()[(circuit.runtime, circuit.provider_id, circuit.model_id)] = circuit
 
+    def count_inflight_attempts(self, runtime: str, provider_id: str, model_id: str | None) -> int:
+        attempts = self._attempts if self._tx_attempts is None else self._tx_attempts
+        return sum(
+            1
+            for attempt in attempts.values()
+            if attempt.status == ExecutionAttemptStatus.RUNNING
+            and attempt.runtime == runtime
+            and attempt.provider_id == provider_id
+            and (model_id is None or attempt.model_id == model_id)
+        )
+
     def try_claim_circuit_probe(
         self,
         runtime: str,

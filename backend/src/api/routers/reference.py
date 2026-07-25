@@ -169,12 +169,18 @@ class ProviderCreateBody(BaseModel):
     name: str
     base_url: str
     api_key: str  # accepted ONCE, stored encrypted, never echoed
+    # Capacity metadata (domain unfreeze #16). Both optional: unset falls back to
+    # the global execution.provider_max_inflight / per_model defaults.
+    max_inflight: int | None = None
+    capacity_scope: str | None = None
 
 
 class ProviderUpdateBody(BaseModel):
     name: str
     base_url: str
     api_key: str | None = None  # present = rotate the stored secret
+    max_inflight: int | None = None
+    capacity_scope: str | None = None
 
 
 @router.get("/providers")
@@ -196,6 +202,8 @@ def create_provider(
         name=body.name,
         base_url=body.base_url,
         api_key_ref=ref.uri,
+        max_inflight=body.max_inflight,
+        capacity_scope=body.capacity_scope,
         models=[],
     )
     container.provider_repo.add(provider)
@@ -211,6 +219,8 @@ def update_provider(
     provider = container.provider_repo.get(provider_id)
     provider.name = body.name
     provider.base_url = body.base_url
+    provider.max_inflight = body.max_inflight
+    provider.capacity_scope = body.capacity_scope
     if body.api_key:
         container.secret_store.put(SecretRef(uri=provider.api_key_ref), body.api_key)
     container.provider_repo.update(provider)
@@ -225,6 +235,8 @@ def delete_provider(provider_id: str, container: AppContainer = Depends(get_cont
 
 class ModelBody(BaseModel):
     name: str
+    # Optional per-model override of the provider's in-flight cap (unfreeze #16).
+    max_inflight: int | None = None
 
 
 @router.get("/models")
@@ -236,7 +248,12 @@ def list_models(container: AppContainer = Depends(get_container)) -> list[IAMode
 def create_model(
     provider_id: str, body: ModelBody, container: AppContainer = Depends(get_container)
 ) -> IAModel:
-    model = IAModel(id=new_id(), provider_id=provider_id, name=body.name)
+    model = IAModel(
+        id=new_id(),
+        provider_id=provider_id,
+        name=body.name,
+        max_inflight=body.max_inflight,
+    )
     container.model_repo.add(model)
     return model
 
@@ -245,9 +262,11 @@ def create_model(
 def update_model(
     model_id: str, body: ModelBody, container: AppContainer = Depends(get_container)
 ) -> None:
-    """Rename only — a model's provider binding is immutable."""
+    """Rename + capacity override only — a model's provider binding is immutable."""
     model = container.model_repo.get(model_id)
-    container.model_repo.update(model.model_copy(update={"name": body.name}))
+    container.model_repo.update(
+        model.model_copy(update={"name": body.name, "max_inflight": body.max_inflight})
+    )
 
 
 @router.delete("/models/{model_id}", status_code=204)

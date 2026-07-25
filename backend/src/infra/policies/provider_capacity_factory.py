@@ -5,8 +5,15 @@ layer's default, so behavior is unchanged until an operator deliberately tunes i
 
   execution.provider_outage_ceiling_seconds       float (default 21600 = 6h)
   execution.provider_daily_quota_ceiling_seconds  float (default 93600 = 26h)
+  execution.provider_max_inflight                 int   (default 8)
+  execution.provider_probe_stale_after_seconds    float (default 900)
 
-These bound how long a provider capacity outage is ridden out on automatic
+`provider_max_inflight` is only the GLOBAL FALLBACK cap: a provider row's
+`max_inflight`, and a model row's override of it, both win over this (domain
+unfreeze #16) — a paid tier, a free aggregator, and a local single-GPU server
+need wildly different ceilings.
+
+The ceilings bound how long a provider capacity outage is ridden out on automatic
 waiting before it escalates to a human-gated block. They are WALL-CLOCK bounds,
 deliberately not attempt counts: an outage's duration is what distinguishes "the
 provider is busy" from "this configuration will never work".
@@ -37,5 +44,13 @@ def build_provider_capacity_policy(config_store: SqliteConfigStore) -> ProviderC
         daily_quota_ceiling_seconds=float(
             config_store.get(_SCOPE, "execution.provider_daily_quota_ceiling_seconds")
             or _DEFAULTS.daily_quota_ceiling_seconds
+        ),
+        max_inflight=int(
+            config_store.get(_SCOPE, "execution.provider_max_inflight")
+            or _DEFAULTS.max_inflight
+        ),
+        probe_stale_after_seconds=float(
+            config_store.get(_SCOPE, "execution.provider_probe_stale_after_seconds")
+            or _DEFAULTS.probe_stale_after_seconds
         ),
     )

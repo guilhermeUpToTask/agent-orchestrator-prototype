@@ -246,6 +246,7 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
         agent_event_sink=object(),
         verification_executor=None,
         provider_capacity_policy=ProviderCapacityPolicy(),
+        provider_repo=object(),
     )
 
     async def fake_worker_tick(*args, **kwargs):
