@@ -14,6 +14,7 @@ from src.app.execution_records import (
     RuntimeCircuit,
 )
 from src.app.handlers.execution_handler import ExecutionHandler
+from src.app.provider_capacity import ProviderCapacityPolicy
 from src.app.runtime_failures import LimitScope
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
@@ -366,11 +367,11 @@ def test_request_concurrency_requeues_without_opening_a_circuit(env_factory):
         assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
 
 
-def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
-    """Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick no
-    longer dispatches cyclic execution at all, so this drives the single goal
-    directly via ExecutionHandler.handle_goal — the same entry point a
-    goal-lease worker (claim_ready_goal / drive_goal) uses in production."""
+def test_capacity_storm_inside_the_ceiling_never_latches_or_blocks(env_factory):
+    """The old rule compared a provider-global failure_count against a PER-TASK
+    attempt budget and latched manual_intervention after a handful of failures
+    shared across concurrent goals. Escalation is now duration-based: a storm of
+    refusals inside the ceiling keeps waiting, and the plan stays RUNNING."""
     agent = make_agent_spec().model_copy(
         update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
     )
@@ -384,79 +385,143 @@ def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factor
         },
         agents=[agent],
     )
-    plan = _plan(max_attempts=2)
-    plan.retry_policy = RetryPolicy(
-        max_attempts=2,
-        initial_backoff_seconds=1,
-        max_backoff_seconds=1,
-        jitter_ratio=0,
+    # max_attempts=2 and a RATE_LIMIT kind budget of 6 both used to terminate the
+    # task long before this many failures.
+    env.seed(_cyclic_plan(env, task_ids=("t1", "t2"), max_attempts=2))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=600),
     )
-    plan.status = PlanStatus.RUNNING
-    plan.cycles = [
-        Cycle(
-            id="cycle-1",
-            intent_proposal_id="intent-1",
-            draft_id="draft-1",
-            status=CycleStatus.ACTIVE,
-            started_at=env.clock.now(),
-            goals=[
-                Goal(
-                    id="g1",
-                    name="g1",
-                    position=0,
-                    description="",
-                    tasks=[
-                        Task(id="t1", name="t1", position=0, description="", agent_id="a1"),
-                        Task(id="t2", name="t2", position=1, description="", agent_id="a1"),
-                    ],
-                )
-            ],
-        )
-    ]
-    env.seed(plan)
-
-    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
 
     def drive() -> str:
-        stored = env.stored("p1")
-        return asyncio.run(execution.handle_goal("p1", "g1", stored, env.uow)).value
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
 
-    assert drive() == "continue"
-    assert drive() == "not_ready"
-    assert env.runner.calls == {"t1": 1}
+    for _ in range(10):
+        assert drive() == "continue"
+        env.clock.advance(5)
 
-    env.clock.advance(5)
-    assert drive() == "continue"
-    env.clock.advance(5)
-    assert drive() == "continue"
     stored = env.stored("p1")
     assert stored.block is None
     assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
-    assert env.runner.calls == {"t1": 3}
+    # the later task never ran: a waiting head task still holds the goal
+    assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
+    assert env.runner.calls == {"t1": 10}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and not circuit.manual_intervention
+    assert circuit.failure_count == 10  # kept for telemetry, no longer a latch
+    assert circuit.opened_at == env.clock.now() - timedelta(seconds=50)  # outage START
 
-    for _ in range(2):
-        env.clock.advance(5)
-        assert drive() == "continue"
 
-    env.clock.advance(5)
+def test_outage_past_the_ceiling_latches_and_opens_a_goal_block(env_factory):
+    """The backstop: a 'transient' signature that never resolves (a revoked key
+    returning 429, a wrong base_url) must eventually reach a human instead of
+    waiting forever while the root still reports RUNNING."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="NVIDIA ResourceExhausted",
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env, task_ids=("t1", "t2")))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=100),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    assert drive() == "continue"  # opens the circuit
+    env.clock.advance(500)  # outage now far older than the ceiling
     assert drive() == "paused"
+
     stored = env.stored("p1")
     assert stored.block is None  # per-goal block, not the legacy scalar
     block = stored.goal_blocks.get("g1")
     assert block is not None and block.active and block.kind == "provider_capacity"
-    assert block.legal_resolutions == [
-        "wait_and_retry",
-        "edit_task",
-        "start_replan",
-    ]
+    assert block.legal_resolutions == ["wait_and_retry", "edit_task", "start_replan"]
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
-    assert env.runner.calls == {"t1": 6}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and circuit.manual_intervention
+
+
+def test_daily_quota_waits_past_the_ordinary_ceiling(env_factory):
+    """A free-tier daily allowance can legitimately take a full day to reset, so
+    it must not escalate on the ordinary ceiling -- that would block precisely the
+    case this design exists to survive."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="free-models-per-day limit reached",
+                fail_limit_scope=LimitScope.DAILY_QUOTA,
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(
+            outage_ceiling_seconds=100,
+            daily_quota_ceiling_seconds=10_000,
+        ),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    assert drive() == "continue"
+
+    # A daily quota also carries a 1h minimum backoff, so the plan is still
+    # WAITING here -- past the ordinary ceiling, but not yet due to probe.
+    env.clock.advance(500)
+    assert drive() == "not_ready"
+    assert env.stored("p1").goal_blocks == {}
+
+    # Now past the probe window and still inside the daily ceiling: it retries
+    # rather than escalating, even though the ordinary ceiling is long gone.
+    env.clock.advance(4_000)
+    assert drive() == "continue"
+    assert env.stored("p1").goal_blocks == {}
+
+    with env.uow:
+        # an account-level limit keys provider-wide: routing to another model
+        # cannot escape it
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", None)
+    assert circuit is not None and not circuit.manual_intervention
+    assert circuit.limit_scope == "daily_quota"
+
+    env.clock.advance(20_000)  # past the daily ceiling too, and past the probe window
+    assert drive() == "paused"
+    block = env.stored("p1").goal_blocks.get("g1")
+    assert block is not None and block.kind == "provider_capacity"

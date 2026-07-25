@@ -48,6 +48,8 @@ from src.infra.git.project_workspace import (
     ProjectWorkspaceResolver,
 )
 from src.domain.policies.retry_policies import RetryPolicy
+from src.app.provider_capacity import ProviderCapacityPolicy
+from src.infra.policies.provider_capacity_factory import build_provider_capacity_policy
 from src.infra.policies.retry_policy_factory import build_retry_policy
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
@@ -116,6 +118,13 @@ class AppContainer:
         via `orchestrate config set` and apply to the next created plan
         without an API restart."""
         return build_retry_policy(self.config_store)
+
+    @property
+    def provider_capacity_policy(self) -> ProviderCapacityPolicy:
+        """Read fresh on every access, same reasoning as default_retry_policy:
+        the ceilings behind it are operator-tuned via `orchestrate config set`
+        and must apply without an API restart."""
+        return build_provider_capacity_policy(self.config_store)
 
     @cached_property
     def secret_store(self) -> SqliteSecretStore:

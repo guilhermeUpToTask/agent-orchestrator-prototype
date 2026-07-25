@@ -21,12 +21,50 @@ metadata, NOT by branching on a provider name here -- see `CapacityScope`.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from src.app.runtime_failures import LimitScope
+from src.domain.value_objects.lifecycle import FailureKind
 
 # Limit tiers that a whole account shares, regardless of which model was called.
 _ACCOUNT_LEVEL_SCOPES = frozenset({LimitScope.QUOTA, LimitScope.DAILY_QUOTA})
+
+# Failure kinds that mean "the provider has no room right now", as opposed to
+# "this task cannot succeed". These are ridden out on automatic waiting bounded
+# by wall-clock time; everything else keeps its ordinary per-task retry budget.
+CAPACITY_KINDS = frozenset({FailureKind.RATE_LIMIT, FailureKind.CONNECTION_ERROR})
+
+
+@dataclass(frozen=True)
+class ProviderCapacityPolicy:
+    """Operator-tunable bounds on how long capacity is waited out.
+
+    The bound is WALL-CLOCK, not an attempt count. Attempt counts are the wrong
+    unit for an outage: a provider-global failure counter compared against a
+    per-task budget latched after a handful of shared failures while each task
+    had barely retried, and with several goals in flight that arrived in minutes.
+
+    Defaults ride out every legitimate outage (real ones last minutes to hours)
+    while still escalating a misconfiguration that merely looks transient -- a
+    revoked key returning 429, or a wrong base_url, produces the same signature
+    forever, and without a backstop the root would report RUNNING and nobody
+    would ever be told.
+    """
+
+    outage_ceiling_seconds: float = 21_600.0  # 6h
+    daily_quota_ceiling_seconds: float = 93_600.0  # 26h — must exceed a daily reset
+
+    def ceiling_for(self, limit_scope: str | None) -> float:
+        """A daily allowance can legitimately take a full day to reset, so it gets
+        the longer ceiling; every other tier uses the ordinary one."""
+        if limit_scope == LimitScope.DAILY_QUOTA.value:
+            return self.daily_quota_ceiling_seconds
+        return self.outage_ceiling_seconds
+
+    def outage_exceeded(self, opened_at: datetime, now: datetime, limit_scope: str | None) -> bool:
+        return (now - opened_at).total_seconds() > self.ceiling_for(limit_scope)
 
 
 class CapacityScope(str, Enum):

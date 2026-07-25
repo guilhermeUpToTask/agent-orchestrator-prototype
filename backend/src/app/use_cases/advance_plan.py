@@ -20,6 +20,7 @@ from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.repositories.agent_repo import AgentRepository
 from src.domain.services.navigation import ready_goal_ids
 
+from src.app.provider_capacity import ProviderCapacityPolicy
 from src.app.handlers.base import PhaseHandler, Signal
 from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.handlers.gate_handler import GateHandler
@@ -57,8 +58,11 @@ class PlanDispatcher:
         clock: Clock,
         planning_handler: PhaseHandler | None = None,
         verifier: VerificationExecutor | None = None,
+        capacity: ProviderCapacityPolicy | None = None,
     ) -> None:
-        self._execution = ExecutionHandler(runner, agents, workspace, event_sink, clock, verifier)
+        self._execution = ExecutionHandler(
+            runner, agents, workspace, event_sink, clock, verifier, capacity
+        )
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)
         self._clock = clock

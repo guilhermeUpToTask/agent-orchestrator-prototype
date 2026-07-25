@@ -69,7 +69,11 @@ from src.app.execution_records import (
     ExecutionRunStatus,
     RuntimeCircuit,
 )
-from src.app.provider_capacity import circuit_model_id, circuit_ref
+from src.app.provider_capacity import (
+    ProviderCapacityPolicy,
+    circuit_model_id,
+    circuit_ref,
+)
 from src.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
 from src.app.handlers.base import Signal
 from src.app.ports import (
@@ -115,6 +119,7 @@ class ExecutionHandler:
         event_sink: AgentEventSink,
         clock: Clock,
         verifier: VerificationExecutor | None = None,
+        capacity: ProviderCapacityPolicy | None = None,
     ) -> None:
         self._runner = runner
         self._agents = agents
@@ -122,6 +127,7 @@ class ExecutionHandler:
         self._event_sink = event_sink
         self._clock = clock
         self._verifier = verifier
+        self._capacity = capacity or ProviderCapacityPolicy()
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -1237,6 +1243,10 @@ class ExecutionHandler:
                 not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
 
                 circuit_manual = False
+                # True only while a capacity outage is being ridden out on
+                # automatic waiting; a REQUEST_CONCURRENCY refusal opens no
+                # circuit and so keeps its ordinary per-task budget as the bound.
+                capacity_wait = False
                 if (
                     exc.kind == FailureKind.RATE_LIMIT
                     and unit.spec.provider_id
@@ -1261,36 +1271,55 @@ class ExecutionHandler:
                         circuit_model,
                     )
                     failure_count = (existing.failure_count if existing else 0) + 1
-                    kind_budget = unit.retry_policy.kind_max_attempts.get(
-                        exc.kind, unit.retry_policy.max_attempts
+                    # The START of the outage, preserved across updates. Restamping
+                    # it on every failure would peg the outage age at ~0 and make a
+                    # wall-clock ceiling unreachable.
+                    opened_at = existing.opened_at if existing else self._clock.now()
+                    scope_value = (
+                        exc.failure.limit_scope.value
+                        if exc.failure.limit_scope is not None
+                        else None
                     )
-                    circuit_manual = failure_count >= kind_budget
+                    # ESCALATE ON DURATION, NOT ON A COUNT. The old rule compared
+                    # this provider-global `failure_count` against a PER-TASK
+                    # attempt budget -- different units of measure. It latched
+                    # after a handful of failures shared across concurrent goals
+                    # while each task had barely retried, and it ignored the
+                    # operator's raised `retry_max_attempts` entirely (see
+                    # RetryPolicy.should_retry, which deliberately treats that key
+                    # as a floor). `failure_count` is kept for telemetry only.
+                    circuit_manual = self._capacity.outage_exceeded(
+                        opened_at, self._clock.now(), scope_value
+                    )
                     uow.executions.upsert_runtime_circuit(
                         RuntimeCircuit(
                             runtime=unit.spec.runtime_type,
                             provider_id=unit.spec.provider_id,
                             model_id=circuit_model,
                             failure_count=failure_count,
-                            # The START of the outage, preserved across updates.
-                            # Restamping it on every failure would peg the outage
-                            # age at ~0 and make a wall-clock ceiling unreachable.
-                            opened_at=(existing.opened_at if existing else self._clock.now()),
+                            opened_at=opened_at,
                             retry_at=not_before,
                             last_failure_kind=exc.kind.value,
                             safe_message=exc.reason,
                             manual_intervention=circuit_manual,
-                            limit_scope=(
-                                exc.failure.limit_scope.value
-                                if exc.failure.limit_scope is not None
-                                else None
-                            ),
+                            limit_scope=scope_value,
                         )
                     )
+                    # Inside the ceiling a capacity failure must ALSO bypass the
+                    # per-task retry budget. Removing only the circuit latch would
+                    # have changed nothing: the task still exhausted
+                    # kind_max_attempts and reached fail_task, opening the same
+                    # goal block a few attempts later. Waiting is bounded by the
+                    # ceiling above, which is the whole point of the redesign.
+                    capacity_wait = not circuit_manual
 
                 if (
                     exc.failure.retryable
                     and not circuit_manual
-                    and unit.retry_policy.should_retry(unit.policy_attempt, exc.kind)
+                    and (
+                        capacity_wait
+                        or unit.retry_policy.should_retry(unit.policy_attempt, exc.kind)
+                    )
                 ):
                     plan.requeue_task(unit.goal_id, unit.task_id, not_before)
                     self._finish_execution(
