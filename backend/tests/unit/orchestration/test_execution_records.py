@@ -602,6 +602,197 @@ def test_admission_gate_refuses_to_start_past_the_inflight_cap(env_factory):
     assert env.runner.calls == {"g1t0": 1}
 
 
+def _routing_agents():
+    """Two interchangeable agents on DIFFERENT providers, tiered. The bound one is
+    the smart tier; the fallback is cheap."""
+    smart = make_agent_spec().model_copy(
+        update={
+            "id": "a1",
+            "model_role": "smart",
+            "runtime_type": "pi",
+            "provider_id": "openrouter",
+            "model_id": "nemotron",
+        }
+    )
+    cheap = make_agent_spec().model_copy(
+        update={
+            "id": "a2",
+            "model_role": "cheap",
+            "runtime_type": "pi",
+            "provider_id": "local",
+            "model_id": "qwen",
+        }
+    )
+    return smart, cheap
+
+
+def _open_circuit(env, provider_id, model_id, *, retry_in):
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id=provider_id,
+                model_id=model_id,
+                failure_count=1,
+                opened_at=env.clock.now(),
+                retry_at=env.clock.now() + timedelta(seconds=retry_in),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+            )
+        )
+
+
+def test_selection_keeps_the_bound_agent_when_its_provider_is_free(env_factory):
+    """Preference is primary. With nothing throttled, routing must not fire at all."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+
+    with env.uow:
+        attempts = env.uow.executions.list_attempts("p1")
+    assert [a.model_id for a in attempts] == ["nemotron"]
+
+
+def test_selection_waits_out_a_short_throttle_but_reroutes_a_long_one(env_factory):
+    """On a paid setup, substituting a weaker model to dodge a ten-second 429 costs
+    output quality for nothing -- so a short wait is waited out. A long outage is
+    worth routing around, which is what makes free-tier parallelism work."""
+    smart, cheap = _routing_agents()
+
+    # short throttle -> stay on the preferred model and wait
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=10)
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert env.runner.calls == {}
+
+    # long outage -> route to the cheap tier and keep making progress
+    env2 = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env2.seed(_two_goal_cycle(env2))
+    _open_circuit(env2, "openrouter", "nemotron", retry_in=3_600)
+    execution2 = ExecutionHandler(env2.runner, env2.agents, env2.ws, env2.sink, env2.clock)
+    assert asyncio.run(execution2.handle_goal("p1", "g1", env2.stored("p1"), env2.uow)).value == (
+        "continue"
+    )
+    with env2.uow:
+        attempts = env2.uow.executions.list_attempts("p1")
+    assert [a.model_id for a in attempts] == ["qwen"]
+
+
+def test_selection_reroutes_immediately_when_the_preferred_pool_is_full(env_factory):
+    """An at-capacity provider has no wait to compare against -- another pool may be
+    idle right now. Applying the time threshold here would make the admission gate
+    serialize exactly the work it exists to parallelize."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    started = env.clock.now()
+    other = _plan()
+    other.id = "p-busy"
+    other.project_id = "project-busy"
+    env.seed(other)
+    with env.uow:
+        env.uow.executions.add_run(
+            ExecutionRun(
+                id="run-b",
+                plan_id="p-busy",
+                goal_id="g9",
+                task_id="t9",
+                status=ExecutionRunStatus.RUNNING,
+                started_at=started,
+            )
+        )
+        env.uow.executions.add_attempt(
+            ExecutionAttempt(
+                id="att-b",
+                run_id="run-b",
+                plan_id="p-busy",
+                goal_id="g9",
+                task_id="t9",
+                number=1,
+                task_attempt=1,
+                status=ExecutionAttemptStatus.RUNNING,
+                started_at=started,
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+            )
+        )
+
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=1),
+    )
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+    with env.uow:
+        attempts = [a for a in env.uow.executions.list_attempts("p1")]
+    assert [a.model_id for a in attempts] == ["qwen"]  # rerouted, not delayed
+
+
+def test_selection_never_mutates_the_persisted_binding(env_factory):
+    """Substitution is a RUNTIME choice. The task's agent_id records the operator's
+    preference and belongs to the aggregate; only the attempt records what ran."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=3_600)
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+
+    stored = env.stored("p1")
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].agent_id == "a1"  # binding untouched
+    with env.uow:
+        attempts = env.uow.executions.list_attempts("p1")
+    assert [a.provider_id for a in attempts] == ["local"]  # but 'local' actually ran
+
+
+def test_selection_waits_when_every_capable_agent_is_throttled(env_factory):
+    """With nowhere better to go, it falls back to the preferred spec and takes the
+    ordinary wait -- never a block merely because routing found no alternative."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=3_600)
+    _open_circuit(env, "local", "qwen", retry_in=3_600)
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert env.runner.calls == {}
+    stored = env.stored("p1")
+    assert stored.goal_blocks == {}
+    assert stored.block is None
+
+
 def test_probe_claim_admits_exactly_one_holder_per_window(env_factory):
     """The atomicity contract behind the half-open probe, on BOTH backends. The
     claim must be a single conditional write: a read-then-write would let two

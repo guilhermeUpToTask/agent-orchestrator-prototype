@@ -75,6 +75,7 @@ from src.app.provider_capacity import (
     CAPACITY_KINDS,
     CapacityScope,
     ProviderCapacityPolicy,
+    RoutingPolicy,
     circuit_model_id,
     circuit_ref,
     resolve_capacity_scope,
@@ -126,6 +127,7 @@ class ExecutionHandler:
         verifier: VerificationExecutor | None = None,
         capacity: ProviderCapacityPolicy | None = None,
         providers: ModelProviderRepository | None = None,
+        routing: RoutingPolicy | None = None,
     ) -> None:
         self._runner = runner
         self._agents = agents
@@ -137,6 +139,7 @@ class ExecutionHandler:
         # Optional: without it, capacity metadata falls back to the global policy.
         # Dry-run and unit tests need no provider catalog.
         self._providers = providers
+        self._routing = routing or RoutingPolicy()
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -206,7 +209,7 @@ class ExecutionHandler:
                 if task.result is not None:
                     return self._finalize_existing(plan_id, plan, goal, task, uow)
 
-                spec = self._resolve_spec(plan, task)
+                spec = self._select_spec(plan, task, uow)
                 # Admission BEFORE the circuit check: if the pool is already full
                 # there is nothing to probe, and claiming the half-open probe only
                 # to be refused would burn the window for everyone.
@@ -1096,6 +1099,69 @@ class ExecutionHandler:
             or self._capacity.max_inflight
         )
         return cap, scope
+
+    def _spec_wait_seconds(self, spec: AgentSpec, uow: UnitOfWork) -> float | None:
+        """How long this spec's provider is unavailable for, or None if it is free.
+
+        `inf` means "blocked, not merely waiting" (a latched circuit): no amount of
+        waiting clears it, so routing elsewhere is always preferable.
+        `0.0` means "at its in-flight ceiling right now" — nothing to wait for,
+        another pool may well be idle.
+        """
+        if not spec.provider_id or not spec.model_id:
+            return None
+        circuit = uow.executions.get_runtime_circuit(
+            spec.runtime_type, spec.provider_id, None
+        ) or uow.executions.get_runtime_circuit(spec.runtime_type, spec.provider_id, spec.model_id)
+        if circuit is not None:
+            if circuit.manual_intervention:
+                return float("inf")
+            remaining = (circuit.retry_at - self._clock.now()).total_seconds()
+            if remaining > 0:
+                return remaining
+        if self._admission_signal(spec, uow) is not None:
+            return 0.0
+        return None
+
+    def _select_spec(
+        self, plan: Plan, task: Task, uow: UnitOfWork
+    ) -> AgentSpec:
+        """The spec this attempt should actually run on.
+
+        A RUNTIME SUBSTITUTION, never a re-binding: the task's persisted
+        `agent_id`/`role_agent_ids` are untouched, because those are the aggregate's
+        to own and they record the operator's PREFERENCE. What actually ran is
+        recorded on the ExecutionAttempt, which already carries provider/model, so
+        every attempt stays auditable.
+
+        Falls back to the preferred spec whenever no better candidate exists, which
+        keeps single-agent setups on exactly the path they had before.
+        """
+        preferred = self._resolve_spec(plan, task)
+        wait = self._spec_wait_seconds(preferred, uow)
+        if wait is None:
+            return preferred  # available: preference wins, no questions asked
+        # A short circuit wait is worth waiting out rather than degrading output.
+        # An at-capacity provider (wait == 0) substitutes immediately.
+        if 0.0 < wait <= self._routing.downgrade_after_seconds:
+            return preferred
+
+        required = list(task.required_capabilities)
+        candidates = [
+            agent
+            for agent in self._agents.list()
+            if agent.id != preferred.id
+            and agent.role == preferred.role
+            and set(required).issubset({capability.id for capability in agent.capabilities})
+            and self._routing.allows(agent.model_role)
+        ]
+        candidates.sort(key=lambda agent: self._routing.tier_rank(agent.model_role))
+        for candidate in candidates:
+            if self._spec_wait_seconds(candidate, uow) is None:
+                return candidate
+        # Everything capable is throttled: keep the preferred spec so the existing
+        # circuit/admission checks produce the same wait or block they always did.
+        return preferred
 
     def _admission_signal(self, spec: AgentSpec, uow: UnitOfWork) -> Signal | None:
         """Refuse to START an attempt that would exceed the provider's in-flight

@@ -48,8 +48,11 @@ from src.infra.git.project_workspace import (
     ProjectWorkspaceResolver,
 )
 from src.domain.policies.retry_policies import RetryPolicy
-from src.app.provider_capacity import ProviderCapacityPolicy
-from src.infra.policies.provider_capacity_factory import build_provider_capacity_policy
+from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
+from src.infra.policies.provider_capacity_factory import (
+    build_provider_capacity_policy,
+    build_routing_policy,
+)
 from src.infra.policies.retry_policy_factory import build_retry_policy
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
@@ -125,6 +128,11 @@ class AppContainer:
         the ceilings behind it are operator-tuned via `orchestrate config set`
         and must apply without an API restart."""
         return build_provider_capacity_policy(self.config_store)
+
+    @property
+    def routing_policy(self) -> RoutingPolicy:
+        """Read fresh per access, same reasoning as the other two policies."""
+        return build_routing_policy(self.config_store)
 
     @cached_property
     def secret_store(self) -> SqliteSecretStore:

@@ -28,11 +28,12 @@ applies without an API restart.
 
 from __future__ import annotations
 
-from src.app.provider_capacity import ProviderCapacityPolicy
+from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
 from src.infra.db.reference_repos import SqliteConfigStore
 
 _SCOPE = SqliteConfigStore.ORCHESTRATOR_SCOPE
 _DEFAULTS = ProviderCapacityPolicy()
+_ROUTING_DEFAULTS = RoutingPolicy()
 
 
 def build_provider_capacity_policy(config_store: SqliteConfigStore) -> ProviderCapacityPolicy:
@@ -52,5 +53,37 @@ def build_provider_capacity_policy(config_store: SqliteConfigStore) -> ProviderC
         probe_stale_after_seconds=float(
             config_store.get(_SCOPE, "execution.provider_probe_stale_after_seconds")
             or _DEFAULTS.probe_stale_after_seconds
+        ),
+    )
+
+
+def build_routing_policy(config_store: SqliteConfigStore) -> RoutingPolicy:
+    """Config keys (scope 'orchestrator'), all optional:
+
+      execution.model_role_order               csv   (default "smart,long_context,cheap")
+      execution.model_downgrade_after_seconds  float (default 60)
+      execution.model_downgrade_floor_role     str   (default unset = any tier)
+
+    These decide when a throttled provider is worth routing AROUND rather than
+    waiting on. Preference is primary: on a paid setup a short 429 should be waited
+    out rather than answered by silently running the work on a weaker model, so
+    raise `model_downgrade_after_seconds` (or set a floor role) to bias toward
+    waiting, and lower it to bias toward throughput on interchangeable free models.
+    """
+    raw_order = config_store.get(_SCOPE, "execution.model_role_order")
+    order = (
+        tuple(part.strip() for part in raw_order.split(",") if part.strip())
+        if raw_order
+        else _ROUTING_DEFAULTS.model_role_order
+    )
+    return RoutingPolicy(
+        model_role_order=order or _ROUTING_DEFAULTS.model_role_order,
+        downgrade_after_seconds=float(
+            config_store.get(_SCOPE, "execution.model_downgrade_after_seconds")
+            or _ROUTING_DEFAULTS.downgrade_after_seconds
+        ),
+        downgrade_floor_role=(
+            config_store.get(_SCOPE, "execution.model_downgrade_floor_role")
+            or _ROUTING_DEFAULTS.downgrade_floor_role
         ),
     )

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
-from src.app.provider_capacity import ProviderCapacityPolicy
+from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
 from src.domain.repositories.model_provider_repo import ModelProviderRepository
 from src.app.handlers.base import PhaseHandler
 from src.app.handlers.execution_handler import ExecutionHandler
@@ -185,6 +185,7 @@ async def drive_goal(
     verifier: VerificationExecutor | None = None,
     capacity: ProviderCapacityPolicy | None = None,
     providers: ModelProviderRepository | None = None,
+    routing: RoutingPolicy | None = None,
 ) -> tuple[str, int]:
     """Goal-level analog of `drive_plan` (ADR-001, domain unfreeze #13 /
     Phase 3c): advance ONE goal (within an active cycle) until it stops
@@ -192,7 +193,7 @@ async def drive_goal(
     Never routes to planning/gates — a goal-lease holder only ever drives
     execution for its one goal."""
     execution = ExecutionHandler(
-        runner, agents, workspace, event_sink, clock, verifier, capacity, providers
+        runner, agents, workspace, event_sink, clock, verifier, capacity, providers, routing
     )
     signal = "continue"
     heartbeat_interval_seconds = (

@@ -78,6 +78,41 @@ class ProviderCapacityPolicy:
         return (now - opened_at).total_seconds() > self.ceiling_for(limit_scope)
 
 
+@dataclass(frozen=True)
+class RoutingPolicy:
+    """When it is worth running a task on a different model than the bound one.
+
+    PREFERENCE BEATS AVAILABILITY. Routing around a throttled model is a win on a
+    free tier, where waits are long and models are interchangeable, and a
+    regression on a paid one, where substituting a weaker model to dodge a
+    ten-second 429 buys nothing and costs output quality. So the bound agent's
+    tier is primary and availability is only the tiebreak.
+    """
+
+    # Highest-preference model tier first. These are `AgentSpec.model_role`
+    # values, which already exist as a model *tier* indirection. Unlisted roles
+    # sort last.
+    model_role_order: tuple[str, ...] = ("smart", "long_context", "cheap")
+    # Substitute for a CIRCUIT wait only when it exceeds this. A short 429 is
+    # waited out. (An at-capacity provider substitutes immediately instead —
+    # there is no wait to compare against, and applying a threshold there would
+    # make the admission gate serialize the work it exists to parallelize.)
+    downgrade_after_seconds: float = 60.0
+    # Never substitute below this tier. Unset = any tier is acceptable.
+    downgrade_floor_role: str | None = None
+
+    def tier_rank(self, model_role: str) -> int:
+        try:
+            return self.model_role_order.index(model_role)
+        except ValueError:
+            return len(self.model_role_order)
+
+    def allows(self, model_role: str) -> bool:
+        if self.downgrade_floor_role is None:
+            return True
+        return self.tier_rank(model_role) <= self.tier_rank(self.downgrade_floor_role)
+
+
 def resolve_capacity_scope(raw: str | None) -> CapacityScope:
     """A provider row's declared scope, tolerating unset and unrecognized values.
 
