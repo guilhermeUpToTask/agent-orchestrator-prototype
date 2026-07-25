@@ -16,6 +16,12 @@ from src.app.execution_records import (
 )
 from src.app.runtime_failures import RuntimeFailure
 
+# (runtime, provider_id, model_id) — `model_id=None` is a provider-wide circuit.
+# The bound SQLite adapter stores that as a sentinel because SQLite forbids NULL
+# primary-key columns; here `None` is a first-class dict key, so the fake needs
+# no translation. Both backends present the identical `None` contract to callers.
+_CircuitKey = tuple[str, str, str | None]
+
 
 class InMemoryExecutionRecordRepository:
     """Copy-on-enter transaction semantics matching the bound SQLite adapter."""
@@ -24,11 +30,11 @@ class InMemoryExecutionRecordRepository:
         self._runs: dict[str, ExecutionRun] = {}
         self._attempts: dict[str, ExecutionAttempt] = {}
         self._planning: dict[str, PlanningOperation] = {}
-        self._circuits: dict[tuple[str, str, str], RuntimeCircuit] = {}
+        self._circuits: dict[_CircuitKey, RuntimeCircuit] = {}
         self._tx_runs: dict[str, ExecutionRun] | None = None
         self._tx_attempts: dict[str, ExecutionAttempt] | None = None
         self._tx_planning: dict[str, PlanningOperation] | None = None
-        self._tx_circuits: dict[tuple[str, str, str], RuntimeCircuit] | None = None
+        self._tx_circuits: dict[_CircuitKey, RuntimeCircuit] | None = None
 
     def _begin(self) -> None:
         if self._tx_runs is not None:
@@ -215,7 +221,7 @@ class InMemoryExecutionRecordRepository:
             )
         return self._tx_planning
 
-    def _circuits_bound(self) -> dict[tuple[str, str, str], RuntimeCircuit]:
+    def _circuits_bound(self) -> dict[_CircuitKey, RuntimeCircuit]:
         if self._tx_circuits is None:
             raise RuntimeError(
                 "InMemoryExecutionRecordRepository used outside a UnitOfWork transaction"
@@ -262,7 +268,7 @@ class InMemoryExecutionRecordRepository:
         )
 
     def get_runtime_circuit(
-        self, runtime: str, provider_id: str, model_id: str
+        self, runtime: str, provider_id: str, model_id: str | None
     ) -> RuntimeCircuit | None:
         circuits = self._circuits if self._tx_circuits is None else self._tx_circuits
         return circuits.get((runtime, provider_id, model_id))
@@ -270,5 +276,5 @@ class InMemoryExecutionRecordRepository:
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
         self._circuits_bound()[(circuit.runtime, circuit.provider_id, circuit.model_id)] = circuit
 
-    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None:
+    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str | None) -> None:
         self._circuits_bound().pop((runtime, provider_id, model_id), None)

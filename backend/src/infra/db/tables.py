@@ -291,6 +291,15 @@ class RuntimeCircuitTable(Base):
     manual_intervention: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # Which capacity tier the provider reported (LimitScope value). Policy keys
+    # off this: a concurrency cap means "send fewer at once", a daily quota means
+    # "wait for the reset". NULL = pre-0012 row or an unclassified message.
+    limit_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Single-flight half-open probe. After retry_at exactly one runner may claim
+    # the probe; without this every concurrent goal worker probes at once and one
+    # outage window costs N failures instead of one.
+    probe_holder: Mapped[str | None] = mapped_column(String, nullable=True)
+    probe_started_at: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (Index("ix_runtime_circuits_retry", "retry_at"),)
 

@@ -35,6 +35,22 @@ _PLANNING_COLUMNS = (
 )
 
 
+# `runtime_circuits` keys on (runtime, provider_id, model_id) as a composite
+# PRIMARY KEY, and SQLite forbids NULL in primary-key columns. A provider-wide
+# circuit (account-level quota, shared by every model on the key) therefore
+# stores this sentinel. It NEVER escapes this module: callers pass and receive
+# `model_id=None`, and the two helpers below are the only translation points.
+_PROVIDER_WIDE_MODEL = "*"
+
+
+def _stored_model_id(model_id: str | None) -> str:
+    return _PROVIDER_WIDE_MODEL if model_id is None else model_id
+
+
+def _public_model_id(stored: str) -> str | None:
+    return None if stored == _PROVIDER_WIDE_MODEL else stored
+
+
 def _dt(value: str | None) -> datetime | None:
     return None if value is None else datetime.fromisoformat(value)
 
@@ -459,18 +475,23 @@ class SqliteExecutionRecordRepository:
         return [_planning(row) for row in rows]
 
     def get_runtime_circuit(
-        self, runtime: str, provider_id: str, model_id: str
+        self, runtime: str, provider_id: str, model_id: str | None
     ) -> RuntimeCircuit | None:
         row = (
             self._bound()
             .execute(
                 text(
                     "SELECT runtime, provider_id, model_id, failure_count, opened_at, "
-                    "retry_at, last_failure_kind, safe_message, manual_intervention "
+                    "retry_at, last_failure_kind, safe_message, manual_intervention, "
+                    "limit_scope, probe_holder, probe_started_at "
                     "FROM runtime_circuits WHERE runtime=:runtime "
                     "AND provider_id=:provider_id AND model_id=:model_id"
                 ),
-                {"runtime": runtime, "provider_id": provider_id, "model_id": model_id},
+                {
+                    "runtime": runtime,
+                    "provider_id": provider_id,
+                    "model_id": _stored_model_id(model_id),
+                },
             )
             .one_or_none()
         )
@@ -479,13 +500,16 @@ class SqliteExecutionRecordRepository:
         return RuntimeCircuit(
             runtime=str(row[0]),
             provider_id=str(row[1]),
-            model_id=str(row[2]),
+            model_id=_public_model_id(str(row[2])),
             failure_count=int(row[3]),
             opened_at=datetime.fromisoformat(str(row[4])),
             retry_at=datetime.fromisoformat(str(row[5])),
             last_failure_kind=str(row[6]),
             safe_message=str(row[7]),
             manual_intervention=bool(row[8]),
+            limit_scope=None if row[9] is None else str(row[9]),
+            probe_holder=None if row[10] is None else str(row[10]),
+            probe_started_at=(None if row[11] is None else datetime.fromisoformat(str(row[11]))),
         )
 
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
@@ -493,33 +517,49 @@ class SqliteExecutionRecordRepository:
             text(
                 "INSERT INTO runtime_circuits "
                 "(runtime, provider_id, model_id, failure_count, opened_at, retry_at, "
-                "last_failure_kind, safe_message, manual_intervention) VALUES "
+                "last_failure_kind, safe_message, manual_intervention, limit_scope, "
+                "probe_holder, probe_started_at) VALUES "
                 "(:runtime, :provider_id, :model_id, :failure_count, :opened_at, "
-                ":retry_at, :last_failure_kind, :safe_message, :manual_intervention) "
+                ":retry_at, :last_failure_kind, :safe_message, :manual_intervention, "
+                ":limit_scope, :probe_holder, :probe_started_at) "
                 "ON CONFLICT(runtime, provider_id, model_id) DO UPDATE SET "
                 "failure_count=excluded.failure_count, opened_at=excluded.opened_at, "
                 "retry_at=excluded.retry_at, last_failure_kind=excluded.last_failure_kind, "
                 "safe_message=excluded.safe_message, "
-                "manual_intervention=excluded.manual_intervention"
+                "manual_intervention=excluded.manual_intervention, "
+                "limit_scope=excluded.limit_scope, "
+                "probe_holder=excluded.probe_holder, "
+                "probe_started_at=excluded.probe_started_at"
             ),
             {
                 "runtime": circuit.runtime,
                 "provider_id": circuit.provider_id,
-                "model_id": circuit.model_id,
+                "model_id": _stored_model_id(circuit.model_id),
                 "failure_count": circuit.failure_count,
                 "opened_at": circuit.opened_at.isoformat(),
                 "retry_at": circuit.retry_at.isoformat(),
                 "last_failure_kind": circuit.last_failure_kind,
                 "safe_message": circuit.safe_message,
                 "manual_intervention": int(circuit.manual_intervention),
+                "limit_scope": circuit.limit_scope,
+                "probe_holder": circuit.probe_holder,
+                "probe_started_at": (
+                    None
+                    if circuit.probe_started_at is None
+                    else circuit.probe_started_at.isoformat()
+                ),
             },
         )
 
-    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None:
+    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str | None) -> None:
         self._bound().execute(
             text(
                 "DELETE FROM runtime_circuits WHERE runtime=:runtime "
                 "AND provider_id=:provider_id AND model_id=:model_id"
             ),
-            {"runtime": runtime, "provider_id": provider_id, "model_id": model_id},
+            {
+                "runtime": runtime,
+                "provider_id": provider_id,
+                "model_id": _stored_model_id(model_id),
+            },
         )

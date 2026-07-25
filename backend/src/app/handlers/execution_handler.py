@@ -1255,6 +1255,11 @@ class ExecutionHandler:
                             last_failure_kind=exc.kind.value,
                             safe_message=exc.reason,
                             manual_intervention=circuit_manual,
+                            limit_scope=(
+                                exc.failure.limit_scope.value
+                                if exc.failure.limit_scope is not None
+                                else None
+                            ),
                         )
                     )
 

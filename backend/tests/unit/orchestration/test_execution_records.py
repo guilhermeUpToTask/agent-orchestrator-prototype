@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
 
-from src.app.execution_records import ExecutionAttemptStatus, ExecutionRunStatus
+from src.app.execution_records import (
+    ExecutionAttemptStatus,
+    ExecutionRunStatus,
+    RuntimeCircuit,
+)
 from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
@@ -204,6 +209,72 @@ def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, mon
         assert env.uow.executions.list_open_attempts("p1") == []
     assert env.stored("p1").goals[0].tasks[0].status == Status.PENDING
     assert "TaskStarted" not in env.outbox_types()
+
+
+def test_runtime_circuit_round_trips_limit_scope_and_probe_fields(env_factory):
+    """The 0012 columns survive a write/read cycle identically on the in-memory
+    fake and the bound SQLite adapter."""
+    env = env_factory()
+    opened = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+    circuit = RuntimeCircuit(
+        runtime="pi",
+        provider_id="openrouter",
+        model_id="nemotron",
+        failure_count=3,
+        opened_at=opened,
+        retry_at=opened + timedelta(seconds=90),
+        last_failure_kind="rate_limit",
+        safe_message="Upstream error from Nvidia: ResourceExhausted",
+        manual_intervention=False,
+        limit_scope="request_concurrency",
+        probe_holder="run-7",
+        probe_started_at=opened + timedelta(seconds=30),
+    )
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(circuit)
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") == circuit
+
+
+def test_provider_wide_circuit_is_addressed_by_none_not_a_sentinel(env_factory):
+    """An account-level (quota) circuit is keyed with model_id=None. Callers only
+    ever speak None; the SQLite adapter's storage sentinel must not leak out, and
+    a provider-wide circuit must not collide with a per-model one."""
+    env = env_factory()
+    opened = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+
+    def _circuit(model_id: str | None, count: int) -> RuntimeCircuit:
+        return RuntimeCircuit(
+            runtime="pi",
+            provider_id="openrouter",
+            model_id=model_id,
+            failure_count=count,
+            opened_at=opened,
+            retry_at=opened + timedelta(seconds=60),
+            last_failure_kind="rate_limit",
+            safe_message="quota",
+            limit_scope="daily_quota" if model_id is None else "request_concurrency",
+        )
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(_circuit(None, 1))
+        env.uow.executions.upsert_runtime_circuit(_circuit("nemotron", 2))
+
+    with env.uow:
+        provider_wide = env.uow.executions.get_runtime_circuit("pi", "openrouter", None)
+        per_model = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert provider_wide is not None and provider_wide.model_id is None
+    assert provider_wide.failure_count == 1
+    assert per_model is not None and per_model.model_id == "nemotron"
+    assert per_model.failure_count == 2
+
+    # clearing one must not clear the other
+    with env.uow:
+        env.uow.executions.clear_runtime_circuit("pi", "openrouter", None)
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is not None
 
 
 def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
