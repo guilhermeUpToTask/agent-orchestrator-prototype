@@ -182,6 +182,29 @@ class ExecutionRecordRepository(Protocol):
 
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None: ...
 
+    def try_claim_circuit_probe(
+        self,
+        runtime: str,
+        provider_id: str,
+        model_id: str | None,
+        *,
+        holder: str,
+        now: datetime,
+        stale_before: datetime,
+    ) -> bool:
+        """Atomically claim the half-open probe. Returns True for the ONE caller
+        that wins; every other concurrent caller gets False and must keep waiting.
+
+        A probe held since before `stale_before` is considered abandoned (its
+        holder died) and may be taken. Implementations must make the test and the
+        write a single atomic step — a read-then-write would let two runners both
+        see it free."""
+        ...
+
+    def release_circuit_probe(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None: ...
+
     def clear_runtime_circuit(
         self, runtime: str, provider_id: str, model_id: str | None
     ) -> None: ...

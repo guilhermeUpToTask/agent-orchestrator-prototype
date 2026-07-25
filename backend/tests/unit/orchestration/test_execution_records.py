@@ -420,6 +420,155 @@ def test_capacity_storm_inside_the_ceiling_never_latches_or_blocks(env_factory):
     assert circuit.opened_at == env.clock.now() - timedelta(seconds=50)  # outage START
 
 
+def _two_goal_cycle(env) -> Plan:
+    """Two INDEPENDENT goals (no depends_on) in one active cycle, both bound to the
+    same provider/model — the shape that produced the probe herd, since each goal
+    gets its own lease and its own UnitOfWork."""
+    plan = _plan(max_attempts=6)
+    plan.retry_policy = RetryPolicy(
+        max_attempts=6, initial_backoff_seconds=10, max_backoff_seconds=10, jitter_ratio=0
+    )
+    plan.status = PlanStatus.RUNNING
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-1",
+            draft_id="draft-1",
+            status=CycleStatus.ACTIVE,
+            started_at=env.clock.now(),
+            goals=[
+                Goal(
+                    id=goal_id,
+                    name=goal_id,
+                    position=position,
+                    description="",
+                    tasks=[
+                        Task(
+                            id=f"{goal_id}t0",
+                            name="t",
+                            position=0,
+                            description="",
+                            agent_id="a1",
+                        )
+                    ],
+                )
+                for position, goal_id in enumerate(("g1", "g2"))
+            ],
+        )
+    ]
+    return plan
+
+
+def test_probe_claim_admits_exactly_one_holder_per_window(env_factory):
+    """The atomicity contract behind the half-open probe, on BOTH backends. The
+    claim must be a single conditional write: a read-then-write would let two
+    concurrent runners each observe the probe free and both probe, which is the
+    herd that made one outage window cost four failures with four goals in flight.
+    """
+    env = env_factory()
+    now = env.clock.now()
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+                failure_count=3,
+                opened_at=now - timedelta(seconds=30),
+                retry_at=now - timedelta(seconds=1),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+            )
+        )
+
+    stale_before = now - timedelta(seconds=100)
+    with env.uow:
+        first = env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-a", now=now, stale_before=stale_before
+        )
+        second = env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-b", now=now, stale_before=stale_before
+        )
+    assert (first, second) == (True, False)
+
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert circuit is not None
+    assert circuit.probe_holder == "runner-a"  # the loser must not overwrite it
+    assert circuit.probe_started_at == now
+
+    # released -> claimable again in the next window
+    with env.uow:
+        env.uow.executions.release_circuit_probe("pi", "openrouter", "nemotron")
+    with env.uow:
+        assert env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-c", now=now, stale_before=stale_before
+        )
+
+
+def test_probe_claim_on_a_missing_circuit_is_refused(env_factory):
+    """No circuit means nothing to probe; a claim must not create a row."""
+    env = env_factory()
+    now = env.clock.now()
+    with env.uow:
+        assert not env.uow.executions.try_claim_circuit_probe(
+            "pi",
+            "openrouter",
+            "nemotron",
+            holder="runner-a",
+            now=now,
+            stale_before=now - timedelta(seconds=100),
+        )
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is None
+
+
+def test_a_stale_probe_is_reclaimed_after_its_holder_dies(env_factory):
+    """A probe whose holder crashed must not gate the provider forever."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory({"g1t0": DummyBehavior(output="ok")}, agents=[agent])
+    env.seed(_two_goal_cycle(env))
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+                failure_count=1,
+                opened_at=env.clock.now() - timedelta(seconds=60),
+                retry_at=env.clock.now() - timedelta(seconds=1),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+                probe_holder="worker-that-died",
+                probe_started_at=env.clock.now() - timedelta(seconds=30),
+            )
+        )
+
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(probe_stale_after_seconds=100),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    # held for 30s, cutoff 100s -> still someone else's probe
+    assert drive() == "not_ready"
+    assert env.runner.calls == {}
+
+    # past the cutoff the abandoned probe is reclaimable
+    env.clock.advance(200)
+    assert drive() == "continue"
+    assert env.runner.calls == {"g1t0": 1}
+
+
 def test_connection_error_waits_on_a_circuit_instead_of_failing_the_task(env_factory):
     """An unreachable or overloaded endpoint is not a defect in this task. It used
     to exhaust the per-task budget and open a goal block for something no human

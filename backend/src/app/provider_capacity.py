@@ -55,6 +55,13 @@ class ProviderCapacityPolicy:
 
     outage_ceiling_seconds: float = 21_600.0  # 6h
     daily_quota_ceiling_seconds: float = 93_600.0  # 26h — must exceed a daily reset
+    # How long a half-open probe may be held before another runner may take it.
+    # MUST exceed `agent_runner.timeout_seconds` (default 600): the probe is held
+    # for the whole attempt, so a shorter bound would let a second runner steal it
+    # mid-attempt and reintroduce the very herd single-flight exists to prevent.
+    # This is why it is not the worker lease (60s) -- that is far shorter than an
+    # attempt.
+    probe_stale_after_seconds: float = 900.0
 
     def ceiling_for(self, limit_scope: str | None) -> float:
         """A daily allowance can legitimately take a full day to reset, so it gets

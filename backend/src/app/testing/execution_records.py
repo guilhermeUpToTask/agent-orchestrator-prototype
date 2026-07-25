@@ -276,5 +276,41 @@ class InMemoryExecutionRecordRepository:
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
         self._circuits_bound()[(circuit.runtime, circuit.provider_id, circuit.model_id)] = circuit
 
+    def try_claim_circuit_probe(
+        self,
+        runtime: str,
+        provider_id: str,
+        model_id: str | None,
+        *,
+        holder: str,
+        now: datetime,
+        stale_before: datetime,
+    ) -> bool:
+        """Same atomicity contract as the SQLite adapter: test and write together.
+        Single-threaded here, so the dict update is trivially atomic."""
+        circuits = self._circuits_bound()
+        circuit = circuits.get((runtime, provider_id, model_id))
+        if circuit is None:
+            return False
+        held = circuit.probe_holder is not None and not (
+            circuit.probe_started_at is not None and circuit.probe_started_at < stale_before
+        )
+        if held:
+            return False
+        circuits[(runtime, provider_id, model_id)] = replace(
+            circuit, probe_holder=holder, probe_started_at=now
+        )
+        return True
+
+    def release_circuit_probe(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None:
+        circuits = self._circuits_bound()
+        circuit = circuits.get((runtime, provider_id, model_id))
+        if circuit is not None:
+            circuits[(runtime, provider_id, model_id)] = replace(
+                circuit, probe_holder=None, probe_started_at=None
+            )
+
     def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str | None) -> None:
         self._circuits_bound().pop((runtime, provider_id, model_id), None)

@@ -551,6 +551,54 @@ class SqliteExecutionRecordRepository:
             },
         )
 
+    def try_claim_circuit_probe(
+        self,
+        runtime: str,
+        provider_id: str,
+        model_id: str | None,
+        *,
+        holder: str,
+        now: datetime,
+        stale_before: datetime,
+    ) -> bool:
+        # ONE statement: SQLite evaluates the WHERE against current data after
+        # taking the write lock, so concurrent claimants serialize and exactly one
+        # sees the probe free. A SELECT-then-UPDATE would let two runners both
+        # observe it unheld and both probe -- the herd this prevents.
+        result: CursorResult[Any] = self._bound().execute(  # type: ignore[assignment]
+            text(
+                "UPDATE runtime_circuits "
+                "SET probe_holder=:holder, probe_started_at=:now "
+                "WHERE runtime=:runtime AND provider_id=:provider_id "
+                "AND model_id=:model_id "
+                "AND (probe_holder IS NULL OR probe_started_at < :stale_before)"
+            ),
+            {
+                "holder": holder,
+                "now": now.isoformat(),
+                "runtime": runtime,
+                "provider_id": provider_id,
+                "model_id": _stored_model_id(model_id),
+                "stale_before": stale_before.isoformat(),
+            },
+        )
+        return bool(result.rowcount)
+
+    def release_circuit_probe(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None:
+        self._bound().execute(
+            text(
+                "UPDATE runtime_circuits SET probe_holder=NULL, probe_started_at=NULL "
+                "WHERE runtime=:runtime AND provider_id=:provider_id AND model_id=:model_id"
+            ),
+            {
+                "runtime": runtime,
+                "provider_id": provider_id,
+                "model_id": _stored_model_id(model_id),
+            },
+        )
+
     def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str | None) -> None:
         self._bound().execute(
             text(

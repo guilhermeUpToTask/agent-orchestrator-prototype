@@ -1107,11 +1107,26 @@ class ExecutionHandler:
             )
             uow.plans.save(plan)
             return Signal.PAUSED
-        if self._clock.now() < circuit.retry_at:
+        now = self._clock.now()
+        if now < circuit.retry_at:
             return Signal.NOT_READY
-        # Half-open probe: one invocation may proceed after the persisted window.
-        # Keep the record until success so a failed probe increments the durable
-        # failure count instead of silently resetting the circuit.
+        # HALF-OPEN PROBE, SINGLE-FLIGHT. Past retry_at exactly one runner may
+        # proceed. This used to be a bare `return None`, which every concurrent
+        # goal worker reached at once: with four goals in flight, one outage
+        # window cost four failures instead of one and inflated the circuit four
+        # times as fast as the outage warranted. The claim is a conditional UPDATE
+        # inside this transaction, so the losers see it taken and keep waiting.
+        # The record is kept until success so a failed probe increments the
+        # durable failure count instead of silently resetting the circuit.
+        if not uow.executions.try_claim_circuit_probe(
+            circuit.runtime,
+            circuit.provider_id,
+            circuit.model_id,
+            holder=f"{plan_id}:{goal.id}:{task.id}:{task.attempt}",
+            now=now,
+            stale_before=now - timedelta(seconds=self._capacity.probe_stale_after_seconds),
+        ):
+            return Signal.NOT_READY
         return None
 
     # ---- finalize transactions (each opens its own txn) ----
@@ -1317,6 +1332,10 @@ class ExecutionHandler:
                             safe_message=exc.reason,
                             manual_intervention=circuit_manual,
                             limit_scope=scope_value,
+                            # probe_holder/probe_started_at default to None, so
+                            # rewriting the row RELEASES this attempt's probe --
+                            # load-bearing, and the reason the next window is
+                            # probeable at all.
                         )
                     )
                     # Inside the ceiling a capacity failure must ALSO bypass the
@@ -1326,6 +1345,16 @@ class ExecutionHandler:
                     # goal block a few attempts later. Waiting is bounded by the
                     # ceiling above, which is the whole point of the redesign.
                     capacity_wait = not circuit_manual
+                elif unit.spec.provider_id and unit.spec.model_id:
+                    # This attempt may have held the half-open probe and then
+                    # failed for a NON-capacity reason (the provider answered; the
+                    # run failed on its own merits). Release the probe explicitly
+                    # so the next window is probeable immediately instead of
+                    # waiting out the stale timeout.
+                    for probe_key in (unit.spec.model_id, None):
+                        uow.executions.release_circuit_probe(
+                            unit.spec.runtime_type, unit.spec.provider_id, probe_key
+                        )
 
                 if (
                     exc.failure.retryable
