@@ -78,7 +78,13 @@ def _limit_scope(output: str) -> LimitScope:
     lowered = output.lower()
     if "per day" in lowered or "daily" in lowered or "free-models-per-day" in lowered:
         return LimitScope.DAILY_QUOTA
-    if "concurr" in lowered or "simultaneous" in lowered:
+    if (
+        "concurr" in lowered
+        or "simultaneous" in lowered
+        or "request limit reached" in lowered
+        or "total request limit" in lowered
+        or "too many requests" in lowered
+    ):
         return LimitScope.REQUEST_CONCURRENCY
     if "quota" in lowered or "credit" in lowered:
         return LimitScope.QUOTA

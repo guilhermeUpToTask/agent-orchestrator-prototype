@@ -69,6 +69,7 @@ from src.app.execution_records import (
     ExecutionRunStatus,
     RuntimeCircuit,
 )
+from src.app.provider_capacity import circuit_model_id, circuit_ref
 from src.app.runtime_failures import RuntimeFailure, safe_runtime_tail
 from src.app.handlers.base import Signal
 from src.app.ports import (
@@ -122,9 +123,7 @@ class ExecutionHandler:
         self._clock = clock
         self._verifier = verifier
 
-    async def handle_goal(
-        self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork
-    ) -> Signal:
+    async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
         a goal-scoped worker that already holds `goal_id`'s lease. Drives that
         ONE goal via the identical body `handle()` uses for the plan-level
@@ -148,7 +147,9 @@ class ExecutionHandler:
                 return Signal.PAUSED  # pause gate armed while we were dispatched
             now = self._clock.now()
             action = (
-                plan.peek_next_for_goal(goal_id, now) if goal_id is not None else plan.peek_next(now)
+                plan.peek_next_for_goal(goal_id, now)
+                if goal_id is not None
+                else plan.peek_next(now)
             )
 
             if action is None:
@@ -178,9 +179,7 @@ class ExecutionHandler:
                     # Open a recoverable block — never let this escape to the
                     # worker loop, which re-runs the reservation and hot-loops the
                     # same TaskFailed every tick.
-                    return self._block_on_unpromotable_goal(
-                        plan_id, plan, goal, failure, uow
-                    )
+                    return self._block_on_unpromotable_goal(plan_id, plan, goal, failure, uow)
             else:
                 if second == "GOAL_FAILED":
                     return self._pause_on_failed_goal(plan_id, plan, goal, uow)
@@ -259,7 +258,6 @@ class ExecutionHandler:
         if isinstance(self._workspace, MainRepositoryWorkspace):
             return await self._workspace.main_repo_status()
         return set()
-
 
     @staticmethod
     def _main_repo_failure(stray_paths: list[str]) -> TaskFailed:
@@ -396,6 +394,7 @@ class ExecutionHandler:
             red_or_baseline_evidence_refs=evidence_refs,
             frozen_at=self._clock.now(),
         )
+
         def finalize() -> Signal:
             with uow:
                 plan = uow.plans.get(plan_id)
@@ -1061,9 +1060,13 @@ class ExecutionHandler:
     ) -> Signal | None:
         if not spec.provider_id or not spec.model_id:
             return None
+        # Two circuits can gate one call. The provider-wide one (account-level
+        # quota) is checked FIRST because routing to another model cannot escape
+        # it; the per-model one covers this model's upstream pool. Whichever is
+        # open wins, and a provider-wide block outranks a per-model wait.
         circuit = uow.executions.get_runtime_circuit(
-            spec.runtime_type, spec.provider_id, spec.model_id
-        )
+            spec.runtime_type, spec.provider_id, None
+        ) or uow.executions.get_runtime_circuit(spec.runtime_type, spec.provider_id, spec.model_id)
         if circuit is None:
             return None
         if circuit.manual_intervention:
@@ -1080,9 +1083,7 @@ class ExecutionHandler:
                     "edit_task",
                     "start_replan",
                 ],
-                evidence_refs=[
-                    f"runtime-circuit://{circuit.runtime}/{circuit.provider_id}/{circuit.model_id}"
-                ],
+                evidence_refs=[circuit_ref(circuit.runtime, circuit.provider_id, circuit.model_id)],
                 created_at=self._clock.now(),
             )
             plan.open_block(block)
@@ -1133,10 +1134,18 @@ class ExecutionHandler:
         provider_capacity block that only a human `wait_and_retry` could reset.
         """
         if unit.spec.provider_id and unit.spec.model_id:
+            # Clear BOTH tiers: a completed run proves the account has budget and
+            # this model's upstream pool has room. Leaving the provider-wide row
+            # behind would keep every sibling model gated on a resolved outage.
             uow.executions.clear_runtime_circuit(
                 unit.spec.runtime_type,
                 unit.spec.provider_id,
                 unit.spec.model_id,
+            )
+            uow.executions.clear_runtime_circuit(
+                unit.spec.runtime_type,
+                unit.spec.provider_id,
+                None,
             )
 
     def _finish_execution(
@@ -1234,10 +1243,14 @@ class ExecutionHandler:
                     and unit.spec.model_id
                     and not_before is not None
                 ):
+                    # Account-level limits key provider-wide; upstream-level ones
+                    # key per model. Routing to a sibling model escapes the second
+                    # but never the first.
+                    circuit_model = circuit_model_id(unit.spec.model_id, exc.failure.limit_scope)
                     existing = uow.executions.get_runtime_circuit(
                         unit.spec.runtime_type,
                         unit.spec.provider_id,
-                        unit.spec.model_id,
+                        circuit_model,
                     )
                     failure_count = (existing.failure_count if existing else 0) + 1
                     kind_budget = unit.retry_policy.kind_max_attempts.get(
@@ -1248,9 +1261,12 @@ class ExecutionHandler:
                         RuntimeCircuit(
                             runtime=unit.spec.runtime_type,
                             provider_id=unit.spec.provider_id,
-                            model_id=unit.spec.model_id,
+                            model_id=circuit_model,
                             failure_count=failure_count,
-                            opened_at=self._clock.now(),
+                            # The START of the outage, preserved across updates.
+                            # Restamping it on every failure would peg the outage
+                            # age at ~0 and make a wall-clock ceiling unreachable.
+                            opened_at=(existing.opened_at if existing else self._clock.now()),
                             retry_at=not_before,
                             last_failure_kind=exc.kind.value,
                             safe_message=exc.reason,

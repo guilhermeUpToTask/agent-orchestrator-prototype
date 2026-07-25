@@ -16,6 +16,7 @@ from src.domain.events.outbox import (
 )
 
 from src.app.ports import Clock, UnitOfWork
+from src.app.provider_capacity import parse_circuit_ref
 
 
 def pause_plan(plan_id: str, uow: UnitOfWork, reason: str | None = None) -> None:
@@ -66,22 +67,23 @@ def retry_task(
         )
         resolution = plan.retry_task(goal_id, task_id, clock.now())
         if resolution == "wait_and_retry":
-            circuit_ref = next(
+            ref = next(
                 (
-                    ref.removeprefix("runtime-circuit://")
-                    for ref in (block.evidence_refs if block is not None else [])
-                    if ref.startswith("runtime-circuit://")
+                    candidate
+                    for candidate in (block.evidence_refs if block is not None else [])
+                    if candidate.startswith("runtime-circuit://")
                 ),
                 None,
             )
-            if circuit_ref is None:
+            if ref is None:
                 raise InvalidEditError("provider retry is missing its runtime circuit reference")
             try:
-                runtime, provider_id, model_id = circuit_ref.split("/", 2)
+                runtime, provider_id, model_id = parse_circuit_ref(ref)
             except ValueError as exc:
                 raise InvalidEditError(
                     "provider retry has an invalid runtime circuit reference"
                 ) from exc
+            # `model_id` is None for a provider-wide (account-level) circuit.
             uow.executions.clear_runtime_circuit(runtime, provider_id, model_id)
         plan.bump_version()
         task = plan._task(plan._goal(goal_id), task_id)
