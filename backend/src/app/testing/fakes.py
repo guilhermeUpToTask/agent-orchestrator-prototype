@@ -21,6 +21,7 @@ from src.domain.events.base import DomainEvent
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
 
+from src.app.runtime_failures import LimitScope, RuntimeFailure
 from src.app.testing.execution_records import InMemoryExecutionRecordRepository
 from src.app.ports import (
     AgentEventSink,
@@ -400,6 +401,24 @@ class DummyBehavior:
     always_fail: bool = False
     emit_events: int = 0  # number of fake agent events to stream
     crash_after_success: bool = False  # simulate worker death AFTER agent returned
+    # Which capacity tier a RATE_LIMIT failure reports. Policy branches on this
+    # (a concurrency cap sheds one request; a daily quota waits for the reset),
+    # so the dummy must be able to express it or dry-run cannot exercise the
+    # production capacity paths at all.
+    fail_limit_scope: LimitScope | None = None
+    fail_retry_after_seconds: float | None = None
+
+
+def _dummy_failure(b: DummyBehavior) -> RuntimeFailure:
+    """Mirror what the CLI runners' taxonomy produces, so a scripted dry-run
+    failure travels the same policy path a real provider failure would."""
+    return RuntimeFailure(
+        kind=b.fail_kind,
+        safe_message=b.fail_reason[:500],
+        retryable=b.fail_kind not in {FailureKind.AUTH_ERROR, FailureKind.TOKEN_LIMIT},
+        limit_scope=b.fail_limit_scope,
+        retry_after_seconds=b.fail_retry_after_seconds,
+    )
 
 
 class DummyAgentRunner:
@@ -437,10 +456,8 @@ class DummyAgentRunner:
                 )
             )
 
-        if b.always_fail:
-            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
-        if b.fail_times and task.attempt <= b.fail_times:
-            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
+        if b.always_fail or (b.fail_times and task.attempt <= b.fail_times):
+            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind, failure=_dummy_failure(b))
 
         return TaskResult.success(b.output, metadata={"dummy": "true"})
 

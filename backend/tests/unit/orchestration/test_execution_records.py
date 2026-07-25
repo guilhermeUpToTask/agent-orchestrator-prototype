@@ -14,6 +14,7 @@ from src.app.execution_records import (
     RuntimeCircuit,
 )
 from src.app.handlers.execution_handler import ExecutionHandler
+from src.app.runtime_failures import LimitScope
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.pause_resume import resume_plan, retry_task
@@ -275,6 +276,94 @@ def test_provider_wide_circuit_is_addressed_by_none_not_a_sentinel(env_factory):
     with env.uow:
         assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
         assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is not None
+
+
+def _cyclic_plan(env, *, task_ids=("t1",), max_attempts=6, backoff=1) -> Plan:
+    """A RUNNING plan with one active cycle and one goal — the shape a goal-lease
+    worker drives via ExecutionHandler.handle_goal."""
+    plan = _plan(max_attempts=max_attempts)
+    plan.retry_policy = RetryPolicy(
+        max_attempts=max_attempts,
+        initial_backoff_seconds=backoff,
+        max_backoff_seconds=backoff,
+        jitter_ratio=0,
+    )
+    plan.status = PlanStatus.RUNNING
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-1",
+            draft_id="draft-1",
+            status=CycleStatus.ACTIVE,
+            started_at=env.clock.now(),
+            goals=[
+                Goal(
+                    id="g1",
+                    name="g1",
+                    position=0,
+                    description="",
+                    tasks=[
+                        Task(
+                            id=task_id,
+                            name=task_id,
+                            position=index,
+                            description="",
+                            agent_id="a1",
+                        )
+                        for index, task_id in enumerate(task_ids)
+                    ],
+                )
+            ],
+        )
+    ]
+    return plan
+
+
+def test_request_concurrency_requeues_without_opening_a_circuit(env_factory):
+    """A concurrency cap is not an outage: the provider served every other
+    in-flight request and refused only the one over its ceiling. The remedy is
+    'send fewer at once', so the task requeues on its own backoff and NO circuit
+    opens -- a circuit would halt a provider that is working."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason=(
+                    "Upstream error from Nvidia: ResourceExhausted: "
+                    "Worker local total request limit reached (33/32)"
+                ),
+                fail_limit_scope=LimitScope.REQUEST_CONCURRENCY,
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env))
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    # Several concurrency refusals in a row: each one requeues, none opens a
+    # circuit, and the plan never blocks.
+    for _ in range(4):
+        assert drive() == "continue"
+        env.clock.advance(5)
+
+    stored = env.stored("p1")
+    assert stored.block is None
+    assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    assert env.runner.calls == {"t1": 4}
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is None
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
 
 
 def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):

@@ -70,7 +70,7 @@ from src.app.execution_records import (
     RuntimeCircuit,
 )
 from src.app.provider_capacity import circuit_model_id, circuit_ref
-from src.app.runtime_failures import RuntimeFailure, safe_runtime_tail
+from src.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
 from src.app.handlers.base import Signal
 from src.app.ports import (
     AgentEventSink,
@@ -1242,6 +1242,14 @@ class ExecutionHandler:
                     and unit.spec.provider_id
                     and unit.spec.model_id
                     and not_before is not None
+                    # A CONCURRENCY cap is not an outage: the provider served
+                    # every other in-flight request successfully and refused only
+                    # the one over the ceiling. The remedy is "send fewer at
+                    # once", so this attempt requeues on its own short backoff and
+                    # NO circuit opens -- opening one would halt a provider that
+                    # is working, and stall the siblings that are mid-run.
+                    # The failure is still recorded on the attempt for telemetry.
+                    and exc.failure.limit_scope is not LimitScope.REQUEST_CONCURRENCY
                 ):
                     # Account-level limits key provider-wide; upstream-level ones
                     # key per model. Routing to a sibling model escapes the second
