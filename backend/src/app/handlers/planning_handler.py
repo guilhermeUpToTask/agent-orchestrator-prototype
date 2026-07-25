@@ -56,6 +56,7 @@ from src.domain.repositories.capability_repo import CapabilityRepository
 from src.domain.services.agent_role_resolution import resolve_task_role_agents
 from src.domain.services.navigation import ready_goal_ids
 
+from src.app.provider_capacity import CAPACITY_KINDS, ProviderCapacityPolicy
 from src.app.handlers.base import Signal
 from src.app.execution_records import PlanningOperation, PlanningOperationStatus
 from src.app.ports import Clock, Reasoner, ReasonerUnavailable, UnitOfWork
@@ -83,11 +84,16 @@ class PlanningHandler:
         agents: AgentRepository,
         capabilities: CapabilityRepository,
         clock: Clock,
+        capacity: ProviderCapacityPolicy | None = None,
     ) -> None:
         self._reasoner = reasoner
         self._agents = agents
         self._capabilities = capabilities
         self._clock = clock
+        # Same ceilings execution uses, so planning and execution ride out a
+        # provider outage for the same length of time instead of one of them
+        # escalating first and blocking the plan the other was patiently waiting on.
+        self._capacity = capacity or ProviderCapacityPolicy()
 
     def _start_operation(
         self,
@@ -403,6 +409,48 @@ class PlanningHandler:
             uow.plans.save(plan)
         return Signal.CONTINUE
 
+    def _is_terminal_reasoner_failure(
+        self,
+        exc: ReasonerUnavailable,
+        plan: Plan,
+        next_attempt: int,
+        operation: PlanningOperation | None,
+    ) -> bool:
+        """Whether this failure should escalate to a human-gated block.
+
+        Gating on `exc.transient` alone was wrong in both directions. It escalated
+        provider capacity after three attempts even though waiting is exactly what
+        resolves it; and it treated "the model replied with prose instead of calling
+        the submission tool" as equally worth retrying, when no amount of waiting
+        makes an incapable model succeed.
+
+        So: a PERMANENT failure is terminal immediately (unchanged). A CAPACITY kind
+        keeps backing off until the outage outlives the wall-clock ceiling — the same
+        bound execution uses. Every other transient kind keeps the ordinary attempt
+        budget.
+        """
+        if not exc.transient:
+            return True
+        if exc.kind is not None and exc.kind in CAPACITY_KINDS and operation is not None:
+            # The outage START. A wall-clock ceiling needs one, and the Plan
+            # aggregate has no first-arm timestamp (only planning_retry_not_before
+            # and planning_attempts), so back-computing it from the attempt count
+            # and the backoff curve would be guesswork.
+            #
+            # The operation row is it: `find_active_planning_operation` REUSES one
+            # row for the same purpose+target across the whole outage, and
+            # `_start_operation` preserves `created_at` when it reuses it — only
+            # status/updated_at/liveness are reset. A COMMITTED operation ends the
+            # run, so the next failure gets a fresh row and a fresh clock.
+            #
+            # (Scanning the ledger for BACKING_OFF rows does NOT work: the reused
+            # row is flipped back to STARTED at the top of every tick, so by the
+            # time this runs the earlier BACKING_OFF is no longer visible.)
+            return self._capacity.outage_exceeded(operation.created_at, self._clock.now(), None)
+        # No operation means the quarantined LEGACY path, which records none: keep
+        # it bounded by its original attempt budget rather than waiting forever.
+        return next_attempt >= plan.retry_policy.max_attempts
+
     def _handle_reasoner_failure(
         self,
         plan_id: str,
@@ -436,7 +484,7 @@ class PlanningHandler:
                 return Signal.PAUSED  # raced by a human command; theirs wins
             phase = plan.activity if cyclic else plan.phase.value
             next_attempt = plan.planning_attempts + 1
-            terminal = not exc.transient or next_attempt >= plan.retry_policy.max_attempts
+            terminal = self._is_terminal_reasoner_failure(exc, plan, next_attempt, operation)
 
             if terminal:
                 if cyclic:
@@ -495,7 +543,12 @@ class PlanningHandler:
                 uow.plans.save(plan)
                 return Signal.FAILED
 
-            delay = plan.retry_policy.backoff_for(next_attempt + 1, kind=None)
+            # Pass the REAL kind: `kind=None` capped every planning backoff at
+            # max_backoff_seconds (900s) and skipped the per-kind patient curve, so
+            # a rate-limited provider was re-polled every 15 minutes forever.
+            delay = plan.retry_policy.backoff_for(next_attempt + 1, kind=exc.kind)
+            if exc.retry_after_seconds is not None:
+                delay = max(delay, exc.retry_after_seconds)  # provider knows better
             not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
             plan.record_planning_retry(not_before)
             plan.bump_version()

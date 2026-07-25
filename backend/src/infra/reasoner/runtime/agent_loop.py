@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.reasoner.runtime.errors import ReasonerError
 from src.infra.reasoner.runtime.llm_client import LLMClient
 from src.infra.reasoner.runtime.tools import ToolResult, ToolSpec, execute_tool_call
@@ -80,6 +81,7 @@ async def run_tool_session(
                 "Reasoner replied with plain text where a tool submit was "
                 f"required (after {turn_index + 1} turn(s)): {final_text[:200]}",
                 transient=True,
+                kind=FailureKind.TOOL_ERROR,
             )
 
         submitted_args: dict[str, Any] | None = None
@@ -117,4 +119,5 @@ async def run_tool_session(
     raise ReasonerError(
         f"Reasoner session exceeded {max_turns} turns without submitting",
         transient=True,
+        kind=FailureKind.TOOL_ERROR,
     )

@@ -75,6 +75,7 @@ async def run_worker_forever(
         container.agent_repo,
         container.capability_repo,
         container.clock,
+        container.provider_capacity_policy,
     )
     runner_mode = validate_agent_runner_mode(container.config_store)
     reconciled = reconcile_stale_attempts(container.new_unit_of_work(), container.clock)

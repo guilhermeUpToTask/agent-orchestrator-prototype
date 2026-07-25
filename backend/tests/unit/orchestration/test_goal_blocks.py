@@ -5,7 +5,7 @@ non-terminal goal is blocked or transitively depends on one that is."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
@@ -286,6 +286,168 @@ def test_enrichment_reasoner_failure_blocks_only_its_own_goal(env_factory):
     assert stored.block is None
     assert set(stored.goal_blocks) == {"g1", "g2"}
     assert stored.status == PlanStatus.BLOCKED  # every independent goal is now blocked
+
+
+def test_capacity_reasoner_failure_keeps_waiting_past_the_attempt_budget(env_factory):
+    """A rate-limited provider must not become a block after three attempts.
+
+    Terminality used to be decided from the `transient` flag plus the attempt
+    budget, so routine provider throttling -- which OpenRouter surfaces as an
+    HTTP 200 with no choices, unconditionally transient -- opened a
+    reasoner_failure block on the third failure. Waiting is what resolves
+    capacity, so capacity kinds now back off until the outage outlives the
+    wall-clock ceiling.
+    """
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.ports import ReasonerUnavailable
+    from src.app.provider_capacity import ProviderCapacityPolicy
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+    from src.domain.value_objects.lifecycle import FailureKind
+
+    class RateLimited:
+        def __init__(self):
+            self.calls = 0
+
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal_contract(self, plan, goal, capabilities):
+            self.calls += 1
+            raise ReasonerUnavailable(
+                "provider rejected the request (rate limited)",
+                transient=True,
+                kind=FailureKind.RATE_LIMIT,
+            )
+
+    env = env_factory()
+    plan = _cyclic_plan([_goal("g1", 0, [])])
+    plan.retry_policy.max_attempts = 2  # the old rule went terminal on attempt 2
+    env.seed(plan)
+
+    reasoner = RateLimited()
+    handler = PlanningHandler(
+        reasoner,
+        env.agents,
+        InMemoryCapabilityRepository(),
+        env.clock,
+        ProviderCapacityPolicy(outage_ceiling_seconds=10_000),
+    )
+
+    def tick():
+        with env.uow:
+            loaded = env.uow.plans.get("p1")
+        return asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    for _ in range(5):
+        tick()
+        env.clock.advance(600)
+
+    stored = env.stored("p1")
+    assert stored.goal_blocks == {}, "capacity must not open a block inside the ceiling"
+    assert stored.block is None
+    assert stored.status == PlanStatus.RUNNING
+    assert reasoner.calls == 5  # kept trying rather than giving up at 2
+
+    # ...but it is still bounded: past the ceiling it escalates.
+    env.clock.advance(20_000)
+    tick()
+    stored = env.stored("p1")
+    assert stored.goal_blocks.get("g1") is not None
+    assert stored.goal_blocks["g1"].kind == "reasoner_failure"
+
+
+def test_tool_error_reasoner_failure_still_blocks_on_the_attempt_budget(env_factory):
+    """A model that answers with prose instead of calling the submission tool will
+    never be fixed by waiting, so it must keep the ordinary budget. Treating every
+    transient failure as capacity would loop forever against an incapable model."""
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.ports import ReasonerUnavailable
+    from src.app.provider_capacity import ProviderCapacityPolicy
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+    from src.domain.value_objects.lifecycle import FailureKind
+
+    class NeverSubmits:
+        def __init__(self):
+            self.calls = 0
+
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal_contract(self, plan, goal, capabilities):
+            self.calls += 1
+            raise ReasonerUnavailable(
+                "Reasoner session exceeded 4 turns without submitting",
+                transient=True,
+                kind=FailureKind.TOOL_ERROR,
+            )
+
+    env = env_factory()
+    plan = _cyclic_plan([_goal("g1", 0, [])])
+    plan.retry_policy.max_attempts = 2
+    env.seed(plan)
+
+    reasoner = NeverSubmits()
+    handler = PlanningHandler(
+        reasoner,
+        env.agents,
+        InMemoryCapabilityRepository(),
+        env.clock,
+        ProviderCapacityPolicy(outage_ceiling_seconds=10_000),
+    )
+
+    def tick():
+        with env.uow:
+            loaded = env.uow.plans.get("p1")
+        return asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    tick()
+    env.clock.advance(600)
+    assert env.stored("p1").goal_blocks == {}  # first failure backs off
+    tick()
+
+    stored = env.stored("p1")
+    assert stored.goal_blocks.get("g1") is not None
+    assert stored.goal_blocks["g1"].kind == "reasoner_failure"
+    assert reasoner.calls == 2  # budget respected, not waited out
+
+
+def test_planning_backoff_honors_provider_retry_after(env_factory):
+    """A provider-supplied Retry-After is a floor on the gate: polling sooner than
+    the provider asked just earns another refusal."""
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.ports import ReasonerUnavailable
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+    from src.domain.value_objects.lifecycle import FailureKind
+
+    class RetryAfter:
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal_contract(self, plan, goal, capabilities):
+            raise ReasonerUnavailable(
+                "rate limited",
+                transient=True,
+                kind=FailureKind.RATE_LIMIT,
+                retry_after_seconds=4_242.0,
+            )
+
+    env = env_factory()
+    plan = _cyclic_plan([_goal("g1", 0, [])])
+    env.seed(plan)
+
+    handler = PlanningHandler(RetryAfter(), env.agents, InMemoryCapabilityRepository(), env.clock)
+    with env.uow:
+        loaded = env.uow.plans.get("p1")
+    asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    stored = env.stored("p1")
+    assert stored.planning_retry_not_before == env.clock.now() + timedelta(seconds=4_242.0)
 
 
 def test_cycle_architecture_reasoner_failure_remains_plan_wide(env_factory):

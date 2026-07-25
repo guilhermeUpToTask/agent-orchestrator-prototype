@@ -56,6 +56,7 @@ from src.app.use_cases.pause_resume import (
 )
 from src.app.use_cases.request_replan import request_replan
 from src.app.use_cases.update_retry_policy import update_retry_policy
+from src.domain.errors.base import DomainError
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
     Cycle,
@@ -71,6 +72,7 @@ from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.factories.identity import new_id
 from src.infra.container import AppContainer
+from src.infra.db.unit_of_work import SqliteUnitOfWork
 from src.infra.errors import AttemptNotFoundError
 from src.infra.runtime.process_supervisor import attempt_log_path, follow_attempt_log
 
@@ -107,6 +109,30 @@ class ActiveRunResponse(BaseModel):
     started_at: str
 
 
+class ProviderWaitingResponse(BaseModel):
+    """An open provider capacity circuit gating this plan's work.
+
+    A SIBLING field, not folded into `status_reason`: that is a pure property of
+    the Plan aggregate, and the aggregate cannot see a RuntimeCircuit (it lives in
+    the execution-record store). Mixing it in would mean either a domain change or
+    a router overwriting a domain property. Same pattern `active_run` and
+    `planning_progress` already use.
+
+    The root stays RUNNING while this is set — it IS running, merely unclaimable
+    until `retry_at`. Waiting on a provider is not a lifecycle state.
+    """
+
+    provider_id: str
+    model_id: str | None  # None = a provider-wide (account-level) circuit
+    runtime: str
+    limit_scope: str | None
+    retry_at: str
+    since: str  # when the outage started, not when it last failed
+    failure_count: int
+    safe_message: str
+    needs_attention: bool  # the outage outlived its ceiling and opened a block
+
+
 class PlanDetailResponse(BaseModel):
     id: str
     project_id: str | None
@@ -123,6 +149,7 @@ class PlanDetailResponse(BaseModel):
     paused: bool
     paused_reason: str | None
     active_run: ActiveRunResponse | None
+    provider_waiting: ProviderWaitingResponse | None
     planning_operation: dict[str, Any] | None
     planning_progress: str | None
     active_cycle: Cycle | None
@@ -484,6 +511,49 @@ def list_plans(container: AppContainer = Depends(get_container)) -> list[dict]:
     return container.new_unit_of_work().plans.list_summaries()
 
 
+def _provider_waiting(
+    current_task: Task | None,
+    container: AppContainer,
+    uow: SqliteUnitOfWork,
+) -> ProviderWaitingResponse | None:
+    """The capacity circuit gating this plan's next work, if any.
+
+    Checks the PROVIDER-WIDE circuit first: an account-level limit is shared by
+    every model on the key, so it outranks a single model's wait. Best-effort —
+    a plan whose binding cannot be resolved simply reports no wait rather than
+    failing the read.
+    """
+    if current_task is None:
+        return None
+    agent_id = current_task.role_agent_ids.get("implementer", current_task.agent_id)
+    try:
+        spec = (
+            container.agent_repo.get(agent_id)
+            if agent_id
+            else container.agent_repo.get(container.agent_repo.default_agent_id())
+        )
+    except DomainError:
+        return None
+    if not spec.provider_id or not spec.model_id:
+        return None
+    circuit = uow.executions.get_runtime_circuit(
+        spec.runtime_type, spec.provider_id, None
+    ) or uow.executions.get_runtime_circuit(spec.runtime_type, spec.provider_id, spec.model_id)
+    if circuit is None:
+        return None
+    return ProviderWaitingResponse(
+        provider_id=circuit.provider_id,
+        model_id=circuit.model_id,
+        runtime=circuit.runtime,
+        limit_scope=circuit.limit_scope,
+        retry_at=circuit.retry_at.isoformat(),
+        since=circuit.opened_at.isoformat(),
+        failure_count=circuit.failure_count,
+        safe_message=circuit.safe_message,
+        needs_attention=circuit.manual_intervention,
+    )
+
+
 @router.get("/{plan_id}", response_model=PlanDetailResponse)
 def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> PlanDetailResponse:
     uow = container.new_unit_of_work()
@@ -508,6 +578,10 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         if current_goal is not None
         else None
     )
+    # Needs `current_task` (computed above, after the first txn closed), so it
+    # takes its own short read transaction.
+    with uow:
+        provider_waiting = _provider_waiting(current_task, container, uow)
     planning_operation = planning_operations[-1] if planning_operations else None
     goal_position = (
         next(
@@ -548,6 +622,7 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         pause_requested=plan.pause_requested,
         paused=plan.paused,
         paused_reason=plan.paused_reason,
+        provider_waiting=provider_waiting,
         active_run=(
             ActiveRunResponse(
                 run_id=latest.run_id,

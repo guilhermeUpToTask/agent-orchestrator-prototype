@@ -130,9 +130,26 @@ class ReasonerUnavailable(Exception):
     the infra ReasonerError subclasses it, so the concrete adapter's raise
     crosses the boundary as this type without app ever importing infra."""
 
-    def __init__(self, reason: str, *, transient: bool = False) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        transient: bool = False,
+        kind: FailureKind | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         self.reason = reason
         self.transient = transient
+        # `transient` alone cannot decide terminality: it lumps a provider rate
+        # limit together with "this model cannot do tool calls", and those need
+        # opposite treatment -- the first should be waited out indefinitely, the
+        # second retried a few times and then escalated, because no amount of
+        # waiting will make an incapable model succeed. `kind` is the same
+        # FailureKind taxonomy the CLI runners produce, so planning and execution
+        # classify capacity identically.
+        self.kind = kind
+        # Provider-supplied Retry-After, honored as a floor on the backoff.
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(reason)
 
 

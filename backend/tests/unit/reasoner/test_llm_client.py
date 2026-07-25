@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import openai
 import pytest
 
+from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.reasoner.runtime.errors import (
     ReasonerError,
     classify_provider_error,
@@ -89,6 +90,7 @@ def test_permanent_error_fails_fast_without_retry():
     with pytest.raises(ReasonerError) as err:
         asyncio.run(client.complete([], TOOLS))
     assert err.value.transient is False
+    assert err.value.kind is FailureKind.TOOL_ERROR
     assert "does not support tool use" in str(err.value)
     assert len(calls) == 1 and sleeps == []
 
@@ -138,6 +140,27 @@ def test_provider_tool_wire_shape():
 def test_classify_timeout_is_transient():
     err = classify_provider_error("m", TimeoutError("request timed out"))
     assert err.transient is True and "timed out" in str(err)
+    assert err.kind is FailureKind.TIMEOUT
+
+
+def test_classify_generic_error_yields_connection_error_kind():
+    err = classify_provider_error("m", api_error("upstream blip"))
+    assert err.transient is True
+    assert err.kind is FailureKind.CONNECTION_ERROR
+
+
+def test_classify_429_status_code_yields_rate_limit_kind():
+    err = classify_provider_error("m", api_error("slow down", status_code=429))
+    assert err.transient is True
+    assert err.kind is FailureKind.RATE_LIMIT
+
+
+def test_classify_provider_error_surfaces_retry_after_seconds():
+    err = classify_provider_error(
+        "m", api_error("rate limited, retry after 30s", status_code=429)
+    )
+    assert err.kind is FailureKind.RATE_LIMIT
+    assert err.retry_after_seconds == 30.0
 
 
 def test_empty_choices_error_extracts_object_shaped_payload():
@@ -148,6 +171,37 @@ def test_empty_choices_error_extracts_object_shaped_payload():
     err = provider_error_from_empty_choices("m", response)
     assert err.transient is True
     assert "upstream 502" in str(err) and "code=502" in str(err)
+    # "upstream 502" names no rate-limit/quota/credit/resource-exhausted
+    # condition, so this falls back to CONNECTION_ERROR.
+    assert err.kind is FailureKind.CONNECTION_ERROR
+
+
+def test_empty_choices_naming_rate_limit_yields_rate_limit_kind():
+    response = SimpleNamespace(
+        choices=None,
+        error={"message": "Rate limit exceeded, please retry later", "code": 429},
+    )
+    err = provider_error_from_empty_choices("m", response)
+    assert err.kind is FailureKind.RATE_LIMIT
+
+
+def test_empty_choices_naming_credits_yields_rate_limit_kind():
+    response = SimpleNamespace(
+        choices=None,
+        error={"message": "You have run out of credits", "code": 402},
+    )
+    err = provider_error_from_empty_choices("m", response)
+    assert err.kind is FailureKind.RATE_LIMIT
+
+
+def test_empty_choices_retry_after_surfaced():
+    response = SimpleNamespace(
+        choices=None,
+        error={"message": "rate limited, retry after 12s", "code": 429},
+    )
+    err = provider_error_from_empty_choices("m", response)
+    assert err.kind is FailureKind.RATE_LIMIT
+    assert err.retry_after_seconds == 12.0
 
 
 def test_tool_arguments_json_but_not_object_coerce_to_empty_dict():

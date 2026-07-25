@@ -114,6 +114,7 @@ def test_schema_invalid_submission_raises_reasoner_unavailable_not_a_crash():
     import pytest
 
     from src.app.ports import ReasonerUnavailable
+    from src.domain.value_objects.lifecycle import FailureKind
 
     client = FakeLLMClient(
         [
@@ -128,6 +129,7 @@ def test_schema_invalid_submission_raises_reasoner_unavailable_not_a_crash():
         converse(OpenAIReasoner(client, CAPS), make_plan(), [], "go")
 
     assert excinfo.value.transient is True
+    assert excinfo.value.kind is FailureKind.TOOL_ERROR
 
 
 def test_submitted_intent_with_unresolved_questions_remains_a_question_turn():

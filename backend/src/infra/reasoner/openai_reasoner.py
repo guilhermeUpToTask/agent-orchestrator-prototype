@@ -46,6 +46,7 @@ from src.domain.entities.execution_contracts import (
 from src.domain.entities.planning_artifacts import GoalOutline
 from src.domain.entities.task import Task
 from src.domain.factories.identity import new_id
+from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.ports.reasoner_port import (
     ChatMessage,
     ConversationMode,
@@ -92,6 +93,7 @@ def _validate_submission(model_cls: type[_ModelT], data: object, *, context: str
         raise ReasonerUnavailable(
             f"{context}: model submitted a schema-invalid payload: {exc}",
             transient=True,
+            kind=FailureKind.TOOL_ERROR,
         ) from exc
 
 

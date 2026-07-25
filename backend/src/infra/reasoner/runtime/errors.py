@@ -10,8 +10,12 @@ llm_client.py.
 
 from __future__ import annotations
 
+import re
+
 from src.app.ports import ReasonerUnavailable
+from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.errors import InfrastructureError
+from src.infra.runtime.taxonomy import classify_failure, parse_retry_after_seconds
 
 
 class ReasonerError(InfrastructureError, ReasonerUnavailable):
@@ -23,10 +27,26 @@ class ReasonerError(InfrastructureError, ReasonerUnavailable):
 
     code = "REASONER_FAILED"
 
-    def __init__(self, message: str, *, transient: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        transient: bool = False,
+        kind: FailureKind | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)  # InfrastructureError.__init__ (MRO)
         self.reason = message
         self.transient = transient
+        self.kind = kind
+        self.retry_after_seconds = retry_after_seconds
+
+
+# Rate-limit-adjacent wording that classify_failure's RATE_LIMIT pattern does
+# not itself cover (it matches "rate limit"/"429"/"resource exhausted" text,
+# but not a bare "quota" or "credit" mention, which providers also use for
+# capacity rejections).
+_RATE_LIMIT_EXTRA_WORDS = re.compile(r"quota|credit", re.IGNORECASE)
 
 
 def classify_provider_error(model: str, exc: Exception) -> ReasonerError:
@@ -49,15 +69,23 @@ def classify_provider_error(model: str, exc: Exception) -> ReasonerError:
             f"Reasoner LLM request to model '{model}' timed out. The model may be "
             "slow, overloaded, or unreachable — retry, or pick a faster model."
         )
+        kind = FailureKind.TIMEOUT
     elif status_code == 404 or "tool use" in text or "tool_use" in text:
         message = (
             f"The configured model '{model}' does not support tool use, which the "
             "reasoner requires. Select a tool-capable model/provider."
         )
         transient = False
+        kind = FailureKind.TOOL_ERROR
     else:
         message = f"Reasoner LLM request failed ({exc_name}): {exc}"
-    return ReasonerError(message, transient=transient)
+        kind = FailureKind.RATE_LIMIT if status_code == 429 else FailureKind.CONNECTION_ERROR
+    return ReasonerError(
+        message,
+        transient=transient,
+        kind=kind,
+        retry_after_seconds=parse_retry_after_seconds(text),
+    )
 
 
 def provider_error_from_empty_choices(model: str, response: object) -> ReasonerError:
@@ -76,7 +104,17 @@ def provider_error_from_empty_choices(model: str, response: object) -> ReasonerE
         "The provider rejected the request (e.g. out of credits, rate limited, "
         "or upstream error)."
     )
-    return ReasonerError(message, transient=True)
+    names_rate_limit = (
+        classify_failure(detail) == FailureKind.RATE_LIMIT
+        or _RATE_LIMIT_EXTRA_WORDS.search(detail) is not None
+    )
+    kind = FailureKind.RATE_LIMIT if names_rate_limit else FailureKind.CONNECTION_ERROR
+    return ReasonerError(
+        message,
+        transient=True,
+        kind=kind,
+        retry_after_seconds=parse_retry_after_seconds(detail),
+    )
 
 
 def _extract_provider_error_text(response: object) -> str:

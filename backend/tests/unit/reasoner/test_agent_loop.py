@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.reasoner.runtime.agent_loop import run_tool_session
 from src.infra.reasoner.runtime.errors import ReasonerError
 from src.infra.reasoner.runtime.tools import ToolSpec
@@ -80,6 +81,7 @@ def test_plain_text_raises_transient_when_submit_required():
     with pytest.raises(ReasonerError) as err:
         run(client, [submit_tool()], allow_plain_reply=False)
     assert err.value.transient is True
+    assert err.value.kind is FailureKind.TOOL_ERROR
 
 
 def test_budget_exhaustion_raises_transient():
@@ -90,6 +92,7 @@ def test_budget_exhaustion_raises_transient():
     with pytest.raises(ReasonerError) as err:
         run(client, [submit_tool(rejecting)], max_turns=3)
     assert err.value.transient is True
+    assert err.value.kind is FailureKind.TOOL_ERROR
 
 
 def test_unknown_tool_and_handler_crash_become_error_results():
