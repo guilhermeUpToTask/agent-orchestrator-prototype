@@ -27,7 +27,9 @@ def _task(task_id: str, status: Status = Status.PENDING) -> Task:
     return t
 
 
-def _goal(goal_id: str, position: int, tasks: list[Task], depends_on: list[str] | None = None) -> Goal:
+def _goal(
+    goal_id: str, position: int, tasks: list[Task], depends_on: list[str] | None = None
+) -> Goal:
     return Goal(
         id=goal_id,
         name=goal_id,
@@ -58,7 +60,9 @@ def _cyclic_plan(goals: list[Goal]) -> Plan:
     )
 
 
-def _block(goal_id: str, task_id: str = "t", legal_resolutions: list[str] | None = None) -> PlanBlock:
+def _block(
+    goal_id: str, task_id: str = "t", legal_resolutions: list[str] | None = None
+) -> PlanBlock:
     return PlanBlock(
         id=f"block-{goal_id}",
         kind="execution_failure",
@@ -212,3 +216,116 @@ def test_plan_wide_block_summary_still_surfaces_coexisting_goal_blocks():
     assert actions[0] == "retry_planning_stage"  # the scalar block leads
     for resolution in plan.goal_blocks["g1"].legal_resolutions:
         assert resolution in actions
+
+
+def test_enrichment_reasoner_failure_blocks_only_its_own_goal(env_factory):
+    """A per-goal enrichment failure must open a GOAL-scoped block.
+
+    Observed live with 6 independent goals and max_concurrent_goals=4: the 6th
+    goal's `enrich_goal_contract` exhausted its turn budget, `_handle_reasoner_failure`
+    built a PlanBlock with NO goal_id, `open_block` therefore routed it to the
+    plan-wide scalar, and the WHOLE plan flipped to BLOCKED -- stranding four
+    siblings that were independently RUNNING at that moment.
+
+    Enrichment is per-goal by construction (`_enrich_one` targets one goal, and
+    the PlanningOperation already carries `target_goal_id`), so this is exactly
+    the failure mode domain unfreeze #14 removed for execution blocks. Only a
+    plan-wide reasoner failure (cycle architecture, target_goal_id=None) may
+    still use the scalar.
+    """
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.ports import ReasonerUnavailable
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+
+    class EnrichFails:
+        def __init__(self):
+            self.goal_ids = []
+
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal_contract(self, plan, goal, capabilities):
+            self.goal_ids.append(goal.id)
+            raise ReasonerUnavailable(
+                "Reasoner session exceeded 4 turns without submitting", transient=False
+            )
+
+    env = env_factory()
+    plan = _cyclic_plan([_goal("g1", 0, []), _goal("g2", 1, [])])
+    plan.retry_policy.max_attempts = 1  # go terminal on the first failure
+    env.seed(plan)
+
+    reasoner = EnrichFails()
+    handler = PlanningHandler(reasoner, env.agents, InMemoryCapabilityRepository(), env.clock)
+    with env.uow:
+        loaded = env.uow.plans.get("p1")
+    asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    stored = env.stored("p1")
+    assert stored.block is None, (
+        "a per-goal enrichment failure must not open the plan-wide scalar block"
+    )
+    assert "g1" in stored.goal_blocks and stored.goal_blocks["g1"].active
+    assert stored.goal_blocks["g1"].goal_id == "g1"
+    assert "g2" not in stored.goal_blocks
+    assert stored.status == PlanStatus.RUNNING, (
+        "an independent sibling goal must keep the plan claimable"
+    )
+
+    # The next planning tick must skip g1's active goal block and attempt g2.
+    # Without that exclusion, it would select g1 again and collide with the
+    # already-open block instead of preserving sibling progress.
+    with env.uow:
+        loaded = env.uow.plans.get("p1")
+    asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    stored = env.stored("p1")
+    assert reasoner.goal_ids == ["g1", "g2"]
+    assert stored.block is None
+    assert set(stored.goal_blocks) == {"g1", "g2"}
+    assert stored.status == PlanStatus.BLOCKED  # every independent goal is now blocked
+
+
+def test_cycle_architecture_reasoner_failure_remains_plan_wide(env_factory):
+    """An operation without a goal target must retain scalar-block semantics."""
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.ports import ReasonerUnavailable
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+    from src.domain.entities.planning_artifacts import IntentProposal, ProposalKind
+
+    class ArchitectureFails:
+        async def architect_cycle(self, plan):
+            raise ReasonerUnavailable("cycle architect unavailable", transient=False)
+
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+    env = env_factory()
+    plan = _cyclic_plan([_goal("g1", 0, [])])
+    plan.intent_proposal = IntentProposal(
+        id="intent-2",
+        kind=ProposalKind.REPLAN,
+        base_plan_version=plan.version,
+        source_cycle_id="cycle-1",
+        objective="replace the active cycle",
+        approved_at=env.clock.now(),
+    )
+    plan.retry_policy.max_attempts = 1
+    env.seed(plan)
+
+    handler = PlanningHandler(
+        ArchitectureFails(), env.agents, InMemoryCapabilityRepository(), env.clock
+    )
+    with env.uow:
+        loaded = env.uow.plans.get("p1")
+    asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    stored = env.stored("p1")
+    assert stored.block is not None and stored.block.active
+    assert stored.block.goal_id is None
+    assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.BLOCKED

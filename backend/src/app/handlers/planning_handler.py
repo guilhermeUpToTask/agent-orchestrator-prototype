@@ -67,7 +67,12 @@ def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
     unmet `depends_on` never starves an independently-ready later goal from
     being JIT-enriched (goal-parallelism fan-out, ADR-001)."""
     ready_ids = ready_goal_ids(plan.execution_goals, now)
-    candidates = [g for g in plan.execution_goals if g.id in ready_ids and not g.tasks]
+    blocked_goal_ids = {goal_id for goal_id, block in plan.goal_blocks.items() if block.active}
+    candidates = [
+        goal
+        for goal in plan.execution_goals
+        if goal.id in ready_ids and goal.id not in blocked_goal_ids and not goal.tasks
+    ]
     return min(candidates, key=lambda g: g.position, default=None)
 
 
@@ -435,11 +440,24 @@ class PlanningHandler:
 
             if terminal:
                 if cyclic:
+                    # Scope the block to the goal being enriched when there is
+                    # one (domain unfreeze #14). Enrichment is per-goal by
+                    # construction and the operation already carries the target,
+                    # so a single goal's reasoner failure must not freeze
+                    # independently-running siblings. A plan-wide failure
+                    # (cycle architecture) has target_goal_id=None and keeps the
+                    # scalar block, exactly as before.
+                    target_goal_id = operation.target_goal_id if operation is not None else None
+                    if target_goal_id is not None and not any(
+                        candidate.id == target_goal_id for candidate in plan.execution_goals
+                    ):
+                        target_goal_id = None
                     block = PlanBlock(
                         id=new_id(),
                         kind="reasoner_failure",
                         explanation=exc.reason,
                         stage=phase,
+                        goal_id=target_goal_id,
                         legal_resolutions=["retry_stage", "start_replan"],
                         created_at=self._clock.now(),
                     )
@@ -449,6 +467,7 @@ class PlanningHandler:
                             plan_id=plan_id,
                             block_id=block.id,
                             stage=block.stage,
+                            goal_id=block.goal_id,
                         )
                     )
                 else:

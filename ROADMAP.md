@@ -293,6 +293,15 @@ Take these up only when real usage demonstrates the need.
     binds provider/model per agent, so route the test_author role to a
     stronger model once real usage justifies the spend. Pairs with the
     registry-profiles item above.
+35. **Architect/enrichment granularity contract** [WALK] — define goals as
+    parallel workstreams and their tasks as meaningful sequential deliverables;
+    TDD RED/GREEN remains an internal task lifecycle, not separate roadmap work.
+    Add deterministic overlap/phase-only linting plus a pre-execution cost
+    estimate, without imposing a hard task-count ceiling that would prevent
+    ambitious projects. The 2026-07-24 live walkthrough demonstrated the gap:
+    test-only goals duplicated feature goals, then enrichment split small
+    cohesive behavior into basic/edge/integration tasks, multiplying real agent
+    sessions.
 
 ## Deferred features — shelved with designed seams [LEG]
 
