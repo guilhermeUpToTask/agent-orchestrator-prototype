@@ -70,6 +70,7 @@ from src.app.execution_records import (
     RuntimeCircuit,
 )
 from src.app.provider_capacity import (
+    CAPACITY_KINDS,
     ProviderCapacityPolicy,
     circuit_model_id,
     circuit_ref,
@@ -1247,8 +1248,18 @@ class ExecutionHandler:
                 # automatic waiting; a REQUEST_CONCURRENCY refusal opens no
                 # circuit and so keeps its ordinary per-task budget as the bound.
                 capacity_wait = False
+                # The circuit this failure was recorded against, if any -- carried
+                # to the block below so its evidence ref names the row that exists.
+                capacity_ref: str | None = None
                 if (
-                    exc.kind == FailureKind.RATE_LIMIT
+                    # CONNECTION_ERROR is capacity too: an unreachable or
+                    # overloaded endpoint is not a defect in this task, and
+                    # exhausting the per-task budget against it used to open a
+                    # goal block for something no human edit could fix. Safe to
+                    # widen only now that the ceiling above bounds the wait --
+                    # doing it while the attempt-count latch was live would have
+                    # escalated after five shared failures instead.
+                    exc.kind in CAPACITY_KINDS
                     and unit.spec.provider_id
                     and unit.spec.model_id
                     and not_before is not None
@@ -1265,6 +1276,9 @@ class ExecutionHandler:
                     # key per model. Routing to a sibling model escapes the second
                     # but never the first.
                     circuit_model = circuit_model_id(unit.spec.model_id, exc.failure.limit_scope)
+                    capacity_ref = circuit_ref(
+                        unit.spec.runtime_type, unit.spec.provider_id, circuit_model
+                    )
                     existing = uow.executions.get_runtime_circuit(
                         unit.spec.runtime_type,
                         unit.spec.provider_id,
@@ -1374,7 +1388,12 @@ class ExecutionHandler:
                     # entries; before #13 this branch had to no-op and drop
                     # this goal's own failure reason when ANY block was
                     # already active anywhere in the plan).
-                    provider_capacity = circuit_manual and exc.kind == FailureKind.RATE_LIMIT
+                    # Any capacity kind that latched, not just RATE_LIMIT: a
+                    # CONNECTION_ERROR outage past the ceiling is equally a
+                    # provider problem, and labelling it execution_failure would
+                    # advertise retry_stage instead of wait_and_retry, leaving the
+                    # operator no way to clear the circuit.
+                    provider_capacity = circuit_manual and exc.kind in CAPACITY_KINDS
                     block = PlanBlock(
                         id=new_id(),
                         kind=("provider_capacity" if provider_capacity else "execution_failure"),
@@ -1390,12 +1409,13 @@ class ExecutionHandler:
                             else ["retry_stage", "edit_task", "start_replan"]
                         ),
                         evidence_refs=(
-                            [
-                                f"execution-attempt://{unit.execution.id}",
-                                "runtime-circuit://"
-                                f"{unit.spec.runtime_type}/{unit.spec.provider_id}/{unit.spec.model_id}",
-                            ]
-                            if provider_capacity
+                            # MUST name the circuit that was actually written --
+                            # which for an account-level limit is the PROVIDER-WIDE
+                            # key, not this model's. Hand-building it from
+                            # spec.model_id pointed wait_and_retry at a row that
+                            # does not exist, so the real circuit stayed latched.
+                            [f"execution-attempt://{unit.execution.id}", capacity_ref]
+                            if provider_capacity and capacity_ref is not None
                             else [f"execution-attempt://{unit.execution.id}"]
                         ),
                         created_at=self._clock.now(),

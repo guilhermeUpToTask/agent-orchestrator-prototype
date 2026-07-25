@@ -420,6 +420,59 @@ def test_capacity_storm_inside_the_ceiling_never_latches_or_blocks(env_factory):
     assert circuit.opened_at == env.clock.now() - timedelta(seconds=50)  # outage START
 
 
+def test_connection_error_waits_on_a_circuit_instead_of_failing_the_task(env_factory):
+    """An unreachable or overloaded endpoint is not a defect in this task. It used
+    to exhaust the per-task budget and open a goal block for something no human
+    edit could fix; it now waits on a circuit like any other capacity failure."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.CONNECTION_ERROR,
+                fail_reason="connection reset by peer",
+            )
+        },
+        agents=[agent],
+    )
+    # max_attempts=2 with a CONNECTION_ERROR kind budget of 5: the old path
+    # terminated this task well inside the loop below.
+    env.seed(_cyclic_plan(env, max_attempts=2))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=600),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    for _ in range(8):
+        assert drive() == "continue"
+        env.clock.advance(5)
+
+    stored = env.stored("p1")
+    assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert circuit is not None and not circuit.manual_intervention
+    assert circuit.last_failure_kind == "connection_error"
+
+    # still bounded: past the ceiling it escalates like any capacity outage
+    env.clock.advance(1_000)
+    assert drive() == "paused"
+    block = env.stored("p1").goal_blocks.get("g1")
+    assert block is not None and block.kind == "provider_capacity"
+
+
 def test_outage_past_the_ceiling_latches_and_opens_a_goal_block(env_factory):
     """The backstop: a 'transient' signature that never resolves (a revoked key
     returning 429, a wrong base_url) must eventually reach a human instead of
