@@ -66,6 +66,12 @@ class ProviderCapacityPolicy:
     # provider row declares one. Deliberately conservative: exceeding a provider's
     # concurrency ceiling is what produces the refusals this design absorbs.
     max_inflight: int = 8
+    # NOTE: the "quiet long enough to be a new outage" threshold is deliberately
+    # NOT a separate knob — see `outage_start`. It is derived from the scope's own
+    # ceiling, because any fixed value small enough to catch stale rows is also
+    # small enough to fire during a legitimate wait. A 3600s constant collided
+    # exactly with the daily-quota backoff floor, which would have stopped a daily
+    # quota from ever escalating.
 
     def ceiling_for(self, limit_scope: str | None) -> float:
         """A daily allowance can legitimately take a full day to reset, so it gets
@@ -76,6 +82,44 @@ class ProviderCapacityPolicy:
 
     def outage_exceeded(self, opened_at: datetime, now: datetime, limit_scope: str | None) -> bool:
         return (now - opened_at).total_seconds() > self.ceiling_for(limit_scope)
+
+    def outage_start(
+        self,
+        existing_opened_at: datetime | None,
+        existing_retry_at: datetime | None,
+        now: datetime,
+        limit_scope: str | None = None,
+    ) -> datetime:
+        """The outage start to record for a failure happening `now`.
+
+        Continues an in-progress outage, but starts a FRESH window when the prior
+        circuit has been quiet for longer than this scope's own ceiling. Without
+        that reset, a circuit row abandoned by an earlier session pre-ages the first
+        failure of a new outage past the ceiling and escalates it immediately — the
+        precise premature escalation this design exists to remove. A circuit is
+        normally deleted by the first success, but nothing deletes one when the work
+        simply stops being attempted, so stale rows are routine.
+
+        The threshold is the LONGEST ceiling, not this scope's own, and not a
+        constant. It has to exceed anything the policy would ever legitimately wait,
+        because reaching a ceiling necessarily involves a long wait — using the
+        scope's own ceiling made the rule contradict escalation itself (an outage
+        old enough to escalate always looked quiet enough to reset), and a 3600s
+        constant collided with the daily-quota backoff floor.
+
+        Quiet beyond even a daily reset is genuinely ambiguous — the provider may
+        have recovered unobserved, or nothing retried. Resetting resolves that
+        toward PATIENCE, since escalating early is the failure mode that hurts.
+        """
+        if existing_opened_at is None:
+            return now
+        quiet_threshold = max(self.daily_quota_ceiling_seconds, self.outage_ceiling_seconds)
+        if (
+            existing_retry_at is not None
+            and (now - existing_retry_at).total_seconds() > quiet_threshold
+        ):
+            return now
+        return existing_opened_at
 
 
 @dataclass(frozen=True)

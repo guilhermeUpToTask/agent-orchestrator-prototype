@@ -34,6 +34,7 @@ The backend's **frozen port contracts** (exact SQL shapes, method signatures, AP
 |---|---|
 | [development.md](development.md) | Hardened local setup, seeding, supervised startup, parameters, secrets hygiene, and CI-parity checks |
 | [git-flow.md](git-flow.md) | Branch naming, pull requests, Conventional Commits, CI, releases, and hotfixes |
+| [`fixtures/happy-path-v1/`](../fixtures/happy-path-v1/) | Locked operator walkthrough (materialize/reset/check + brief) for re-runnable real plans |
 
 ## Decisions — why it works that way
 

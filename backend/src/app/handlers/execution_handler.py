@@ -1431,14 +1431,23 @@ class ExecutionHandler:
                         circuit_model,
                     )
                     failure_count = (existing.failure_count if existing else 0) + 1
-                    # The START of the outage, preserved across updates. Restamping
-                    # it on every failure would peg the outage age at ~0 and make a
-                    # wall-clock ceiling unreachable.
-                    opened_at = existing.opened_at if existing else self._clock.now()
+                    # The START of the outage, preserved across updates within one
+                    # outage (restamping every failure would peg the age at ~0 and
+                    # make the ceiling unreachable) but RESET when the previous
+                    # circuit has been quiet long enough to count as a past outage.
+                    # A row abandoned by an earlier session would otherwise pre-age
+                    # a fresh outage straight past its ceiling — observed live
+                    # against a circuit left behind three days earlier.
                     scope_value = (
                         exc.failure.limit_scope.value
                         if exc.failure.limit_scope is not None
                         else None
+                    )
+                    opened_at = self._capacity.outage_start(
+                        existing.opened_at if existing else None,
+                        existing.retry_at if existing else None,
+                        self._clock.now(),
+                        scope_value,
                     )
                     # ESCALATE ON DURATION, NOT ON A COUNT. The old rule compared
                     # this provider-global `failure_count` against a PER-TASK

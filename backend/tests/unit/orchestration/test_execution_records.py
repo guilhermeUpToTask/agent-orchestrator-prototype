@@ -1057,7 +1057,11 @@ def test_daily_quota_waits_past_the_ordinary_ceiling(env_factory):
     assert circuit is not None and not circuit.manual_intervention
     assert circuit.limit_scope == "daily_quota"
 
-    env.clock.advance(20_000)  # past the daily ceiling too, and past the probe window
+    # Past the daily ceiling (10_000s from the outage start) while still retrying
+    # normally. Deliberately NOT a single huge jump: silence for longer than a whole
+    # daily ceiling is treated as a DIFFERENT outage, so an unrealistically quiet
+    # clock would reset the window rather than escalate.
+    env.clock.advance(7_500)
     assert drive() == "paused"
     block = env.stored("p1").goal_blocks.get("g1")
     assert block is not None and block.kind == "provider_capacity"

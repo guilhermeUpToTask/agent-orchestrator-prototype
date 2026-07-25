@@ -129,6 +129,23 @@ CI parses every workflow shell helper and exercises its help surface. That smoke
 gate catches broken quoting, dispatch, and compatibility-wrapper regressions
 before a branch reaches runtime tests.
 
+## Operator happy-path walkthrough
+
+For re-runnable end-to-end plan walks (backend bug hunting, not CI), use the
+locked fixture at [`fixtures/happy-path-v1/`](../fixtures/happy-path-v1/):
+
+```bash
+./fixtures/happy-path-v1/scripts/materialize.sh
+export PROJECT_REPO_DIR="${HAPPY_PATH_REPO:-$HOME/.orchestrator/happy-path-v1/repo}"
+backend/scripts/dev.sh start --frontend
+# Paste fixtures/happy-path-v1/BRIEF.md into a new project plan, approve gates,
+# then after the cycle: ./fixtures/happy-path-v1/scripts/check-success.sh
+# Between runs: ./fixtures/happy-path-v1/scripts/reset.sh
+```
+
+See that folder's README for Tier 0 (stub/dry-run) vs Tier 1 (real), size
+budgets, and the recommended outer-agent operator loop.
+
 ## Troubleshooting
 
 - `doctor` warns when the selected environment file is group/world accessible.

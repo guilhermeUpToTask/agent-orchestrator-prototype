@@ -6,6 +6,7 @@ import pytest
 
 from src.app.provider_capacity import (
     CapacityScope,
+    ProviderCapacityPolicy,
     circuit_model_id,
     circuit_ref,
     parse_circuit_ref,
@@ -73,3 +74,58 @@ def test_circuit_ref_is_a_stable_uri():
 def test_parse_rejects_a_malformed_ref():
     with pytest.raises(ValueError):
         parse_circuit_ref("runtime-circuit://only-one-segment")
+
+
+def _dt(seconds: float):
+    from datetime import datetime, timedelta, timezone
+
+    return datetime(2026, 7, 25, tzinfo=timezone.utc) + timedelta(seconds=seconds)
+
+
+def test_outage_start_continues_an_in_progress_outage():
+    """Within one outage the start must be preserved, or the age pegs at ~0 and the
+    ceiling is never reachable."""
+    policy = ProviderCapacityPolicy()
+    opened, retry_at, now = _dt(0), _dt(120), _dt(180)
+    assert policy.outage_start(opened, retry_at, now) == opened
+
+
+def test_outage_start_resets_after_a_long_quiet_period():
+    """Regression for a live finding: a circuit row abandoned by an earlier session
+    (retry_at three days in the past) pre-aged the FIRST failure of a fresh outage
+    past the ceiling, escalating immediately -- the premature escalation this whole
+    design exists to remove."""
+    policy = ProviderCapacityPolicy()
+    stale_opened, stale_retry = _dt(0), _dt(5)
+    now = _dt(3 * 24 * 3_600)
+    assert policy.outage_start(stale_opened, stale_retry, now) == now
+    # and therefore does not read as an outage older than the ceiling
+    assert not policy.outage_exceeded(
+        policy.outage_start(stale_opened, stale_retry, now), now, None
+    )
+
+
+def test_outage_start_treats_a_missing_circuit_as_a_new_outage():
+    assert ProviderCapacityPolicy().outage_start(None, None, _dt(50)) == _dt(50)
+
+
+def test_a_daily_quota_waiting_normally_is_not_mistaken_for_a_new_outage():
+    """The quiet threshold must exceed anything the policy itself waits. A daily
+    quota backs off an hour at a time, so a fixed 1h reset would have reset its own
+    window every cycle and stopped it from ever escalating."""
+    policy = ProviderCapacityPolicy()
+    opened = _dt(0)
+    retry_at = _dt(3_600)  # the daily-quota backoff floor
+    now = _dt(3_600 + 3_500)  # ~1h of quiet: still just waiting
+    assert policy.outage_start(opened, retry_at, now, "daily_quota") == opened
+
+
+def test_an_outage_old_enough_to_escalate_is_not_reset_by_its_own_age():
+    """The reset must not contradict escalation: reaching a ceiling necessarily
+    involves a long wait, so keying the reset on the scope's own ceiling made every
+    escalatable outage look like a fresh one."""
+    policy = ProviderCapacityPolicy(outage_ceiling_seconds=100)
+    opened, retry_at = _dt(0), _dt(10)
+    now = _dt(500)  # far past a 100s ceiling, but nowhere near a day
+    assert policy.outage_start(opened, retry_at, now, None) == opened
+    assert policy.outage_exceeded(opened, now, None)
