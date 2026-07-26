@@ -28,13 +28,30 @@ class RetryPolicy(BaseModel):
     kind_backoff_scale: dict[FailureKind, float] = Field(
         default_factory=lambda: {FailureKind.RATE_LIMIT: 4.0}
     )
+    # Domain un-freeze #17. A ceiling is the opposite instrument to
+    # `kind_max_attempts`: that one is a FLOOR that grants a transient kind extra
+    # tries and cannot be cut by a lower global budget; this one caps a kind
+    # whose repetition is EVIDENCE rather than bad luck, and must therefore
+    # survive a higher global budget too.
+    #
+    # A rejected candidate earns exactly one more attempt. Agent output is a
+    # sample, so re-running it against the same frozen tests -- now told what was
+    # rejected -- is the cheapest recovery available. A third identical rejection
+    # says the CONTRACT is wrong, and no number of retries repairs a contract.
+    kind_attempt_ceiling: dict[FailureKind, int] = Field(
+        default_factory=lambda: {FailureKind.VERIFICATION_ERROR: 2}
+    )
     # Typed classification (shared failure taxonomy): a token-limit or auth failure
     # will fail identically on every retry, so it is terminal immediately.
+    # VERIFICATION_ERROR was here until un-freeze #17: it made ONE bad agent
+    # output block the goal, and the next attempt was never told what went wrong
+    # anyway. The prompt feedback (src/app/agent_feedback.py) is what makes the
+    # retry mean something; a Class C orchestration race stays terminal through
+    # `RuntimeFailure.retryable=False`, which vetoes independently of this set.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(
         {
             FailureKind.TOKEN_LIMIT,
             FailureKind.AUTH_ERROR,
-            FailureKind.VERIFICATION_ERROR,
         }
     )
 
@@ -52,6 +69,8 @@ class RetryPolicy(BaseModel):
             if kind is not None
             else self.max_attempts
         )
+        if kind is not None and kind in self.kind_attempt_ceiling:
+            budget = min(budget, self.kind_attempt_ceiling[kind])
         return attempts < budget
 
     def backoff_for(

@@ -176,6 +176,149 @@
         }
       }
     },
+    "/api/plans/{plan_id}/planning-artifacts": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List Planning Artifacts",
+        "description": "What earlier attempts at this artifact established, newest first.\n\nThe payload itself is deliberately NOT served \u2014 it is model working state,\ncan be large, and an operator needs to know an attempt happened and why it\nwas refused, not to re-read the draft.",
+        "operationId": "plans-list_planning_artifacts",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "goal_contract",
+              "title": "Purpose"
+            }
+          },
+          {
+            "name": "goal_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanningArtifactResponse"
+                  },
+                  "title": "Response Plans-List Planning Artifacts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Clear Planning Artifacts",
+        "description": "Drop a goal's planning memory \u2014 the escape hatch for when the replay\nheuristics are wrong and a retry keeps being steered by a bad draft.",
+        "operationId": "plans-clear_planning_artifacts",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "goal_contract",
+              "title": "Purpose"
+            }
+          },
+          {
+            "name": "goal_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/attempts": {
       "get": {
         "tags": [
@@ -3601,10 +3744,12 @@
               "kind_backoff_scale": {
                 "rate_limit": 4.0
               },
+              "kind_attempt_ceiling": {
+                "verification_error": 2
+              },
               "non_retryable_kinds": [
                 "auth_error",
-                "token_limit",
-                "verification_error"
+                "token_limit"
               ]
             }
           },
@@ -4044,6 +4189,16 @@
             "type": "string",
             "title": "Intent Proposal Id"
           },
+          "approved_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntentProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "draft_id": {
             "type": "string",
             "title": "Draft Id"
@@ -4288,6 +4443,7 @@
               "edit_task_requirements",
               "rebind_task_agent",
               "update_task",
+              "update_task_contract",
               "update_goal",
               "remove_goal"
             ],
@@ -4392,6 +4548,97 @@
               }
             ],
             "title": "Depends On"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContractCriterion"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
+          "verification_strategy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationStrategy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_scope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Scope"
+          },
+          "forbidden_scope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forbidden Scope"
+          },
+          "verification_commands": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Commands"
+          },
+          "goal_criterion_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Criterion Ids"
           }
         },
         "type": "object",
@@ -5042,6 +5289,14 @@
             "type": "integer",
             "title": "Calls"
           },
+          "turns": {
+            "type": "integer",
+            "title": "Turns"
+          },
+          "max_session_turns": {
+            "type": "integer",
+            "title": "Max Session Turns"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -5090,6 +5345,8 @@
         "required": [
           "sessions",
           "calls",
+          "turns",
+          "max_session_turns",
           "prompt_tokens",
           "completion_tokens",
           "total_tokens",
@@ -5783,6 +6040,77 @@
         ],
         "title": "PlanDetailResponse"
       },
+      "PlanningArtifactResponse": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "input_fingerprint": {
+            "type": "string",
+            "title": "Input Fingerprint"
+          },
+          "rejection_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rejection Reasons"
+          },
+          "turns_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turns Used"
+          },
+          "has_payload": {
+            "type": "boolean",
+            "title": "Has Payload"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "purpose",
+          "sequence",
+          "outcome",
+          "input_fingerprint",
+          "rejection_reasons",
+          "turns_used",
+          "has_payload",
+          "created_at"
+        ],
+        "title": "PlanningArtifactResponse",
+        "description": "One recorded planning attempt.\n\nWithout this the feature is invisible: a retry that starts better informed\nlooks identical from outside to one that does not, so nothing an operator\n(or a fixture) can read tells them whether the memory is working."
+      },
       "PlanningOperationResponse": {
         "properties": {
           "id": {
@@ -6338,6 +6666,16 @@
             "type": "object",
             "title": "Kind Backoff Scale"
           },
+          "kind_attempt_ceiling": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/FailureKind"
+            },
+            "type": "object",
+            "title": "Kind Attempt Ceiling"
+          },
           "non_retryable_kinds": {
             "items": {
               "$ref": "#/components/schemas/FailureKind"
@@ -6347,8 +6685,7 @@
             "title": "Non Retryable Kinds",
             "default": [
               "auth_error",
-              "token_limit",
-              "verification_error"
+              "token_limit"
             ]
           }
         },
@@ -7204,6 +7541,14 @@
             "type": "integer",
             "title": "Calls"
           },
+          "turns": {
+            "type": "integer",
+            "title": "Turns"
+          },
+          "max_session_turns": {
+            "type": "integer",
+            "title": "Max Session Turns"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -7245,6 +7590,8 @@
         "required": [
           "sessions",
           "calls",
+          "turns",
+          "max_session_turns",
           "prompt_tokens",
           "completion_tokens",
           "total_tokens",

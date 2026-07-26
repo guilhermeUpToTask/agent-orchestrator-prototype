@@ -24,7 +24,7 @@ A run is **green** only if every item holds:
 4. [ ] Task(s) reached DONE with accepted verification evidence  
 5. [ ] Goal promoted; cycle reached publication  
 6. [ ] Publication disposition recorded (`retain_branch` is fine)  
-7. [ ] `./scripts/check-success.sh` exits 0 on the promoted work (or plan/cycle branch checkout)  
+7. [ ] `./scripts/check-success.sh` exits 0 on a checkout of the cycle branch (Tier 1 only — in Tier 0 the dry-run runner writes no implementation, so exit 1 there is expected)  
 8. [ ] Seed default branch still matches `happy-path-v1-seed` content for `greeter.py` until promotion (orchestrator must not rewrite main)  
 
 ## Failure taxonomy (how to file)
@@ -42,9 +42,11 @@ A run is **green** only if every item holds:
 ## Capture on every run (green or red)
 
 ```bash
-# plan id from UI or plan list
-python backend/scripts/snapshot_current_plan.py --plan-id <ID> --pretty \
-  -o "$ORCHESTRATOR_HOME/happy-path-v1/runs/$(date -u +%Y%m%dT%H%M%SZ).json"
+# plan id from the API (list order is not recency — sort explicitly):
+#   ./scripts/api.sh GET /api/plans | jq -r 'sort_by(.updated_at) | last | .id'
+python backend/scripts/snapshot_current_plan.py --plan-id "$PLAN_ID" --pretty \
+  --output "$ORCHESTRATOR_HOME/happy-path-v1/runs/$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
 Optional: worker log tail, `GET /api/plans/{id}/attempts`, attempt log stream.
+Everything here is checkable over HTTP — the walkthrough never needs the UI.

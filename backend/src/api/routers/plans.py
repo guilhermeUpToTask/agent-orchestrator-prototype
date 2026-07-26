@@ -32,6 +32,7 @@ from src.app.use_cases.apply_edit import (
     ReorderTasks,
     UpdateGoal,
     UpdateTask,
+    UpdateTaskContract,
     apply_edit,
 )
 from src.app.use_cases.conversation import discovery_message, replanning_message
@@ -57,6 +58,7 @@ from src.app.use_cases.pause_resume import (
 from src.app.use_cases.request_replan import request_replan
 from src.app.use_cases.update_retry_policy import update_retry_policy
 from src.domain.errors.base import DomainError
+from src.domain.entities.execution_contracts import ContractCriterion, VerificationStrategy
 from src.domain.entities.goal import Goal
 from src.domain.entities.planning_artifacts import (
     Cycle,
@@ -311,6 +313,7 @@ class EditRequest(BaseModel):
         "edit_task_requirements",
         "rebind_task_agent",
         "update_task",
+        "update_task_contract",
         "update_goal",
         "remove_goal",
     ]
@@ -323,6 +326,15 @@ class EditRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     depends_on: list[str] | None = None
+    # update_task_contract (un-freeze #17): every field the reasoner authored.
+    # Execution identity and observed evidence stay read-only by omission.
+    objective: str | None = None
+    acceptance_criteria: list[ContractCriterion] | None = None
+    verification_strategy: VerificationStrategy | None = None
+    allowed_scope: list[str] | None = None
+    forbidden_scope: list[str] | None = None
+    verification_commands: list[str] | None = None
+    goal_criterion_ids: list[str] | None = None
 
 
 def _require(value: Any, field: str, edit_type: str) -> Any:
@@ -363,6 +375,19 @@ def _to_edit(body: EditRequest) -> Edit:
             task_id=_require(body.task_id, "task_id", body.type),
             name=body.name,
             description=body.description,
+        )
+    if body.type == "update_task_contract":
+        return UpdateTaskContract(
+            goal_id=body.goal_id,
+            task_id=_require(body.task_id, "task_id", body.type),
+            objective=body.objective,
+            acceptance_criteria=body.acceptance_criteria,
+            verification_strategy=body.verification_strategy,
+            allowed_scope=body.allowed_scope,
+            forbidden_scope=body.forbidden_scope,
+            verification_commands=body.verification_commands,
+            goal_criterion_ids=body.goal_criterion_ids,
+            required_capabilities=body.required_capabilities,
         )
     if body.type == "update_goal":
         return UpdateGoal(
@@ -671,6 +696,70 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         phase=plan.phase.value,
         iteration=plan.iteration,
     )
+
+
+class PlanningArtifactResponse(BaseModel):
+    """One recorded planning attempt.
+
+    Without this the feature is invisible: a retry that starts better informed
+    looks identical from outside to one that does not, so nothing an operator
+    (or a fixture) can read tells them whether the memory is working.
+    """
+
+    goal_id: str | None
+    purpose: str
+    sequence: int
+    outcome: str
+    input_fingerprint: str
+    rejection_reasons: list[str]
+    turns_used: int | None
+    has_payload: bool
+    created_at: str
+
+
+@router.get("/{plan_id}/planning-artifacts", response_model=list[PlanningArtifactResponse])
+def list_planning_artifacts(
+    plan_id: str,
+    purpose: str = "goal_contract",
+    goal_id: str | None = None,
+    limit: int = 20,
+    container: AppContainer = Depends(get_container),
+) -> list[PlanningArtifactResponse]:
+    """What earlier attempts at this artifact established, newest first.
+
+    The payload itself is deliberately NOT served — it is model working state,
+    can be large, and an operator needs to know an attempt happened and why it
+    was refused, not to re-read the draft.
+    """
+    artifacts = container.planning_artifacts.latest(
+        plan_id, purpose, goal_id=goal_id, limit=limit
+    )
+    return [
+        PlanningArtifactResponse(
+            goal_id=item.goal_id,
+            purpose=item.purpose,
+            sequence=item.sequence,
+            outcome=item.outcome,
+            input_fingerprint=item.input_fingerprint,
+            rejection_reasons=list(item.rejection_reasons),
+            turns_used=item.turns_used,
+            has_payload=item.payload is not None,
+            created_at=item.created_at.isoformat(),
+        )
+        for item in artifacts
+    ]
+
+
+@router.delete("/{plan_id}/planning-artifacts", status_code=204)
+def clear_planning_artifacts(
+    plan_id: str,
+    purpose: str = "goal_contract",
+    goal_id: str | None = None,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Drop a goal's planning memory — the escape hatch for when the replay
+    heuristics are wrong and a retry keeps being steered by a bad draft."""
+    container.planning_artifacts.clear(plan_id, purpose, goal_id=goal_id)
 
 
 @router.get("/{plan_id}/attempts", response_model=AttemptTimelineResponse)

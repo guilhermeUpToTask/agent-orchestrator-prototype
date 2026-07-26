@@ -374,6 +374,42 @@ class PlanChatMessageTable(Base):
     __table_args__ = (Index("ix_plan_chat_messages_plan", "plan_id", "id"),)
 
 
+class PlanningArtifactTable(Base):
+    """One planning attempt's artifact — what was submitted and why it was refused.
+
+    Deliberately NOT a column on `planning_operations`: that row is reused across
+    a whole outage (its `created_at` is the capacity ceiling's clock), so a single
+    column would be overwritten every attempt and destroy the sequence this table
+    exists to keep.
+    """
+
+    __tablename__ = "planning_artifacts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    operation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejection_reasons_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    turns_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    __table_args__ = (
+        Index("ix_planning_artifacts_lookup", "plan_id", "goal_id", "purpose", "created_at"),
+        Index("uq_planning_artifacts_operation_sequence", "operation_id", "sequence", unique=True),
+        CheckConstraint(
+            "outcome IN ('rejected', 'abandoned', 'committed')",
+            name="ck_planning_artifacts_outcome",
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Reference data (user-managed catalogs). AgentSpec embeds its capabilities and
 # ModelProvider embeds its models in the domain; here they normalize into join/

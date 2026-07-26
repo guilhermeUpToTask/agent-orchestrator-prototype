@@ -18,7 +18,9 @@ Prefer **`max_concurrent_goals=1`** for this fixture so concurrency is not a con
 
 ## What this fixture covers
 
-- Project plan open + brief → intent gate  
+Backend API only — `curl` + `jq` against `:8000`, no Vite server and no browser.
+
+- Project row + plan open + brief → intent gate  
 - Cycle draft gate  
 - JIT enrichment of one head goal  
 - Real (or dry-run) task execution + verification command  
@@ -33,12 +35,16 @@ Prefer **`max_concurrent_goals=1`** for this fixture so concurrency is not a con
 - Authenticated GitHub PR open  
 - Bubblewrap sandbox  
 - Multi-worker / multi-machine  
-- Frontend E2E automation  
+- **Anything frontend**: the UI is a second client of these same endpoints and is
+  out of scope here — a step that cannot be done over the API is a finding  
 
 Use separate labeled experiments for those.
 
 ## Known ambient flakes
 
+- **Project row created without `repo_url`** — the worker then branches a freshly
+  auto-seeded empty repo under `$ORCHESTRATOR_HOME/projects/<id>/repo` and the run
+  "passes" against the wrong tree. Setting `PROJECT_REPO_DIR` does not fix this.  
 - Free-tier provider rate limits (signal about capacity handling, not greeter difficulty)  
 - Missing agent CLI binary (`GET /api/runner/status` before real runs)  
 - Stale worktrees after hard kills — `reset.sh` + worker startup prune help  

@@ -64,6 +64,7 @@ from src.domain.value_objects.lifecycle import Status
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
 
+from src.app.block_policy import resolutions_for
 from src.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
@@ -71,6 +72,7 @@ from src.app.execution_records import (
     ExecutionRunStatus,
     RuntimeCircuit,
 )
+from src.app.ports import PlanningArtifact, PlanningArtifactStore, RepositoryReader
 from src.app.provider_capacity import (
     CAPACITY_KINDS,
     CapacityScope,
@@ -94,9 +96,31 @@ from src.app.ports import (
     VerificationExecutor,
     WorkspaceHandle,
 )
-from src.app.verification import sha256_file, validate_candidate
+import structlog
+
+from src.app.agent_feedback import split_reasons
+from src.app.contract_repair import propose_repair
+from src.app.promotion_failures import is_transient_merge_failure
+from src.domain.services.edit_service import resync_goal_contract
+from src.app.verification import (
+    sha256_file,
+    test_author_path_allowed,
+    validate_candidate,
+)
 
 _T = TypeVar("_T")
+
+# Distinct contract repairs attempted before a human is asked. Bounded by
+# ATTEMPTS, not wall clock: unlike a provider outage, time does not heal a wrong
+# contract, so a clock-based bound would only spin.
+MAX_CONTRACT_REPAIRS = 2
+
+# Re-attempts of a goal->cycle merge that failed for an ENVIRONMENTAL reason. The
+# merge is cheap; if two re-attempts do not clear it, the condition is not
+# momentary and a human should see it.
+MAX_PROMOTION_RETRIES = 2
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -116,6 +140,22 @@ class _Unit:
     run_role: str
 
 
+def _orchestration_failure(reason: str) -> RuntimeFailure:
+    """A Class C failure: an orchestration race or missing infrastructure.
+
+    Un-freeze #17 made VERIFICATION_ERROR retryable so a rejected CANDIDATE gets
+    a second attempt. These are not candidates — a superseded cycle, evidence
+    that moved during promotion, an absent verifier — and retrying only re-races
+    them. `RuntimeFailure.retryable` is an independent veto in the retry
+    condition, so the split stays structural rather than keyed off message text.
+    """
+    return RuntimeFailure(
+        kind=FailureKind.VERIFICATION_ERROR,
+        safe_message=reason[:500],
+        retryable=False,
+    )
+
+
 class ExecutionHandler:
     def __init__(
         self,
@@ -128,6 +168,8 @@ class ExecutionHandler:
         capacity: ProviderCapacityPolicy | None = None,
         providers: ModelProviderRepository | None = None,
         routing: RoutingPolicy | None = None,
+        repository_reader: RepositoryReader | None = None,
+        planning_artifacts: PlanningArtifactStore | None = None,
     ) -> None:
         self._runner = runner
         self._agents = agents
@@ -140,6 +182,11 @@ class ExecutionHandler:
         # Dry-run and unit tests need no provider catalog.
         self._providers = providers
         self._routing = routing or RoutingPolicy()
+        # Contract repair needs repository facts to derive a patch from, and a
+        # durable place to count its own attempts. Without either it simply never
+        # fires and a block opens exactly as before.
+        self._repository_reader = repository_reader
+        self._planning_artifacts = planning_artifacts
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -258,7 +305,10 @@ class ExecutionHandler:
                 if self._verifier is None:
                     raise TaskFailed(
                         "deterministic verification executor is unavailable",
-                        FailureKind.VERIFICATION_ERROR,
+                        # Class C (a missing verifier is configuration, not a candidate the agent can fix). Un-freeze #17 made
+                        # VERIFICATION_ERROR retryable for candidate rejections;
+                        # this is not one, so it keeps the `retryable` veto.
+                        failure=_orchestration_failure("deterministic verification executor is unavailable"),
                     )
                 if unit.run_role == "test_author":
                     return await self._finalize_test_author(plan_id, unit, handle, uow)
@@ -310,6 +360,200 @@ class ExecutionHandler:
         if stray_paths:
             raise self._main_repo_failure(stray_paths)
 
+    def _retry_promotion(
+        self,
+        plan_id: str,
+        goal_id: str,
+        reservation: str,
+        exc: Exception,
+        uow: UnitOfWork,
+    ) -> bool:
+        """Release the reservation and let a later tick re-attempt the merge.
+
+        Only for environmental failures, and only a bounded number of times. The
+        reservation MUST be released either way — holding it would block the very
+        retry this exists to allow, and `assert_lifecycle_mutation_allowed`
+        refuses every edit while one is open.
+
+        Bounded by attempts rather than wall clock: the merge is cheap, so if two
+        re-attempts do not clear it the condition is not momentary, and a human
+        should see it.
+        """
+        if self._planning_artifacts is None:
+            return False  # nowhere to count, so no unbounded loop is possible
+        if not is_transient_merge_failure(str(exc)):
+            return False
+
+        prior = self._planning_artifacts.latest(
+            plan_id, "goal_promotion_retry", goal_id=goal_id, limit=MAX_PROMOTION_RETRIES + 1
+        )
+        if len(prior) >= MAX_PROMOTION_RETRIES:
+            return False
+
+        with uow:
+            plan = uow.plans.get(plan_id)
+            if plan.goal_promotion_reservations.get(goal_id) != reservation:
+                return False  # someone else owns it now; do not touch their state
+            plan.release_promotion(goal_id, reservation)
+            plan.bump_version()
+            uow.plans.save(plan)
+
+        self._planning_artifacts.append(
+            PlanningArtifact(
+                plan_id=plan_id,
+                goal_id=goal_id,
+                purpose="goal_promotion_retry",
+                sequence=0,
+                input_fingerprint=goal_id,
+                outcome="abandoned",
+                rejection_reasons=(str(exc)[:500],),
+                created_at=self._clock.now(),
+            )
+        )
+        log.info("promotion.retrying", plan_id=plan_id, goal_id=goal_id, error=str(exc)[:200])
+        return True
+
+    def _repair_contract(
+        self,
+        plan_id: str,
+        plan: Plan,
+        unit: "_Unit",
+        exc: TaskFailed,
+        uow: UnitOfWork,
+        not_before: datetime | None,
+    ) -> bool:
+        """Fix an unsatisfiable contract in place and requeue, or return False.
+
+        Bounded by DISTINCT repairs attempted, not by wall clock: unlike a
+        provider outage, time does not heal a wrong contract, so a clock-based
+        bound would just spin. Past the bound the block opens exactly as before —
+        by then a repair and the full retry budget have both failed, which is
+        genuinely a human's problem.
+
+        Every repair is recorded (visible at GET /plans/{id}/planning-artifacts)
+        and requeues the task with a `TaskRequeued` naming what changed, so an
+        automatic loop is observable rather than a silent spinner.
+        """
+        if self._repository_reader is None or self._planning_artifacts is None:
+            return False
+        if plan.project_id is None:
+            return False
+        try:
+            goal = plan._goal(unit.goal_id)
+            task = plan._task(goal, unit.task_id)
+        except Exception:  # noqa: BLE001 — a vanished task is not repairable
+            return False
+        if task.contract is None:
+            return False
+
+        prior = self._planning_artifacts.latest(
+            plan_id, "contract_repair", goal_id=unit.goal_id, limit=MAX_CONTRACT_REPAIRS + 1
+        )
+        attempted = sum(
+            1
+            for item in prior
+            if item.payload is not None and item.payload.get("task_id") == task.id
+        )
+        if attempted >= MAX_CONTRACT_REPAIRS:
+            return False
+
+        try:
+            tracked = self._repository_reader.list_paths(plan.project_id, max_entries=2000)
+        except Exception as read_error:  # noqa: BLE001 — no sight, no repair
+            log.warning("contract_repair.repository_unavailable", error=str(read_error))
+            return False
+
+        repair = propose_repair(task.contract, split_reasons(exc.reason), tracked)
+        if repair is None:
+            return False
+
+        try:
+            # Requeue FIRST: the task is still RUNNING at this point and
+            # `amend_contract` guards {PENDING, FAILED} — an in-flight task must
+            # not have its contract rewritten underneath it.
+            plan.requeue_task(unit.goal_id, unit.task_id, not_before)
+            task.amend_contract(
+                allowed_scope=repair.allowed_scope,
+                verification_commands=repair.verification_commands,
+            )
+            resync_goal_contract(goal)
+        except Exception as amend_error:  # noqa: BLE001 — never worsen a failure
+            log.warning("contract_repair.rejected", task_id=task.id, error=str(amend_error))
+            return False
+
+        self._planning_artifacts.append(
+            PlanningArtifact(
+                plan_id=plan_id,
+                goal_id=unit.goal_id,
+                purpose="contract_repair",
+                sequence=0,
+                input_fingerprint=f"{task.id}:{task.revision}",
+                outcome="committed",
+                payload={"task_id": task.id, "repair": repair.description},
+                rejection_reasons=(exc.reason,),
+                created_at=self._clock.now(),
+            )
+        )
+        self._finish_execution(
+            uow,
+            unit,
+            ExecutionAttemptStatus.FAILED,
+            ExecutionRunStatus.RETRYING,
+            failure=exc.failure,
+            retry_at=not_before,
+        )
+        plan.bump_version()
+        uow.outbox.add(
+            TaskRequeued(
+                plan_id=plan_id,
+                goal_id=unit.goal_id,
+                task_id=unit.task_id,
+                attempt=unit.attempt,
+                reason=f"contract repaired automatically: {repair.description}",
+                kind=exc.kind.value if exc.kind else None,
+            )
+        )
+        uow.plans.save(plan)
+        log.info(
+            "contract_repair.applied",
+            plan_id=plan_id,
+            task_id=task.id,
+            repair=repair.description,
+        )
+        return True
+
+    def _attempts_against_budget(
+        self, plan_id: str, unit: "_Unit", kind: FailureKind | None, uow: UnitOfWork
+    ) -> int:
+        """How many attempts this failure's budget has actually consumed.
+
+        `cycle_attempt` counts EVERY attempt, including ones that never reached
+        the work: a provider capacity failure means there was no room upstream,
+        not that the agent produced something wrong. For a kind bounded by a
+        ceiling that distinction decides the outcome — observed live, a task
+        waited out three rate limits and then its FIRST real candidate rejection
+        blocked the goal, because the ceiling of 2 had already been spent by
+        failures of an unrelated kind.
+
+        Kinds with a ceiling are therefore counted per KIND. Everything else
+        keeps the whole-task counter, which is what a general attempt budget
+        means.
+        """
+        if kind is None or kind not in unit.retry_policy.kind_attempt_ceiling:
+            return unit.policy_attempt
+        # The ledger holds only attempts already finalized; this one is still
+        # RUNNING (finalize happens after the retry decision). Count it, so the
+        # number means the same thing `policy_attempt` does: attempts made,
+        # including the one that just failed.
+        prior = sum(
+            1
+            for attempt in uow.executions.list_attempts(plan_id)
+            if attempt.task_id == unit.task_id
+            and attempt.goal_id == unit.goal_id
+            and attempt.failure_kind == kind.value
+        )
+        return prior + 1
+
     @staticmethod
     def _raise_on_infrastructure_exit(outcomes: list[CommandExecution]) -> None:
         """Exit 126/127 means the command could not run at all — never a test verdict."""
@@ -323,16 +567,9 @@ class ExecutionHandler:
 
     @staticmethod
     def _test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
-        normalized = path.replace("\\", "/")
-        if strategy == VerificationStrategy.EXECUTABLE_CHECK:
-            return True
-        name = normalized.rsplit("/", 1)[-1]
-        return (
-            normalized.startswith("tests/")
-            or "/tests/" in normalized
-            or name.startswith("test_")
-            or name in {"conftest.py", "pytest.ini"}
-        )
+        # One definition, shared with the reasoner's submission-time check so a
+        # contract cannot freeze a strategy its own scope makes unsatisfiable.
+        return test_author_path_allowed(path, strategy)
 
     async def _finalize_test_author(
         self,
@@ -684,7 +921,10 @@ class ExecutionHandler:
             if cycle is None:
                 raise TaskFailed(
                     f"captured cycle '{unit.cycle_id}' no longer exists",
-                    FailureKind.VERIFICATION_ERROR,
+                    # Class C (the cycle was superseded mid-run; retrying re-races it). Un-freeze #17 made VERIFICATION_ERROR
+                    # retryable for candidate rejections; this is not one, so it
+                    # keeps the independent `retryable` veto.
+                    failure=_orchestration_failure("captured cycle '{unit.cycle_id}' no longer exists"),
                 )
             goals = cycle.goals
         return find_task(find_goal(goals, unit.goal_id), unit.task_id)
@@ -802,9 +1042,9 @@ class ExecutionHandler:
         # being re-selected, so this goal's own block can't collide with
         # itself on a later tick either. No pre-check needed; open_block's
         # "already active" guard is a genuine-bug detector now, not routine.
-        resolutions = ["edit_task", "start_replan"]
-        if offending.status == Status.FAILED:
-            resolutions = ["retry_stage", *resolutions]
+        resolutions = resolutions_for(
+            "execution_failure", task_retryable=offending.status == Status.FAILED
+        )
         block = PlanBlock(
             id=new_id(),
             kind="execution_failure",
@@ -842,7 +1082,10 @@ class ExecutionHandler:
         if not can_promote_goal(goal):
             raise TaskFailed(
                 "goal cannot merge without accepted task evidence",
-                FailureKind.VERIFICATION_ERROR,
+                # Class C (a promotion-time state check, not the agent's work). Un-freeze #17 made VERIFICATION_ERROR
+                # retryable for candidate rejections; this is not one, so it
+                # keeps the independent `retryable` veto.
+                failure=_orchestration_failure("goal cannot merge without accepted task evidence"),
             )
         reservation = f"goal:{cycle.id}:{goal.id}"
         plan.reserve_promotion(goal.id, reservation)
@@ -860,6 +1103,11 @@ class ExecutionHandler:
         try:
             commit_sha = await self._workspace.merge_goal(plan_id, cycle_id, goal_id)
         except Exception as exc:
+            # A verified goal must not be thrown away because the repository was
+            # momentarily unusable. A stale worktree registration or a held index
+            # lock clears on its own; a CONFLICT never does.
+            if self._retry_promotion(plan_id, goal_id, reservation, exc, uow):
+                return Signal.NOT_READY
             with uow:
                 plan = uow.plans.get(plan_id)
                 if plan.goal_promotion_reservations.get(goal_id) != reservation:
@@ -871,7 +1119,7 @@ class ExecutionHandler:
                     explanation=f"goal Git promotion failed: {exc}",
                     stage="merge",
                     goal_id=goal_id,
-                    legal_resolutions=["start_replan"],
+                    legal_resolutions=resolutions_for("goal_promotion_failure"),
                     created_at=self._clock.now(),
                 )
                 plan.open_block(block)
@@ -898,7 +1146,10 @@ class ExecutionHandler:
             if cycle is None or plan.active_cycle is None or plan.active_cycle.id != cycle_id:
                 raise TaskFailed(
                     "goal promotion targets a superseded cycle",
-                    FailureKind.VERIFICATION_ERROR,
+                    # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
+                    # retryable for candidate rejections; this is not one, so it
+                    # keeps the independent `retryable` veto.
+                    failure=_orchestration_failure("goal promotion targets a superseded cycle"),
                 )
             goal = find_goal(cycle.goals, goal_id)
             if any(
@@ -906,7 +1157,10 @@ class ExecutionHandler:
             ):
                 raise TaskFailed(
                     "goal evidence changed during promotion",
-                    FailureKind.VERIFICATION_ERROR,
+                    # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
+                    # retryable for candidate rejections; this is not one, so it
+                    # keeps the independent `retryable` veto.
+                    failure=_orchestration_failure("goal evidence changed during promotion"),
                 )
             cycle.evidence_refs.append(f"git:{commit_sha}")
             plan.complete_goal(goal_id)
@@ -936,11 +1190,7 @@ class ExecutionHandler:
                 goal_id=goal.id,
                 task_id=failed.id,
                 task_revision=failed.revision,
-                legal_resolutions=[
-                    "retry_stage",
-                    "edit_task",
-                    "start_replan",
-                ],
+                legal_resolutions=resolutions_for("execution_failure"),
                 created_at=self._clock.now(),
             )
             plan.open_block(block)
@@ -1213,11 +1463,7 @@ class ExecutionHandler:
                 goal_id=goal.id,
                 task_id=task.id,
                 task_revision=task.revision,
-                legal_resolutions=[
-                    "wait_and_retry",
-                    "edit_task",
-                    "start_replan",
-                ],
+                legal_resolutions=resolutions_for("provider_capacity"),
                 evidence_refs=[circuit_ref(circuit.runtime, circuit.provider_id, circuit.model_id)],
                 created_at=self._clock.now(),
             )
@@ -1501,7 +1747,10 @@ class ExecutionHandler:
                     and not circuit_manual
                     and (
                         capacity_wait
-                        or unit.retry_policy.should_retry(unit.policy_attempt, exc.kind)
+                        or unit.retry_policy.should_retry(
+                            self._attempts_against_budget(plan_id, unit, exc.kind, uow),
+                            exc.kind,
+                        )
                     )
                 ):
                     plan.requeue_task(unit.goal_id, unit.task_id, not_before)
@@ -1527,6 +1776,13 @@ class ExecutionHandler:
                     )
                     uow.plans.save(plan)
                     return Signal.PAUSED if paused_at_boundary else Signal.CONTINUE
+
+                # Before giving up on the operator's behalf: is the CONTRACT the
+                # thing that is wrong? A contract no agent could satisfy fails
+                # identically on every attempt, so blocking a human is the only
+                # outcome a retry can reach — unless the contract itself is fixed.
+                if self._repair_contract(plan_id, plan, unit, exc, uow, not_before):
+                    return Signal.CONTINUE
 
                 # Terminal task failure (retry budget exhausted or non-retryable kind):
                 # record the FAILED task and AUTO-PAUSE the plan in the same txn
@@ -1572,10 +1828,8 @@ class ExecutionHandler:
                         task_id=unit.task_id,
                         task_revision=unit.task_revision,
                         run_id=unit.execution.run_id,
-                        legal_resolutions=(
-                            ["wait_and_retry", "edit_task", "start_replan"]
-                            if provider_capacity
-                            else ["retry_stage", "edit_task", "start_replan"]
+                        legal_resolutions=resolutions_for(
+                            "provider_capacity" if provider_capacity else "execution_failure"
                         ),
                         evidence_refs=(
                             # MUST name the circuit that was actually written --

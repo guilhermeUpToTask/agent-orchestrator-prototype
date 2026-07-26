@@ -1,336 +1,552 @@
-# ROADMAP
+# ROADMAP — first valuable public release
 
-Everything designed or planned but **not yet implemented**, in priority order. Each item names its origin so you can read the full reasoning:
+This roadmap is ordered by **external developer value and launch dependency**.
+The orchestration architecture already exists; the release problem is making
+one local workflow reproducible, understandable, trustworthy, and easy to
+evaluate.
 
-- **[EVO]** — the 2026-07-06 evolution plan ([archived](docs/history/planning/2026-07-06-orchestrator-evolution-plan-fable-5.md)).
-- **[MRF]** — the master roadmap the integration was executed against ([archived](docs/history/planning/2026-07-02-master-roadmap-final-fable-5.md)).
-- **[LEG]** — pre-refactor features shelved with designed seams ([docs/legacy/pre-refactor-backend.md](docs/legacy/pre-refactor-backend.md)).
-- **[LIVE]** — defects/gaps verified by the first real end-to-end plan ([review](docs/history/analyses/2026-07-13-first-live-plan-review.md), [strategy](docs/history/planning/2026-07-13-execution-domain-refactor-strategy.md)).
-- **[PR20]** — findings from the PR #20 review that landed the cyclic-lifecycle refactor (decisions 44–48).
-- **[CI]** — pending CI/verification hardening surfaced while getting PR #20 green.
-- **[WALK]** — findings from the 2026-07-19 live plan walkthrough (issues #28, #30–#32; fixes in PR #29 and this branch).
+**Positioning:** a local-first, human-gated, verified multi-agent coding
+orchestrator for developers working on their own repositories.
 
-Verified defects backing several items below are documented in
-[docs/architecture/known-issues.md](docs/architecture/known-issues.md) — read that
-file, don't duplicate it here.
+It is not a fully autonomous software factory, multi-tenant SaaS, fully
+sandboxed platform, or replacement for an engineering team.
 
-**Current architecture** (context for everything below): a long-lived root
-`ProjectPlan` contains `Cycle`s, the finite delivery unit. Each cycle moves
-`IntentProposal` (versioned, exact-revision review gate) → `CycleDraft`
-(ordered goals, stable local keys, no forward-dependency edges, second
-exact-revision gate) → active `Cycle`. The old nine-phase `PlanPhase` machine
-is legacy-compat only (see known-issues.md); do not describe it as current.
+Status markers:
+
+- ✅ Completed — verified in the repository
+- 🚧 In progress — foundation exists; graduation work remains
+- ⬜ Planned — required for the first peer preview
+- ⏸ Deferred — reconsider only with run or user evidence
+
+The launch sequence is:
+
+```text
+reproducible fixture
+→ real-plan walkthroughs
+→ backend stabilization
+→ capability/API/frontend coverage matrix
+→ API control-plane completion
+→ frontend truth and operator UX
+→ onboarding, packaging, documentation, and demo
+→ small peer preview
+→ evidence-driven hardening
+```
+
+Accepted ADRs and current code are authoritative. Domain changes require a
+recorded unfreeze in [the decision log](docs/decisions/decision-log.md).
+Verified unresolved defects belong in
+[known issues](docs/architecture/known-issues.md), not duplicated here.
+
+## Implemented launch foundation ✅
+
+These are current capabilities, not future roadmap work:
+
+- Cyclic long-lived project plans with intent, architecture, JIT enrichment,
+  execution, publication, exact-revision review gates, and source-preserving
+  replanning.
+- Project-bound repository routing, worktree-isolated attempts, independent
+  verification, task → goal → cycle Git promotion, and publication
+  dispositions.
+- SQLite version CAS, leases, per-goal claims, transactional outbox, operational
+  ledgers, provider circuits, and SSE.
+- Graceful pause, resume-only semantics, targeted retry, structured blocks,
+  live-registry recovery, and provider-capacity waiting/admission/routing.
+- Automatic recovery that keeps a repairable mistake away from a human: the
+  orchestrator's own rejection reasons are fed into the next agent attempt, a
+  rejected candidate earns a bounded second try, an unsatisfiable contract is
+  repaired in place (near-miss command paths, a test path the strategy requires),
+  a transient goal merge is re-attempted, and a failed planning session leaves
+  evidence the retry reuses. Every one is bounded, recorded, and still ends in a
+  backstop block.
+- Repository sight for the planner: bounded read-only tools over a committed ref
+  (list / read / search / orientation), so contracts name paths that exist
+  instead of being written blind, with submission-time rejection of a scope or
+  command nothing could satisfy.
+- Stub and OpenAI-compatible reasoners; dry-run and catalog-resolved real agent
+  runtimes; provider/model/agent/capability/project catalogs.
+- Plan, recovery, attempt, telemetry, config, readiness, and publication APIs,
+  plus an operator frontend with gates and catalog settings.
+- Dual fake/SQLite orchestration tests, Git/API/SSE integration tests, CI quality
+  gates, a supervised dev launcher, release automation, and run-evidence export.
+- Three operator fixtures, all API-only (`curl` + `jq`, no frontend):
+  [`happy-path-v1`](fixtures/happy-path-v1/) (the locked one-goal walkthrough,
+  Tier 0 and Tier 1), [`planning-recovery-v1`](fixtures/planning-recovery-v1/)
+  (a starved planning session leaves evidence the retry can use),
+  and [`parallel-goals-v1`](fixtures/parallel-goals-v1/) (two goals promote into
+  one cycle branch, so the second merge hits a base the first moved).
+  Between them they found the repository-binding trap, an unhandled
+  `RoleUnsatisfiableError` that crash-looped the worker, a contract whose
+  strategy contradicted its own scope, and capacity failures spending the
+  verification retry ceiling.
+
+Completed foundations stay in architecture docs and tests. They are not
+reintroduced below merely because further hardening is possible.
+
+## Phase 0 — reproducible validation baseline 🚧
+
+**External capability:** a developer can run one free, deterministic walkthrough
+that proves the lifecycle, gates, worker, Git/verification path, publication,
+API, and basic UI wiring against the same disposable repository every time.
+
+### Deliverables
+
+- ✅ Keep `happy-path-v1` as the canonical one-goal, one-function fixture,
+  materialized outside this repository.
+- ✅ Reuse the canonical cyclic integration test and existing run exporters;
+  do not create a second orchestration model inside the fixture.
+- ✅ Correct repository binding. The walkthrough told operators to export
+  `PROJECT_REPO_DIR`, which `AppContainer` does not read: a project with no
+  `repo_url` gets a fresh empty repo auto-seeded at
+  `$ORCHESTRATOR_HOME/projects/<id>/repo`, so a run "passed" against a tree the
+  checker never looked at. Found on the first live run of this fixture; the
+  README now creates the project with `repo_url` set and states the trap.
+- ✅ The materialize → bind → run → publish → check → reset sequence is
+  deterministic from a clean state, verified by repeated Tier 0 runs.
+- ✅ A precise command contract, not a driver: the walkthrough is API-only
+  (`scripts/api.sh` + the exact `curl`/`jq` calls), so no step depends on
+  reading a screen. Review gates stay explicit operator actions.
+- ⬜ Extend the checker (or add a companion) to validate plan/cycle state,
+  accepted evidence, disposition, promoted Git output, clean seed/default
+  branch, and repository isolation—not only `pytest`.
+- ⬜ Capture the plan snapshot, evidence bundle, worker-log reference, fixture
+  version, and orchestrator Git SHA in one consistently named run directory.
+- ⬜ Add a focused test for the locked seed/brief/checker contract without
+  duplicating the backend lifecycle suite.
+- 🚧 Version the fixture: the locked brief now lives in `brief.txt` so it can be
+  posted verbatim (`BRIEF.md` had prose that would have been sent to the
+  reasoner as part of the brief). The v1/v2 rule is documented; no bump needed
+  yet.
+
+### Exit criteria
+
+- A clean Tier 0 run repeats after `reset.sh` with the same result and no
+  network/API key.
+- The checker fails on the seed and passes only on the promoted result.
+- Artifacts identify fixture/code version, plan/cycle, timeline, evidence,
+  disposition, and Git refs.
+- The real API and worker are exercised; one manual pass confirms critical UI
+  wiring.
+
+## Phase 1 — Tier 1 real-runtime happy path ⬜
+
+**External capability:** a developer can evaluate whether one pinned real
+reasoner and coding runtime reliably complete a tiny, verifiable change.
+
+### Deliverables
+
+- Use `happy-path-v1` unchanged: locked greeting brief, one goal preferred, one
+  or two tasks, and `python -m pytest -q`.
+- Pin and record the reasoner provider/model, agent runtime and provider/model,
+  timeout, concurrency, and orchestrator version.
+- Preflight reasoner, agent binding, binary, secret, repository, and verification
+  command readiness before spending on a run.
+- Reset the repository and cycle state between comparable runs. Never repair the
+  greeter manually during a measured run.
+- Export the snapshot and evidence bundle for every green or red run.
+- Classify failures as product, setup/config, provider capacity, model quality,
+  or fixture defects.
+
+### Exit criteria
+
+- Three consecutive real runs complete with no unexpected human code correction.
+- No false terminal block or hot loop occurs.
+- Every accepted task has correct revision-bound verification evidence.
+- Work promotes through expected Git refs while the seed default branch remains
+  unchanged.
+- Publication records the disposition and returns the project plan to `idle`.
+- Evidence, including usage when reported, is comparable across all three runs.
+
+## Phase 2 — walkthrough-driven backend hardening ⬜
+
+**External capability:** the tiny workflow survives common failures and either
+recovers automatically or tells the operator exactly what to do.
+
+The recovery architecture exists. Validate it with Tier 0/Tier 1 evidence
+instead of redesigning it speculatively.
+
+Recovery work completed against run evidence this cycle is listed under the
+implemented foundation above; what remains here is the evidence still to
+collect, not a redesign.
+
+### Priority experiments
+
+- Provider capacity: connection failure, rate limit, daily quota, request
+  concurrency, admission, circuit scope, half-open probe, alternate routing,
+  and wall-clock ceilings.
+- Controls: pause during work, graceful stop, resume-only behavior, targeted and
+  planning retry, task edit, registry repair, block resolution, and replan.
+- Recovery: process crash, expired plan/goal lease, heartbeat/liveness, CAS
+  finalize race, late result, and malformed-plan starvation.
+- Git: failed-attempt cleanup, stale worktree recovery, protected default branch,
+  promotion reservations, concurrent goal merge, and publication output.
+- Planning quality: goal/task fan-out, duplicate test-only work, capability
+  coverage, model-role adherence, and pre-execution cost visibility.
+- Scheduling: dependencies, independent-goal progress, per-goal blocks, and
+  provider-capacity interaction.
+
+Every verified defect follows:
+
+```text
+reproduction
+→ minimal fix
+→ regression test against fake and/or SQLite truth
+→ Tier 0 rerun
+→ Tier 1 rerun when execution, reasoning, verification, runtime resolution,
+  capacity, workspace, or publication changed
+```
+
+Do not expand the domain or introduce coordination infrastructure without run
+evidence and a decision-log entry.
+
+### Deferred — goal-promotion auto-rebase, pending run evidence
+
+`goal_promotion_failure` is the only block kind with **no observed run
+evidence**. It opens on the FIRST exception from `merge_goal`, with no retry at
+all — including for a transient git or filesystem error — and advertises a single
+resolution, `start_replan`.
+
+The obvious repair is to rebase the goal branch onto the moved cycle branch and
+retry the merge. It is deliberately NOT built yet, for two reasons:
+
+- **The failure has not been reproduced.** `fixtures/parallel-goals-v1` exists to
+  provoke it: two independent goals, one cycle branch, so the second merge runs
+  against a base the first already moved. It passes — both goals DONE, both
+  merged, no block. Under dry-run each task writes its own artifact, so two goals
+  never touch the same file and cannot conflict; a genuine conflict needs Tier 1
+  with two goals over overlapping scope, which is the next evidence to collect.
+- **A rebase is not "retry the merge".** Goal→cycle promotion currently runs no
+  verification of its own: `_reserve_goal_promotion` checks each task is DONE
+  with accepted evidence, and that evidence was produced per task, on the task
+  branch, against an OLDER base. Rebasing recombines verified code with code it
+  was never tested against, so the repair must also introduce a goal-level
+  re-verification step that has never existed — the orchestrator re-running the
+  tasks' `verification_commands` on the rebased tree. Skipping that would move
+  unverified work upward and break the invariant the whole system rests on.
+
+The smaller, safer fix available today, if evidence never materialises: retry a
+merge that failed for a transient reason before blocking, and stop advertising
+`start_replan` as the only way out of a git error that a retry would clear.
+
+### Deferred — no operator control point at the contract boundary
+
+A worker enriches a goal and executes its first task under ONE claim, and the
+pause gate blocks *claims* — so arming a pause before enrichment stops enrichment
+too, and arming it after is unwinnable: there is no window. A plan sitting at a
+review gate is `waiting` and cannot be paused at all. Net effect: nothing outside
+the process can hold a plan between "the contract is frozen" and "an agent is
+running against it".
+
+Found while trying to build a live fixture for contract repair (un-freeze #17),
+which needs exactly that boundary. The behaviour is arguably correct — the JIT
+loop exists to avoid planning work nobody asked for — but it means a whole class
+of contract-level operator scenario can only be tested by stopping the worker,
+which is outside an API-only walkthrough. Those scenarios are covered at the
+orchestration level instead (`tests/unit/orchestration/test_contract_editing.py`
+drives both handlers a step at a time, on both backends).
+
+If it is ever picked up, the smallest useful lever is a review-gate-like hold at
+the contract boundary — opt-in per plan, so the JIT loop stays the default — not
+a general "pause between units", which would turn every unit boundary into a
+scheduling decision.
+
+### Deferred — reasoner config is boot-time only
+
+`AppContainer.reasoner` is a `@cached_property` and the worker resolves it once
+at startup, so every `reasoner.*` config key — `mode`, `provider_id`, `model_id`,
+`temperature`, `max_turns` — takes effect only after a worker restart. Writing
+one through `PUT /api/config/orchestrator/...` succeeds, `GET /api/reasoner/status`
+reports the new value (the API process builds its own), and the worker keeps
+using what it booted with. Found while building `planning-recovery-v1`, whose
+whole mechanism is changing `reasoner.max_turns` mid-run: the change was accepted
+and silently ignored.
+
+Caching is deliberate — rebuilding per tick would re-read the secret store and
+re-resolve the catalog on every poll — so this is a **staleness** decision, not a
+bug to patch blindly. Whoever picks it up chooses between: a cheap generation
+counter on the config table that the worker compares each tick and invalidates
+on change; scoping invalidation to the keys that are safe to swap mid-flight (a
+model swap between attempts is fine, a mode swap mid-session is not); or leaving
+it boot-time and making that explicit in `GET /api/reasoner/status` plus the
+config API response, so an operator is told a restart is required instead of
+watching a successful write do nothing. The last option is the smallest honest
+fix and probably the right first move.
+
+Same question applies to `agent_runner.*`, which resolves per task per run and
+is therefore probably already live — verify rather than assume.
+
+### Deferred — planning-artifact retention
+
+`planning_artifacts` (migration 0014) keeps what a failed planning attempt
+produced so the retry starts better informed. Nothing prunes it, and **that is a
+deliberate deferral, not an oversight**:
+
+- Reads are already bounded — keyed by `(plan_id, purpose, goal_id)` with
+  `limit=5` and served by `ix_planning_artifacts_lookup` — so growth costs
+  storage, never read latency or correctness.
+- A replan mints new goal ids (`activate_cycle`), so a superseded cycle's rows
+  become permanently unreachable rather than wrong. A long-lived plan through
+  several replans therefore accumulates rows nothing will ever read again.
+- `ON DELETE CASCADE` from `plans` already collects them when a plan is deleted.
+
+What a retention sweep would need to decide, whenever it is picked up: keep the
+last N attempts per `(plan, purpose, goal)` versus an age bound; whether
+`committed` outcomes are worth keeping at all once the contract they produced is
+frozen; and whether pruning belongs in the store's `append` (cheap, amortised) or
+in a maintenance command (visible, operator-triggered). Do not add a background
+sweeper for it — this codebase has no scheduler, and inventing one for garbage
+collection would be exactly the coordination infrastructure this phase says not
+to introduce without run evidence.
+
+### Exit criteria
+
+- No launch-critical defect can hot-loop, corrupt state, promote unverified
+  work, touch the default branch, or advertise an unusable recovery.
+- Repeated unexpected worker exceptions cannot starve healthy plans.
+- Operators can distinguish active work, capacity/backoff waiting, graceful
+  pause, recoverable block, and external terminal failure from persisted facts.
+- Relevant regressions pass the baseline fixture contract.
+
+## Phase 3 — capability-to-product coverage audit ⬜
+
+**External capability:** maintainers can state exactly which operator workflows
+are supported and where each capability is exposed.
+
+Create one authoritative matrix:
+
+```text
+domain capability
+→ application use case/handler
+→ FastAPI route
+→ frontend consumer
+→ tests
+→ status
+→ launch priority
+```
+
+Classify rows as implemented/exposed, implemented but hidden, exposed but
+unused, frontend complete/partial/contradictory, legacy-only, and
+launch-critical/deferred.
+
+Audit setup, readiness, planning/gates, execution visibility, capacity,
+recovery, evidence, repository/Git output, publication, diagnostics, and health.
+Include backend routes not consumed by the UI, such as live attempt-log SSE.
+
+### Exit criteria
+
+- No endpoint is proposed merely for completeness; every launch-critical row
+  maps to a walkthrough operator job.
+- Nine-phase fields/routes are labelled compatibility-only.
+- Each launch-critical gap has an owner phase (4, 5, or 6) and objective test.
+
+## Phase 4 — API control-plane completion ⬜
+
+**External capability:** a technical operator can set up, drive, inspect,
+recover, and publish the happy path without database surgery.
+
+Close only launch-critical matrix gaps. Investigate:
+
+- project/repository binding, local/remote validation, and workspace readiness;
+- canonical legal actions for intent, gates, pause/resume, retry/edit, block
+  resolution, replan, and publication;
+- reasoner, agent, provider/model, capability, binary, sandbox, and secret
+  readiness without exposing secret material;
+- active action, attempts, liveness/deadlines, live logs, capacity, and backoff;
+- verification evidence, protected scope, promoted refs, disposition/output,
+  and evidence-export guidance;
+- API/worker health and diagnostics needed by the setup checklist.
+
+Keep routers thin. Preserve error mapping, UoW/CAS, outbox, side-effect
+boundaries, and the dependency rule.
+
+### Exit criteria
+
+- Tier 0/Tier 1 need no direct SQLite edit or hidden env fallback.
+- Every advertised action works in the state that advertises it.
+- OpenAPI describes the cyclic lifecycle and launch-critical models; generated
+  frontend types are current.
+- Integration tests cover each new/corrected contract.
+
+## Phase 5 — frontend truth and operator UX ⬜
+
+**External capability:** a new operator can understand the system, take only
+legal actions, recover, and find the verified result.
+
+The React shell, composer, settings CRUD, gates, status surface, attempt history,
+and SSE bridge are foundations. Improve them in this order:
+
+1. **Status truth**
+   - Render root status, activity, planning operation, current work/TDD stage,
+     gates, plan/per-goal blocks, active run, provider waiting, retry/backoff,
+     and legal actions from backend truth.
+   - Do not turn capacity waiting into a human block or hide independent blocks.
+   - Distinguish **"waiting, recovering automatically"** from **"needs you"**.
+     `src/app/block_policy.py` already records `requires_human` per block kind
+     and is the single source for what a block may advertise; the API does not
+     serve it yet, so the frontend cannot tell an operator whether a block is
+     their problem or the orchestrator's. Serve it alongside `legal_actions`,
+     and surface the automatic loops (contract repair, promotion retry, planning
+     replay) as progress rather than a silent spinner — they are recorded at
+     `GET /api/plans/{id}/planning-artifacts`.
+
+2. **Control truth**
+   - Ensure every visible action is legal and functional.
+   - Stop using legacy `phase` to control cyclic chat, editing, navigation, or
+     recovery; isolate compatibility rendering to legacy plans.
+
+3. **Execution visibility**
+   - Consume per-attempt log SSE, including rotation, offset resume, and end.
+   - Show running command/stage, attempt, retry reason, wait, verification
+     progress, and bounded persisted history.
+
+4. **First-mile setup**
+   - Guide project/repository binding, provider/model creation, reasoner
+     selection, agent/runtime binding, coverage, dependency probes, and secrets.
+   - Present one readiness checklist and clear first-plan launch path.
+
+5. **Last-mile delivery**
+   - Show accepted evidence, promoted branch/output reference, and disposition
+     consequences.
+   - Give accurate manual PR instructions; add a thin helper only if evidenced.
+
+6. **Legacy cleanup**
+   - Remove/isolate nine-phase timelines, labels, toasts, and phase-derived
+     controls for cyclic plans.
+   - Use backend `legal_actions`, not reconstructed React transition rules.
+
+Use Playwright selectively for stable setup, gate, recovery, and publication
+contracts. Do not block on a visual redesign or full real-agent browser E2E.
+
+### Exit criteria
+
+- A first-time operator completes Tier 0 in the UI without undocumented setup.
+- Tier 1 waits, retries, evidence, and output are clear without terminal logs.
+- Critical actions have stable automated contracts.
+- No cyclic screen presents the nine-phase machine as authoritative.
+
+## Phase 6 — public-preview productization ⬜
+
+**External capability:** an external developer can install the preview, complete
+the first walkthrough, understand limits/costs, and share useful evidence.
+
+### Existing foundation
+
+- ✅ `backend/scripts/dev.sh` provides locked setup, doctor, seed, supervised
+  startup, and contributor checks.
+- ✅ CI builds backend/frontend, checks generated API types, and excludes paid
+  LLM smoke tests from normal pushes.
+- ✅ Release automation attaches a Python wheel and frontend bundle.
+- ✅ The fixture seed is the sample repository; exporters create sanitized
+  evidence bundles.
+
+### Deliverables
+
+- Choose and validate one realistic public install path (`uvx`/`pipx`, packaged
+  local app, or Docker Compose). One supported path beats several guesses.
+- Start API, worker, and packaged frontend with one command or short supervised
+  sequence and an explicit state directory.
+- Add guided setup/readiness outside a source checkout.
+- Publish getting-started, first-plan, Tier 0, pinned Tier 1, troubleshooting,
+  and evidence-sharing guides.
+- Document security posture, cooperative isolation, unsandboxed runtime limits,
+  secrets, supported OS/runtimes, provider costs, known limits, and recovery.
+- Reconcile current docs/metadata with project-scoped repositories, goal-level
+  execution, cyclic lifecycle, migration head, and live logs.
+- Add representative screenshots and a short reproducible demo.
+- Validate versioning, changelog, license/contribution/security files, and
+  artifact installation on a clean machine.
+
+### Exit criteria
+
+- A technical user goes from install to green Tier 0 using public docs only.
+- Tier 1 requires explicit model/runtime/cost choices and a readiness result.
+- Packaged frontend/backend agree on API version/types.
+- Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.
+
+## Phase 7 — small peer preview ⬜
+
+**External capability:** a narrow group can use the orchestrator on disposable
+or personal repos and provide comparable evidence.
+
+- Invite approximately 10–50 technical users familiar with local CLIs and Git.
+- Start with canonical Tier 0/Tier 1 before treating larger projects as evidence.
+- Provide one feedback template and explicit support/issue path.
+- Measure install/time-to-first-cycle, setup/runtime/repo failures, unclear
+  states/actions, recovery, capacity/cost, evidence trust, Git output, and
+  missing controls.
+- Avoid speculative architecture work while collecting evidence.
+
+### Exit criteria
+
+- Reports include fixture/version/runtime evidence rather than anecdotes alone.
+- Blockers are ranked by frequency, severity, and workflow.
+- The next hardening work is selected from repeated user evidence.
+
+## Phase 8 — evidence-driven hardening and expansion ⏸
+
+Take these up only when preview evidence proves the need:
+
+- stronger sandboxing and pointer-free workspaces;
+- authenticated forge publication and automatic GitHub PR creation;
+- persisted project-wide `ProjectSpec` and cycle-wide verification;
+- browser-driven full-cycle Playwright E2E;
+- workspace/branch/checkpoint retention and garbage collection;
+- richer telemetry analytics, OpenTelemetry, and retention;
+- repository indexing, symbol graphs, and context packaging;
+- proactive concurrent-goal scope-disjointness validation;
+- advanced scheduling, load-tested pools, and additional runtimes;
+- multi-worker/multi-machine execution, distributed claims, or Redis;
+- registry execution profiles/model-tier policy beyond minimum readiness;
+- aggregate/handler/router decomposition and schema-diagram tooling unless
+  recurring change risk or drift justifies them.
+
+Task-level parallelism, relational goal/task persistence, a continuous domain
+reconciler, and a workflow-engine dependency remain rejected absent new
+evidence.
+
+## Continuous workstreams
+
+### Regression discipline
+
+- Every fixed bug gets a focused regression test.
+- Fake and SQLite semantics remain aligned.
+- Tier 0 runs for every relevant backend/control-plane change.
+- Tier 1 runs after execution, reasoning, verification, runtime resolution,
+  capacity, workspace, or publication changes.
+- Paid provider tests stay opt-in, never an ordinary per-push cost.
+
+### Run evidence
+
+Capture:
+
+- exact brief, fixture version, and orchestrator Git SHA/version;
+- reasoner provider/model and agent runtime/provider/model;
+- plan/cycle/goal/task/run/attempt IDs;
+- timeline, retries, capacity waits, and interventions;
+- usage with provenance when available;
+- verification evidence and Git refs/disposition;
+- defects, fixes, and comparison with previous runs.
+
+Use existing snapshot/bundle exporters as the canonical format.
+
+### Documentation discipline
+
+- Architecture docs describe implemented behavior only.
+- `ROADMAP.md` contains future work plus explicit completed foundations, not
+  historical implementation plans.
+- Verified defects live in
+  [`docs/architecture/known-issues.md`](docs/architecture/known-issues.md).
+- Historical plans/analyses stay under `docs/history/`.
+- Unimplemented features never appear as current architecture.
+- Domain changes require a decision-log entry and explicit unfreeze.
+
+### Scope discipline
+
+- Prefer changes that improve installability, first-run success, operator trust,
+  recovery, or verified output.
+- Do not add endpoints, abstractions, schedulers, or telemetry for completeness.
+- Change one fixture variable per run series so evidence stays comparable.
 
 ---
 
-## Now — CI and merge hygiene [CI]
-
-Blocking or near-blocking issues on the current PR.
-
-### 1. Verification environment determinism — watch item
-Two determinism bugs in `LocalVerificationExecutor` were found and fixed on
-this branch: a login-shell PATH reset breaking interpreter resolution, and
-interpreter/test-cache byproducts (`__pycache__`, `.pytest_cache`, `*.pyc`)
-leaking into frozen verification bundles. Both are fixed; keep watching for
-further machine-dependent assumptions (locale, timezone, ambient env vars) the
-executor might still inherit from the host shell.
-
-## Now — agent isolation and prompt fidelity [WALK]
-
-The walkthrough proved agents escape cooperative isolation: worktree + cwd is a
-convention, not a boundary. The post-run guard (this branch) is DETECTION; these
-items are prevention, cheapest first.
-
-### 2. Pointer-free attempt workspaces
-The per-attempt git worktree's `.git` is a pointer file naming the main repo's
-absolute path — the second breadcrumb (the first, full env inheritance, was
-closed by the allowlisted child env in the 2026-07-20 accelerate run). Evaluate
-`git clone --shared` (or scissor the pointer) for attempt workspaces so no
-on-disk path names the main repository; keep the branch/merge semantics
-identical. Decide against the worktree-prune/audit machinery decision 45 added
-before changing the mechanism. Evaluation done 2026-07-20: gitfile scissoring
-is ruled out (corrupts worktree bookkeeping); the candidates are
-`GIT_DIR`+per-attempt-index redirection (keeps in-process `--no-ff` merges,
-requires branch-ref-only audit) vs `git clone --shared` (push-based merges,
-alternates still name the main repo). Both obsolete decision 45's
-worktree-based audit — implementation awaits an explicit decision.
-
-## Now — test foundation and boundary cleanup [PR20]
-
-Sequencing matters: strengthen tests before refactoring domain/app code so the
-refactors below have a safety net.
-
-### 3. Clarify domain/application boundaries
-(Item "harden the test foundation" closed 2026-07-20: API-layer coverage landed
-in PR #26/#27, the SSE streaming gap is closed by a live-socket uvicorn test,
-and `src/app/verification.py` was confirmed single-owner — its charter is
-frozen test-BUNDLE validation (pure, handler-only caller), not command
-execution, which lives in `VerificationExecutor`.)
-
-Decision briefs for the bullets below were prepared in the 2026-07-20
-accelerate run (router-logic inventory with line refs; `app/ports.py` is a
-justified re-export facade — collapsing it would invert the dependency arrow;
-`observations.py` currently has zero live consumers). The decisions remain
-open:
-- Audit `src/api/routers/plans.py` (1088 lines) for embedded use-case logic
-  (branching, validation, orchestration) that belongs in `src/app/`; routers
-  are supposed to be thin per the architectural invariants.
-- Decide whether app-layer ports (`src/app/ports.py`, 158 lines) are justified
-  as a separate layer from domain ports, or whether they should collapse into
-  the domain ports package.
-- Decide whether `src/app/observations.py` (201 lines) is still needed, or
-  whether domain telemetry + domain events (outbox/agent_events) already
-  cover its job.
-
-### 4. Refactor orchestration (after 3 lands)
-- Decompose `src/domain/aggregates/planner_orchestrator.py` (882 lines) — the
-  single-authority aggregate is correct as a boundary, but its size makes
-  review and change risky; split by responsibility (transitions vs.
-  navigation vs. gate logic) without breaking the "only caller of
-  Goal/Task transitions" invariant.
-- Remove legacy/backward-compat code (e.g. the compat branches in
-  `src/app/use_cases/advance_plan.py` and similar call sites) — the test
-  hardening that protects the behavior being deleted landed 2026-07-20.
-- Formalize abrupt pause/resume semantics: define precisely when a pause must
-  interrupt a running task attempt vs. merely stop new claims, and what
-  "paused goal" means for a goal mid-promotion. Decision 44's Git-promotion
-  reservation already carves out that pause remains legal during a
-  reservation — this item is the general policy the reservation is a special
-  case of.
-
-### 5. Refactor handlers, in dependency order (after 3–4)
-`execution_handler.py` (1249 lines) first, then `planning_handler.py` (514
-lines) — execution is upstream of planning in the dependency graph and carries
-more risk. Share only mechanisms proven common to both (not speculative
-abstraction). Refactoring prompts already exist from the PR #20 review; do not
-start until item 3's decisions land — the API-layer safety net exists; the point is
-a safety net before touching 1700+ lines of handler code.
-
-## Next — tooling and documentation consolidation [PR20]
-
-### 6. DB-schema-inspection → diagram tool
-Idea surfaced during the migration 0009 review: a small tool that inspects the
-live SQLite schema and emits a diagram (tables, FKs, indexes) so
-`docs/architecture/data-model.md` can be checked against the DB instead of
-hand-maintained. Evidence gate checked 2026-07-20: the doc HAD drifted (two
-migrations, 0009+0010 — two tables and ~20 columns) and was hand-fixed in the
-same run (~30 min). One lapse doesn't evidence recurring drift; the tool stays
-unbuilt unless the doc drifts again.
-
-### 7. Oversized graphify skill review
-Tracked separately from this roadmap: the graphify skill review left comments
-against outdated diff locations (the file moved under later commits). Not an
-architecture item — a skill-repo hygiene follow-up.
-
-## Then — operational visibility [LIVE / PR20]
-
-10. **Truthful usage scopes [LIVE]** — split planner LLM usage from
-    child-agent usage; add coverage/provenance fields and reasoning tokens.
-    Partially landed: decision 45 gives planner/child/combined coverage with
-    "unavailable" distinct from zero — re-verify remaining gaps against
-    known-issues.md before treating this as done.
-11. **Run timing and pause visibility [LIVE]** — expose run_id, started time,
-    elapsed, last heartbeat, deadline, and whether pause is merely waiting for
-    the current run boundary. Decision 45 hydrates attempt-history before SSE
-    and decision 46 added typed cycle/proposal/draft/gate/block exports on
-    plan detail; known-issues.md still flags the read model exposes active
-    run start rather than the promoted lease deadline — that gap is this
-    item's remaining scope.
-12. **Dead-letter / operator quarantine policy** — known-issues.md still lists
-    a malformed plan that raises before any save as reclaimable-first by
-    oldest `updated_at`; no quarantine policy for repeated unexpected
-    exceptions yet.
-13. **Execution ledger `run_kind` column** — attempts have global UUIDs and
-    monotonic absolute numbers, but `run_kind` isn't promoted to a dedicated
-    SQL column (known-issues.md).
-14. **`workspace gc` CLI for dead branches** — decision 45 landed conservative
-    worktree pruning/audit at worker startup, closing the original "leaks
-    forever" failure mode; an operator-triggered `workspace gc` for branches
-    left over from long-dead plans may still be worth adding. Re-verify
-    against known-issues.md's "not yet automated everywhere" note before
-    committing to scope.
-15. **Retention** — `outbox`, `agent_events`, `plan_chat_messages`, and now
-    authoritative test-checkpoint branch refs (known-issues.md) grow forever.
-    Add a `db prune` CLI command plus a checkpoint-ref retention policy.
-16. **SSE durability** — SSE is bounded and non-durable; reconnect relies on
-    client refetch. Relay/event-table retention remains operational work
-    (known-issues.md).
-16a. **Frontend live runtime-log viewer** — the backend now exposes the RAW
-    per-attempt agent stdout/stderr as a live SSE tail at
-    `GET /api/plans/{id}/attempts/{attempt_id}/log/stream` (distinct from the
-    `/api/events` telemetry feed; `follow_attempt_log` in `process_supervisor.py`,
-    with rotation-reset + `Last-Event-ID` resume). Still needed: a frontend
-    component that opens this stream and renders live stdout/stderr for an
-    attempt in the Activity/Agents view (replacing the current poll of the
-    snapshot `…/log` endpoint), plus `npm run generate:api` to pick up the new
-    route in the generated client.
-
-## Then — project ownership and output isolation [LIVE]
-
-17. Require a `project_id` on plans and route through a project workspace
-    resolver.
-18. Store repositories under the orchestrator home at
-    `projects/<immutable-project-id-or-slug>/repo`; do not use a mutable
-    display name as the filesystem identity.
-19. Define migration or quarantine behavior for the legacy global
-    workspace-repo.
-20. Add project delete guards for active plans and dual-project isolation
-    tests.
-21. Add an explicit plan output disposition so DONE says whether the branch
-    was merged, opened as a PR, kept, or discarded. Partially informed by
-    known-issues.md: `open_pr`/`merge` dispositions already record the
-    reference of an externally-completed operation; there is still no
-    authenticated forge port — see the deferred-features table.
-
-## Later — evidence-gated capability work
-
-Take these up only when real usage demonstrates the need.
-
-22. **Multi-worker deployment, documented + truth-tested** [EVO] — add a
-    two-worker truth test and operator docs now that decision 45's stale-claim
-    startup handling exists.
-23. **Registry-defined execution profiles and coverage preflight** [LIVE] —
-    let users create stable execution-role profiles and capability policies in
-    the registry instead of keeping the TDD role vocabulary in
-    `_ROLE_CAPABILITY`. Contracts should reference versioned role/profile ids;
-    the settings UI should show a role × task-capability coverage matrix;
-    cycle review should warn about uncovered combinations before enrichment;
-    registry edits should expose their impact on active/future contracts
-    without silently rebinding work. Decision 47 already preserves explicit
-    role-capability checks and transactional retry binding — build on that,
-    don't replace it.
-24. **Worker/scheduler health surface** [MRF] — expose last-heartbeat, current
-    claims, and restart counts (a `/api/workers` endpoint). The lease is the
-    recovery *mechanism*; this is *visibility*.
-25. **Launcher / OS supervision** [MRF] — a thin, idempotent supervisor
-    (systemd or process manager) that restarts a dead worker; the lease
-    handles the takeover. Document failure modes; no distributed consensus.
-26. **pi NDJSON streaming** [MRF] — partially landed 2026-07-20: the pi
-    runner now runs `--mode json`, the NDJSON stream tails into the bounded
-    per-attempt runtime log (atomic rotation; readable mid-run via
-    `GET /plans/{id}/attempts/{id}/log`), tool/usage events are promoted to
-    agent_events, and the final assistant message becomes the task output
-    (`src/infra/runtime/pi_protocol.py`). Remaining scope is only the full
-    rpc/stdio handshake if bidirectional control is ever needed.
-27. **Redis claim path** [MRF] — swap the SQLite lease transport behind the
-    repository port *only if* multi-machine workers become real. Deliberately
-    unnecessary for local-first. Re-evaluated 2026-07-22 alongside goal-level
-    parallelism landing (item 23's old slot, now implemented — see
-    [ADR-001](docs/decisions/adr-001-concurrency-lease.md)): the SQLite
-    `goal_leases` table already delivers real cross-*process* concurrency on
-    one machine, which is what actually needed solving; Redis only becomes
-    the right answer for cross-*machine* deployment, a different problem
-    this system's single-SQLite-file persistence model doesn't attempt to
-    solve either. Still deliberately unnecessary until multi-machine is the
-    actual goal. Re-confirmed 2026-07-23 (domain unfreeze #14, symmetric
-    per-goal leases + the in-process goal-worker pool): real single-process
-    concurrency needed no new coordination primitive either, just removing
-    the plan-level lease's execution-dispatch privilege — another point in
-    favor of "this problem was never actually about the transport."
-28. **CI pipeline split** [MRF / CI] — per-PR: unit + integration + dummy e2e +
-    ruff/mypy; nightly/merge-only: the paid real-model smoke. Still open —
-    the split matters, don't burn money per push.
-29. **Frontend E2E (Playwright)** [MRF, [archived plan](docs/history/planning/2026-06-15-playwright-e2e-plan-deferred.md)] — one full-cycle browser walk against the dry-run stack; the archived plan targets the old API and needs rewriting against the current routes.
-30. **Unified telemetry store** [MRF] — one queryable persistence for outbox +
-    agent_events + API request logs. Build on the existing two streams; **no
-    second event system**.
-31. **Proactive goal-scope-disjointness guard** [MRF, ADR-001 follow-up] —
-    goal-level parallelism (implemented 2026-07-22, domain unfreeze #13;
-    made fully symmetric 2026-07-23, domain unfreeze #14) ships with only a
-    REACTIVE safety net for concurrent goals touching overlapping files (the
-    existing `goal_promotion_failure` block, hit at git-merge time — now
-    per-goal, see `Plan.goal_blocks`, so one goal's merge conflict no longer
-    stalls unrelated goals either). A proactive guard would check, at
-    goal-enrichment time, whether a goal's frozen `allowed_scope` overlaps
-    any OTHER concurrently-reachable goal's (no dependency edge either way)
-    and reject/re-prompt before either ever runs. Deliberately deferred, not
-    an oversight: the failure-UX decision (auto-reprompt the reasoner vs.
-    open a block vs. just log) isn't settled, and "could legitimately run
-    concurrently" is a static approximation that could produce false-positive
-    friction on a deployment that never actually contends (single worker
-    pool, e.g.) — needs real usage evidence first, same as the other
-    evidence-gated items on this list. Unfreeze #13's in-process goal-worker
-    pool (`max_concurrent_goals`, default 4, not load-tested) makes real
-    contention MORE likely to actually occur in a live deployment than #12's
-    additive shape did, which raises the value of real usage evidence here
-    but still doesn't settle the failure-UX question on its own — the
-    dependency stays open.
-
-32. **Devcontainer runtime parity** [WALK] — the live container carries
-    runtimes the `.devcontainer` config never installs (ad-hoc installs, lost
-    on every rebuild): `codex` (the acceleration flow's primary implementer),
-    `grok`, `mimo`, the `gh` CLI (used for all PR/issue automation), and
-    `bubblewrap`. Add them to the Dockerfile with pinned versions; persist
-    their auth/config dirs (`~/.codex`, `~/.grok`, `~/.mimocode`, gh auth)
-    via mounts like the existing `~/.orchestrator` pattern; for bubblewrap
-    also add the container `runArgs` (seccomp profile / userns capability)
-    without which it cannot create namespaces at all. While there: drop the
-    stale `AGENT_MODE` terminal env (the config key replaced it) and align
-    the image's Python with CI (3.12). `gemini` remains a factory
-    `runtime_type` with no binary anywhere — decide to provision or delist it.
-33. **True FS sandboxing per attempt (bubblewrap)** [WALK] — item 32's
-    devcontainer fix (2026-07-22: seccomp profile + AppArmor policy for safe
-    nested bubblewrap) unblocked this: bwrap 0.11.0 now creates the
-    unprivileged user namespace successfully in this container (re-verified
-    live, 2026-07-22 — `--unshare-user` + a bound writable worktree + real
-    read-only enforcement elsewhere, `pi`/`claude` both resolve inside the
-    sandbox). The `Sandbox` port + `NoSandbox` adapter landed the same day
-    (peer of `AgentRunner`, explicitly not a domain concept — the frozen
-    domain and `ExecutionHandler` never see this type; `wrap(cmd, policy) ->
-    cmd` + `probe()`, consumed blindly by the CLI runners/
-    `supervise_process`; probe status surfaces through `GET
-    /api/runner/status` alongside the binary probes). Remaining scope is
-    purely the real `BubblewrapSandbox` adapter: bind the attempt worktree
-    rw, toolchain ro, tmpfs HOME with the CLI's auth copied in, network on;
-    config-gated (default off, mirrors `agent_runner.mode`) so nothing
-    changes for an existing real-mode setup until explicitly enabled; loud
-    `sandbox=disabled` fallback when the probe fails, never a silent
-    downgrade or a refusal to run. Items 2–3 (pointer-free workspaces, a
-    scrubbed env) remain open hardening follow-ups, not blockers for a first
-    `--ro-bind / /`-shaped cut.
-34. **Per-role model quality bindings** [WALK] — the free reasoning model
-    follows task descriptions over role instructions; the registry already
-    binds provider/model per agent, so route the test_author role to a
-    stronger model once real usage justifies the spend. Pairs with the
-    registry-profiles item above. NARROWED (2026-07-25): the *mechanism* now
-    exists — tier-ordered, throttle-aware selection picks among
-    capability-satisfying agents by `AgentSpec.model_role`
-    (`execution.model_role_order`), and the remaining scope is purely the
-    operator-facing decision of which role gets which tier plus the spend to
-    back it.
-35. **Architect/enrichment granularity contract** [WALK] — define goals as
-    parallel workstreams and their tasks as meaningful sequential deliverables;
-    TDD RED/GREEN remains an internal task lifecycle, not separate roadmap work.
-    Add deterministic overlap/phase-only linting plus a pre-execution cost
-    estimate, without imposing a hard task-count ceiling that would prevent
-    ambitious projects. The 2026-07-24 live walkthrough demonstrated the gap:
-    test-only goals duplicated feature goals, then enrichment split small
-    cohesive behavior into basic/edge/integration tasks, multiplying real agent
-    sessions.
-
-## Deferred features — shelved with designed seams [LEG]
-
-Documented in full, with reintroduction designs, in [docs/legacy/pre-refactor-backend.md](docs/legacy/pre-refactor-backend.md):
-
-| Feature | Seam that preserves it |
-|---|---|
-| GitHub PR gate / authenticated forge port (orchestrator opens PRs, humans merge) | The `Workspace` port — `open_pr`/`merge` dispositions already record external references (known-issues.md); no authenticated push/PR write exists yet |
-| Project spec governance (`propose → diff → apply`) | Two-tier config + the `projects` table; also blocks a persisted `ProjectSpec` for cycle-wide verification commands (known-issues.md) |
-| Decision gate / decision history | Genuine whitespace — design preserved in the legacy doc |
-| Env provisioner (uv/Bun) + framework questionnaire | Config fields first, provisioning later [MRF] |
-| Repository indexing / symbol graph / context packaging | Never built; idea preserved |
-| Replay & audit tooling (reconstruct a run from events) | Outbox + agent_events already carry the data |
-
-## Do-not-do list [EVO]
-
-Tempting improvements explicitly rejected — with reasons — so they aren't re-litigated by default:
-
-- **Temporal / DBOS / Celery / Redis now** — this is a local-first tool whose deployment story is one SQLite file; a workflow engine adds a server dependency and makes the human-gated cycle machine *harder* to test. Re-evaluate only if a multi-executor pool starts re-inventing workflow versioning.
-- **Task-level parallelism now** — no throughput evidence; it breaks the plan-document CAS model for a speculative gain.
-- **Splitting the plan JSON into relational goal/task rows** — the single document + the dual-backend truth tests are the system's core asset.
-- **WebSockets / SSE replay on reconnect** — the frontend refetches state on connect; `event_id` dedup covers the rest.
-- **A continuous domain reconciler** — decision 45 deliberately solved operational recovery (stale claims, provider circuits, truthful timelines) without reintroducing one; don't propose it again without new evidence the lease-driven model is insufficient.
-
----
-
-*History note: the pre-refactor roadmap (Redis topology, task-manager/reconciler, PR workflows) is preserved verbatim at [docs/history/pre-refactor/roadmap.md](docs/history/pre-refactor/roadmap.md). It describes a system that no longer exists — read it as context, not as a plan. The nine-phase-machine-era roadmap this file replaces is recoverable from git history on this branch if needed for comparison.*
+Historical roadmaps and analyses remain under [`docs/history/`](docs/history/).
+They are evidence, not the current execution order.

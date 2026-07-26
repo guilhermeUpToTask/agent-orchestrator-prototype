@@ -76,6 +76,7 @@ async def run_worker_forever(
         container.capability_repo,
         container.clock,
         container.provider_capacity_policy,
+        container.planning_artifacts,
     )
     runner_mode = validate_agent_runner_mode(container.config_store)
     reconciled = reconcile_stale_attempts(container.new_unit_of_work(), container.clock)
@@ -131,6 +132,8 @@ async def run_worker_forever(
                 capacity=container.provider_capacity_policy,
                 providers=container.provider_repo,
                 routing=container.routing_policy,
+                repository_reader=container.repository_reader,
+                planning_artifacts=container.planning_artifacts,
             )
             if result[0] == "lease_lost":
                 log.info(

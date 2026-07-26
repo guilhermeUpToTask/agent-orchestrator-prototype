@@ -5,9 +5,11 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from src.domain.entities.execution_contracts import (
+    ContractCriterion,
     TaskContract,
     TestBundle,
     VerificationEvidence,
+    VerificationStrategy,
 )
 from src.domain.errors.tasks_errors import InvalidTransitionError
 from src.domain.value_objects.lifecycle import FailureKind, Status, TERMINAL
@@ -87,8 +89,24 @@ class Task(BaseModel):
         self.cycle_attempt = 0
         self.retry_not_before = None
 
-    def semantic_edit(self, *, name: str | None = None, description: str | None = None) -> None:
-        """Revise executable meaning and invalidate revision-bound artifacts."""
+    def semantic_edit(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        acceptance_criteria: list[ContractCriterion] | None = None,
+        verification_strategy: VerificationStrategy | None = None,
+    ) -> None:
+        """Revise executable meaning and invalidate revision-bound artifacts.
+
+        Un-freeze #17 widened this to the contract fields that change what
+        "correct" MEANS. Each one makes the authored tests stop describing the
+        task: criteria are what `freeze_test_bundle` maps to checks, and the
+        strategy decides what evidence is even meaningful. Fields that only
+        change how correctness is CHECKED go to `amend_contract` instead, which
+        keeps the tests — re-authoring a suite to fix a typo in a command is what
+        made repairing a contract cost a whole replan.
+        """
         self._guard({Status.PENDING, Status.FAILED}, Status.PENDING)
         if name is not None:
             self.name = name
@@ -98,17 +116,84 @@ class Task(BaseModel):
         self.result = None
         self.revision += 1
         if self.contract is not None:
-            self.contract = self.contract.model_copy(
-                update={
-                    "revision": self.revision,
-                    "objective": self.description or self.name,
-                }
+            update: dict[str, object] = {
+                "revision": self.revision,
+                "objective": self.description or self.name,
+            }
+            if acceptance_criteria is not None:
+                update["acceptance_criteria"] = acceptance_criteria
+            if verification_strategy is not None:
+                update["verification_strategy"] = verification_strategy
+            # A full revalidation, not a blind copy: an edit must not be able to
+            # write a contract shape enrichment itself could never produce.
+            self.contract = TaskContract.model_validate(
+                {**self.contract.model_dump(), **update}
             )
         if self.test_bundle is not None:
             self.test_bundle.invalidate("semantic task edit")
         self.verification_evidence = []
         self.cycle_attempt = 0
         self.retry_not_before = None
+
+    def amend_contract(
+        self,
+        *,
+        allowed_scope: list[str] | None = None,
+        forbidden_scope: list[str] | None = None,
+        verification_commands: list[str] | None = None,
+        goal_criterion_ids: list[str] | None = None,
+        required_capabilities: list[str] | None = None,
+    ) -> None:
+        """Repair HOW correctness is checked, without re-authoring the tests.
+
+        Deliberately does NOT bump the revision or touch the `TestBundle`: none
+        of these fields changes what the task must do, so the authored tests
+        still describe it. That is the whole point — the live repair was a
+        verification command naming `tests/test_greet.py` in a repository whose
+        file is `tests/test_greeter.py`, and paying for a full test re-authoring
+        to fix one filename is why a replan looked cheaper than an edit.
+
+        Accepted evidence is cleared only when a previously accepted candidate
+        might no longer qualify: the commands changed (so the recorded runs are
+        stale), or the scope NARROWED (so an accepted candidate may have touched
+        a path that is now excluded). Widening is provably safe and keeps it.
+        """
+        self._guard({Status.PENDING, Status.FAILED}, Status.PENDING)
+        if self.contract is None:
+            raise ValueError("task has no contract to amend")
+
+        update: dict[str, object] = {}
+        if allowed_scope is not None:
+            update["allowed_scope"] = allowed_scope
+        if forbidden_scope is not None:
+            update["forbidden_scope"] = forbidden_scope
+        if verification_commands is not None:
+            update["verification_commands"] = verification_commands
+        if goal_criterion_ids is not None:
+            update["goal_criterion_ids"] = goal_criterion_ids
+        if required_capabilities is not None:
+            update["required_capabilities"] = required_capabilities
+        if not update:
+            return
+
+        narrowed = allowed_scope is not None and not set(allowed_scope) >= set(
+            self.contract.allowed_scope
+        )
+        forbade_more = forbidden_scope is not None and not set(forbidden_scope) <= set(
+            self.contract.forbidden_scope
+        )
+        commands_changed = (
+            verification_commands is not None
+            and verification_commands != self.contract.verification_commands
+        )
+
+        self.contract = TaskContract.model_validate({**self.contract.model_dump(), **update})
+        self.status = Status.PENDING
+        self.result = None
+        self.cycle_attempt = 0
+        self.retry_not_before = None
+        if narrowed or forbade_more or commands_changed:
+            self.verification_evidence = []
 
     def clear_backoff(self) -> None:
         self.retry_not_before = None

@@ -40,7 +40,13 @@ from typing import Callable
 
 import structlog
 
-from src.app.ports import AgentEventSink, Sandbox, TaskFailed, WorkspaceHandle
+from src.app.ports import (
+    AgentEventSink,
+    PriorAttemptFeedback,
+    Sandbox,
+    TaskFailed,
+    WorkspaceHandle,
+)
 from src.app.observations import ObservationRepository
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.ia_model import IAModel
@@ -223,6 +229,7 @@ class CatalogAgentRunner:
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
         sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
     ) -> None:
         self._config_store = config_store
         self._provider_repo = provider_repo
@@ -231,6 +238,8 @@ class CatalogAgentRunner:
         self._orchestrator_home = orchestrator_home
         self._observation_repository = observation_repository
         self._sandbox = sandbox
+        # Why the previous candidate was rejected, so a retry is not a rerun.
+        self._prior_attempt_feedback = prior_attempt_feedback
         self._dummy = DryRunAgentRunner()
 
     def _timeout_seconds(self) -> int:
@@ -266,6 +275,7 @@ class CatalogAgentRunner:
                 orchestrator_home=self._orchestrator_home,
                 observation_repository=self._observation_repository,
                 sandbox=self._sandbox,
+                prior_attempt_feedback=self._prior_attempt_feedback,
             )
         if runtime == "claude":
             return ClaudeCodeRunner(
@@ -277,6 +287,7 @@ class CatalogAgentRunner:
                 orchestrator_home=self._orchestrator_home,
                 observation_repository=self._observation_repository,
                 sandbox=self._sandbox,
+                prior_attempt_feedback=self._prior_attempt_feedback,
             )
         return GeminiRunner(
             api_key=api_key,
@@ -287,6 +298,7 @@ class CatalogAgentRunner:
             orchestrator_home=self._orchestrator_home,
             observation_repository=self._observation_repository,
             sandbox=self._sandbox,
+            prior_attempt_feedback=self._prior_attempt_feedback,
         )
 
     async def run(
@@ -331,6 +343,7 @@ def build_agent_runner(
     orchestrator_home: Path | None = None,
     observation_repository: ObservationRepository | None = None,
     sandbox: Sandbox | None = None,
+    prior_attempt_feedback: PriorAttemptFeedback | None = None,
 ) -> AgentRunner:
     """`secret_store` is a thunk: dry-run mode must never construct it (it
     fails closed on a missing master key, which dry-run does not have).
@@ -350,4 +363,5 @@ def build_agent_runner(
         orchestrator_home,
         observation_repository,
         sandbox,
+        prior_attempt_feedback,
     )

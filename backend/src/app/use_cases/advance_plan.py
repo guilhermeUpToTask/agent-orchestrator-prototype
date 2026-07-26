@@ -26,6 +26,8 @@ from src.app.handlers.base import PhaseHandler, Signal
 from src.app.handlers.execution_handler import ExecutionHandler
 from src.app.handlers.gate_handler import GateHandler
 from src.app.ports import (
+    PlanningArtifactStore,
+    RepositoryReader,
     AgentEventSink,
     AgentRunner,
     Clock,
@@ -61,9 +63,20 @@ class PlanDispatcher:
         verifier: VerificationExecutor | None = None,
         capacity: ProviderCapacityPolicy | None = None,
         providers: ModelProviderRepository | None = None,
+        repository_reader: RepositoryReader | None = None,
+        planning_artifacts: PlanningArtifactStore | None = None,
     ) -> None:
         self._execution = ExecutionHandler(
-            runner, agents, workspace, event_sink, clock, verifier, capacity, providers
+            runner,
+            agents,
+            workspace,
+            event_sink,
+            clock,
+            verifier,
+            capacity,
+            providers,
+            repository_reader=repository_reader,
+            planning_artifacts=planning_artifacts,
         )
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)

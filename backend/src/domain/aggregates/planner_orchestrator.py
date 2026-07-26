@@ -489,18 +489,41 @@ class Plan(BaseModel):
         return resolution
 
     def retry_planning_stage(self, resolved_at: datetime) -> None:
-        """Resolve a cyclic reasoner failure and requeue the same planning stage."""
+        """Resolve a reasoner failure and requeue the same planning stage.
+
+        Looks in `goal_blocks` as well as the scalar `block`. Goal enrichment
+        knows which goal it was working on, so `planning_handler` files its
+        failure per-goal (unfreeze #14) — and this method reading only the scalar
+        meant the block advertised `retry_stage` as a legal resolution that
+        could never reach it: a guaranteed 422 on the operator's one obvious move.
+        Cycle architecture has no goal and keeps the scalar block.
+        """
+        block = self.block if self.block is not None and self.block.active else None
+        if block is None or block.kind != "reasoner_failure":
+            block = next(
+                (
+                    candidate
+                    for candidate in self.goal_blocks.values()
+                    if candidate.active and candidate.kind == "reasoner_failure"
+                ),
+                None,
+            )
         if (
-            self.block is None
-            or not self.block.active
-            or self.block.kind != "reasoner_failure"
-            or "retry_stage" not in self.block.legal_resolutions
+            block is None
+            or not block.active
+            or block.kind != "reasoner_failure"
+            or "retry_stage" not in block.legal_resolutions
         ):
             raise InvalidEditError("plan is not blocked on a retryable planning stage")
-        self.block.resolution = "retry_stage"
-        self.block.resolved_at = resolved_at
+        block.resolution = "retry_stage"
+        block.resolved_at = resolved_at
         self.clear_planning_retry()
-        self.status = PlanStatus.RUNNING
+        if self.active_cycle is not None:
+            # per-goal blocks feed the derived root status; recompute rather than
+            # asserting RUNNING over a plan that may still have other blocks
+            self._recompute_cyclic_status(resolved_at)
+        else:
+            self.status = PlanStatus.RUNNING
 
     def retry_agent_binding(
         self,
@@ -1047,6 +1070,10 @@ class Plan(BaseModel):
             raise InvalidEditError("only one active cycle is allowed")
         self._resolve_review_gate(gate_id, revision, "approve", resolved_at)
         draft.approved_at = resolved_at
+        # Retain the approved intent ON the cycle before clearing it from the
+        # plan: enrichment happens after activation and must honour the intent's
+        # scope/constraints/exclusions, which were previously thrown away here.
+        cycle.approved_intent = self.intent_proposal
         self.cycles.append(cycle)
         self.intent_proposal = None
         self.cycle_draft = None

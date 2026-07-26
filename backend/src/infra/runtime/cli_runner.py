@@ -30,7 +30,15 @@ from pathlib import Path
 
 import structlog
 
-from src.app.ports import AgentEventSink, Sandbox, SandboxPolicy, TaskFailed, WorkspaceHandle
+from src.app.ports import (
+    AgentEventSink,
+    PriorAttemptFeedback,
+    PriorAttemptRejection,
+    Sandbox,
+    SandboxPolicy,
+    TaskFailed,
+    WorkspaceHandle,
+)
 from src.app.runtime_failures import safe_runtime_tail
 from src.infra.runtime.sandbox import NoSandbox
 from src.app.observations import (
@@ -119,7 +127,28 @@ def _run_role_label(task: Task, spec: AgentSpec) -> str:
     return spec.role
 
 
-def build_task_prompt(task: Task, spec: AgentSpec) -> str:
+def _render_prior_rejection(prior: PriorAttemptRejection | None) -> str:
+    """What the orchestrator rejected last time, and the instruction to fix it.
+
+    Without this a retry is the same prompt, the same contract and a clean
+    worktree — so it reproduces the same failure, at full provider cost. The
+    reasons are the orchestrator's own independent verdict, not the agent's
+    self-report, which is exactly what makes them worth stating.
+    """
+    if prior is None or not prior.reasons:
+        return ""
+    reasons = "\n".join(f"- {reason}" for reason in prior.reasons)
+    return (
+        f"\n\n## Previous attempt ({prior.attempt_number}) — rejected\n"
+        "The orchestrator independently rejected the previous candidate for:\n"
+        f"{reasons}\n"
+        "Fix these specifically. Do not repeat the same approach."
+    )
+
+
+def build_task_prompt(
+    task: Task, spec: AgentSpec, *, prior_rejection: PriorAttemptRejection | None = None
+) -> str:
     """Markdown task contract handed to the CLI agent. Project-level conventions
     live in the workspace AGENTS.md — not here — so they apply consistently
     across runtimes."""
@@ -146,7 +175,7 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
         + str(task.attempt)
     )
     if task.contract is None:
-        return prompt
+        return prompt + _render_prior_rejection(prior_rejection)
     contract = task.contract
     criteria = "\n".join("- `" + c.id + "`: " + c.description for c in contract.acceptance_criteria)
     allowed = "\n".join("- `" + path + "`" for path in contract.allowed_scope)
@@ -176,6 +205,7 @@ def build_task_prompt(task: Task, spec: AgentSpec) -> str:
         + contract.verification_strategy.value
         + "`\n\nStage expectations:\n- "
         + expectation
+        + _render_prior_rejection(prior_rejection)
     )
 
 
@@ -191,11 +221,16 @@ class CliAgentRunner(ABC):
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
         sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._provider_id = provider_id
         self._model_id = model_id
         self._observation_repository = observation_repository
+        # Why the last candidate was rejected. Constructor-injected because the
+        # AgentRunner domain port carries no context channel and widening it
+        # would be a domain change.
+        self._prior_attempt_feedback = prior_attempt_feedback
         # ROADMAP item 33: NoSandbox is today's behavior and the permanent
         # fallback, not a placeholder — real confinement (item 34) is a
         # drop-in adapter swap here, never a change to this call site.
@@ -221,6 +256,20 @@ class CliAgentRunner(ABC):
 
     @abstractmethod
     def _env(self) -> dict[str, str]: ...
+
+    def _prior_rejection(
+        self, plan_id: str | None, goal_id: str | None, task: Task
+    ) -> PriorAttemptRejection | None:
+        """Best-effort: feedback improves a retry, it never gates one."""
+        if self._prior_attempt_feedback is None or not plan_id or not goal_id:
+            return None
+        try:
+            return self._prior_attempt_feedback.last_rejection(
+                plan_id, goal_id, task.id, task_revision=task.revision
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("agent.prior_feedback_unavailable", task_id=task.id, error=str(exc))
+            return None
 
     def _task_output(self, stdout: str) -> str:
         """The human-readable outcome persisted as TaskResult.output.
@@ -257,7 +306,9 @@ class CliAgentRunner(ABC):
         attempt_number = (
             int(attempt_number_value) if attempt_number_value is not None else task.attempt
         )
-        prompt = build_task_prompt(task, spec)
+        prompt = build_task_prompt(
+            task, spec, prior_rejection=self._prior_rejection(plan_id, goal_id, task)
+        )
         observations: list[TelemetryObservation] = []
 
         await self._emit(
@@ -560,6 +611,7 @@ class PiAgentRunner(CliAgentRunner):
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
         sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
     ) -> None:
         if backend not in PI_BACKEND_ENV_VAR:
             raise ValueError(
@@ -574,6 +626,7 @@ class PiAgentRunner(CliAgentRunner):
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
             sandbox=sandbox,
+            prior_attempt_feedback=prior_attempt_feedback,
         )
         self._api_key = api_key
         self._model = _pi_model_name(model, provider_id)
@@ -602,6 +655,20 @@ class PiAgentRunner(CliAgentRunner):
 
     def _env(self) -> dict[str, str]:
         return {**_base_child_env(), PI_BACKEND_ENV_VAR[self._backend]: self._api_key}
+
+    def _prior_rejection(
+        self, plan_id: str | None, goal_id: str | None, task: Task
+    ) -> PriorAttemptRejection | None:
+        """Best-effort: feedback improves a retry, it never gates one."""
+        if self._prior_attempt_feedback is None or not plan_id or not goal_id:
+            return None
+        try:
+            return self._prior_attempt_feedback.last_rejection(
+                plan_id, goal_id, task.id, task_revision=task.revision
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("agent.prior_feedback_unavailable", task_id=task.id, error=str(exc))
+            return None
 
     def _task_output(self, stdout: str) -> str:
         # --mode json makes stdout an NDJSON event stream; persist the final
@@ -632,6 +699,7 @@ class ClaudeCodeRunner(CliAgentRunner):
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
         sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
     ) -> None:
         super().__init__(
             timeout_seconds,
@@ -640,6 +708,7 @@ class ClaudeCodeRunner(CliAgentRunner):
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
             sandbox=sandbox,
+            prior_attempt_feedback=prior_attempt_feedback,
         )
         self._api_key = api_key
         self._model = model
@@ -673,6 +742,7 @@ class GeminiRunner(CliAgentRunner):
         orchestrator_home: Path | None = None,
         observation_repository: ObservationRepository | None = None,
         sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
     ) -> None:
         super().__init__(
             timeout_seconds,
@@ -681,6 +751,7 @@ class GeminiRunner(CliAgentRunner):
             orchestrator_home=orchestrator_home,
             observation_repository=observation_repository,
             sandbox=sandbox,
+            prior_attempt_feedback=prior_attempt_feedback,
         )
         self._api_key = api_key
         self._model = model

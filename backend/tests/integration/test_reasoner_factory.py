@@ -137,6 +137,15 @@ def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):
     reasoner = build(container)
     assert isinstance(reasoner, OpenAIReasoner)
     assert reasoner._client.model == "gpt-x"  # the provider model string
+    # Enrichment gets the SAME configured budget as conversation. It used to be
+    # pinned at 4 with no way to raise it, and the GOAL_ENRICHMENT profile hands
+    # the model six read tools: observed live, every turn went to reads and the
+    # session died "exceeded 4 turns without submitting" — leaving no turn for
+    # the repair the submit handler's rejections depend on.
+    assert reasoner._enrich_max_turns == reasoner._converse_max_turns == 8
+
+    container.config_store.set("orchestrator", "reasoner.max_turns", "12")
+    assert build(container)._enrich_max_turns == 12
 
 
 def test_seed_llm_requires_key_in_env(tmp_path, monkeypatch):

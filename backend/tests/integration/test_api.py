@@ -689,6 +689,11 @@ def test_metrics_endpoint(client):
     assert body["llm"]["scopes"]["planner"]["total_tokens"] == 43
     assert body["llm"]["scopes"]["child"]["total_tokens"] is None
     assert body["llm"]["coverage"]["reported"] == 1
+    # Turn consumption is the only warning a session budget gives before it
+    # exhausts and blocks a goal; it was persisted but no endpoint served it.
+    assert body["llm"]["scopes"]["planner"]["turns"] == 2
+    assert body["llm"]["scopes"]["planner"]["max_session_turns"] == 2
+    assert body["llm"]["turns"] == 2
     assert body["agent"]["runs"] == 2
     assert body["agent"]["failed"] == 2
     assert body["agent"]["failures_by_kind"]["rate_limit"] == 2
@@ -1127,3 +1132,130 @@ def test_agents_and_projects_crud_over_http(client):
     assert next(item for item in client.get("/api/projects").json() if item["id"] == project_id)["name"] == "P2"
     assert client.delete(f"/api/projects/{project_id}").status_code == 204
     assert all(item["id"] != project_id for item in client.get("/api/projects").json())
+
+
+def test_planning_artifacts_are_readable_and_resettable(client):
+    """Phase 2's memory is invisible without this: a retry that starts better
+    informed looks identical from outside to one that does not."""
+    from datetime import datetime, timezone
+
+    from src.api import dependencies
+    from src.app.ports import PlanningArtifact
+
+    plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()[
+        "plan_id"
+    ]
+    container = dependencies.get_container()
+    container.planning_artifacts.append(
+        PlanningArtifact(
+            plan_id=plan_id,
+            goal_id="g1",
+            purpose="goal_contract",
+            sequence=0,
+            input_fingerprint="fp-1",
+            outcome="rejected",
+            payload={"tasks": [{"allowed_scope": ["implementation"]}]},
+            rejection_reasons=("allowed_scope: 'implementation' is a capability id",),
+            turns_used=5,
+            created_at=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        )
+    )
+
+    body = client.get(f"/api/plans/{plan_id}/planning-artifacts?goal_id=g1").json()
+
+    assert len(body) == 1
+    assert body[0]["outcome"] == "rejected"
+    assert body[0]["rejection_reasons"] == ["allowed_scope: 'implementation' is a capability id"]
+    assert body[0]["turns_used"] == 5
+    # the draft itself stays server-side: model working state, potentially large
+    assert body[0]["has_payload"] is True
+    assert "payload" not in body[0]
+
+    # the operator escape hatch, for when a bad draft keeps steering the retry
+    assert client.delete(f"/api/plans/{plan_id}/planning-artifacts?goal_id=g1").status_code == 204
+    assert client.get(f"/api/plans/{plan_id}/planning-artifacts?goal_id=g1").json() == []
+
+
+def test_update_task_contract_repairs_a_frozen_contract_over_http(client):
+    """Un-freeze #17 end to end: one wrong verification command used to cost a
+    full replan, because no edit type could reach a frozen contract's fields."""
+    from datetime import datetime, timezone
+
+    from src.api import dependencies
+    from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from src.domain.entities.execution_contracts import (
+        ContractCriterion,
+        GoalContract,
+        TaskContract,
+        VerificationStrategy,
+    )
+    from src.domain.entities.goal import Goal
+    from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+    from src.domain.entities.task import Task
+
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    contract = TaskContract(
+        id="t1",
+        position=0,
+        objective="implement greet",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="greets")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["src/happy_path/", "tests/"],
+        verification_commands=["python -m pytest -q tests/test_greet.py"],  # the typo
+        verification_strategy=VerificationStrategy.TDD,
+    )
+    task = Task(id="t1", name="t1", position=0, description="d", contract=contract)
+    goal = Goal(
+        id="g1",
+        name="g1",
+        position=0,
+        description="",
+        tasks=[task],
+        contract=GoalContract(
+            id="g1",
+            objective="ship",
+            acceptance_criteria=[ContractCriterion(id="g-1", description="shipped")],
+            tasks=[contract],
+            frozen_at=now,
+        ),
+    )
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        uow.plans.save(
+            Plan(
+                id="edit-plan",
+                project_id="project-1",
+                brief="b",
+                phase=PlanPhase.RUNNING,
+                status=PlanStatus.RUNNING,
+                paused=True,
+                cycles=[
+                    Cycle(
+                        id="c1",
+                        intent_proposal_id="i1",
+                        draft_id="d1",
+                        status=CycleStatus.ACTIVE,
+                        goals=[goal],
+                        started_at=now,
+                    )
+                ],
+            )
+        )
+
+    response = client.post(
+        "/api/plans/edit-plan/edits",
+        json={
+            "type": "update_task_contract",
+            "goal_id": "g1",
+            "task_id": "t1",
+            "verification_commands": ["python -m pytest -q tests/test_greeter.py"],
+        },
+    )
+
+    assert response.status_code == 204
+    detail = client.get("/api/plans/edit-plan").json()
+    repaired = detail["goals"][0]["tasks"][0]
+    assert repaired["contract"]["verification_commands"] == [
+        "python -m pytest -q tests/test_greeter.py"
+    ]
+    assert repaired["revision"] == 1  # a command fix does not re-author the tests

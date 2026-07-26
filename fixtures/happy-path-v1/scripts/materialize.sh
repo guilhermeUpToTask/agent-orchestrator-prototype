@@ -53,4 +53,5 @@ fi
 git -C "$TARGET" tag -f "$SEED_TAG"
 note "tagged $SEED_TAG at $(git -C "$TARGET" rev-parse --short HEAD)"
 note "export PROJECT_REPO_DIR=$TARGET"
-note "next: backend/scripts/dev.sh start --frontend  (then paste fixtures/happy-path-v1/BRIEF.md)"
+note "next: backend/scripts/dev.sh start   (API + worker; the walkthrough is API-only)"
+note "then: POST fixtures/happy-path-v1/brief.txt as a plan -- see the fixture README"

@@ -16,7 +16,7 @@ Config keys (scope 'orchestrator'):
   reasoner.provider_id  providers.id                    (llm mode, required)
   reasoner.model_id     models.id                       (llm mode, required)
   reasoner.temperature  float                           (default 0.2)
-  reasoner.max_turns    int, converse budget            (default 8)
+  reasoner.max_turns    int, conversation AND enrichment turn budget (default 8)
 
 `validate_reasoner_config` is the non-raising catalog check shared by
 `build_reasoner` and the API status endpoint. It covers catalog wiring only —
@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from src.app.observations import ObservationRepository
+from src.app.ports import PriorPlanningAttempts, RepositoryReader
 from src.domain.entities.ia_model import IAModel
 from src.domain.entities.model_provider import ModelProvider
 from src.domain.errors.config_errors import (
@@ -151,6 +152,8 @@ def build_reasoner(
     secret_store: Callable[[], SqliteSecretStore],
     capability_repo: CapabilityRepository,
     observation_repository: ObservationRepository | None = None,
+    repository_reader: RepositoryReader | None = None,
+    prior_attempts: PriorPlanningAttempts | None = None,
 ) -> Reasoner:
     """`secret_store` is a thunk: stub mode must never construct it (it fails
     closed on a missing master key, which dry-run does not have).
@@ -180,6 +183,16 @@ def build_reasoner(
         client,
         capability_repo.list(),
         converse_max_turns=max_turns,
+        # Enrichment gets the same budget. Pinned at 4 it could not fund the read
+        # tools its own profile offers plus a submission, let alone the repair turn
+        # the submit handler's rejections are built around.
+        enrich_max_turns=max_turns,
         observation_repository=observation_repository,
         provider=provider.id,
+        # Stub mode never receives this: dry-run stays repository-free and
+        # secret-free, and StubReasoner needs no sight to emit its fixed grammar.
+        repository_reader=repository_reader,
+        # What earlier attempts at the same artifact already established, so a
+        # retry does not rebuild its prompt from nothing.
+        prior_attempts=prior_attempts,
     )

@@ -248,6 +248,8 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
         provider_capacity_policy=ProviderCapacityPolicy(),
         provider_repo=object(),
         routing_policy=RoutingPolicy(),
+        planning_artifacts=None,
+        repository_reader=None,
     )
 
     async def fake_worker_tick(*args, **kwargs):

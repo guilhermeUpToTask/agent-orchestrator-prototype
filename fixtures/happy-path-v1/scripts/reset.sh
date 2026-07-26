@@ -25,4 +25,4 @@ git -C "$TARGET" clean -fdx
 git -C "$TARGET" worktree prune 2>/dev/null || true
 
 note "HEAD=$(git -C "$TARGET" rev-parse --short HEAD) clean working tree"
-note "start a new cycle/plan with the same BRIEF.md"
+note "start a new cycle/plan by POSTing the same brief.txt (see the fixture README)"

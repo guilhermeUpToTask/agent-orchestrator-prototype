@@ -1,8 +1,9 @@
 # Known issues and compatibility debt
 
 Verified against the refactored code on 2026-07-14; re-verified 2026-07-20
-against merged PRs through #29. Fixed entries are removed; regressions live in
-tests rather than remaining as warnings here.
+against merged PRs through #29, with operator-workflow/documentation drift
+re-verified 2026-07-25. Fixed entries are removed; regressions live in tests
+rather than remaining as warnings here.
 
 ## Lifecycle compatibility
 
@@ -45,11 +46,21 @@ tests rather than remaining as warnings here.
 ## Git/process cleanup
 
 - Owned process groups are terminated and reaped on success, failure, timeout,
-  discard, and stale results. A host crash can still leave Git worktree metadata;
-  periodic `git worktree prune` is not yet automated.
+  discard, and stale results. Worker startup now prunes and audits worktrees, but
+  a host crash can leave metadata until the next worker startup; there is no
+  operator-triggered branch/checkpoint garbage-collection policy.
 - Authoritative test checkpoint branch refs are retained after implementation
   forks from their immutable commit. They preserve auditability but need a
   retention policy for long-running repositories.
+
+## Operator walkthrough and documentation
+
+- Several current-facing descriptions still reflect superseded implementation
+  details: plan-level sequential execution, the nine-phase lifecycle as current,
+  `PROJECT_REPO_DIR`, the old branch hierarchy/migration head, or snapshot-only
+  attempt logs. The cyclic lifecycle, project workspace resolver, goal leases,
+  current migration chain, and live attempt-log route are authoritative until
+  those docs and API metadata are reconciled.
 
 ## Invariants to preserve
 

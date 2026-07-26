@@ -6,9 +6,10 @@ mirror what the real SQLite adapter must do."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
+from src.app.ports import PlanningArtifact
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
@@ -272,6 +273,39 @@ class InMemoryChatStore:
 
     def list(self, plan_id: str) -> list[ChatMessage]:
         return [m.model_copy(deep=True) for m in self._messages.get(plan_id, [])]
+
+
+class InMemoryPlanningArtifactStore:
+    """Mirrors SqlitePlanningArtifactRepository: append-only per
+    (plan, purpose, goal), newest first, sequence assigned on write.
+
+    Deliberately OFF the UnitOfWork, exactly like the real adapter — an artifact
+    kept so a retry can learn from it must survive the transaction that failed.
+    """
+
+    def __init__(self) -> None:
+        self._artifacts: dict[tuple[str, str, str | None], list[PlanningArtifact]] = {}
+
+    def _key(
+        self, plan_id: str, purpose: str, goal_id: str | None
+    ) -> tuple[str, str, str | None]:
+        return (plan_id, purpose, goal_id)
+
+    def append(self, artifact: PlanningArtifact) -> None:
+        bucket = self._artifacts.setdefault(
+            self._key(artifact.plan_id, artifact.purpose, artifact.goal_id), []
+        )
+        sequence = artifact.sequence or (max((a.sequence for a in bucket), default=0) + 1)
+        bucket.append(replace(artifact, sequence=sequence))
+
+    def latest(
+        self, plan_id: str, purpose: str, *, goal_id: str | None = None, limit: int = 5
+    ) -> list[PlanningArtifact]:
+        bucket = self._artifacts.get(self._key(plan_id, purpose, goal_id), [])
+        return sorted(bucket, key=lambda a: a.sequence, reverse=True)[:limit]
+
+    def clear(self, plan_id: str, purpose: str, *, goal_id: str | None = None) -> None:
+        self._artifacts.pop(self._key(plan_id, purpose, goal_id), None)
 
 
 # ---- in-memory agent registry ----

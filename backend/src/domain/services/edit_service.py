@@ -17,12 +17,40 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
+from src.domain.entities.execution_contracts import ContractCriterion, VerificationStrategy
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
 from src.domain.services.lookups import find_goal, find_task
 from src.domain.errors.planning_errors import InvalidEditError
 from src.domain.errors.tasks_errors import GoalAlreadyRunningError
 from src.domain.value_objects.lifecycle import Status, TERMINAL
+
+
+def resync_goal_contract(goal: Goal) -> None:
+    """Rebuild `goal.contract.tasks` from the live task contracts.
+
+    `planning_handler._enrich_one` constructs each Task with `contract=item`
+    where `item` is an element of `goal.contract.tasks`, so the two start as the
+    SAME object. Every contract write goes through `model_validate`/`model_copy`,
+    which rebinds only the task's reference — so without this the goal contract
+    keeps describing a version that no longer exists.
+
+    Re-running `GoalContract`'s validator is the point, not a side effect:
+    `goal_criterion_ids` is editable, so an edit can orphan a goal criterion, and
+    this is where that surfaces instead of landing silently.
+    """
+    if goal.contract is None:
+        return
+    live = {task.id: task.contract for task in goal.tasks if task.contract is not None}
+    if not live:
+        return
+    ordered = [
+        live[contract.id] if contract.id in live else contract
+        for contract in goal.contract.tasks
+    ]
+    goal.contract = goal.contract.model_validate(
+        {**goal.contract.model_dump(), "tasks": [c.model_dump() for c in ordered]}
+    )
 
 
 def _assert_editable(goal: Goal, *, paused: bool = False) -> None:
@@ -105,6 +133,9 @@ def edit_task_requirements(
     task = find_task(goal, task_id)  # one lookup, one error: TaskNotFoundError
     _assert_task_mutable(task, paused=paused)
     task.required_capabilities = list(required_capabilities)
+    if task.contract is not None:
+        task.amend_contract(required_capabilities=list(required_capabilities))
+    resync_goal_contract(goal)
 
 
 def update_task(
@@ -125,6 +156,58 @@ def update_task(
         raise InvalidEditError("task name cannot be empty")
     if name is not None or description is not None:
         task.semantic_edit(name=name, description=description)
+    resync_goal_contract(goal)
+
+
+def update_task_contract(
+    goals: list[Goal],
+    goal_id: str,
+    task_id: str,
+    *,
+    objective: str | None = None,
+    acceptance_criteria: list[ContractCriterion] | None = None,
+    verification_strategy: VerificationStrategy | None = None,
+    allowed_scope: list[str] | None = None,
+    forbidden_scope: list[str] | None = None,
+    verification_commands: list[str] | None = None,
+    goal_criterion_ids: list[str] | None = None,
+    required_capabilities: list[str] | None = None,
+    paused: bool = False,
+) -> None:
+    """Repair a frozen contract in place, instead of regenerating the cycle.
+
+    Routes each field by whether it changes what "correct" MEANS
+    (`semantic_edit`, which re-authors the tests) or only how correctness is
+    CHECKED (`amend_contract`, which keeps them). Both in one call so an operator
+    fixing a scope AND a command pays the re-authoring cost at most once.
+    """
+    goal = find_goal(goals, goal_id)
+    _assert_editable(goal, paused=paused)
+    task = find_task(goal, task_id)
+    _assert_task_mutable(task, paused=paused)
+    if task.contract is None:
+        raise InvalidEditError(f"task '{task_id}' has no frozen contract to edit")
+
+    semantic = acceptance_criteria is not None or verification_strategy is not None
+    if semantic or objective is not None:
+        task.semantic_edit(
+            description=objective,
+            acceptance_criteria=acceptance_criteria,
+            verification_strategy=verification_strategy,
+        )
+    task.amend_contract(
+        allowed_scope=allowed_scope,
+        forbidden_scope=forbidden_scope,
+        verification_commands=verification_commands,
+        goal_criterion_ids=goal_criterion_ids,
+        required_capabilities=required_capabilities,
+    )
+    if required_capabilities is not None:
+        # keep the task-level list the registry binds against in step with the
+        # contract's — they used to diverge silently (EditTaskRequirements wrote
+        # only the task, never the contract).
+        task.required_capabilities = list(required_capabilities)
+    resync_goal_contract(goal)
 
 
 def _assert_acyclic(goals: list[Goal], goal_id: str, new_deps: list[str]) -> None:

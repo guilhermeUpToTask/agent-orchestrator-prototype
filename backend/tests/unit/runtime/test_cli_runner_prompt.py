@@ -119,3 +119,40 @@ def test_run_role_overrides_static_role_in_implementation_stage():
     p = build_task_prompt(t, spec("test_author"))
     assert "## Your role\nimplementer\n" in p
     assert "Make the frozen tests pass; never modify tests." in p
+
+
+def test_a_prior_rejection_is_rendered_so_the_retry_is_not_identical():
+    """Live Tier 1: attempt 2 failed `test author produced no executable checks`
+    and the goal blocked. Nothing about the failure reached the agent, so a
+    retry would have re-run an identical prompt against an identical contract on
+    a clean worktree — a guaranteed-identical failure at full provider cost.
+
+    This is the precondition for making a verification failure retryable at all.
+    """
+    from src.app.ports import PriorAttemptRejection
+
+    prompt = build_task_prompt(
+        Task(id="t1", name="Example", position=0, description="Do it.", contract=contract()),
+        spec("implementer"),
+        prior_rejection=PriorAttemptRejection(
+            attempt_number=2,
+            reasons=(
+                "path outside allowed scope: src/other.py",
+                "authoritative verification command failed",
+            ),
+        ),
+    )
+
+    assert "## Previous attempt (2) — rejected" in prompt
+    assert "- path outside allowed scope: src/other.py" in prompt
+    assert "- authoritative verification command failed" in prompt
+    # it must say what to DO, not merely what happened
+    assert "Fix these specifically" in prompt
+    # and it belongs after the contract, so the constraints still read first
+    assert prompt.index("## Constraints") < prompt.index("## Previous attempt")
+
+
+def test_no_prior_rejection_leaves_the_prompt_untouched():
+    task = Task(id="t1", name="Example", position=0, description="Do it.", contract=contract())
+
+    assert build_task_prompt(task, spec()) == build_task_prompt(task, spec(), prior_rejection=None)

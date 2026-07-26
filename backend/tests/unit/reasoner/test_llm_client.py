@@ -103,6 +103,60 @@ def test_empty_choices_is_transient_and_retried():
     assert sleeps == [1.0]
 
 
+def response_with_choice(message, finish_reason="stop"):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason=finish_reason)]
+    )
+
+
+def test_upstream_error_inside_a_200_choice_is_transient_and_retried():
+    """OpenRouter returns some upstream failures as a well-formed choice with
+    `finish_reason="error"`, no content and no tool calls — HTTP 200, `choices`
+    present, so neither the SDK nor the empty-choices guard sees it.
+
+    Observed live against openai/gpt-oss-20b:free: 164 reasoning tokens billed,
+    an empty message, and the agent loop reported "Reasoner replied with plain
+    text where a tool submit was required" — blaming the model for a provider
+    fault, and abandoning a session that had already paid for three read turns.
+    """
+    failed = response_with_choice(assistant_message(None), finish_reason="error")
+    client, sleeps, calls = make_client(
+        [failed, response_with_choice(assistant_message("recovered"))]
+    )
+
+    turn = asyncio.run(client.complete([], TOOLS))
+
+    assert turn.text == "recovered"
+    assert len(calls) == 2 and sleeps == [1.0]
+
+
+def test_a_choice_with_neither_content_nor_tool_calls_is_treated_as_a_provider_fault():
+    """A turn that carries nothing is never a usable answer, whatever the
+    provider labels it. Retrying costs one call; surfacing it as a model
+    failure costs the whole session."""
+    empty = response_with_choice(assistant_message(""), finish_reason="stop")
+    client, sleeps, calls = make_client([empty, response_with_choice(assistant_message("ok"))])
+
+    turn = asyncio.run(client.complete([], TOOLS))
+
+    assert turn.text == "ok"
+    assert len(calls) == 2
+
+
+def test_an_empty_content_turn_that_carries_tool_calls_is_kept():
+    """Tool-calling models routinely answer with tool_calls and no prose. That
+    is the normal success path and must not be mistaken for a fault."""
+    tool_call = SimpleNamespace(id="c1", function=SimpleNamespace(name="t", arguments="{}"))
+    client, _, calls = make_client(
+        [response_with_choice(assistant_message(None, [tool_call]), finish_reason="tool_calls")]
+    )
+
+    turn = asyncio.run(client.complete([], TOOLS))
+
+    assert [call.name for call in turn.tool_calls] == ["t"]
+    assert len(calls) == 1
+
+
 def test_retry_budget_exhaustion_raises_last_error():
     client, _, calls = make_client(
         [api_error("blip"), api_error("blip"), api_error("blip")], max_retries=3

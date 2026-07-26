@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from src.domain.entities.execution_contracts import TaskContract, TestBundle
+from src.domain.entities.execution_contracts import (
+    TaskContract,
+    TestBundle,
+    VerificationStrategy,
+)
 
 _BYPASS_MARKERS = (
     "pytest.skip(",
@@ -47,6 +51,27 @@ def _matches_scope(path: str, scope: str) -> bool:
     normalized_path = normalized_path.strip("/")
     normalized_scope = scope_value.strip("/")
     return normalized_path == normalized_scope or normalized_path.startswith(f"{normalized_scope}/")
+
+
+def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
+    """May the TEST-AUTHORING stage write this path?
+
+    The RED stage authors executable checks and must never touch production
+    files. Shared with the reasoner's submission-time check so a frozen contract
+    cannot declare a strategy whose first stage it makes impossible: a `tdd`
+    contract whose `allowed_scope` names only production files leaves the test
+    author with nowhere legal to write, and NO agent can satisfy it.
+    """
+    normalized = path.replace("\\", "/")
+    if strategy == VerificationStrategy.EXECUTABLE_CHECK:
+        return True
+    name = normalized.rstrip("/").rsplit("/", 1)[-1]
+    return (
+        normalized.startswith("tests/")
+        or "/tests/" in normalized
+        or name.startswith("test_")
+        or name in {"conftest.py", "pytest.ini", "tests"}
+    )
 
 
 def validate_candidate(

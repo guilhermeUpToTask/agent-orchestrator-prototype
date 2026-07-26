@@ -405,9 +405,24 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
         LocalVerificationExecutor(clock),
     )
 
-    signal = asyncio.run(handler.handle(plan.id, plan, uow))
+    # Un-freeze #17: a rejected CANDIDATE is not terminal on the first failure.
+    # Agent output is a sample; the retry now carries the orchestrator's own
+    # rejection in its prompt (src/app/agent_feedback.py), so it is not a rerun.
+    first = asyncio.run(handler.handle(plan.id, plan, uow))
 
-    assert signal.value == "paused"
+    assert first.value in {"continue", "paused"}
+    requeued = plans.get(plan.id)
+    assert requeued.status != PlanStatus.BLOCKED
+    assert requeued.goal_blocks.get("goal-1") is None
+    retried_task = requeued.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert retried_task.status.value == "pending"
+
+    # ...but the ceiling is low: a second identical rejection is evidence the
+    # CONTRACT is wrong, which no further retry can repair.
+    clock.advance(3600)  # past the requeue backoff
+    second = asyncio.run(handler.handle(plan.id, plans.get(plan.id), uow))
+
+    assert second.value == "paused"
     blocked = plans.get(plan.id)
     assert blocked.status == PlanStatus.BLOCKED
     assert blocked.block is None  # domain unfreeze #14: routes per-goal now
@@ -418,3 +433,158 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
     failed_task = blocked.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert failed_task.status.value == "failed"
     assert uow.executions.list_open_attempts(plan.id) == []
+
+
+def test_capacity_waits_do_not_spend_the_verification_ceiling(tmp_path):
+    """Observed live (Tier 1, free provider): a task waited out three
+    `rate_limit` attempts, and then its FIRST real candidate rejection blocked
+    the goal instead of retrying.
+
+    `cycle_attempt` counts every attempt, including ones that never reached the
+    work — a capacity failure means the provider had no room upstream, not that
+    the agent produced something wrong. Counted against a ceiling of 2, any task
+    unlucky enough to hit an outage gets ZERO verification retries, which is the
+    exact behaviour un-freeze #17 set out to remove.
+    """
+    from src.app.execution_records import (
+        ExecutionAttempt,
+        ExecutionAttemptStatus,
+        ExecutionRun,
+        ExecutionRunStatus,
+    )
+    from src.app.runtime_failures import RuntimeFailure
+    from src.domain.value_objects.lifecycle import FailureKind
+    from uuid import uuid4
+
+    repo_dir = tmp_path / "repo"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(repo_dir)], check=True, capture_output=True, text=True
+    )
+    tests = repo_dir / "tests"
+    tests.mkdir()
+    (tests / "test_existing.py").write_text("def test_existing():\n    assert True\n")
+    _git(repo_dir, "add", "tests/test_existing.py")
+    _git(
+        repo_dir,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "-m",
+        "existing test",
+    )
+
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    criterion = ContractCriterion(id="g-1", description="existing behavior remains")
+    contract = TaskContract(
+        id="task-1",
+        position=0,
+        objective="preserve behavior",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="checked")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["."],
+        forbidden_scope=[".git/"],
+        verification_commands=["git diff --check"],
+        verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+    )
+    task = Task(
+        id="task-1",
+        name="preserve behavior",
+        position=0,
+        description="preserve behavior",
+        contract=contract,
+        required_capabilities=["test_authoring"],
+    )
+    goal = Goal(
+        id="goal-1",
+        name="preserve",
+        position=0,
+        description="",
+        tasks=[task],
+        contract=GoalContract(
+            id="goal-1",
+            objective="preserve",
+            acceptance_criteria=[criterion],
+            tasks=[contract],
+            frozen_at=NOW,
+        ),
+    )
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="preserve",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                goals=[goal],
+                started_at=NOW,
+            )
+        ],
+    )
+    plans.add(plan)
+
+    # three prior capacity failures, exactly as the live run recorded them
+    for number in (1, 2, 3):
+        run_id, attempt_id = str(uuid4()), str(uuid4())
+        with uow:
+            uow.executions.add_run(
+                ExecutionRun(
+                    id=run_id,
+                    plan_id="plan-1",
+                    goal_id="goal-1",
+                    task_id="task-1",
+                    status=ExecutionRunStatus.RUNNING,
+                    started_at=NOW,
+                )
+            )
+            uow.executions.add_attempt(
+                ExecutionAttempt(
+                    id=attempt_id,
+                    run_id=run_id,
+                    plan_id="plan-1",
+                    goal_id="goal-1",
+                    task_id="task-1",
+                    number=number,
+                    task_attempt=number,
+                    status=ExecutionAttemptStatus.RUNNING,
+                    started_at=NOW,
+                )
+            )
+            uow.executions.finalize_attempt(
+                attempt_id,
+                attempt_status=ExecutionAttemptStatus.FAILED,
+                run_status=ExecutionRunStatus.FAILED,
+                completed_at=NOW,
+                failure=RuntimeFailure(
+                    kind=FailureKind.RATE_LIMIT, safe_message="no room upstream", retryable=True
+                ),
+            )
+    task.cycle_attempt = 3  # what those capacity attempts left behind
+
+    agents = InMemoryAgentRepository(
+        [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+        default_id="implementer",
+    )
+    handler = ExecutionHandler(
+        DeletingTestRunner(),
+        agents,
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    signal = asyncio.run(handler.handle(plan.id, plan, uow))
+
+    # the first CANDIDATE rejection still gets its retry
+    assert signal.value in {"continue", "paused"}
+    after = plans.get(plan.id)
+    assert after.goal_blocks.get("goal-1") is None
+    assert after.active_cycle.goals[0].tasks[0].status.value == "pending"  # type: ignore[union-attr]

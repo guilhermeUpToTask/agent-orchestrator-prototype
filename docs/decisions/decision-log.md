@@ -346,3 +346,104 @@ exceed the ceiling — turning "fire the request, get refused, back off" into
 "never fire it") and by the scope-aware circuit key (account-level limits open a
 provider-wide circuit, upstream-level ones stay per-model). Surfaced through the
 existing provider/model CRUD API. Migration 0013 adds the columns, nullable.
+
+---
+
+**Decision 57 (2026-07-26) — domain unfreeze #17: a rejected candidate is not
+terminal.** `RetryPolicy` drops `VERIFICATION_ERROR` from `non_retryable_kinds`
+and gains `kind_attempt_ceiling` (default `{VERIFICATION_ERROR: 2}`). Additive
+Pydantic field with a default — persisted pre-#17 policies rehydrate unchanged.
+
+A ceiling is the opposite instrument to unfreeze #15's `kind_max_attempts`. That
+one is a FLOOR: it grants a self-healing kind extra tries and deliberately
+cannot be cut by a lower global budget. This one caps a kind whose repetition is
+EVIDENCE rather than bad luck, and must therefore survive a *higher* global
+budget — otherwise an operator who raises `max_attempts` to ride out rate limits
+silently pays for ten identical verification failures.
+
+Motivation, from a live Tier 1 walkthrough of `fixtures/happy-path-v1`: attempt 1
+hit a provider rate limit and was correctly waited out; attempt 2 failed
+`test author produced no executable checks`; the goal blocked and a human was
+required. Agent output is a sample, and re-running it against the same frozen
+tests is the cheapest recovery available — but only if the agent is told what was
+rejected. Before this, `build_task_prompt` rendered the contract and nothing
+about the previous attempt, so a retry re-ran an identical prompt against an
+identical contract on a clean worktree and reproduced an identical failure at
+full provider cost. That is why `VERIFICATION_ERROR` being terminal was *correct*
+until the feedback loop existed, and why the loop shipped first
+(`src/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
+`## Constraints`).
+
+The retryable set is now narrower than the kind: only class **A** — the
+candidate the agent produced was rejected (out of scope, protected test touched,
+no RED, authoritative command failed). Class **C** — orchestration races and
+missing infrastructure (superseded cycle, evidence changed during promotion,
+absent verifier) — stays terminal through `RuntimeFailure.retryable=False`, an
+independent veto in the retry condition, so the split is structural rather than
+keyed off message text. Class **B** — a contract no agent could satisfy — is
+still bounded by this ceiling and then blocks; repairing the contract instead of
+blocking is the next phase.
+
+The ceiling is 2, not #15's 6: a rate limit heals by waiting, whereas a third
+identical rejection says the CONTRACT is wrong, and no number of retries repairs
+a contract.
+
+---
+
+**Decision 58 (2026-07-26) — domain unfreeze #17 (continued): an authored
+contract is editable.** The same unfreeze as decision 57, second half. Three
+additive domain changes, no migration — plans persist as one JSON document, so
+defaulted fields rehydrate pre-#17 rows unchanged (pinned by a round-trip test
+that strips the new field first).
+
+1. **`Task.semantic_edit` widened; `Task.amend_contract` added.** A frozen
+   `TaskContract` was unreachable: the eight edit types touched task
+   name/description/capabilities/agent/order and goal name/description/deps, and
+   only `semantic_edit` wrote a contract at all — its `revision` and `objective`.
+   One wrong string therefore cost a full replan. Observed live: enrichment froze
+   a `tdd` contract whose `allowed_scope` named only production files, which no
+   agent could satisfy.
+
+   The split is NOT editable-vs-not, it is whether a change alters what "correct"
+   MEANS. `objective`, `acceptance_criteria` and `verification_strategy` do —
+   criteria are what `freeze_test_bundle` maps to checks and the strategy decides
+   what evidence is meaningful — so they bump the revision and invalidate the
+   `TestBundle`. `allowed_scope`, `forbidden_scope`, `verification_commands`,
+   `goal_criterion_ids` and `required_capabilities` do not, so `amend_contract`
+   keeps the authored tests. Re-authoring a suite to fix a typo in a command is
+   precisely what made a replan look cheaper than an edit. Evidence is cleared
+   only when a previously accepted candidate might no longer qualify: commands
+   changed, or scope NARROWED. Widening is provably safe and keeps it. Both
+   transitions revalidate the whole `TaskContract`, so an edit cannot write a
+   shape enrichment itself could never produce.
+
+   **Not editable, deliberately:** `id`, `attempt`, `revision`, `status`,
+   `result`, `verification_evidence`, `test_bundle`, and any DONE or SKIPPED
+   task. These are the audit trail the finalize re-guard and "only independently
+   verified work moves upward" key off; a writable `revision` would let a stale
+   in-flight finalize land, and a DONE task's contract has already been merged
+   upward under evidence that references it. Where a block advertises `edit_task`
+   for a terminal task, the ADVERTISEMENT is the defect.
+
+2. **`Cycle.approved_intent`.** `activate_cycle` discarded `Plan.intent_proposal`,
+   and `Cycle` kept only `intent_proposal_id` — so goal enrichment, which must
+   honour the intent's objective/scope/constraints/exclusions, could read nothing
+   but an opaque identifier. The cycle now retains the proposal it was approved
+   from, and both `read_approved_intent` and the enrichment prompt serve it.
+
+3. **`Plan.retry_planning_stage` consults `goal_blocks`.** Goal enrichment knows
+   which goal it was working on, so its failures are filed per-goal (unfreeze
+   #14) — while this method read only the scalar `block`. The block advertised
+   `retry_stage` as legal and the endpoint answered 422: the operator's one
+   obvious move could not reach it. Cycle architecture has no goal and keeps the
+   scalar. Resolution now recomputes the derived cyclic status rather than
+   asserting RUNNING over a plan that may still hold other goal blocks.
+
+Also fixed here, and the reason a stale goal contract was never noticed:
+`planning_handler._enrich_one` builds each `Task` with `contract=item` where
+`item` is an element of `goal.contract.tasks`, so the two start as the SAME
+object, and every contract write rebinds only the task's reference.
+`edit_service.resync_goal_contract` rebuilds the list after any edit and re-runs
+`GoalContract`'s validator — which is the point, not a side effect: with
+`goal_criterion_ids` editable, an edit can orphan a goal criterion, and that now
+surfaces instead of landing silently.

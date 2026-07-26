@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.domain.entities.execution_contracts import ContractCriterion, VerificationStrategy
 from src.domain.entities.task import Task
 from src.domain.errors.agent_errors import UnknownCapabilityError
 from src.domain.errors.planning_errors import InvalidEditError
@@ -75,6 +76,29 @@ class UpdateTask:
 
 
 @dataclass
+class UpdateTaskContract:
+    """Repair a frozen contract instead of regenerating the cycle (un-freeze #17).
+
+    Every field the reasoner AUTHORED. Execution identity and observed evidence
+    (`id`, `attempt`, `revision`, `status`, `result`, `verification_evidence`,
+    `test_bundle`) are deliberately absent: they are the audit trail the finalize
+    re-guard and "only verified work moves upward" key off, and a writable
+    `revision` would let a stale in-flight finalize land.
+    """
+
+    goal_id: str
+    task_id: str
+    objective: str | None = None
+    acceptance_criteria: list[ContractCriterion] | None = None
+    verification_strategy: VerificationStrategy | None = None
+    allowed_scope: list[str] | None = None
+    forbidden_scope: list[str] | None = None
+    verification_commands: list[str] | None = None
+    goal_criterion_ids: list[str] | None = None
+    required_capabilities: list[str] | None = None
+
+
+@dataclass
 class UpdateGoal:
     """Rename / re-describe a goal, or rewrite its connections (depends_on)."""
 
@@ -96,6 +120,7 @@ Edit = (
     | EditTaskRequirements
     | RebindTaskAgent
     | UpdateTask
+    | UpdateTaskContract
     | UpdateGoal
     | RemoveGoal
 )
@@ -174,6 +199,29 @@ def apply_edit(
                 description=edit.description,
                 paused=paused,
             )
+        elif isinstance(edit, UpdateTaskContract):
+            if edit.required_capabilities is not None:
+                _validate_capability_ids(edit.required_capabilities, capabilities)
+            edit_service.update_task_contract(
+                goals,
+                edit.goal_id,
+                edit.task_id,
+                objective=edit.objective,
+                acceptance_criteria=edit.acceptance_criteria,
+                verification_strategy=edit.verification_strategy,
+                allowed_scope=edit.allowed_scope,
+                forbidden_scope=edit.forbidden_scope,
+                verification_commands=edit.verification_commands,
+                goal_criterion_ids=edit.goal_criterion_ids,
+                required_capabilities=edit.required_capabilities,
+                paused=paused,
+            )
+            if edit.required_capabilities is not None:
+                # capabilities moved, so the bound agent may no longer satisfy it
+                task = find_task(find_goal(goals, edit.goal_id), edit.task_id)
+                task.agent_id, _ = match_agent(
+                    task.required_capabilities, agents.list(), agents.default_agent_id()
+                )
         elif isinstance(edit, UpdateGoal):
             edit_service.update_goal(
                 goals,

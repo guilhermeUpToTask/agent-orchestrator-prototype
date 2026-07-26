@@ -134,17 +134,23 @@ before a branch reaches runtime tests.
 For re-runnable end-to-end plan walks (backend bug hunting, not CI), use the
 locked fixture at [`fixtures/happy-path-v1/`](../fixtures/happy-path-v1/):
 
+The walkthrough is **backend-only**: every step is an HTTP call against the API
+(`curl` + `jq`, via `scripts/api.sh`), so no frontend build or browser is needed.
+
 ```bash
 ./fixtures/happy-path-v1/scripts/materialize.sh
-export PROJECT_REPO_DIR="${HAPPY_PATH_REPO:-$HOME/.orchestrator/happy-path-v1/repo}"
-backend/scripts/dev.sh start --frontend
-# Paste fixtures/happy-path-v1/BRIEF.md into a new project plan, approve gates,
-# then after the cycle: ./fixtures/happy-path-v1/scripts/check-success.sh
+export HAPPY_PATH_REPO="${HAPPY_PATH_REPO:-$HOME/.orchestrator/happy-path-v1/repo}"
+backend/scripts/dev.sh start                      # API + worker; no --frontend
+# POST a project whose repo_url IS that repo (the worker branches the project's
+# repo_url, not PROJECT_REPO_DIR), then POST fixtures/happy-path-v1/brief.txt as
+# a plan, converse until the turn reports committed:true, and approve each gate
+# by echoing back pending_gate.id + subject_revision. After the cycle:
+#   ./fixtures/happy-path-v1/scripts/check-success.sh <cycle-branch checkout>
 # Between runs: ./fixtures/happy-path-v1/scripts/reset.sh
 ```
 
-See that folder's README for Tier 0 (stub/dry-run) vs Tier 1 (real), size
-budgets, and the recommended outer-agent operator loop.
+See that folder's README for the exact call sequence, Tier 0 (stub/dry-run) vs
+Tier 1 (real), size budgets, and the recommended outer-agent operator loop.
 
 ## Troubleshooting
 

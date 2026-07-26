@@ -491,3 +491,115 @@ def test_cycle_architecture_reasoner_failure_remains_plan_wide(env_factory):
     assert stored.block.goal_id is None
     assert stored.goal_blocks == {}
     assert stored.status == PlanStatus.BLOCKED
+
+
+def test_unsatisfiable_role_binding_opens_a_block_instead_of_poisoning_the_worker(env_factory):
+    """Observed live: enrichment produced a contract whose tasks needed
+    `test_authoring`, no registered agent covered it, and the worker crashed with
+    an unhandled `RoleUnsatisfiableError` — six times, once per tick.
+
+    The handler catches `ValueError`, which is what role resolution used to
+    raise. It now raises `RoleUnsatisfiableError`, a `DomainError` that is NOT a
+    `ValueError`, so the designed `agent_capability` block stopped being reachable
+    and the plan became a poison pill instead: the exact 1Hz re-dispatch storm
+    `_block_on_unpromotable_goal` exists to prevent.
+    """
+    import asyncio
+
+    from src.app.handlers.planning_handler import PlanningHandler
+    from src.app.testing.fakes import InMemoryCapabilityRepository
+    from src.domain.entities.capability import Capability
+    from src.domain.entities.execution_contracts import (
+        ContractCriterion,
+        GoalContract,
+        TaskContract,
+        VerificationStrategy,
+    )
+
+    contract = TaskContract(
+        id="t1",
+        position=0,
+        objective="do it",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="works")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["src/", "tests/"],
+        verification_commands=["pytest -q"],
+        verification_strategy=VerificationStrategy.TDD,
+        required_capabilities=["test_authoring"],
+    )
+
+    class Enriches:
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal_contract(self, plan, goal, capabilities):
+            return GoalContract(
+                id=goal.id,
+                objective="ship",
+                acceptance_criteria=[ContractCriterion(id="g-1", description="shipped")],
+                tasks=[contract],
+                frozen_at=NOW,
+            )
+
+    env = env_factory()
+    env.seed(_cyclic_plan([_goal("g1", 0, [])]))
+    # the registry covers nothing the contract asks for
+    handler = PlanningHandler(
+        Enriches(),
+        env.agents,
+        InMemoryCapabilityRepository(
+            [Capability(id="test_authoring", name="test authoring", description="")]
+        ),
+        env.clock,
+    )
+
+    def tick():
+        with env.uow:
+            loaded = env.uow.plans.get("p1")
+        return asyncio.run(handler.handle("p1", loaded, env.uow))
+
+    tick()  # must not raise
+
+    stored = env.stored("p1")
+    block = stored.goal_blocks.get("g1") or stored.block
+    assert block is not None and block.active
+    assert block.kind == "agent_capability"
+    assert "test_author" in block.explanation
+    # and a second tick must stay quiet rather than re-raising every poll
+    tick()
+
+
+def test_a_per_goal_reasoner_failure_is_reachable_by_its_own_resolution(env_factory):
+    """`planning_handler` files a `reasoner_failure` into `goal_blocks` when it
+    knows which goal was being enriched, and the block advertises `retry_stage`.
+    `Plan.retry_planning_stage` read only the scalar `self.block`, so that
+    resolution 422'd — the block advertised the one action that could not reach
+    it. The plan-wide case (cycle architecture, no goal) must keep working.
+    """
+    import pytest
+
+    from src.domain.errors.planning_errors import InvalidEditError
+
+    plan = _cyclic_plan([_goal("g1", 0, [])])
+    plan.open_block(
+        PlanBlock(
+            id="b1",
+            kind="reasoner_failure",
+            explanation="Reasoner session exceeded 8 turns without submitting",
+            stage="goal_contract",
+            goal_id="g1",
+            legal_resolutions=["retry_stage", "start_replan"],
+            created_at=NOW,
+        )
+    )
+    assert plan.block is None and plan.goal_blocks["g1"].active  # routed per-goal
+
+    plan.retry_planning_stage(NOW)
+
+    assert plan.goal_blocks["g1"].resolution == "retry_stage"
+    assert plan.goal_blocks["g1"].active is False
+    assert plan.planning_attempts == 0  # the backoff gate is cleared too
+
+    # and a plan with nothing retryable still refuses
+    with pytest.raises(InvalidEditError, match="not blocked on a retryable planning stage"):
+        _cyclic_plan([_goal("g2", 0, [])]).retry_planning_stage(NOW)

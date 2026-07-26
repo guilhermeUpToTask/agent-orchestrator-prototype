@@ -34,12 +34,17 @@ class ReasonerError(InfrastructureError, ReasonerUnavailable):
         transient: bool = False,
         kind: FailureKind | None = None,
         retry_after_seconds: float | None = None,
+        turns_used: int | None = None,
     ) -> None:
         super().__init__(message)  # InfrastructureError.__init__ (MRO)
         self.reason = message
         self.transient = transient
         self.kind = kind
         self.retry_after_seconds = retry_after_seconds
+        self.turns_used = turns_used
+        self.partial_artifact = None
+        self.rejection_reasons = ()
+        self.input_fingerprint = None
 
 
 # Rate-limit-adjacent wording that classify_failure's RATE_LIMIT pattern does
@@ -88,8 +93,10 @@ def classify_provider_error(model: str, exc: Exception) -> ReasonerError:
     )
 
 
-def provider_error_from_empty_choices(model: str, response: object) -> ReasonerError:
-    """Build a ReasonerError for a 200 response that carries no choices.
+def provider_error_from_empty_choices(
+    model: str, response: object, *, degenerate_choice: bool = False
+) -> ReasonerError:
+    """Build a ReasonerError for a 200 response that carries no usable answer.
 
     Some OpenAI-compatible providers (OpenRouter and similar proxies) return an
     error inside an HTTP 200 body instead of a non-2xx status. The OpenAI SDK
@@ -99,8 +106,13 @@ def provider_error_from_empty_choices(model: str, response: object) -> ReasonerE
     (transient) failure.
     """
     detail = _extract_provider_error_text(response)
+    symptom = (
+        "returned a choice with neither content nor tool calls"
+        if degenerate_choice
+        else "returned no choices"
+    )
     message = (
-        f"Reasoner LLM request to model '{model}' returned no choices: {detail}. "
+        f"Reasoner LLM request to model '{model}' {symptom}: {detail}. "
         "The provider rejected the request (e.g. out of credits, rate limited, "
         "or upstream error)."
     )
