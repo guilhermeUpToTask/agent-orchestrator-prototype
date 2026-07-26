@@ -79,6 +79,16 @@ class GitBranchWorkspace:
         self._repo = Path(repo_dir)
         self._default_branch = default_branch
 
+    # Read-only identity, for adapters that inspect the same repository without
+    # taking a worktree (see infra/git/repository_reader.py).
+    @property
+    def repo_dir(self) -> Path:
+        return self._repo
+
+    @property
+    def default_branch(self) -> str:
+        return self._default_branch
+
     # ---- Workspace port ----
     async def begin(
         self,

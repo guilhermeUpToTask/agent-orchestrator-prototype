@@ -19,6 +19,8 @@ from src.domain.entities.execution_contracts import (
 )
 from src.domain.entities.task import Task
 from src.domain.policies.retry_policies import RetryPolicy
+from src.domain.errors.agent_errors import RoleUnsatisfiableError
+from src.domain.errors.base import DomainError
 from src.domain.services.agent_role_resolution import RunRole, resolve_role_agent
 from src.domain.value_objects.lifecycle import Status
 
@@ -140,9 +142,24 @@ def test_existing_registry_resolves_separate_roles_by_capability() -> None:
 
 
 def test_role_resolution_never_falls_back_without_role_capability() -> None:
+    """Unsatisfiable role resolution must raise a CODED DomainError.
+
+    It used to raise a bare `ValueError`, which carries no `code`, so the API's
+    single `_STATUS_BY_CODE` table could not reach it: `POST /retry-stage` on an
+    `agent_capability` block -- the block's OWN advertised legal resolution --
+    returned an opaque `500 INTERNAL_ERROR` instead of telling the operator
+    which capabilities no agent covers. src/api/exceptions.py states the rule
+    outright: "an unmapped builtin error is a bug and should surface as the
+    enveloped 500."
+    """
     repository = InMemoryAgentRepository([agent("default", ["python"])], "default")
-    with pytest.raises(ValueError, match="test_author"):
+    with pytest.raises(RoleUnsatisfiableError, match="test_author") as excinfo:
         resolve_role_agent(RunRole.TEST_AUTHOR, ["python"], repository)
+
+    assert excinfo.value.code == "ROLE_UNSATISFIABLE"
+    assert isinstance(excinfo.value, DomainError)
+    # The operator needs to know exactly what to register.
+    assert set(excinfo.value.required) == {"test_authoring", "python"}
 
 
 def test_role_resolution_does_not_require_a_default_agent() -> None:

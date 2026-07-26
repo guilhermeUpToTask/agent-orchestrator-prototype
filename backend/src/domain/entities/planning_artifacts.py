@@ -161,6 +161,13 @@ class CycleDraft(BaseModel):
 class Cycle(BaseModel):
     id: str
     intent_proposal_id: str
+    # The intent this cycle was approved from, retained rather than discarded.
+    # `activate_cycle` used to clear `Plan.intent_proposal`, leaving only the id
+    # above — so goal enrichment, which must honour the objective, scope,
+    # constraints and exclusions, could read nothing but an opaque identifier and
+    # planned against the goal name alone. Additive with a None default: rows
+    # written before unfreeze #17 rehydrate unchanged and simply have no intent.
+    approved_intent: "IntentProposal | None" = None
     draft_id: str
     status: CycleStatus = CycleStatus.ACTIVE
     goals: list[Goal] = Field(default_factory=list)

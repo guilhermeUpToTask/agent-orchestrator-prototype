@@ -33,6 +33,7 @@ from src.domain.aggregates.planner_orchestrator import (
     WORKER_PLANNING_PHASES,
 )
 from src.domain.entities.goal import Goal
+from src.domain.errors.agent_errors import RoleUnsatisfiableError
 from src.domain.entities.planning_artifacts import (
     CycleDraft,
     PlanBlock,
@@ -56,9 +57,22 @@ from src.domain.repositories.capability_repo import CapabilityRepository
 from src.domain.services.agent_role_resolution import resolve_task_role_agents
 from src.domain.services.navigation import ready_goal_ids
 
+from src.app.provider_capacity import CAPACITY_KINDS, ProviderCapacityPolicy
 from src.app.handlers.base import Signal
+from src.app.block_policy import resolutions_for
 from src.app.execution_records import PlanningOperation, PlanningOperationStatus
-from src.app.ports import Clock, Reasoner, ReasonerUnavailable, UnitOfWork
+import structlog
+
+from src.app.ports import (
+    Clock,
+    PlanningArtifact,
+    PlanningArtifactStore,
+    Reasoner,
+    ReasonerUnavailable,
+    UnitOfWork,
+)
+
+log = structlog.get_logger(__name__)
 
 
 def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
@@ -67,7 +81,12 @@ def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
     unmet `depends_on` never starves an independently-ready later goal from
     being JIT-enriched (goal-parallelism fan-out, ADR-001)."""
     ready_ids = ready_goal_ids(plan.execution_goals, now)
-    candidates = [g for g in plan.execution_goals if g.id in ready_ids and not g.tasks]
+    blocked_goal_ids = {goal_id for goal_id, block in plan.goal_blocks.items() if block.active}
+    candidates = [
+        goal
+        for goal in plan.execution_goals
+        if goal.id in ready_ids and goal.id not in blocked_goal_ids and not goal.tasks
+    ]
     return min(candidates, key=lambda g: g.position, default=None)
 
 
@@ -78,11 +97,66 @@ class PlanningHandler:
         agents: AgentRepository,
         capabilities: CapabilityRepository,
         clock: Clock,
+        capacity: ProviderCapacityPolicy | None = None,
+        planning_artifacts: PlanningArtifactStore | None = None,
     ) -> None:
         self._reasoner = reasoner
         self._agents = agents
         self._capabilities = capabilities
         self._clock = clock
+        # Same ceilings execution uses, so planning and execution ride out a
+        # provider outage for the same length of time instead of one of them
+        # escalating first and blocking the plan the other was patiently waiting on.
+        self._capacity = capacity or ProviderCapacityPolicy()
+        # Written OUTSIDE the plan transaction (the ChatStore rule): work kept so
+        # a retry can learn from it must survive the failure that produced it.
+        self._planning_artifacts = planning_artifacts
+
+    def _record_planning_artifact(
+        self,
+        plan_id: str,
+        goal_id: str | None,
+        exc: ReasonerUnavailable,
+        operation: PlanningOperation | None = None,
+        purpose: str = "goal_contract",
+    ) -> None:
+        """Persist a failed attempt's work so the retry is better informed.
+
+        Best-effort by design: memory is an optimisation, and losing it must
+        never turn a recoverable planning failure into a worse one.
+        """
+        artifact = getattr(exc, "partial_artifact", None)
+        reasons = tuple(getattr(exc, "rejection_reasons", ()) or ())
+        fingerprint = getattr(exc, "input_fingerprint", None)
+        if self._planning_artifacts is None or fingerprint is None:
+            return
+        # An attempt that produced NOTHING is still worth recording. The most
+        # common enrichment failure is a session dying on its turn budget without
+        # ever submitting — observed live — and if that leaves no row, the retry
+        # is granted no extra turns and dies exactly the same way. The row buys
+        # the escalating budget; the outcome filter keeps it out of the replay,
+        # because there is no rejection to learn from.
+        try:
+            self._planning_artifacts.append(
+                PlanningArtifact(
+                    plan_id=plan_id,
+                    goal_id=goal_id,
+                    purpose=purpose,
+                    # The operation row is REUSED across a whole outage, so this
+                    # ties every attempt of one planning operation together while
+                    # `sequence` keeps them ordered and distinct.
+                    operation_id=operation.id if operation is not None else None,
+                    sequence=0,  # the store assigns the next one
+                    input_fingerprint=fingerprint,
+                    outcome="rejected" if reasons else "abandoned",
+                    payload=artifact,
+                    rejection_reasons=reasons,
+                    turns_used=getattr(exc, "turns_used", None),
+                    created_at=self._clock.now(),
+                )
+            )
+        except Exception as exc_write:  # noqa: BLE001
+            log.warning("planning.artifact_write_failed", plan_id=plan_id, error=str(exc_write))
 
     def _start_operation(
         self,
@@ -209,6 +283,13 @@ class PlanningHandler:
                 ),
             )
         except ReasonerUnavailable as exc:
+            # Architecture fails exactly the way enrichment does — a session that
+            # burns its budget without submitting — and it is the FIRST stage a
+            # starved reasoner hits, so leaving it without memory means the retry
+            # restarts from nothing at the very point the plan gets stuck.
+            self._record_planning_artifact(
+                plan_id, None, exc, operation, purpose="cycle_architecture"
+            )
             return self._handle_reasoner_failure(plan_id, exc, uow, operation)
 
         with uow:
@@ -306,6 +387,10 @@ class PlanningHandler:
                 contract = None
                 tasks = await self._reasoner.enrich_goal(plan, target, self._capabilities.list())
         except ReasonerUnavailable as exc:
+            # Record what the dead session had produced BEFORE handling the
+            # failure, and outside any transaction: the point of the artifact is
+            # to outlive this failure, so it must not ride the rollback.
+            self._record_planning_artifact(plan_id, target.id, exc, operation)
             # The reasoner is down (rate limit / upstream error / bad config). Arm
             # the durable backoff gate or fail the plan — and surface it (outbox ->
             # SSE) instead of letting it propagate to a silent worker.tick_failed loop.
@@ -353,14 +438,21 @@ class PlanningHandler:
                     for task in fresh.tasks:
                         task.role_agent_ids = role_bindings[task.id]
                         task.agent_id = task.role_agent_ids["implementer"]
-                except ValueError as exc:
+                except (ValueError, RoleUnsatisfiableError) as exc:
+                    # RoleUnsatisfiableError is a DomainError, NOT a ValueError.
+                    # Role resolution used to raise a bare ValueError; giving it a
+                    # stable `code` (so the API could map it) silently made this
+                    # handler stop catching it, and an unsatisfiable binding
+                    # crashed the worker on every tick instead of opening the
+                    # agent_capability block that `retry_stage` exists to clear.
+                    # Observed live: six identical tracebacks, one per poll.
                     block = PlanBlock(
                         id=new_id(),
                         kind="agent_capability",
                         explanation=str(exc),
                         stage="goal_enrichment",
                         goal_id=fresh.id,
-                        legal_resolutions=["retry_stage", "start_replan"],
+                        legal_resolutions=resolutions_for("agent_capability"),
                         created_at=self._clock.now(),
                     )
                     plan.open_block(block)
@@ -398,6 +490,56 @@ class PlanningHandler:
             uow.plans.save(plan)
         return Signal.CONTINUE
 
+    def _is_terminal_reasoner_failure(
+        self,
+        exc: ReasonerUnavailable,
+        plan: Plan,
+        next_attempt: int,
+        operation: PlanningOperation | None,
+    ) -> bool:
+        """Whether this failure should escalate to a human-gated block.
+
+        Gating on `exc.transient` alone was wrong in both directions. It escalated
+        provider capacity after three attempts even though waiting is exactly what
+        resolves it; and it treated "the model replied with prose instead of calling
+        the submission tool" as equally worth retrying, when no amount of waiting
+        makes an incapable model succeed.
+
+        So: a PERMANENT failure is terminal immediately (unchanged). A CAPACITY kind
+        keeps backing off until the outage outlives the wall-clock ceiling — the same
+        bound execution uses. Every other transient kind keeps the ordinary attempt
+        budget.
+        """
+        if not exc.transient:
+            return True
+        # TOOL_ERROR deliberately does NOT get the wall-clock ceiling, even though
+        # Phase 2 makes each planning retry strictly better informed. The kind
+        # conflates two opposite situations: a HARD GOAL (a session that burned its
+        # turns, where the escalating budget genuinely helps) and an INCAPABLE
+        # MODEL (prose instead of a tool call, which no amount of waiting fixes).
+        # Waiting out the second for hours before telling anyone is worse than
+        # giving up on the first after a few attempts. Separating them needs a
+        # distinct signal, not a longer clock.
+        if exc.kind is not None and exc.kind in CAPACITY_KINDS and operation is not None:
+            # The outage START. A wall-clock ceiling needs one, and the Plan
+            # aggregate has no first-arm timestamp (only planning_retry_not_before
+            # and planning_attempts), so back-computing it from the attempt count
+            # and the backoff curve would be guesswork.
+            #
+            # The operation row is it: `find_active_planning_operation` REUSES one
+            # row for the same purpose+target across the whole outage, and
+            # `_start_operation` preserves `created_at` when it reuses it — only
+            # status/updated_at/liveness are reset. A COMMITTED operation ends the
+            # run, so the next failure gets a fresh row and a fresh clock.
+            #
+            # (Scanning the ledger for BACKING_OFF rows does NOT work: the reused
+            # row is flipped back to STARTED at the top of every tick, so by the
+            # time this runs the earlier BACKING_OFF is no longer visible.)
+            return self._capacity.outage_exceeded(operation.created_at, self._clock.now(), None)
+        # No operation means the quarantined LEGACY path, which records none: keep
+        # it bounded by its original attempt budget rather than waiting forever.
+        return next_attempt >= plan.retry_policy.max_attempts
+
     def _handle_reasoner_failure(
         self,
         plan_id: str,
@@ -431,16 +573,29 @@ class PlanningHandler:
                 return Signal.PAUSED  # raced by a human command; theirs wins
             phase = plan.activity if cyclic else plan.phase.value
             next_attempt = plan.planning_attempts + 1
-            terminal = not exc.transient or next_attempt >= plan.retry_policy.max_attempts
+            terminal = self._is_terminal_reasoner_failure(exc, plan, next_attempt, operation)
 
             if terminal:
                 if cyclic:
+                    # Scope the block to the goal being enriched when there is
+                    # one (domain unfreeze #14). Enrichment is per-goal by
+                    # construction and the operation already carries the target,
+                    # so a single goal's reasoner failure must not freeze
+                    # independently-running siblings. A plan-wide failure
+                    # (cycle architecture) has target_goal_id=None and keeps the
+                    # scalar block, exactly as before.
+                    target_goal_id = operation.target_goal_id if operation is not None else None
+                    if target_goal_id is not None and not any(
+                        candidate.id == target_goal_id for candidate in plan.execution_goals
+                    ):
+                        target_goal_id = None
                     block = PlanBlock(
                         id=new_id(),
                         kind="reasoner_failure",
                         explanation=exc.reason,
                         stage=phase,
-                        legal_resolutions=["retry_stage", "start_replan"],
+                        goal_id=target_goal_id,
+                        legal_resolutions=resolutions_for("reasoner_failure"),
                         created_at=self._clock.now(),
                     )
                     plan.open_block(block)
@@ -449,6 +604,7 @@ class PlanningHandler:
                             plan_id=plan_id,
                             block_id=block.id,
                             stage=block.stage,
+                            goal_id=block.goal_id,
                         )
                     )
                 else:
@@ -476,7 +632,12 @@ class PlanningHandler:
                 uow.plans.save(plan)
                 return Signal.FAILED
 
-            delay = plan.retry_policy.backoff_for(next_attempt + 1, kind=None)
+            # Pass the REAL kind: `kind=None` capped every planning backoff at
+            # max_backoff_seconds (900s) and skipped the per-kind patient curve, so
+            # a rate-limited provider was re-polled every 15 minutes forever.
+            delay = plan.retry_policy.backoff_for(next_attempt + 1, kind=exc.kind)
+            if exc.retry_after_seconds is not None:
+                delay = max(delay, exc.retry_after_seconds)  # provider knows better
             not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
             plan.record_planning_retry(not_before)
             plan.bump_version()

@@ -11,6 +11,20 @@ class ModelProvider(BaseModel):
     # happens in infra at the single decryption point; keys never enter the domain.
     api_key_ref: str
     models: list[IAModel]
+    # --- capacity metadata (domain unfreeze #16) ---
+    # How many attempts may be in flight against this provider at once. None =
+    # fall back to the operator's global default. This belongs to the PROVIDER,
+    # not the orchestrator: a paid tier, a free aggregator, and a local
+    # single-GPU server have wildly different ceilings, and one global number
+    # would either throttle the paid tier to free-tier levels or over-drive the
+    # local one.
+    max_inflight: int | None = None
+    # How this provider's limits are structured — `per_model` (default) or
+    # `endpoint_wide`. An aggregator routes each model to its own upstream pool,
+    # so its concurrency limits are per-model while billing is account-wide; a
+    # single-endpoint deployment shares one pool across every model it serves.
+    # Declared as provider DATA so no handler ever branches on a provider name.
+    capacity_scope: str | None = None
 
     def add_model(self, model: IAModel) -> None:
         self.models.append(model)

@@ -48,6 +48,9 @@ __all__ = [
     "ExecutionRecordRepository",
     "GoalLeaseRepository",
     "Outbox",
+    "PlanningArtifact",
+    "PlanningArtifactStore",
+    "PriorPlanningAttempts",
     "Reasoner",
     "ReasonerReply",
     "ReasonerUnavailable",
@@ -61,6 +64,11 @@ __all__ = [
     "VerificationExecutor",
     "CommandExecution",
     "MainRepositoryWorkspace",
+    "PriorAttemptFeedback",
+    "PriorAttemptRejection",
+    "RepositoryReader",
+    "RepositoryOrientation",
+    "RepositorySearchHit",
 ]
 
 
@@ -71,6 +79,93 @@ class CommandExecution:
     started_at: datetime
     finished_at: datetime
     bounded_output_ref: str
+
+
+@dataclass(frozen=True)
+class RepositorySearchHit:
+    path: str
+    line: int
+    text: str
+
+
+@dataclass(frozen=True)
+class RepositoryOrientation:
+    """The answer to "what am I planning against?", in one cheap call."""
+
+    default_branch: str
+    top_level_entries: tuple[str, ...]
+    test_directories: tuple[str, ...]
+    detected_test_command: str | None
+    config_files: tuple[str, ...]
+
+
+@runtime_checkable
+class RepositoryReader(Protocol):
+    """READ-ONLY sight of a project's repository, for the planning reasoner.
+
+    Contracts name exact paths and exact verification commands, and until this
+    existed the planner wrote both blind: `read_repository_context` returned a
+    hardcoded `{"availability": "adapter_context_only"}`. Observed live, the
+    model invented `pytest -q tests/test_greet.py` for a repository whose file
+    is `tests/test_greeter.py`, and the resulting frozen contract could not be
+    satisfied by any agent.
+
+    Every method is keyed by `project_id`, never by a filesystem path — the
+    reasoner must not learn that paths outside the repository exist. Every
+    method is bounded: an unbounded read costs TOKEN_LIMIT, which is terminal,
+    so a careless call would be worse than no sight at all.
+
+    Implementations read a committed ref, NOT the working tree: during
+    enrichment the working tree may hold a concurrent worker's worktree state,
+    while the default branch is the stable truth a contract is written against.
+    """
+
+    def orientation(self, project_id: str) -> RepositoryOrientation: ...
+
+    def list_paths(
+        self, project_id: str, *, prefix: str = "", max_entries: int = 200
+    ) -> list[str]: ...
+
+    def read_file(self, project_id: str, path: str, *, max_bytes: int = 20_000) -> str: ...
+
+    def search(
+        self,
+        project_id: str,
+        pattern: str,
+        *,
+        path_prefix: str = "",
+        max_hits: int = 50,
+    ) -> list[RepositorySearchHit]: ...
+
+    def exists(self, project_id: str, path: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class PriorAttemptRejection:
+    """Why the orchestrator rejected this task's previous candidate."""
+
+    attempt_number: int
+    reasons: tuple[str, ...]
+
+
+@runtime_checkable
+class PriorAttemptFeedback(Protocol):
+    """The previous attempt's rejection, for the next attempt's prompt.
+
+    The `AgentRunner` domain port carries no context channel and widening it
+    would be a domain change, so the runner reads this instead — the same
+    constructor-injection seam the reasoner uses for repository sight. The data
+    is already persisted (`ExecutionAttempt.safe_message`); nothing new is
+    written, it was simply never read back.
+
+    Implementations return only agent-repairable rejections (see
+    `src/app/agent_feedback.py`): a provider rate limit or a promotion race says
+    nothing an agent could act on.
+    """
+
+    def last_rejection(
+        self, plan_id: str, goal_id: str, task_id: str, *, task_revision: int
+    ) -> PriorAttemptRejection | None: ...
 
 
 @runtime_checkable
@@ -130,9 +225,42 @@ class ReasonerUnavailable(Exception):
     the infra ReasonerError subclasses it, so the concrete adapter's raise
     crosses the boundary as this type without app ever importing infra."""
 
-    def __init__(self, reason: str, *, transient: bool = False) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        transient: bool = False,
+        kind: FailureKind | None = None,
+        retry_after_seconds: float | None = None,
+        partial_artifact: dict[str, object] | None = None,
+        rejection_reasons: tuple[str, ...] = (),
+        input_fingerprint: str | None = None,
+        turns_used: int | None = None,
+    ) -> None:
         self.reason = reason
         self.transient = transient
+        # What the session had produced when it died, so the RETRY can start from
+        # it instead of from nothing. The reasoner reads and never persists (the
+        # domain port says so, and that is load-bearing), so it attaches the work
+        # to the failure and the handler decides whether to record it.
+        self.partial_artifact = partial_artifact
+        self.rejection_reasons = rejection_reasons
+        # What the attempt was derived from, so a replay can be discarded when the
+        # inputs have moved on (an edit, a replan, a catalog change).
+        self.input_fingerprint = input_fingerprint
+        # Turns this session burned. An attempt that produced nothing still
+        # proves the goal is expensive, which is what earns the retry more room.
+        self.turns_used = turns_used
+        # `transient` alone cannot decide terminality: it lumps a provider rate
+        # limit together with "this model cannot do tool calls", and those need
+        # opposite treatment -- the first should be waited out indefinitely, the
+        # second retried a few times and then escalated, because no amount of
+        # waiting will make an incapable model succeed. `kind` is the same
+        # FailureKind taxonomy the CLI runners produce, so planning and execution
+        # classify capacity identically.
+        self.kind = kind
+        # Provider-supplied Retry-After, honored as a floor on the backoff.
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(reason)
 
 
@@ -145,6 +273,68 @@ class ChatStore(Protocol):
 
     def append(self, plan_id: str, message: ChatMessage) -> None: ...
     def list(self, plan_id: str) -> list[ChatMessage]: ...
+
+
+@dataclass(frozen=True)
+class PlanningArtifact:
+    """One planning attempt: what was submitted, and why it was refused.
+
+    `input_fingerprint` is what the attempt was derived from. A replay whose
+    fingerprint no longer matches the current inputs is discarded rather than
+    shown to the model: after an edit, a replan, or a capability-catalog change
+    the prior attempt is not merely unhelpful, it describes work the model is no
+    longer being asked to do.
+    """
+
+    plan_id: str
+    purpose: str
+    sequence: int
+    input_fingerprint: str
+    outcome: str  # 'rejected' | 'abandoned' | 'committed'
+    created_at: datetime
+    goal_id: str | None = None
+    operation_id: str | None = None
+    payload: dict[str, object] | None = None
+    rejection_reasons: tuple[str, ...] = ()
+    turns_used: int | None = None
+
+
+@runtime_checkable
+class PriorPlanningAttempts(Protocol):
+    """The READ half of `PlanningArtifactStore`, for the reasoner.
+
+    Narrow on purpose: the Reasoner port promises it reads and never persists,
+    so handing the adapter something with `append` would invite exactly the
+    violation that promise exists to prevent.
+    """
+
+    def latest(
+        self, plan_id: str, purpose: str, *, goal_id: str | None = None, limit: int = 5
+    ) -> list[PlanningArtifact]: ...
+
+
+@runtime_checkable
+class PlanningArtifactStore(Protocol):
+    """Planning attempts that survive the transaction that failed.
+
+    Same rule as `ChatStore`, for the same reason: writes run OUTSIDE the plan
+    UnitOfWork on their own short transactions. An artifact recorded so a RETRY
+    can learn from it must not roll back with the transaction it exists to
+    outlive, and it must never be able to roll plan state back either.
+
+    Before this, a rejected submission lived only in the reasoner's in-process
+    message list; when the turn budget ran out that list was discarded and the
+    retry rebuilt its prompt from scratch, reproducing the same mistake until the
+    attempt budget opened a block.
+    """
+
+    def append(self, artifact: PlanningArtifact) -> None: ...
+
+    def latest(
+        self, plan_id: str, purpose: str, *, goal_id: str | None = None, limit: int = 5
+    ) -> list[PlanningArtifact]: ...
+
+    def clear(self, plan_id: str, purpose: str, *, goal_id: str | None = None) -> None: ...
 
 
 @runtime_checkable

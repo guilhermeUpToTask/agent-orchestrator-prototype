@@ -103,15 +103,28 @@ class PlanningOperation:
 
 @dataclass(frozen=True)
 class RuntimeCircuit:
+    """A provider's capacity state. `model_id=None` is a PROVIDER-WIDE circuit —
+    used for account-level limits (quota, daily quota) that every model on the
+    key shares. Per-model circuits carry the concrete model id and cover
+    upstream-level limits (an aggregator routes each model to its own pool).
+
+    `opened_at` is the START of the outage, not the last failure: policy rides a
+    capacity outage out on automatic waiting and only escalates once the outage
+    has lasted longer than the configured wall-clock ceiling.
+    """
+
     runtime: str
     provider_id: str
-    model_id: str
+    model_id: str | None
     failure_count: int
     opened_at: datetime
     retry_at: datetime
     last_failure_kind: str
     safe_message: str
     manual_intervention: bool = False
+    limit_scope: str | None = None
+    probe_holder: str | None = None
+    probe_started_at: datetime | None = None
 
 
 @runtime_checkable
@@ -147,6 +160,18 @@ class ExecutionRecordRepository(Protocol):
 
     def list_open_attempts(self, plan_id: str | None = None) -> list[ExecutionAttempt]: ...
 
+    def count_inflight_attempts(self, runtime: str, provider_id: str, model_id: str | None) -> int:
+        """Attempts currently running against a provider, ACROSS ALL PLANS.
+
+        Cross-plan on purpose: an upstream inference pool is shared by every plan
+        this orchestrator runs, so a plan-scoped count would let two plans each
+        open a full cap's worth and blow straight through the provider's ceiling.
+
+        `model_id=None` counts every model on the provider (an endpoint that
+        shares one pool). Counted from ATTEMPTS, not runs: ExecutionRun carries no
+        provider binding — the attempt is what records which provider/model ran."""
+        ...
+
     def list_runs(self, plan_id: str) -> list[ExecutionRun]: ...
 
     def list_attempts(self, plan_id: str) -> list[ExecutionAttempt]: ...
@@ -161,10 +186,37 @@ class ExecutionRecordRepository(Protocol):
 
     def list_planning_operations(self, plan_id: str) -> list[PlanningOperation]: ...
 
+    # Circuit accessors take `model_id=None` for a PROVIDER-WIDE circuit. Callers
+    # always speak `None`; how a backend stores "no model" is its own business.
     def get_runtime_circuit(
-        self, runtime: str, provider_id: str, model_id: str
+        self, runtime: str, provider_id: str, model_id: str | None
     ) -> RuntimeCircuit | None: ...
 
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None: ...
 
-    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None: ...
+    def try_claim_circuit_probe(
+        self,
+        runtime: str,
+        provider_id: str,
+        model_id: str | None,
+        *,
+        holder: str,
+        now: datetime,
+        stale_before: datetime,
+    ) -> bool:
+        """Atomically claim the half-open probe. Returns True for the ONE caller
+        that wins; every other concurrent caller gets False and must keep waiting.
+
+        A probe held since before `stale_before` is considered abandoned (its
+        holder died) and may be taken. Implementations must make the test and the
+        write a single atomic step — a read-then-write would let two runners both
+        see it free."""
+        ...
+
+    def release_circuit_probe(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None: ...
+
+    def clear_runtime_circuit(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None: ...

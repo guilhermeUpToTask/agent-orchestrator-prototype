@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
 
-from src.app.execution_records import ExecutionAttemptStatus, ExecutionRunStatus
+from src.app.execution_records import (
+    ExecutionAttempt,
+    ExecutionAttemptStatus,
+    ExecutionRun,
+    ExecutionRunStatus,
+    RuntimeCircuit,
+)
 from src.app.handlers.execution_handler import ExecutionHandler
+from src.app.provider_capacity import ProviderCapacityPolicy
+from src.app.runtime_failures import LimitScope
 from src.app.testing.fakes import DummyBehavior
 from src.app.use_cases.advance_plan import advance_plan
 from src.app.use_cases.pause_resume import resume_plan, retry_task
@@ -206,29 +215,80 @@ def test_attempt_creation_rolls_back_with_task_start_and_outbox(env_factory, mon
     assert "TaskStarted" not in env.outbox_types()
 
 
-def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factory):
-    """Domain unfreeze #14 (symmetric per-goal leases): the plan-level tick no
-    longer dispatches cyclic execution at all, so this drives the single goal
-    directly via ExecutionHandler.handle_goal — the same entry point a
-    goal-lease worker (claim_ready_goal / drive_goal) uses in production."""
-    agent = make_agent_spec().model_copy(
-        update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
+def test_runtime_circuit_round_trips_limit_scope_and_probe_fields(env_factory):
+    """The 0012 columns survive a write/read cycle identically on the in-memory
+    fake and the bound SQLite adapter."""
+    env = env_factory()
+    opened = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+    circuit = RuntimeCircuit(
+        runtime="pi",
+        provider_id="openrouter",
+        model_id="nemotron",
+        failure_count=3,
+        opened_at=opened,
+        retry_at=opened + timedelta(seconds=90),
+        last_failure_kind="rate_limit",
+        safe_message="Upstream error from Nvidia: ResourceExhausted",
+        manual_intervention=False,
+        limit_scope="request_concurrency",
+        probe_holder="run-7",
+        probe_started_at=opened + timedelta(seconds=30),
     )
-    env = env_factory(
-        {
-            "t1": DummyBehavior(
-                always_fail=True,
-                fail_kind=FailureKind.RATE_LIMIT,
-                fail_reason="NVIDIA ResourceExhausted",
-            )
-        },
-        agents=[agent],
-    )
-    plan = _plan(max_attempts=2)
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(circuit)
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") == circuit
+
+
+def test_provider_wide_circuit_is_addressed_by_none_not_a_sentinel(env_factory):
+    """An account-level (quota) circuit is keyed with model_id=None. Callers only
+    ever speak None; the SQLite adapter's storage sentinel must not leak out, and
+    a provider-wide circuit must not collide with a per-model one."""
+    env = env_factory()
+    opened = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+
+    def _circuit(model_id: str | None, count: int) -> RuntimeCircuit:
+        return RuntimeCircuit(
+            runtime="pi",
+            provider_id="openrouter",
+            model_id=model_id,
+            failure_count=count,
+            opened_at=opened,
+            retry_at=opened + timedelta(seconds=60),
+            last_failure_kind="rate_limit",
+            safe_message="quota",
+            limit_scope="daily_quota" if model_id is None else "request_concurrency",
+        )
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(_circuit(None, 1))
+        env.uow.executions.upsert_runtime_circuit(_circuit("nemotron", 2))
+
+    with env.uow:
+        provider_wide = env.uow.executions.get_runtime_circuit("pi", "openrouter", None)
+        per_model = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert provider_wide is not None and provider_wide.model_id is None
+    assert provider_wide.failure_count == 1
+    assert per_model is not None and per_model.model_id == "nemotron"
+    assert per_model.failure_count == 2
+
+    # clearing one must not clear the other
+    with env.uow:
+        env.uow.executions.clear_runtime_circuit("pi", "openrouter", None)
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is not None
+
+
+def _cyclic_plan(env, *, task_ids=("t1",), max_attempts=6, backoff=1) -> Plan:
+    """A RUNNING plan with one active cycle and one goal — the shape a goal-lease
+    worker drives via ExecutionHandler.handle_goal."""
+    plan = _plan(max_attempts=max_attempts)
     plan.retry_policy = RetryPolicy(
-        max_attempts=2,
-        initial_backoff_seconds=1,
-        max_backoff_seconds=1,
+        max_attempts=max_attempts,
+        initial_backoff_seconds=backoff,
+        max_backoff_seconds=backoff,
         jitter_ratio=0,
     )
     plan.status = PlanStatus.RUNNING
@@ -246,57 +306,762 @@ def test_provider_circuit_blocks_head_goal_without_running_later_task(env_factor
                     position=0,
                     description="",
                     tasks=[
-                        Task(id="t1", name="t1", position=0, description="", agent_id="a1"),
-                        Task(id="t2", name="t2", position=1, description="", agent_id="a1"),
+                        Task(
+                            id=task_id,
+                            name=task_id,
+                            position=index,
+                            description="",
+                            agent_id="a1",
+                        )
+                        for index, task_id in enumerate(task_ids)
                     ],
                 )
             ],
         )
     ]
-    env.seed(plan)
+    return plan
+
+
+def test_request_concurrency_requeues_without_opening_a_circuit(env_factory):
+    """A concurrency cap is not an outage: the provider served every other
+    in-flight request and refused only the one over its ceiling. The remedy is
+    'send fewer at once', so the task requeues on its own backoff and NO circuit
+    opens -- a circuit would halt a provider that is working."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason=(
+                    "Upstream error from Nvidia: ResourceExhausted: "
+                    "Worker local total request limit reached (33/32)"
+                ),
+                fail_limit_scope=LimitScope.REQUEST_CONCURRENCY,
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env))
 
     execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
 
     def drive() -> str:
-        stored = env.stored("p1")
-        return asyncio.run(execution.handle_goal("p1", "g1", stored, env.uow)).value
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
 
-    assert drive() == "continue"
-    assert drive() == "not_ready"
-    assert env.runner.calls == {"t1": 1}
+    # Several concurrency refusals in a row: each one requeues, none opens a
+    # circuit, and the plan never blocks.
+    for _ in range(4):
+        assert drive() == "continue"
+        env.clock.advance(5)
 
-    env.clock.advance(5)
-    assert drive() == "continue"
-    env.clock.advance(5)
-    assert drive() == "continue"
     stored = env.stored("p1")
     assert stored.block is None
     assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
-    assert env.runner.calls == {"t1": 3}
+    assert env.runner.calls == {"t1": 4}
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is None
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
+
+
+def test_capacity_storm_inside_the_ceiling_never_latches_or_blocks(env_factory):
+    """The old rule compared a provider-global failure_count against a PER-TASK
+    attempt budget and latched manual_intervention after a handful of failures
+    shared across concurrent goals. Escalation is now duration-based: a storm of
+    refusals inside the ceiling keeps waiting, and the plan stays RUNNING."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="NVIDIA ResourceExhausted",
+            )
+        },
+        agents=[agent],
+    )
+    # max_attempts=2 and a RATE_LIMIT kind budget of 6 both used to terminate the
+    # task long before this many failures.
+    env.seed(_cyclic_plan(env, task_ids=("t1", "t2"), max_attempts=2))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=600),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    for _ in range(10):
+        assert drive() == "continue"
+        env.clock.advance(5)
+
+    stored = env.stored("p1")
+    assert stored.block is None
+    assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    # the later task never ran: a waiting head task still holds the goal
+    assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
+    assert env.runner.calls == {"t1": 10}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and not circuit.manual_intervention
+    assert circuit.failure_count == 10  # kept for telemetry, no longer a latch
+    assert circuit.opened_at == env.clock.now() - timedelta(seconds=50)  # outage START
 
-    for _ in range(2):
-        env.clock.advance(5)
+
+def _two_goal_cycle(env) -> Plan:
+    """Two INDEPENDENT goals (no depends_on) in one active cycle, both bound to the
+    same provider/model — the shape that produced the probe herd, since each goal
+    gets its own lease and its own UnitOfWork."""
+    plan = _plan(max_attempts=6)
+    plan.retry_policy = RetryPolicy(
+        max_attempts=6, initial_backoff_seconds=10, max_backoff_seconds=10, jitter_ratio=0
+    )
+    plan.status = PlanStatus.RUNNING
+    plan.cycles = [
+        Cycle(
+            id="cycle-1",
+            intent_proposal_id="intent-1",
+            draft_id="draft-1",
+            status=CycleStatus.ACTIVE,
+            started_at=env.clock.now(),
+            goals=[
+                Goal(
+                    id=goal_id,
+                    name=goal_id,
+                    position=position,
+                    description="",
+                    tasks=[
+                        Task(
+                            id=f"{goal_id}t0",
+                            name="t",
+                            position=0,
+                            description="",
+                            agent_id="a1",
+                        )
+                    ],
+                )
+                for position, goal_id in enumerate(("g1", "g2"))
+            ],
+        )
+    ]
+    return plan
+
+
+def test_inflight_count_is_cross_plan_and_scoped_to_the_model(env_factory):
+    """The gate counts against the UPSTREAM POOL, which every plan shares. A
+    plan-scoped count would let two plans each open a full cap and blow straight
+    through the provider's ceiling. Counted from attempts because ExecutionRun
+    carries no provider binding."""
+    env = env_factory()
+    started = env.clock.now()
+    # execution_runs.plan_id is a real FK, so every plan referenced must exist.
+    for plan_id in ("p1", "p2"):
+        plan = _plan()
+        plan.id = plan_id
+        plan.project_id = f"project-{plan_id}"
+        env.seed(plan)
+
+    def _attempt(attempt_id: str, plan_id: str, model_id: str, status):
+        return ExecutionAttempt(
+            id=attempt_id,
+            run_id=f"run-{attempt_id}",
+            plan_id=plan_id,
+            goal_id="g1",
+            # attempts are unique on (plan, goal, task, number)
+            task_id=f"t-{attempt_id}",
+            number=1,
+            task_attempt=1,
+            status=status,
+            started_at=started,
+            runtime="pi",
+            provider_id="openrouter",
+            model_id=model_id,
+        )
+
+    with env.uow:
+        for attempt_id, plan_id, model_id, status in [
+            ("a1", "p1", "nemotron", ExecutionAttemptStatus.RUNNING),
+            ("a2", "p2", "nemotron", ExecutionAttemptStatus.RUNNING),  # a DIFFERENT plan
+            ("a3", "p1", "other-model", ExecutionAttemptStatus.RUNNING),
+            ("a4", "p1", "nemotron", ExecutionAttemptStatus.SUCCEEDED),  # finished
+        ]:
+            env.uow.executions.add_run(
+                ExecutionRun(
+                    id=f"run-{attempt_id}",
+                    plan_id=plan_id,
+                    goal_id="g1",
+                    task_id=f"t-{attempt_id}",
+                    status=ExecutionRunStatus.RUNNING,
+                    started_at=started,
+                )
+            )
+            env.uow.executions.add_attempt(_attempt(attempt_id, plan_id, model_id, status))
+            if status != ExecutionAttemptStatus.RUNNING:
+                env.uow.executions.finalize_attempt(
+                    attempt_id,
+                    attempt_status=status,
+                    run_status=ExecutionRunStatus.SUCCEEDED,
+                    completed_at=started,
+                )
+
+    with env.uow:
+        # per-model: both plans' running nemotron attempts, not the other model,
+        # not the finished one
+        assert env.uow.executions.count_inflight_attempts("pi", "openrouter", "nemotron") == 2
+        # provider-wide (an endpoint sharing one pool): every running model
+        assert env.uow.executions.count_inflight_attempts("pi", "openrouter", None) == 3
+        assert env.uow.executions.count_inflight_attempts("pi", "other-provider", None) == 0
+
+
+def test_admission_gate_refuses_to_start_past_the_inflight_cap(env_factory):
+    """Never fire the request that would be refused. The provider's ceiling was
+    always there; it was just unmeasured, so the orchestrator discovered it by
+    being rejected."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory({"g1t0": DummyBehavior(output="ok")}, agents=[agent])
+    env.seed(_two_goal_cycle(env))
+    started = env.clock.now()
+    # A DIFFERENT plan holds the in-flight attempt: the pool is shared, so the
+    # gate must see it. execution_runs.plan_id is a real FK, hence a real plan.
+    other = _plan()
+    other.id = "p-other-plan"
+    other.project_id = "project-other"
+    env.seed(other)
+
+    # one attempt already in flight against this provider/model
+    with env.uow:
+        env.uow.executions.add_run(
+            ExecutionRun(
+                id="run-x",
+                plan_id="p-other-plan",
+                goal_id="g9",
+                task_id="t9",
+                status=ExecutionRunStatus.RUNNING,
+                started_at=started,
+            )
+        )
+        env.uow.executions.add_attempt(
+            ExecutionAttempt(
+                id="att-x",
+                run_id="run-x",
+                plan_id="p-other-plan",
+                goal_id="g9",
+                task_id="t9",
+                number=1,
+                task_attempt=1,
+                status=ExecutionAttemptStatus.RUNNING,
+                started_at=started,
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+            )
+        )
+
+    at_cap = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=1),
+    )
+    assert (
+        asyncio.run(at_cap.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == "not_ready"
+    )
+    assert env.runner.calls == {}  # never fired
+
+    # raise the cap and the same work proceeds
+    with_room = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=2),
+    )
+    assert (
+        asyncio.run(with_room.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+        == "continue"
+    )
+    assert env.runner.calls == {"g1t0": 1}
+
+
+def _routing_agents():
+    """Two interchangeable agents on DIFFERENT providers, tiered. The bound one is
+    the smart tier; the fallback is cheap."""
+    smart = make_agent_spec().model_copy(
+        update={
+            "id": "a1",
+            "model_role": "smart",
+            "runtime_type": "pi",
+            "provider_id": "openrouter",
+            "model_id": "nemotron",
+        }
+    )
+    cheap = make_agent_spec().model_copy(
+        update={
+            "id": "a2",
+            "model_role": "cheap",
+            "runtime_type": "pi",
+            "provider_id": "local",
+            "model_id": "qwen",
+        }
+    )
+    return smart, cheap
+
+
+def _open_circuit(env, provider_id, model_id, *, retry_in):
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id=provider_id,
+                model_id=model_id,
+                failure_count=1,
+                opened_at=env.clock.now(),
+                retry_at=env.clock.now() + timedelta(seconds=retry_in),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+            )
+        )
+
+
+def test_selection_keeps_the_bound_agent_when_its_provider_is_free(env_factory):
+    """Preference is primary. With nothing throttled, routing must not fire at all."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+
+    with env.uow:
+        attempts = env.uow.executions.list_attempts("p1")
+    assert [a.model_id for a in attempts] == ["nemotron"]
+
+
+def test_selection_waits_out_a_short_throttle_but_reroutes_a_long_one(env_factory):
+    """On a paid setup, substituting a weaker model to dodge a ten-second 429 costs
+    output quality for nothing -- so a short wait is waited out. A long outage is
+    worth routing around, which is what makes free-tier parallelism work."""
+    smart, cheap = _routing_agents()
+
+    # short throttle -> stay on the preferred model and wait
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=10)
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert env.runner.calls == {}
+
+    # long outage -> route to the cheap tier and keep making progress
+    env2 = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env2.seed(_two_goal_cycle(env2))
+    _open_circuit(env2, "openrouter", "nemotron", retry_in=3_600)
+    execution2 = ExecutionHandler(env2.runner, env2.agents, env2.ws, env2.sink, env2.clock)
+    assert asyncio.run(execution2.handle_goal("p1", "g1", env2.stored("p1"), env2.uow)).value == (
+        "continue"
+    )
+    with env2.uow:
+        attempts = env2.uow.executions.list_attempts("p1")
+    assert [a.model_id for a in attempts] == ["qwen"]
+
+
+def test_selection_reroutes_immediately_when_the_preferred_pool_is_full(env_factory):
+    """An at-capacity provider has no wait to compare against -- another pool may be
+    idle right now. Applying the time threshold here would make the admission gate
+    serialize exactly the work it exists to parallelize."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    started = env.clock.now()
+    other = _plan()
+    other.id = "p-busy"
+    other.project_id = "project-busy"
+    env.seed(other)
+    with env.uow:
+        env.uow.executions.add_run(
+            ExecutionRun(
+                id="run-b",
+                plan_id="p-busy",
+                goal_id="g9",
+                task_id="t9",
+                status=ExecutionRunStatus.RUNNING,
+                started_at=started,
+            )
+        )
+        env.uow.executions.add_attempt(
+            ExecutionAttempt(
+                id="att-b",
+                run_id="run-b",
+                plan_id="p-busy",
+                goal_id="g9",
+                task_id="t9",
+                number=1,
+                task_attempt=1,
+                status=ExecutionAttemptStatus.RUNNING,
+                started_at=started,
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+            )
+        )
+
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=1),
+    )
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+    with env.uow:
+        attempts = [a for a in env.uow.executions.list_attempts("p1")]
+    assert [a.model_id for a in attempts] == ["qwen"]  # rerouted, not delayed
+
+
+def test_selection_never_mutates_the_persisted_binding(env_factory):
+    """Substitution is a RUNTIME choice. The task's agent_id records the operator's
+    preference and belongs to the aggregate; only the attempt records what ran."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=3_600)
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+
+    stored = env.stored("p1")
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].agent_id == "a1"  # binding untouched
+    with env.uow:
+        attempts = env.uow.executions.list_attempts("p1")
+    assert [a.provider_id for a in attempts] == ["local"]  # but 'local' actually ran
+
+
+def test_selection_waits_when_every_capable_agent_is_throttled(env_factory):
+    """With nowhere better to go, it falls back to the preferred spec and takes the
+    ordinary wait -- never a block merely because routing found no alternative."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(output="ok")}, agents=[smart, cheap], default_agent_id="a1"
+    )
+    env.seed(_two_goal_cycle(env))
+    _open_circuit(env, "openrouter", "nemotron", retry_in=3_600)
+    _open_circuit(env, "local", "qwen", retry_in=3_600)
+
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert env.runner.calls == {}
+    stored = env.stored("p1")
+    assert stored.goal_blocks == {}
+    assert stored.block is None
+
+
+def test_probe_claim_admits_exactly_one_holder_per_window(env_factory):
+    """The atomicity contract behind the half-open probe, on BOTH backends. The
+    claim must be a single conditional write: a read-then-write would let two
+    concurrent runners each observe the probe free and both probe, which is the
+    herd that made one outage window cost four failures with four goals in flight.
+    """
+    env = env_factory()
+    now = env.clock.now()
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+                failure_count=3,
+                opened_at=now - timedelta(seconds=30),
+                retry_at=now - timedelta(seconds=1),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+            )
+        )
+
+    stale_before = now - timedelta(seconds=100)
+    with env.uow:
+        first = env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-a", now=now, stale_before=stale_before
+        )
+        second = env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-b", now=now, stale_before=stale_before
+        )
+    assert (first, second) == (True, False)
+
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert circuit is not None
+    assert circuit.probe_holder == "runner-a"  # the loser must not overwrite it
+    assert circuit.probe_started_at == now
+
+    # released -> claimable again in the next window
+    with env.uow:
+        env.uow.executions.release_circuit_probe("pi", "openrouter", "nemotron")
+    with env.uow:
+        assert env.uow.executions.try_claim_circuit_probe(
+            "pi", "openrouter", "nemotron", holder="runner-c", now=now, stale_before=stale_before
+        )
+
+
+def test_probe_claim_on_a_missing_circuit_is_refused(env_factory):
+    """No circuit means nothing to probe; a claim must not create a row."""
+    env = env_factory()
+    now = env.clock.now()
+    with env.uow:
+        assert not env.uow.executions.try_claim_circuit_probe(
+            "pi",
+            "openrouter",
+            "nemotron",
+            holder="runner-a",
+            now=now,
+            stale_before=now - timedelta(seconds=100),
+        )
+    with env.uow:
+        assert env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron") is None
+
+
+def test_a_stale_probe_is_reclaimed_after_its_holder_dies(env_factory):
+    """A probe whose holder crashed must not gate the provider forever."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory({"g1t0": DummyBehavior(output="ok")}, agents=[agent])
+    env.seed(_two_goal_cycle(env))
+
+    with env.uow:
+        env.uow.executions.upsert_runtime_circuit(
+            RuntimeCircuit(
+                runtime="pi",
+                provider_id="openrouter",
+                model_id="nemotron",
+                failure_count=1,
+                opened_at=env.clock.now() - timedelta(seconds=60),
+                retry_at=env.clock.now() - timedelta(seconds=1),
+                last_failure_kind="rate_limit",
+                safe_message="ResourceExhausted",
+                probe_holder="worker-that-died",
+                probe_started_at=env.clock.now() - timedelta(seconds=30),
+            )
+        )
+
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(probe_stale_after_seconds=100),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    # held for 30s, cutoff 100s -> still someone else's probe
+    assert drive() == "not_ready"
+    assert env.runner.calls == {}
+
+    # past the cutoff the abandoned probe is reclaimable
+    env.clock.advance(200)
+    assert drive() == "continue"
+    assert env.runner.calls == {"g1t0": 1}
+
+
+def test_connection_error_waits_on_a_circuit_instead_of_failing_the_task(env_factory):
+    """An unreachable or overloaded endpoint is not a defect in this task. It used
+    to exhaust the per-task budget and open a goal block for something no human
+    edit could fix; it now waits on a circuit like any other capacity failure."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.CONNECTION_ERROR,
+                fail_reason="connection reset by peer",
+            )
+        },
+        agents=[agent],
+    )
+    # max_attempts=2 with a CONNECTION_ERROR kind budget of 5: the old path
+    # terminated this task well inside the loop below.
+    env.seed(_cyclic_plan(env, max_attempts=2))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=600),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    for _ in range(8):
         assert drive() == "continue"
+        env.clock.advance(5)
 
-    env.clock.advance(5)
+    stored = env.stored("p1")
+    assert stored.goal_blocks == {}
+    assert stored.status == PlanStatus.RUNNING
+    assert stored.active_cycle is not None
+    assert stored.active_cycle.goals[0].tasks[0].status == Status.PENDING
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert circuit is not None and not circuit.manual_intervention
+    assert circuit.last_failure_kind == "connection_error"
+
+    # still bounded: past the ceiling it escalates like any capacity outage
+    env.clock.advance(1_000)
     assert drive() == "paused"
+    block = env.stored("p1").goal_blocks.get("g1")
+    assert block is not None and block.kind == "provider_capacity"
+
+
+def test_outage_past_the_ceiling_latches_and_opens_a_goal_block(env_factory):
+    """The backstop: a 'transient' signature that never resolves (a revoked key
+    returning 429, a wrong base_url) must eventually reach a human instead of
+    waiting forever while the root still reports RUNNING."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "nvidia", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="NVIDIA ResourceExhausted",
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env, task_ids=("t1", "t2")))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(outage_ceiling_seconds=100),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    assert drive() == "continue"  # opens the circuit
+    env.clock.advance(500)  # outage now far older than the ceiling
+    assert drive() == "paused"
+
     stored = env.stored("p1")
     assert stored.block is None  # per-goal block, not the legacy scalar
     block = stored.goal_blocks.get("g1")
     assert block is not None and block.active and block.kind == "provider_capacity"
-    assert block.legal_resolutions == [
-        "wait_and_retry",
-        "edit_task",
-        "start_replan",
-    ]
+    assert block.legal_resolutions == ["wait_and_retry", "edit_task", "start_replan"]
     assert stored.active_cycle is not None
     assert stored.active_cycle.goals[0].tasks[1].status == Status.PENDING
-    assert env.runner.calls == {"t1": 6}
     with env.uow:
         circuit = env.uow.executions.get_runtime_circuit("pi", "nvidia", "nemotron")
     assert circuit is not None and circuit.manual_intervention
+
+
+def test_daily_quota_waits_past_the_ordinary_ceiling(env_factory):
+    """A free-tier daily allowance can legitimately take a full day to reset, so
+    it must not escalate on the ordinary ceiling -- that would block precisely the
+    case this design exists to survive."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="free-models-per-day limit reached",
+                fail_limit_scope=LimitScope.DAILY_QUOTA,
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env))
+    execution = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(
+            outage_ceiling_seconds=100,
+            daily_quota_ceiling_seconds=10_000,
+        ),
+    )
+
+    def drive() -> str:
+        return asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value
+
+    assert drive() == "continue"
+
+    # A daily quota also carries a 1h minimum backoff, so the plan is still
+    # WAITING here -- past the ordinary ceiling, but not yet due to probe.
+    env.clock.advance(500)
+    assert drive() == "not_ready"
+    assert env.stored("p1").goal_blocks == {}
+
+    # Now past the probe window and still inside the daily ceiling: it retries
+    # rather than escalating, even though the ordinary ceiling is long gone.
+    env.clock.advance(4_000)
+    assert drive() == "continue"
+    assert env.stored("p1").goal_blocks == {}
+
+    with env.uow:
+        # an account-level limit keys provider-wide: routing to another model
+        # cannot escape it
+        circuit = env.uow.executions.get_runtime_circuit("pi", "openrouter", None)
+    assert circuit is not None and not circuit.manual_intervention
+    assert circuit.limit_scope == "daily_quota"
+
+    # Past the daily ceiling (10_000s from the outage start) while still retrying
+    # normally. Deliberately NOT a single huge jump: silence for longer than a whole
+    # daily ceiling is treated as a DIFFERENT outage, so an unrealistically quiet
+    # clock would reset the window rather than escalate.
+    env.clock.advance(7_500)
+    assert drive() == "paused"
+    block = env.stored("p1").goal_blocks.get("g1")
+    assert block is not None and block.kind == "provider_capacity"

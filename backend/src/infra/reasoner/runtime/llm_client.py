@@ -64,6 +64,20 @@ def to_provider_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def _is_degenerate_choice(choice: Any) -> bool:
+    """True when a returned choice carries neither text nor tool calls.
+
+    Tool-calling models routinely answer with tool_calls and empty content --
+    that is the normal success path, not a fault -- so both must be absent.
+    """
+    message = getattr(choice, "message", None)
+    if message is None:
+        return True
+    if getattr(message, "tool_calls", None):
+        return False
+    return not (getattr(message, "content", None) or "").strip()
+
+
 class OpenAIChatClient:
     """chat.completions against any OpenAI-compatible base_url (OpenAI,
     OpenRouter, Anthropic's compat endpoint, Gemini's, local servers)."""
@@ -143,8 +157,22 @@ class OpenAIChatClient:
                 error = classify_provider_error(self.model, exc)
             else:
                 if response.choices:
-                    return response.choices[0].message, self._extract_usage(response)
-                error = provider_error_from_empty_choices(self.model, response)
+                    choice = response.choices[0]
+                    if not _is_degenerate_choice(choice):
+                        return choice.message, self._extract_usage(response)
+                    # A choice that carries no content AND no tool calls is never
+                    # a usable answer. OpenRouter returns some upstream failures
+                    # exactly this way -- HTTP 200, `choices` present,
+                    # `finish_reason="error"` -- so neither the SDK nor the
+                    # empty-choices guard sees it, and the agent loop would blame
+                    # the MODEL for a provider fault ("replied with plain text
+                    # where a tool submit was required"), throwing away every
+                    # read turn the session had already paid for.
+                    error = provider_error_from_empty_choices(
+                        self.model, response, degenerate_choice=True
+                    )
+                else:
+                    error = provider_error_from_empty_choices(self.model, response)
 
             last_error = error
             if not error.transient or attempt == self._max_retries - 1:

@@ -28,24 +28,49 @@ class RetryPolicy(BaseModel):
     kind_backoff_scale: dict[FailureKind, float] = Field(
         default_factory=lambda: {FailureKind.RATE_LIMIT: 4.0}
     )
+    # Domain un-freeze #17. A ceiling is the opposite instrument to
+    # `kind_max_attempts`: that one is a FLOOR that grants a transient kind extra
+    # tries and cannot be cut by a lower global budget; this one caps a kind
+    # whose repetition is EVIDENCE rather than bad luck, and must therefore
+    # survive a higher global budget too.
+    #
+    # A rejected candidate earns exactly one more attempt. Agent output is a
+    # sample, so re-running it against the same frozen tests -- now told what was
+    # rejected -- is the cheapest recovery available. A third identical rejection
+    # says the CONTRACT is wrong, and no number of retries repairs a contract.
+    kind_attempt_ceiling: dict[FailureKind, int] = Field(
+        default_factory=lambda: {FailureKind.VERIFICATION_ERROR: 2}
+    )
     # Typed classification (shared failure taxonomy): a token-limit or auth failure
     # will fail identically on every retry, so it is terminal immediately.
+    # VERIFICATION_ERROR was here until un-freeze #17: it made ONE bad agent
+    # output block the goal, and the next attempt was never told what went wrong
+    # anyway. The prompt feedback (src/app/agent_feedback.py) is what makes the
+    # retry mean something; a Class C orchestration race stays terminal through
+    # `RuntimeFailure.retryable=False`, which vetoes independently of this set.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(
         {
             FailureKind.TOKEN_LIMIT,
             FailureKind.AUTH_ERROR,
-            FailureKind.VERIFICATION_ERROR,
         }
     )
 
     def should_retry(self, attempts: int, kind: FailureKind | None) -> bool:
         if kind is not None and kind in self.non_retryable_kinds:
             return False
+        # A per-kind budget GRANTS a transient kind extra attempts; it is never a
+        # ceiling. `max_attempts` is operator-configured (execution.retry_max_attempts)
+        # precisely so a provider capacity outage can be ridden out on automatic
+        # backoff instead of opening a human-gated block -- taking the kind entry
+        # verbatim would let the hardcoded default (6) silently cut a configured
+        # baseline of, say, 10 back down for the exact kind that key targets.
         budget = (
-            self.kind_max_attempts.get(kind, self.max_attempts)
+            max(self.kind_max_attempts.get(kind, self.max_attempts), self.max_attempts)
             if kind is not None
             else self.max_attempts
         )
+        if kind is not None and kind in self.kind_attempt_ceiling:
+            budget = min(budget, self.kind_attempt_ceiling[kind])
         return attempts < budget
 
     def backoff_for(

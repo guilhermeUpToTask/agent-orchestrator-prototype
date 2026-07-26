@@ -136,6 +136,8 @@ class SqliteAgentEventReader:
             return {
                 "sessions": 0,
                 "calls": 0,
+                "turns": 0,
+                "max_session_turns": 0,
                 "prompt_tokens": None,
                 "completion_tokens": None,
                 "total_tokens": None,
@@ -156,6 +158,9 @@ class SqliteAgentEventReader:
                 scope = scopes[name]
                 scope["sessions"] += 1
                 scope["calls"] += int(payload.get("llm_calls") or 0)
+                session_turns = int(payload.get("turns") or 0)
+                scope["turns"] += session_turns
+                scope["max_session_turns"] = max(scope["max_session_turns"], session_turns)
                 scope["coverage"]["observations"] += 1
                 scope["coverage"][str(quality)] = scope["coverage"].get(str(quality), 0) + 1
                 for field, payload_key in (

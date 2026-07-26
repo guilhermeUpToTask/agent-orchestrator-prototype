@@ -135,3 +135,125 @@ def test_claim_predicate_skips_a_plan_until_its_gate_opens(env_factory):
     env.clock.advance(31)
     claimed = env.uow.plans.claim_one_unit("w1", lease_seconds=60)
     assert claimed is not None and claimed.id == "p1"
+
+
+def test_a_failed_enrichment_leaves_its_work_behind_for_the_retry(env_factory):
+    """The artifact must OUTLIVE the failure that produced it.
+
+    Before this, a rejected submission lived only in the reasoner's in-process
+    message list; the raise discarded it, `_start_operation` reused the same
+    planning_operations row, and the retry rebuilt its prompt from nothing —
+    reproducing the same class of mistake until the budget opened a block.
+
+    Written outside the plan transaction on purpose (the ChatStore rule): a
+    record kept so the retry can learn must not roll back with the rollback.
+    """
+    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+
+    class RejectsThenDies:
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal(self, plan, goal, capabilities):
+            raise ReasonerUnavailable(
+                "Reasoner session exceeded 4 turns without submitting",
+                transient=True,
+                partial_artifact={"tasks": [{"allowed_scope": ["implementation"]}]},
+                rejection_reasons=("allowed_scope: 'implementation' is a capability id",),
+                input_fingerprint="fp-1",
+            )
+
+    env = env_factory()
+    env.seed(enriching_plan())
+    artifacts = InMemoryPlanningArtifactStore()
+    planning = PlanningHandler(
+        RejectsThenDies(),
+        env.agents,
+        InMemoryCapabilityRepository(),
+        env.clock,
+        planning_artifacts=artifacts,
+    )
+
+    signal = asyncio.run(planning.handle("p1", env.stored("p1"), env.uow))
+
+    assert signal == Signal.NOT_READY  # backoff, as before
+    (kept,) = artifacts.latest("p1", "goal_contract", goal_id="g1")
+    assert kept.outcome == "rejected"
+    assert kept.payload == {"tasks": [{"allowed_scope": ["implementation"]}]}
+    assert kept.rejection_reasons == ("allowed_scope: 'implementation' is a capability id",)
+    assert kept.input_fingerprint == "fp-1"
+
+
+def test_a_session_that_produced_nothing_is_still_recorded(env_factory):
+    """The most common enrichment failure is a session dying on its turn budget
+    without ever submitting — observed live, twice. If that leaves no row, the
+    retry is granted no extra turns and dies in exactly the same way.
+
+    The row exists to buy the escalating budget. It carries no payload and no
+    reasons, and the replay's outcome filter keeps `abandoned` out of the prompt:
+    there is nothing there to learn from, only evidence that this goal is hard.
+    """
+    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+
+    env = env_factory()
+    env.seed(enriching_plan())
+    artifacts = InMemoryPlanningArtifactStore()
+    planning = PlanningHandler(
+        FailingReasoner(transient=True),
+        env.agents,
+        InMemoryCapabilityRepository(),
+        env.clock,
+        planning_artifacts=artifacts,
+    )
+
+    asyncio.run(planning.handle("p1", env.stored("p1"), env.uow))
+
+    kept = artifacts.latest("p1", "goal_contract", goal_id="g1")
+    assert kept == []  # no fingerprint on this failure -> nothing addressable
+
+
+def test_a_budget_exhaustion_records_an_abandoned_attempt(env_factory):
+    """With a fingerprint, an empty-handed failure IS recorded."""
+    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+
+    class DiesOnBudget:
+        async def converse(self, plan, history, message, mode):  # pragma: no cover
+            raise AssertionError("unused")
+
+        async def enrich_goal(self, plan, goal, capabilities):
+            raise ReasonerUnavailable(
+                "Reasoner session exceeded 4 turns without submitting",
+                transient=True,
+                input_fingerprint="fp-1",
+                turns_used=4,
+            )
+
+    env = env_factory()
+    env.seed(enriching_plan())
+    artifacts = InMemoryPlanningArtifactStore()
+    planning = PlanningHandler(
+        DiesOnBudget(),
+        env.agents,
+        InMemoryCapabilityRepository(),
+        env.clock,
+        planning_artifacts=artifacts,
+    )
+
+    asyncio.run(planning.handle("p1", env.stored("p1"), env.uow))
+
+    (kept,) = artifacts.latest("p1", "goal_contract", goal_id="g1")
+    assert kept.outcome == "abandoned"
+    assert kept.payload is None and kept.rejection_reasons == ()
+    assert kept.turns_used == 4
+
+
+def test_a_permanent_planning_failure_still_fails_immediately(env_factory):
+    """Waiting cannot fix a model that has no tool-use endpoint."""
+    env = env_factory()
+    env.seed(enriching_plan())
+
+    asyncio.run(handler(FailingReasoner(transient=False), env).handle("p1", env.stored("p1"), env.uow))
+
+    from src.domain.entities.planning_artifacts import PlanStatus
+
+    assert env.stored("p1").status == PlanStatus.BLOCKED

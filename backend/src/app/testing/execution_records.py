@@ -16,6 +16,12 @@ from src.app.execution_records import (
 )
 from src.app.runtime_failures import RuntimeFailure
 
+# (runtime, provider_id, model_id) — `model_id=None` is a provider-wide circuit.
+# The bound SQLite adapter stores that as a sentinel because SQLite forbids NULL
+# primary-key columns; here `None` is a first-class dict key, so the fake needs
+# no translation. Both backends present the identical `None` contract to callers.
+_CircuitKey = tuple[str, str, str | None]
+
 
 class InMemoryExecutionRecordRepository:
     """Copy-on-enter transaction semantics matching the bound SQLite adapter."""
@@ -24,11 +30,11 @@ class InMemoryExecutionRecordRepository:
         self._runs: dict[str, ExecutionRun] = {}
         self._attempts: dict[str, ExecutionAttempt] = {}
         self._planning: dict[str, PlanningOperation] = {}
-        self._circuits: dict[tuple[str, str, str], RuntimeCircuit] = {}
+        self._circuits: dict[_CircuitKey, RuntimeCircuit] = {}
         self._tx_runs: dict[str, ExecutionRun] | None = None
         self._tx_attempts: dict[str, ExecutionAttempt] | None = None
         self._tx_planning: dict[str, PlanningOperation] | None = None
-        self._tx_circuits: dict[tuple[str, str, str], RuntimeCircuit] | None = None
+        self._tx_circuits: dict[_CircuitKey, RuntimeCircuit] | None = None
 
     def _begin(self) -> None:
         if self._tx_runs is not None:
@@ -215,7 +221,7 @@ class InMemoryExecutionRecordRepository:
             )
         return self._tx_planning
 
-    def _circuits_bound(self) -> dict[tuple[str, str, str], RuntimeCircuit]:
+    def _circuits_bound(self) -> dict[_CircuitKey, RuntimeCircuit]:
         if self._tx_circuits is None:
             raise RuntimeError(
                 "InMemoryExecutionRecordRepository used outside a UnitOfWork transaction"
@@ -262,7 +268,7 @@ class InMemoryExecutionRecordRepository:
         )
 
     def get_runtime_circuit(
-        self, runtime: str, provider_id: str, model_id: str
+        self, runtime: str, provider_id: str, model_id: str | None
     ) -> RuntimeCircuit | None:
         circuits = self._circuits if self._tx_circuits is None else self._tx_circuits
         return circuits.get((runtime, provider_id, model_id))
@@ -270,5 +276,52 @@ class InMemoryExecutionRecordRepository:
     def upsert_runtime_circuit(self, circuit: RuntimeCircuit) -> None:
         self._circuits_bound()[(circuit.runtime, circuit.provider_id, circuit.model_id)] = circuit
 
-    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str) -> None:
+    def count_inflight_attempts(self, runtime: str, provider_id: str, model_id: str | None) -> int:
+        attempts = self._attempts if self._tx_attempts is None else self._tx_attempts
+        return sum(
+            1
+            for attempt in attempts.values()
+            if attempt.status == ExecutionAttemptStatus.RUNNING
+            and attempt.runtime == runtime
+            and attempt.provider_id == provider_id
+            and (model_id is None or attempt.model_id == model_id)
+        )
+
+    def try_claim_circuit_probe(
+        self,
+        runtime: str,
+        provider_id: str,
+        model_id: str | None,
+        *,
+        holder: str,
+        now: datetime,
+        stale_before: datetime,
+    ) -> bool:
+        """Same atomicity contract as the SQLite adapter: test and write together.
+        Single-threaded here, so the dict update is trivially atomic."""
+        circuits = self._circuits_bound()
+        circuit = circuits.get((runtime, provider_id, model_id))
+        if circuit is None:
+            return False
+        held = circuit.probe_holder is not None and not (
+            circuit.probe_started_at is not None and circuit.probe_started_at < stale_before
+        )
+        if held:
+            return False
+        circuits[(runtime, provider_id, model_id)] = replace(
+            circuit, probe_holder=holder, probe_started_at=now
+        )
+        return True
+
+    def release_circuit_probe(
+        self, runtime: str, provider_id: str, model_id: str | None
+    ) -> None:
+        circuits = self._circuits_bound()
+        circuit = circuits.get((runtime, provider_id, model_id))
+        if circuit is not None:
+            circuits[(runtime, provider_id, model_id)] = replace(
+                circuit, probe_holder=None, probe_started_at=None
+            )
+
+    def clear_runtime_circuit(self, runtime: str, provider_id: str, model_id: str | None) -> None:
         self._circuits_bound().pop((runtime, provider_id, model_id), None)

@@ -61,7 +61,7 @@ _PROVIDER_CODE = re.compile(
 )
 
 
-def _retry_after_seconds(output: str) -> float | None:
+def parse_retry_after_seconds(output: str) -> float | None:
     match = _RETRY_AFTER.search(output)
     if match is None:
         return None
@@ -78,7 +78,13 @@ def _limit_scope(output: str) -> LimitScope:
     lowered = output.lower()
     if "per day" in lowered or "daily" in lowered or "free-models-per-day" in lowered:
         return LimitScope.DAILY_QUOTA
-    if "concurr" in lowered or "simultaneous" in lowered:
+    if (
+        "concurr" in lowered
+        or "simultaneous" in lowered
+        or "request limit reached" in lowered
+        or "total request limit" in lowered
+        or "too many requests" in lowered
+    ):
         return LimitScope.REQUEST_CONCURRENCY
     if "quota" in lowered or "credit" in lowered:
         return LimitScope.QUOTA
@@ -131,7 +137,7 @@ def normalize_failure(
         provider_id=provider_id,
         model_id=model_id,
         provider_code=normalized_provider_code,
-        retry_after_seconds=_retry_after_seconds(output),
+        retry_after_seconds=parse_retry_after_seconds(output),
         limit_scope=(_limit_scope(output) if kind == FailureKind.RATE_LIMIT else None),
         exit_code=exit_code,
         stdout_tail=safe_runtime_tail(stdout),

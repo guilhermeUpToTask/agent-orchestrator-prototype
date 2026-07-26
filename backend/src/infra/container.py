@@ -39,15 +39,23 @@ from src.infra.db.reference_repos import (
     SqliteProjectRepository,
 )
 from src.infra.db.agent_event_reader import SqliteAgentEventReader
+from src.infra.db.attempt_feedback_repository import SqliteAttemptFeedbackRepository
+from src.infra.db.planning_artifact_repository import SqlitePlanningArtifactRepository
 from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
+from src.infra.git.repository_reader import GitRepositoryReader
 from src.infra.git.project_workspace import (
     ProjectRoutingWorkspace,
     ProjectWorkspaceResolver,
 )
 from src.domain.policies.retry_policies import RetryPolicy
+from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
+from src.infra.policies.provider_capacity_factory import (
+    build_provider_capacity_policy,
+    build_routing_policy,
+)
 from src.infra.policies.retry_policy_factory import build_retry_policy
 from src.infra.reasoner.factory import build_reasoner
 from src.infra.runtime.factory import build_agent_runner
@@ -117,6 +125,18 @@ class AppContainer:
         without an API restart."""
         return build_retry_policy(self.config_store)
 
+    @property
+    def provider_capacity_policy(self) -> ProviderCapacityPolicy:
+        """Read fresh on every access, same reasoning as default_retry_policy:
+        the ceilings behind it are operator-tuned via `orchestrate config set`
+        and must apply without an API restart."""
+        return build_provider_capacity_policy(self.config_store)
+
+    @property
+    def routing_policy(self) -> RoutingPolicy:
+        """Read fresh per access, same reasoning as the other two policies."""
+        return build_routing_policy(self.config_store)
+
     @cached_property
     def secret_store(self) -> SqliteSecretStore:
         # fail-closed: a missing/invalid ORCHESTRATOR_MASTER_KEY raises here
@@ -126,6 +146,13 @@ class AppContainer:
     @cached_property
     def workspace_resolver(self) -> ProjectWorkspaceResolver:
         return ProjectWorkspaceResolver(self.project_repo, self.orchestrator_home)
+
+    @cached_property
+    def repository_reader(self) -> GitRepositoryReader:
+        """Read-only repository sight for the planning reasoner. Shares the
+        project resolver with the execution workspace, so the planner reads the
+        exact repository the agents will edit."""
+        return GitRepositoryReader(self.workspace_resolver)
 
     @cached_property
     def workspace(self) -> ProjectRoutingWorkspace:
@@ -170,7 +197,20 @@ class AppContainer:
             self.orchestrator_home,
             self.observation_repository,
             self.sandbox,
+            self.attempt_feedback,
         )
+
+    @cached_property
+    def planning_artifacts(self) -> SqlitePlanningArtifactRepository:
+        """Failed planning attempts, kept so a retry starts better informed.
+        Own short transactions — it must outlive the transaction that failed."""
+        return SqlitePlanningArtifactRepository(self.session_factory)
+
+    @cached_property
+    def attempt_feedback(self) -> SqliteAttemptFeedbackRepository:
+        """Why the previous candidate was rejected. Own short read transaction —
+        the agent runner executes outside the plan UnitOfWork by design."""
+        return SqliteAttemptFeedbackRepository(self.session_factory)
 
     @cached_property
     def verification_executor(self) -> LocalVerificationExecutor:
@@ -190,4 +230,6 @@ class AppContainer:
             lambda: self.secret_store,
             self.capability_repo,
             self.observation_repository,
+            self.repository_reader,
+            self.planning_artifacts,
         )

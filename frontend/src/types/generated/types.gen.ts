@@ -378,6 +378,7 @@ export type Cycle = {
      * Intent Proposal Id
      */
     intent_proposal_id: string;
+    approved_intent?: IntentProposal | null;
     /**
      * Draft Id
      */
@@ -495,7 +496,7 @@ export type EditRequest = {
     /**
      * Type
      */
-    type: 'add_task' | 'remove_task' | 'reorder_tasks' | 'edit_task_requirements' | 'rebind_task_agent' | 'update_task' | 'update_goal' | 'remove_goal';
+    type: 'add_task' | 'remove_task' | 'reorder_tasks' | 'edit_task_requirements' | 'rebind_task_agent' | 'update_task' | 'update_task_contract' | 'update_goal' | 'remove_goal';
     /**
      * Goal Id
      */
@@ -529,6 +530,31 @@ export type EditRequest = {
      * Depends On
      */
     depends_on?: Array<string> | null;
+    /**
+     * Objective
+     */
+    objective?: string | null;
+    /**
+     * Acceptance Criteria
+     */
+    acceptance_criteria?: Array<ContractCriterion> | null;
+    verification_strategy?: VerificationStrategy | null;
+    /**
+     * Allowed Scope
+     */
+    allowed_scope?: Array<string> | null;
+    /**
+     * Forbidden Scope
+     */
+    forbidden_scope?: Array<string> | null;
+    /**
+     * Verification Commands
+     */
+    verification_commands?: Array<string> | null;
+    /**
+     * Goal Criterion Ids
+     */
+    goal_criterion_ids?: Array<string> | null;
 };
 
 /**
@@ -795,6 +821,10 @@ export type IaModel = {
      * Name
      */
     name: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
 };
 
 /**
@@ -888,6 +918,14 @@ export type LlmMetrics = {
      */
     calls: number;
     /**
+     * Turns
+     */
+    turns: number;
+    /**
+     * Max Session Turns
+     */
+    max_session_turns: number;
+    /**
      * Prompt Tokens
      */
     prompt_tokens: number | null;
@@ -967,6 +1005,10 @@ export type ModelBody = {
      * Name
      */
     name: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
 };
 
 /**
@@ -993,6 +1035,14 @@ export type ModelProvider = {
      * Models
      */
     models: Array<IaModel>;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
 };
 
 /**
@@ -1187,6 +1237,7 @@ export type PlanDetailResponse = {
      */
     paused_reason: string | null;
     active_run: ActiveRunResponse | null;
+    provider_waiting: ProviderWaitingResponse | null;
     /**
      * Planning Operation
      */
@@ -1228,6 +1279,54 @@ export type PlanDetailResponse = {
      * Iteration
      */
     iteration?: number | null;
+};
+
+/**
+ * PlanningArtifactResponse
+ *
+ * One recorded planning attempt.
+ *
+ * Without this the feature is invisible: a retry that starts better informed
+ * looks identical from outside to one that does not, so nothing an operator
+ * (or a fixture) can read tells them whether the memory is working.
+ */
+export type PlanningArtifactResponse = {
+    /**
+     * Goal Id
+     */
+    goal_id: string | null;
+    /**
+     * Purpose
+     */
+    purpose: string;
+    /**
+     * Sequence
+     */
+    sequence: number;
+    /**
+     * Outcome
+     */
+    outcome: string;
+    /**
+     * Input Fingerprint
+     */
+    input_fingerprint: string;
+    /**
+     * Rejection Reasons
+     */
+    rejection_reasons: Array<string>;
+    /**
+     * Turns Used
+     */
+    turns_used: number | null;
+    /**
+     * Has Payload
+     */
+    has_payload: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
 };
 
 /**
@@ -1367,6 +1466,14 @@ export type ProviderCreateBody = {
      * Api Key
      */
     api_key: string;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
 };
 
 /**
@@ -1385,6 +1492,67 @@ export type ProviderUpdateBody = {
      * Api Key
      */
     api_key?: string | null;
+    /**
+     * Max Inflight
+     */
+    max_inflight?: number | null;
+    /**
+     * Capacity Scope
+     */
+    capacity_scope?: string | null;
+};
+
+/**
+ * ProviderWaitingResponse
+ *
+ * An open provider capacity circuit gating this plan's work.
+ *
+ * A SIBLING field, not folded into `status_reason`: that is a pure property of
+ * the Plan aggregate, and the aggregate cannot see a RuntimeCircuit (it lives in
+ * the execution-record store). Mixing it in would mean either a domain change or
+ * a router overwriting a domain property. Same pattern `active_run` and
+ * `planning_progress` already use.
+ *
+ * The root stays RUNNING while this is set — it IS running, merely unclaimable
+ * until `retry_at`. Waiting on a provider is not a lifecycle state.
+ */
+export type ProviderWaitingResponse = {
+    /**
+     * Provider Id
+     */
+    provider_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string | null;
+    /**
+     * Runtime
+     */
+    runtime: string;
+    /**
+     * Limit Scope
+     */
+    limit_scope: string | null;
+    /**
+     * Retry At
+     */
+    retry_at: string;
+    /**
+     * Since
+     */
+    since: string;
+    /**
+     * Failure Count
+     */
+    failure_count: number;
+    /**
+     * Safe Message
+     */
+    safe_message: string;
+    /**
+     * Needs Attention
+     */
+    needs_attention: boolean;
 };
 
 /**
@@ -1481,6 +1649,12 @@ export type RetryPolicy = {
      * Kind Backoff Scale
      */
     kind_backoff_scale?: {
+        [key in FailureKind]?: number;
+    };
+    /**
+     * Kind Attempt Ceiling
+     */
+    kind_attempt_ceiling?: {
         [key in FailureKind]?: number;
     };
     /**
@@ -1985,6 +2159,14 @@ export type UsageScopeMetrics = {
      */
     calls: number;
     /**
+     * Turns
+     */
+    turns: number;
+    /**
+     * Max Session Turns
+     */
+    max_session_turns: number;
+    /**
      * Prompt Tokens
      */
     prompt_tokens: number | null;
@@ -2202,6 +2384,90 @@ export type PlansGetPlanResponses = {
 };
 
 export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
+
+export type PlansClearPlanningArtifactsData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: {
+        /**
+         * Purpose
+         */
+        purpose?: string;
+        /**
+         * Goal Id
+         */
+        goal_id?: string | null;
+    };
+    url: '/api/plans/{plan_id}/planning-artifacts';
+};
+
+export type PlansClearPlanningArtifactsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansClearPlanningArtifactsError = PlansClearPlanningArtifactsErrors[keyof PlansClearPlanningArtifactsErrors];
+
+export type PlansClearPlanningArtifactsResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansClearPlanningArtifactsResponse = PlansClearPlanningArtifactsResponses[keyof PlansClearPlanningArtifactsResponses];
+
+export type PlansListPlanningArtifactsData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: {
+        /**
+         * Purpose
+         */
+        purpose?: string;
+        /**
+         * Goal Id
+         */
+        goal_id?: string | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/api/plans/{plan_id}/planning-artifacts';
+};
+
+export type PlansListPlanningArtifactsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansListPlanningArtifactsError = PlansListPlanningArtifactsErrors[keyof PlansListPlanningArtifactsErrors];
+
+export type PlansListPlanningArtifactsResponses = {
+    /**
+     * Response Plans-List Planning Artifacts
+     *
+     * Successful Response
+     */
+    200: Array<PlanningArtifactResponse>;
+};
+
+export type PlansListPlanningArtifactsResponse = PlansListPlanningArtifactsResponses[keyof PlansListPlanningArtifactsResponses];
 
 export type PlansAttemptTimelineData = {
     body?: never;

@@ -6,9 +6,10 @@ mirror what the real SQLite adapter must do."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
+from src.app.ports import PlanningArtifact
 from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
@@ -21,6 +22,7 @@ from src.domain.events.base import DomainEvent
 from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
 
+from src.app.runtime_failures import LimitScope, RuntimeFailure
 from src.app.testing.execution_records import InMemoryExecutionRecordRepository
 from src.app.ports import (
     AgentEventSink,
@@ -273,6 +275,39 @@ class InMemoryChatStore:
         return [m.model_copy(deep=True) for m in self._messages.get(plan_id, [])]
 
 
+class InMemoryPlanningArtifactStore:
+    """Mirrors SqlitePlanningArtifactRepository: append-only per
+    (plan, purpose, goal), newest first, sequence assigned on write.
+
+    Deliberately OFF the UnitOfWork, exactly like the real adapter — an artifact
+    kept so a retry can learn from it must survive the transaction that failed.
+    """
+
+    def __init__(self) -> None:
+        self._artifacts: dict[tuple[str, str, str | None], list[PlanningArtifact]] = {}
+
+    def _key(
+        self, plan_id: str, purpose: str, goal_id: str | None
+    ) -> tuple[str, str, str | None]:
+        return (plan_id, purpose, goal_id)
+
+    def append(self, artifact: PlanningArtifact) -> None:
+        bucket = self._artifacts.setdefault(
+            self._key(artifact.plan_id, artifact.purpose, artifact.goal_id), []
+        )
+        sequence = artifact.sequence or (max((a.sequence for a in bucket), default=0) + 1)
+        bucket.append(replace(artifact, sequence=sequence))
+
+    def latest(
+        self, plan_id: str, purpose: str, *, goal_id: str | None = None, limit: int = 5
+    ) -> list[PlanningArtifact]:
+        bucket = self._artifacts.get(self._key(plan_id, purpose, goal_id), [])
+        return sorted(bucket, key=lambda a: a.sequence, reverse=True)[:limit]
+
+    def clear(self, plan_id: str, purpose: str, *, goal_id: str | None = None) -> None:
+        self._artifacts.pop(self._key(plan_id, purpose, goal_id), None)
+
+
 # ---- in-memory agent registry ----
 class InMemoryAgentRepository:
     """Mirrors SqliteAgentRepository: in-memory agent catalog with the same typed
@@ -400,6 +435,24 @@ class DummyBehavior:
     always_fail: bool = False
     emit_events: int = 0  # number of fake agent events to stream
     crash_after_success: bool = False  # simulate worker death AFTER agent returned
+    # Which capacity tier a RATE_LIMIT failure reports. Policy branches on this
+    # (a concurrency cap sheds one request; a daily quota waits for the reset),
+    # so the dummy must be able to express it or dry-run cannot exercise the
+    # production capacity paths at all.
+    fail_limit_scope: LimitScope | None = None
+    fail_retry_after_seconds: float | None = None
+
+
+def _dummy_failure(b: DummyBehavior) -> RuntimeFailure:
+    """Mirror what the CLI runners' taxonomy produces, so a scripted dry-run
+    failure travels the same policy path a real provider failure would."""
+    return RuntimeFailure(
+        kind=b.fail_kind,
+        safe_message=b.fail_reason[:500],
+        retryable=b.fail_kind not in {FailureKind.AUTH_ERROR, FailureKind.TOKEN_LIMIT},
+        limit_scope=b.fail_limit_scope,
+        retry_after_seconds=b.fail_retry_after_seconds,
+    )
 
 
 class DummyAgentRunner:
@@ -437,10 +490,8 @@ class DummyAgentRunner:
                 )
             )
 
-        if b.always_fail:
-            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
-        if b.fail_times and task.attempt <= b.fail_times:
-            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind)
+        if b.always_fail or (b.fail_times and task.attempt <= b.fail_times):
+            raise TaskFailed(reason=b.fail_reason, kind=b.fail_kind, failure=_dummy_failure(b))
 
         return TaskResult.success(b.output, metadata={"dummy": "true"})
 

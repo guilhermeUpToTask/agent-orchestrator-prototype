@@ -48,6 +48,9 @@ const RETRY_DEFAULTS: Required<RetryPolicy> = {
   jitter_ratio: 0.2,
   kind_max_attempts: {},
   kind_backoff_scale: {},
+  // A ceiling, unlike kind_max_attempts' floor: it caps a kind whose repetition
+  // is evidence rather than bad luck, so it survives a higher global budget.
+  kind_attempt_ceiling: {},
   non_retryable_kinds: [],
 };
 

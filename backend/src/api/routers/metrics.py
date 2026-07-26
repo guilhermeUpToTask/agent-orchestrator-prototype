@@ -35,6 +35,12 @@ class CoverageMetrics(BaseModel):
 class UsageScopeMetrics(BaseModel):
     sessions: int
     calls: int
+    # Turn consumption per scope. `max_session_turns` is the diagnostic one: a
+    # session budget only warns by exhausting, and a single session creeping
+    # toward the configured `reasoner.max_turns` is the signal before a goal
+    # blocks on "exceeded N turns without submitting".
+    turns: int
+    max_session_turns: int
     prompt_tokens: int | None
     completion_tokens: int | None
     total_tokens: int | None
