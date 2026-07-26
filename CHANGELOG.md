@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/compare/agent-orchestrator-v0.1.0...agent-orchestrator-v0.2.0) (2026-07-26)
+
+
+### Features
+
+* **recovery:** keep a repairable mistake away from a human ([#52](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/52)) ([6ca8b5d](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/6ca8b5dec9c63949dbb24cc0441e20bd2b043568))
+
 ## 0.1.0 (2026-07-24)
 
 
