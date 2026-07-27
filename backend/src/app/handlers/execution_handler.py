@@ -156,6 +156,21 @@ def _orchestration_failure(reason: str) -> RuntimeFailure:
     )
 
 
+
+def _run_role_for(plan: Plan, task: Task) -> str:
+    """Which stage runs next for this task: author the checks, or implement.
+
+    One definition, because `_start_unit` and `_resolve_spec` must agree — they
+    each had their own copy of this expression, and a divergence would resolve an
+    agent for one role while running the other.
+    """
+    if plan.active_cycle is None or task.contract is None:
+        return "implementer"
+    if task.test_bundle is not None and task.test_bundle.validates(task.id, task.revision):
+        return "implementer"
+    return "test_author"
+
+
 class ExecutionHandler:
     def __init__(
         self,
@@ -1233,13 +1248,7 @@ class ExecutionHandler:
         spec: AgentSpec | None = None,
     ) -> _Unit:
         # resolve agent BEFORE marking running so a missing agent fails fast.
-        run_role = (
-            "test_author"
-            if plan.active_cycle is not None
-            and task.contract is not None
-            and (task.test_bundle is None or not task.test_bundle.validates(task.id, task.revision))
-            else "implementer"
-        )
+        run_role = _run_role_for(plan, task)
         spec = spec or self._resolve_spec(plan, task)
         was_reclaimed = task.status == Status.RUNNING
         if was_reclaimed:
@@ -1309,13 +1318,7 @@ class ExecutionHandler:
         return unit
 
     def _resolve_spec(self, plan: Plan, task: Task) -> AgentSpec:
-        run_role = (
-            "test_author"
-            if plan.active_cycle is not None
-            and task.contract is not None
-            and (task.test_bundle is None or not task.test_bundle.validates(task.id, task.revision))
-            else "implementer"
-        )
+        run_role = _run_role_for(plan, task)
         agent_id = task.role_agent_ids.get(run_role, task.agent_id)
         return (
             self._agents.get(agent_id)

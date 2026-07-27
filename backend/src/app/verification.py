@@ -53,6 +53,18 @@ def _matches_scope(path: str, scope: str) -> bool:
     return normalized_path == normalized_scope or normalized_path.startswith(f"{normalized_scope}/")
 
 
+def is_check_path(path: str) -> bool:
+    """Does this path hold executable checks rather than production code?"""
+    normalized = path.replace("\\", "/")
+    name = normalized.rstrip("/").rsplit("/", 1)[-1]
+    return (
+        normalized.startswith("tests/")
+        or "/tests/" in normalized
+        or name.startswith("test_")
+        or name in {"conftest.py", "pytest.ini", "tests"}
+    )
+
+
 def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
     """May the TEST-AUTHORING stage write this path?
 
@@ -62,16 +74,17 @@ def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
     contract whose `allowed_scope` names only production files leaves the test
     author with nowhere legal to write, and NO agent can satisfy it.
     """
-    normalized = path.replace("\\", "/")
     if strategy == VerificationStrategy.EXECUTABLE_CHECK:
         return True
-    name = normalized.rstrip("/").rsplit("/", 1)[-1]
-    return (
-        normalized.startswith("tests/")
-        or "/tests/" in normalized
-        or name.startswith("test_")
-        or name in {"conftest.py", "pytest.ini", "tests"}
-    )
+    return is_check_path(path)
+
+
+# Deliberately NOT here: a `discover_executable_checks(root)` that scans the
+# repository for test files. It was written, and it is the wrong idea. A scan
+# cannot tell task 3's checks from task 1's, so on a multi-task goal it happily
+# freezes another task's failing test as this task's evidence. WHICH tests prove
+# a task is done is intent, not a property of the tree, so it has to be declared
+# — see `src/app/test_identity.py`.
 
 
 def validate_candidate(

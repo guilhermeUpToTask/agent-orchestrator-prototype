@@ -120,10 +120,12 @@ if [[ "$TIER" == "1" ]]; then
   jq -e '.binaries[] | select(.name == "git") | .ok' <<<"$RUNNER" >/dev/null \
     && pass "git binary present" || fail "git binary missing (the workspace needs it)"
 
-  # The secret store is only touched in real mode, and only decrypts with the key.
-  [[ -n "${ORCHESTRATOR_MASTER_KEY:-}" ]] \
-    && pass "ORCHESTRATOR_MASTER_KEY is set" \
-    || fail "ORCHESTRATOR_MASTER_KEY is unset — real mode cannot decrypt the provider key"
+  # NOT checked here: ORCHESTRATOR_MASTER_KEY. Preflight runs in the OPERATOR's
+  # shell, but the process that decrypts the provider key is the WORKER — which
+  # normally loads it from an env file preflight never sees. Testing the wrong
+  # process's environment produced a confident false failure, which is worse than
+  # no check: the binding validity reported above is what actually resolves the
+  # provider row, and a genuinely missing key surfaces as AUTH_ERROR on the run.
 else
   pass "agent bindings/binaries not required in dry-run"
 fi
