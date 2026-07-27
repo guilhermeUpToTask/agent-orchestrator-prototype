@@ -345,12 +345,9 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
         allowed_scope=["."],
         forbidden_scope=[".git/"],
         verification_commands=["git diff --check"],
-        # characterization, not executable_check: this fixture needs a GREEN
-        # baseline (`git diff --check` exits 0 on a clean worktree) to reach the
-        # "deleted or renamed" guard it is actually testing. `executable_check`
-        # now requires a FAILING baseline — a check that already passes proves
-        # nothing about the task. This is also characterization's only end-to-end
-        # coverage anywhere in the suite.
+        # characterization, not executable_check: `executable_check` now requires
+        # a FAILING baseline, and `git diff --check` exits 0 on a clean worktree.
+        # This is also characterization's only end-to-end coverage in the suite.
         verification_strategy=VerificationStrategy.CHARACTERIZATION,
     )
     task = Task(
@@ -435,7 +432,10 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
     block = blocked.goal_blocks.get("goal-1")
     assert block is not None and block.active
     assert block.kind == "execution_failure"
-    assert "deleted or renamed" in block.explanation
+    # Caught by the pre-authoring snapshot rather than by the post-run diff: the
+    # deleted file was in `checks_before`, so `check_protected` rejects it before
+    # the verification commands even run, and names the exact path.
+    assert "protected test missing or renamed: tests/test_existing.py" in block.explanation
     failed_task = blocked.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     assert failed_task.status.value == "failed"
     assert uow.executions.list_open_attempts(plan.id) == []
@@ -494,12 +494,9 @@ def test_capacity_waits_do_not_spend_the_verification_ceiling(tmp_path):
         allowed_scope=["."],
         forbidden_scope=[".git/"],
         verification_commands=["git diff --check"],
-        # characterization, not executable_check: this fixture needs a GREEN
-        # baseline (`git diff --check` exits 0 on a clean worktree) to reach the
-        # "deleted or renamed" guard it is actually testing. `executable_check`
-        # now requires a FAILING baseline — a check that already passes proves
-        # nothing about the task. This is also characterization's only end-to-end
-        # coverage anywhere in the suite.
+        # characterization, not executable_check: `executable_check` now requires
+        # a FAILING baseline, and `git diff --check` exits 0 on a clean worktree.
+        # This is also characterization's only end-to-end coverage in the suite.
         verification_strategy=VerificationStrategy.CHARACTERIZATION,
     )
     task = Task(

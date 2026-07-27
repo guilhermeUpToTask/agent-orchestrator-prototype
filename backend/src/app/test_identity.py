@@ -27,11 +27,12 @@ someone else's failing test.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from src.app.verification import is_check_path
+from src.app.verification import is_byproduct_path, is_check_path, sha256_file
 from src.domain.entities.execution_contracts import TaskContract
 
 
@@ -117,3 +118,42 @@ def criterion_test_map(
     """
     selectors = list(check_selectors)
     return {criterion.id: list(selectors) for criterion in contract.acceptance_criteria}
+
+
+def existing_checks(root: Path) -> dict[str, str]:
+    """Every check file already in the worktree, hashed, before the author runs.
+
+    This IS a repository scan, and it answers a different question from the one a
+    scan cannot answer. It does not ask "which of these are mine" — that is
+    intent, and inferring it is what made an earlier design freeze another task's
+    failing test as this task's evidence. It asks "what checks exist right now",
+    a plain fact about the tree, for two uses:
+
+    - anything the author adds that is NOT in here is unambiguously this task's;
+    - everything in here is protected, so neither the author nor the implementer
+      can weaken a check belonging to another task. On a multi-task goal that
+      closes a real hole: task 2's author could rewrite task 1's check into
+      something trivially failing, have it hashed as task 2's own protected
+      evidence, and let the implementer "fix" it — destroying task 1's
+      verification while every gate downstream reported green.
+
+    Walks with pruning rather than `rglob`, so `node_modules` and `.venv` are
+    never descended into, and skips symlinks: a link loop would hang the walk and
+    a link out of the repository would hash a file the run does not own.
+    """
+    found: dict[str, str] = {}
+    for current, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not is_byproduct_path(name) and not Path(current, name).is_symlink()
+        ]
+        for filename in filenames:
+            path = Path(current, filename)
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            if is_byproduct_path(relative) or not is_check_path(relative):
+                continue
+            found[relative] = sha256_file(path)
+    return dict(sorted(found.items()))

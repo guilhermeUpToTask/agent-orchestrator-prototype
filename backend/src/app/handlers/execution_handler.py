@@ -19,7 +19,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Mapping, TypeVar
 from uuid import uuid4
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
@@ -102,9 +102,11 @@ from src.app.agent_feedback import split_reasons
 from src.app.contract_repair import propose_repair
 from src.app.promotion_failures import is_transient_merge_failure
 from src.domain.services.edit_service import resync_goal_contract
-from src.app.test_identity import criterion_test_map, declared_checks
+from src.app.test_identity import criterion_test_map, declared_checks, existing_checks
 from src.app.verification import (
+    is_check_path,
     sha256_file,
+    validate_authoring,
     test_author_path_allowed,
     validate_candidate,
 )
@@ -307,6 +309,13 @@ class ExecutionHandler:
             ),
         )
         main_repo_before: set[str] = set()
+        # Taken BEFORE the agent runs, because afterwards there is no way to tell
+        # a check the author added from one that was already in the tree. Anything
+        # new in the diff is then unambiguously this task's, and everything in
+        # here stays protected against both stages.
+        checks_before: dict[str, str] = (
+            existing_checks(Path(handle.path)) if unit.run_role == "test_author" else {}
+        )
         try:
             main_repo_before = await self._main_repo_status()
             result: TaskResult = await self._runner.run(
@@ -327,7 +336,9 @@ class ExecutionHandler:
                         failure=_orchestration_failure("deterministic verification executor is unavailable"),
                     )
                 if unit.run_role == "test_author":
-                    return await self._finalize_test_author(plan_id, unit, handle, uow)
+                    return await self._finalize_test_author(
+                        plan_id, unit, handle, uow, checks_before
+                    )
                 return await self._finalize_verified_implementation(plan_id, unit, handle, uow)
             if not self._reserve_candidate(plan_id, unit, uow):
                 await self._workspace.discard(handle)
@@ -593,6 +604,7 @@ class ExecutionHandler:
         unit: _Unit,
         handle: WorkspaceHandle,
         uow: UnitOfWork,
+        checks_before: Mapping[str, str],
     ) -> Signal:
         assert self._verifier is not None
         contract = unit.task_snapshot.contract
@@ -607,24 +619,33 @@ class ExecutionHandler:
         # the very tests it must satisfy.
         authored = await self._verifier.changed_paths(workspace_handle.path, base_ref)
         declared = declared_checks(contract, Path(workspace_handle.path))
-        if authored:
-            disallowed = [
-                path
-                for path in authored
-                if not self._test_author_path_allowed(path, contract.verification_strategy)
-            ]
-            if disallowed:
+
+        # Same rules the implementer answers to: scope, forbidden paths,
+        # verification-config filenames, and the integrity of every check that
+        # already existed. This stage used to be judged by `is_check_path` alone.
+        authoring = validate_authoring(Path(workspace_handle.path), checks_before, authored)
+        if not authoring.accepted:
+            raise TaskFailed(
+                "test author violated the frozen checks: " + "; ".join(authoring.reasons),
+                FailureKind.VERIFICATION_ERROR,
+            )
+
+        # New = this task's, by construction. A path that was already in the tree
+        # belongs to whoever put it there, so it is never claimed here.
+        new_checks = [path for path in authored if path not in checks_before]
+        if new_checks:
+            not_checks = [path for path in new_checks if not is_check_path(path)]
+            if not_checks:
                 raise TaskFailed(
-                    f"test author modified production paths: {disallowed}",
+                    f"test author modified production paths: {not_checks}",
                     FailureKind.VERIFICATION_ERROR,
                 )
-            checks, selectors = list(authored), list(authored)
+            checks, selectors = list(new_checks), list(new_checks)
         elif declared.declared:
-            # Certain, or author. An empty diff is correct when the contract
-            # NAMES a check that already exists — the ordinary bug-fix workflow,
-            # where the repro test is already in the repo. The mapping comes from
-            # the contract, never from scanning the tree, so a multi-task goal
-            # cannot hand this task another task's failing test.
+            # Certain, or author. An empty diff is correct when the contract NAMES
+            # a check that already exists — the ordinary bug-fix workflow. The
+            # mapping comes from the contract, never from scanning the tree, so a
+            # multi-task goal cannot hand this task another task's failing test.
             checks, selectors = list(declared.files), list(declared.node_ids)
         else:
             raise TaskFailed(
@@ -674,7 +695,10 @@ class ExecutionHandler:
                 f"test author deleted or renamed executable checks: {missing}",
                 FailureKind.VERIFICATION_ERROR,
             )
-        protected = {path: sha256_file(Path(workspace_handle.path) / path) for path in checks}
+        protected = {
+            **dict(checks_before),
+            **{path: sha256_file(Path(workspace_handle.path) / path) for path in checks},
+        }
         if not self._reserve_candidate(plan_id, unit, uow):
             await self._workspace.discard(workspace_handle)
             self._abandon_stale(plan_id, unit, uow)

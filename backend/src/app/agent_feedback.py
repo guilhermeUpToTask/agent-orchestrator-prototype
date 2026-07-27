@@ -43,6 +43,10 @@ _AGENT_ACTIONABLE_PREFIXES: tuple[str, ...] = (
     "test bundle does not match task revision",
     # execution_handler._finalize_test_author
     "test author produced no executable checks",
+    # The authoring stage's shared-rule rejection: it edited a check that already
+    # existed (another task's, or one the contract declared), or moved the
+    # verification configuration. Agent-repairable — the retry prompt must say so.
+    "test author violated the frozen checks",
     "test author modified production paths",
     "test author deleted or renamed executable checks",
     "test bundle did not establish",
