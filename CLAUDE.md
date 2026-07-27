@@ -143,8 +143,11 @@ agent-orchestrator/
 │                           #   happy-path-v1 (locked, Tier 0 + Tier 1),
 │                           #   planning-recovery-v1 (a starved planning session
 │                           #   leaves evidence the retry uses), parallel-goals-v1
-│                           #   (two goals into one cycle branch). Never mix modes:
-│                           #   Tier 0 = stub + dry-run, Tier 1 = llm + real.
+│                           #   (two goals into one cycle branch), contract-repair-v1
+│                           #   (Tier 1 only: poison a frozen contract, prove it is
+│                           #   repaired in place — a run that must FAIL first).
+│                           #   Never mix modes: Tier 0 = stub + dry-run,
+│                           #   Tier 1 = llm + real.
 ├── ROADMAP.md              # everything planned but not yet implemented (+ do-not-do)
 └── frontend/               # React/Vite on the thin API: plan list + /plans/:id shell,
                             #   chat panel, gates, 9-phase rail, goals canvas, SSE bridge

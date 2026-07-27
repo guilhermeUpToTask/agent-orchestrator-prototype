@@ -69,16 +69,21 @@ These are current capabilities, not future roadmap work:
   plus an operator frontend with gates and catalog settings.
 - Dual fake/SQLite orchestration tests, Git/API/SSE integration tests, CI quality
   gates, a supervised dev launcher, release automation, and run-evidence export.
-- Three operator fixtures, all API-only (`curl` + `jq`, no frontend):
+- Four operator fixtures, all API-only (`curl` + `jq`, no frontend):
   [`happy-path-v1`](fixtures/happy-path-v1/) (the locked one-goal walkthrough,
   Tier 0 and Tier 1), [`planning-recovery-v1`](fixtures/planning-recovery-v1/)
   (a starved planning session leaves evidence the retry can use),
-  and [`parallel-goals-v1`](fixtures/parallel-goals-v1/) (two goals promote into
-  one cycle branch, so the second merge hits a base the first moved).
+  [`parallel-goals-v1`](fixtures/parallel-goals-v1/) (two goals promote into
+  one cycle branch, so the second merge hits a base the first moved), and
+  [`contract-repair-v1`](fixtures/contract-repair-v1/) (Tier 1: poison a frozen
+  contract with a command that cannot pass, and prove it is repaired in place
+  rather than escalated — the first fixture that drives a run which must FAIL
+  first).
   Between them they found the repository-binding trap, an unhandled
   `RoleUnsatisfiableError` that crash-looped the worker, a contract whose
-  strategy contradicted its own scope, and capacity failures spending the
-  verification retry ceiling.
+  strategy contradicted its own scope, capacity failures spending the
+  verification retry ceiling, and the contract-repair write that deadlocked
+  SQLite against the transaction that called it.
 
 Completed foundations stay in architecture docs and tests. They are not
 reintroduced below merely because further hardening is possible.
@@ -421,10 +426,22 @@ the goal completed, where the pre-fix series runs exhausted the budget and
 blocked. Zero `Database stayed locked` events (seven in the pre-fix session) and
 the worker survived the whole run.
 
-Not exercised: `contract_repair` never fired, because the agent succeeded this
-time. The deadlock fix therefore remains verified by its regression test and by
-the absence of the failure mode, not by watching a repair persist live. That is
-still the open item for the next red run.
+Not exercised in that run: `contract_repair` never fired, because the agent
+succeeded. **Closed since, by [`contract-repair-v1`](fixtures/contract-repair-v1/)**
+— a fixture that poisons a frozen contract on purpose so the repair path is
+reachable on demand instead of by luck. Green end to end: the poisoned command
+produced a contract-shaped failure, the repair was recorded `committed`, the
+contract was snapped to the real path, the task reached DONE with no block, and
+**zero** `Database stayed locked` events. The deadlock fix is now validated
+live, not merely by its regression test.
+
+One property of that fixture is itself a finding: the operator window it needs
+is a **race**. `update_task_contract` requires the task PENDING (or FAILED while
+paused), enrichment and the first attempt run under one claim, and the pause has
+to settle on a TDD stage boundary. It won two runs of four; the losses exit 2
+(SETUP), never a false FAIL. That is the deferred "no operator control point at
+the contract boundary" item priced in a concrete unit: a free deterministic
+regression test versus a paid one that needs to win a race.
 
 **Controls — one defect, otherwise correct.**
 - Pausing a plan parked at a review gate is refused (422 `INVALID_TRANSITION`),
