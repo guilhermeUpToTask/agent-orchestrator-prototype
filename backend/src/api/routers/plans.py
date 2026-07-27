@@ -38,6 +38,7 @@ from src.app.use_cases.apply_edit import (
 from src.app.use_cases.conversation import discovery_message, replanning_message
 from src.app.use_cases.create_plan import open_project_plan
 from src.app.use_cases.bind_project import bind_legacy_project
+from src.app.use_cases.delete_plan import delete_plan
 from src.app.use_cases.cyclic_planning import (
     activate_cycle,
     approve_intent,
@@ -577,6 +578,17 @@ def _provider_waiting(
         safe_message=circuit.safe_message,
         needs_attention=circuit.manual_intervention,
     )
+
+
+@router.delete("/{plan_id}", status_code=204)
+def delete_plan_route(plan_id: str, container: AppContainer = Depends(get_container)) -> None:
+    """Dispose of a plan and everything produced under it.
+
+    404 when it does not exist, 409 (`PLAN_BUSY`) while a worker holds a live
+    lease. Irreversible: cycles, attempts, evidence, chat and telemetry go with
+    it, so export the run evidence first if it is worth keeping.
+    """
+    delete_plan(plan_id, container.new_unit_of_work())
 
 
 @router.get("/{plan_id}", response_model=PlanDetailResponse)

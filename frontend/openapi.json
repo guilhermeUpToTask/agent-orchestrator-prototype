@@ -135,6 +135,40 @@
       }
     },
     "/api/plans/{plan_id}": {
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Delete Plan Route",
+        "description": "Dispose of a plan and everything produced under it.\n\n404 when it does not exist, 409 (`PLAN_BUSY`) while a worker holds a live\nlease. Irreversible: cycles, attempts, evidence, chat and telemetry go with\nit, so export the run evidence first if it is worth keeping.",
+        "operationId": "plans-delete_plan_route",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "plans"

@@ -34,15 +34,23 @@ The backend follows a strict **Hexagonal / Clean Architecture**.
 1. **Dependency Rule**: `domain` -> `app` -> `infra` & `api`.
    - **NEVER** import `app`, `infra`, or `api` modules inside `src/domain/`.
    - **NEVER** import `infra` inside `src/app/` (App uses Ports; Infra provides Adapters). The in-memory fakes live in `src/app/testing/fakes.py`; infra re-exports what it shares (e.g. the dummy runner).
-2. **The `Plan` aggregate is the single authority** (`src/domain/aggregates/planner_orchestrator.py`):
+2. **Plan disposal is a repository command, not a transition**: the cyclic root
+   is never terminal and a project owns exactly one long-lived `Plan`, so
+   "finished with this plan" has no in-domain representation.
+   `DELETE /api/plans/{id}` (`delete_plan`) is refused with 409 `PLAN_BUSY` while
+   a worker holds a live lease. Every plan-scoped table declares
+   `ON DELETE CASCADE` (migration 0015) so one delete leaves no orphan — a new
+   plan-scoped table must too, and `test_delete_plan_leaves_nothing.py` fails if
+   it does not.
+3. **The `Plan` aggregate is the single authority** (`src/domain/aggregates/planner_orchestrator.py`):
    - It owns the goal/task tree and is the ONLY caller of `Goal`/`Task` transition methods. **NEVER** mutate goal/task fields from use cases — go through the aggregate's guarded transitions (`start_task`, `complete_task`, `enter_review`, `begin_replanning`, `commit_replanned_goals`, ...). Illegal transitions raise `InvalidTransitionError`.
    - **Navigation is derived, never stored**: `next_action(goals, now)` re-scans statuses every tick; there is no cursor to desync. `now` is always injected — the domain never reads a clock.
    - 🔒 The domain is FROZEN (roadmap Phase 0). Additions require a deliberate, decision-logged un-freeze — the full, authoritative list lives in [`docs/decisions/decision-log.md`](docs/decisions/decision-log.md) and currently runs through **un-freeze #17** (decisions 57-58, 2026-07-26). The pivotal one is **#4 — [ADR-003](docs/decisions/adr-003-cyclic-project-plan-lifecycle.md) (decision 43, 2026-07-14): the cyclic `ProjectPlan` lifecycle**, which superseded the terminal nine-phase machine (see Key Concepts below). Earlier un-freezes: **#1** agent-registry runtime resolution (2026-07-05); **#2** the planning backoff gate (2026-07-08); **#3** the pause gate + recoverable auto-pause + editable-while-paused (2026-07-09). Do not re-summarize the whole list here — link the decision log.
-3. **Optimistic Concurrency (CAS)**: use cases call `plan.bump_version()` then `uow.plans.save(plan)`; the store rejects when `stored.version >= incoming.version` with `StaleVersionError` (worker-vs-edit race → API 409).
-4. **Transactional outbox**: state changes and their `DomainEvent`s are written in the SAME `with uow:` transaction (`uow.plans.save(...)` + `uow.outbox.add(event)`). Event payloads are minimal (IDs + tiny metadata). The API's **outbox relay** delivers rows to SSE at-least-once; consumers dedup on `event_id`. Side effects (agent runs, LLM calls) happen OUTSIDE transactions; finalize transactions re-read and re-guard.
-5. **The lease replaces the reconciler**: `claim_one_unit` / `heartbeat` / `release` on the plan row. A plan is claimable when its root `PlanStatus` is `running` and it is bound to a project, not paused, and unclaimed-or-lease-expired (`_CLAIM_SQL`: `status='running' AND project_id IS NOT NULL AND paused=0 AND pause_requested=0`); a dead worker's lease expires and any worker reclaims from persisted state. Mid-action heartbeats renew the lease; the worker tick reports *progress*, not claiming (no-progress → sleep). Startup reconciliation closes stale RUNNING attempt rows only when the plan has no live claim — it never invents task outcomes.
-6. **Configuration & DI**: the environment is read ONLY in `AppContainer` (`src/infra/container.py`, the composition root) — never deep in the code. All adapters hang off the container as cached properties; `new_unit_of_work()` per worker/request (a UoW is not thread-safe).
-7. **Error Handling**: domain errors subclass `DomainError` with a stable `code`; the CLI uses `@catch_domain_errors`; the API maps codes to HTTP statuses in ONE table (`src/api/exceptions.py::_STATUS_BY_CODE`). Do NOT scatter try/except returning HTTP responses inside routers, and do NOT add blanket `KeyError`/`ValueError` handlers.
+4. **Optimistic Concurrency (CAS)**: use cases call `plan.bump_version()` then `uow.plans.save(plan)`; the store rejects when `stored.version >= incoming.version` with `StaleVersionError` (worker-vs-edit race → API 409).
+5. **Transactional outbox**: state changes and their `DomainEvent`s are written in the SAME `with uow:` transaction (`uow.plans.save(...)` + `uow.outbox.add(event)`). Event payloads are minimal (IDs + tiny metadata). The API's **outbox relay** delivers rows to SSE at-least-once; consumers dedup on `event_id`. Side effects (agent runs, LLM calls) happen OUTSIDE transactions; finalize transactions re-read and re-guard.
+6. **The lease replaces the reconciler**: `claim_one_unit` / `heartbeat` / `release` on the plan row. A plan is claimable when its root `PlanStatus` is `running` and it is bound to a project, not paused, and unclaimed-or-lease-expired (`_CLAIM_SQL`: `status='running' AND project_id IS NOT NULL AND paused=0 AND pause_requested=0`); a dead worker's lease expires and any worker reclaims from persisted state. Mid-action heartbeats renew the lease; the worker tick reports *progress*, not claiming (no-progress → sleep). Startup reconciliation closes stale RUNNING attempt rows only when the plan has no live claim — it never invents task outcomes.
+7. **Configuration & DI**: the environment is read ONLY in `AppContainer` (`src/infra/container.py`, the composition root) — never deep in the code. All adapters hang off the container as cached properties; `new_unit_of_work()` per worker/request (a UoW is not thread-safe).
+8. **Error Handling**: domain errors subclass `DomainError` with a stable `code`; the CLI uses `@catch_domain_errors`; the API maps codes to HTTP statuses in ONE table (`src/api/exceptions.py::_STATUS_BY_CODE`). Do NOT scatter try/except returning HTTP responses inside routers, and do NOT add blanket `KeyError`/`ValueError` handlers.
 
 ## 🧠 Key Concepts & Terminology
 
@@ -123,7 +131,7 @@ agent-orchestrator/
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
 │   ├── alembic/            # migration chain (0001_core through
-│   │                       #   0014_planning_artifacts; one linear head)
+│   │                       #   0015_plan_delete_cascade; one linear head)
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
 ├── docs/                   # system documentation:
 │   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,

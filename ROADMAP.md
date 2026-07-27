@@ -166,6 +166,19 @@ Three defects, all found by running the walkthrough rather than reading it:
   ~3(*N*-1) stale branches and the runs stopped being comparable. It now deletes
   that hierarchy — matching by ref prefix, since a task branch is
   `task/<id>/a<attempt>` and `refs/heads/task/*` silently misses two levels.
+- `reset.sh` reset only GIT. The orchestrator database was untouched, so every
+  re-run added another cycle to the same long-lived plan and no two runs started
+  from the same state — the fixture's core promise. Fixing it needed a supported
+  way to dispose of a plan, so **`DELETE /api/plans/{id}` landed early from
+  Phase 4** (`delete_plan`; 409 `PLAN_BUSY` while a worker holds the lease), and
+  **migration 0015** gave every plan-scoped table `ON DELETE CASCADE` so one
+  delete leaves no orphan. Two tables had a foreign key with no `ON DELETE` (the
+  delete was rejected) and two carried a `plan_id` with no foreign key at all
+  (rows were silently orphaned). `reset.sh` now deletes the fixture's plans
+  through the API — best-effort, so a reset still works with the API down, and
+  scoped to plans bound to this fixture's project. Verified: run, reset, re-run
+  yields `created=true`, a new plan id, exactly one cycle, and zero rows left in
+  any plan-scoped table while the seeded catalog survives.
 
 ## Phase 1 — Tier 1 real-runtime happy path ⬜
 

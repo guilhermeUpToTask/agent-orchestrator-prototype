@@ -27,6 +27,8 @@ from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.observation_repository import SqliteObservationRepository
 from src.infra.db.tables import Base
 
+from tests.support import seed_plan_row
+
 pytestmark = pytest.mark.integration
 
 T0 = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
@@ -78,6 +80,7 @@ def repository(request, tmp_path):
         return InMemoryObservationRepository(clock.now)
     engine = build_engine(f"sqlite:///{tmp_path / 'observations.db'}")
     Base.metadata.create_all(engine)
+    seed_plan_row(engine, "p1", "plan-1")
     return SqliteObservationRepository(make_session_factory(engine), clock)
 
 
@@ -136,6 +139,7 @@ def test_observation_validation_rejects_false_unavailable_and_unsafe_estimate():
 def test_typed_row_preserves_legacy_shape_with_allowlisted_payload(tmp_path):
     engine = build_engine(f"sqlite:///{tmp_path / 'typed.db'}")
     Base.metadata.create_all(engine)
+    seed_plan_row(engine, "p1", "plan-1")
     repository = SqliteObservationRepository(
         make_session_factory(engine),
         FakeClock(T0),
@@ -186,6 +190,7 @@ def test_typed_row_preserves_legacy_shape_with_allowlisted_payload(tmp_path):
 def test_legacy_agent_event_is_preserved_and_marked_unknown(tmp_path):
     engine = build_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
     Base.metadata.create_all(engine)
+    seed_plan_row(engine, "p1", "plan-1")
     sf = make_session_factory(engine)
     event = AgentEvent(
         event_id="legacy-1",

@@ -249,6 +249,16 @@ lifecycle and the git promotion chain; only Tier 1 can turn that check green.
 # Re-POST the SAME brief.txt to the SAME project to open the next cycle.
 ```
 
+`reset.sh` resets the RUN, not just the worktree: it restores `main` to the seed
+tag, deletes the previous run's `plan/`/`cycle/`/`goal/`/`task/` branches, and
+deletes the fixture's plans through `DELETE /api/plans/{id}` (cycles, attempts,
+evidence, chat and telemetry cascade with them). The seeded catalog — agents,
+providers, models, config, secrets — is preserved, so you never re-enter a
+provider key. It needs the API up for the plan half; with the API down it still
+does the git half and warns. `HAPPY_PATH_SKIP_PLAN_RESET=1` keeps the plan.
+
+After a reset the next brief opens a genuinely NEW plan. Without one:
+
 **There is no "new plan under the same project."** A `ProjectDefinition` owns
 exactly one long-lived `Plan` ([ADR-003](../../docs/decisions/adr-003-cyclic-project-plan-lifecycle.md)),
 so re-POSTing returns the *existing* `plan_id` and opens another cycle on it. Run

@@ -106,6 +106,20 @@ class SqlitePlanRepository:
             raise PlanNotFoundError(plan_id)
         return PlanFactory.reconstruct(json.loads(row[0]))
 
+    def delete(self, plan_id: str) -> None:
+        session = self._bound()
+        exists = session.execute(
+            text("SELECT 1 FROM plans WHERE id = :id"), {"id": plan_id}
+        ).one_or_none()
+        if exists is None:
+            raise PlanNotFoundError(plan_id)
+        # One statement, deliberately. Every plan-scoped table declares
+        # ON DELETE CASCADE (migration 0015), and `PRAGMA foreign_keys=ON`
+        # (engine.py) makes SQLite honour it — so the schema guarantees no
+        # leftovers instead of this adapter maintaining a list that the fifth
+        # such table would quietly fall off.
+        session.execute(text("DELETE FROM plans WHERE id = :id"), {"id": plan_id})
+
     def save(self, plan: Plan) -> None:
         session = self._bound()
         result: CursorResult[Any] = session.execute(  # type: ignore[assignment]

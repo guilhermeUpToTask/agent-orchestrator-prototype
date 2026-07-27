@@ -19,6 +19,8 @@ from src.infra.db.observation_repository import SqliteObservationRepository
 from src.infra.db.tables import Base
 from src.infra.runtime.cli_runner import PiAgentRunner
 
+from tests.support import seed_plan_row
+
 
 def _process_observation() -> TelemetryObservation:
     return TelemetryObservation(
@@ -63,6 +65,7 @@ def test_pi_strips_only_its_provider_prefix_from_model_id() -> None:
 def test_container_process_repository_persists_process_observations(tmp_path) -> None:
     container = AppContainer(tmp_path)
     Base.metadata.create_all(container.engine)
+    seed_plan_row(container.engine, "plan-1")
     observation = _process_observation()
 
     assert asyncio.run(container.observation_repository.append(observation)) is True

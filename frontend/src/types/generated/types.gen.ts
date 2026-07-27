@@ -2355,6 +2355,36 @@ export type PlansCreateResponses = {
 
 export type PlansCreateResponse = PlansCreateResponses[keyof PlansCreateResponses];
 
+export type PlansDeletePlanRouteData = {
+    body?: never;
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}';
+};
+
+export type PlansDeletePlanRouteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansDeletePlanRouteError = PlansDeletePlanRouteErrors[keyof PlansDeletePlanRouteErrors];
+
+export type PlansDeletePlanRouteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansDeletePlanRouteResponse = PlansDeletePlanRouteResponses[keyof PlansDeletePlanRouteResponses];
+
 export type PlansGetPlanData = {
     body?: never;
     path: {
