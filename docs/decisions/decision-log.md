@@ -447,3 +447,29 @@ object, and every contract write rebinds only the task's reference.
 `GoalContract`'s validator — which is the point, not a side effect: with
 `goal_criterion_ids` editable, an edit can orphan a goal criterion, and that now
 surfaces instead of landing silently.
+
+**Decision 59 (2026-07-27) — domain unfreeze #18: a refusal speaks the
+vocabulary the operator was shown.** `Plan.pause` and `Plan.resume` raise
+`InvalidTransitionError` with `self.status.value` instead of `self.phase.value`
+(`planner_orchestrator.py:419`, `:427`). No state, transition, invariant, or
+persisted shape changes — the argument to an error message does. This is the
+smallest un-freeze in the log and is recorded anyway, because the rule is that
+domain edits are deliberate, not that they are large.
+
+Found by driving the API as the operator during the Phase 2 control
+experiments. `Plan.request_pause` — the cyclic graceful pause gate — already
+reported `status.value`, so the same surface refused in two vocabularies
+depending on which branch fired. A plan the API describes as
+`status: waiting, reason: intent` was refused with "cannot transition from
+**discovery** to resumed": the nine-phase machine that
+[ADR-003](adr-003-cyclic-project-plan-lifecycle.md) superseded, and that a
+cyclic operator has never seen in any other response. The legacy projection is
+deliberately still there for migrated rows and existing clients, but it is a
+*read* compatibility surface — leaking it into an operator-facing 422 tells
+someone their plan is in a phase the rest of the API never mentions.
+
+This matters for Phase 2 exit criterion 3 (operators can distinguish plan
+states from persisted facts) for the same reason `block_policy` exists: a
+control surface that misdescribes itself is worse than one that says nothing.
+Locked by `test_refusals_speak_the_cyclic_vocabulary_not_the_legacy_phase` on
+both backends.

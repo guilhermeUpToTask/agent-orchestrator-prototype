@@ -372,7 +372,54 @@ measurement was opportunistic rather than a controlled experiment.
   covered at the orchestration level instead. An API-only walkthrough cannot
   exercise the failure-path controls without a fault-injection seam.
 
-**Recovery — works; the gap is visibility, not correctness.**
+**Recovery — one defect fixed; the latency itself is by design.**
+
+The mid-attempt crash experiment turned up a real bug on the way past:
+`reconcile_stale_attempts` gated only on `plans.is_claim_live`, but since goal
+leases (un-freeze #13) attempts are created by goal workers, which do not hold
+the plan claim while they run. A second worker's STARTUP reconciliation
+therefore saw a RUNNING attempt with no live plan claim and abandoned a ledger
+row whose process was alive and about to finalize it. Single-worker restart
+never exposed it — there the old process really is dead — so it took two
+workers to surface, which is how it survived. Now checks both leases; locked by
+`test_startup_reconciliation_respects_a_live_GOAL_lease` on both backends.
+
+The ~6 minute recovery latency around it is **not** a bug:
+
+- Startup reconciliation deliberately does not revert the domain task. It
+  closes the ledger row and stops, precisely so a dead process is never
+  mistaken for a task outcome. That restraint is load-bearing.
+- The goal lease expiring is therefore the only correct recovery trigger, and
+  it is the designed one: "a dead worker's lease expires and any worker
+  reclaims from persisted state". A restarting worker has no other liveness
+  signal about the previous holder.
+- So the wait equals `lease_seconds` (300s default for goals) plus poll
+  cadence, which is what was measured. Working as intended.
+
+If it is ever worth shortening, in increasing order of cost:
+
+1. **Lower the goal `lease_seconds`.** Pure configuration, and cheaper than it
+   looks: the lease does NOT have to cover a whole attempt, because an active
+   action renews it every `lease_seconds / 3`. That is why the 300s default
+   already sits below `agent_runner.timeout_seconds` (600) without a live
+   worker ever losing its goal. The real floor is the worst-case gap between
+   heartbeats — a renewal must land before expiry under scheduling jitter, GC
+   pauses, and a loaded host — so the tunable quantity is that safety margin,
+   not the attempt duration. Recovery latency falls linearly with it.
+2. **Have a worker release its goal leases on graceful shutdown.** Turns an
+   orderly restart into instant recovery and leaves only `kill -9` paying the
+   full lease. Does nothing for a hard crash, which is the case that matters.
+3. **A liveness registry** (worker heartbeat rows, reclaim when the *worker* is
+   dead rather than when the lease expires). Correct and fast, and the most
+   coordination infrastructure — the phase's own rule says not to add that
+   without run evidence, and one crash test is not it.
+
+The recommendation is (1) after checking it against the runner timeout, and
+otherwise to leave the latency alone and fix the *visibility*, below — an
+operator who can see "lease expires in 4m12s, last heartbeat 90s ago" does not
+experience a correct 6-minute wait as a hang.
+
+**Recovery — the remaining gap is visibility, not correctness.**
 - `kill -9` the worker *before* any attempt starts: a restarted worker reclaims
   from persisted state and reaches publication in ~8s. Nothing was invented.
 - `kill -9` the worker *mid-attempt*, with attempt 1 RUNNING: startup
