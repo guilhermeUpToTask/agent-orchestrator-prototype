@@ -180,7 +180,7 @@ Three defects, all found by running the walkthrough rather than reading it:
   yields `created=true`, a new plan id, exactly one cycle, and zero rows left in
   any plan-scoped table while the seeded catalog survives.
 
-## Phase 1 — Tier 1 real-runtime happy path ⬜
+## Phase 1 — Tier 1 real-runtime happy path 🚧
 
 **External capability:** a developer can evaluate whether one pinned real
 reasoner and coding runtime reliably complete a tiny, verifiable change.
@@ -199,9 +199,45 @@ reasoner and coding runtime reliably complete a tiny, verifiable change.
 - Classify failures as product, setup/config, provider capacity, model quality,
   or fixture defects.
 
+### Result of the first green run (2026-07-27)
+
+**One Tier 1 run is green end to end: 17/17, expectation 7 included.** Reasoner
+`nvidia/nemotron-3-ultra-550b-a55b:free`, coding agent `anthropic/claude-haiku-4.5`
+on the `pi` runtime, fixture `happy-path-v2`. The agent authored
+`tests/test_greeter.py`, the orchestrator established a RED baseline, the
+implementer turned it GREEN, and the out-of-repo acceptance check confirmed the
+authored test **discriminates** (it fails against a deliberately broken `greet`).
+
+Getting there took a fixture change and a pipeline fix, both from run evidence:
+
+- **The pipeline had one shape.** `_run_role_for` always ran an authoring stage
+  and never read `verification_strategy`, so a repo that already contained a
+  failing test had no way through: two runs died on
+  `test author produced no executable checks` and
+  `did not establish a passing characterization/check baseline`. The reasoner's
+  contract was correct both times.
+- **A task's checks are now identified by declaration** (`src/app/test_identity.py`),
+  from the author's diff or a `verification_command` naming a concrete file —
+  never a repository scan, which cannot tell task 3's checks from task 1's.
+  `TestBundle.criterion_to_tests` finally holds the real mapping.
+- **The fixture's verdict was circular.** v1 ran `pytest` inside the repo, in the
+  same `tests/` the agent writes to. v2 ships `tests/` empty and holds the
+  acceptance check outside the repo, with a mutation probe that catches a
+  vacuous test — something v1 could not detect at all.
+- **Tier 0's verification proved nothing** until now: the stub used
+  `git diff --check`, which cannot fail on a clean worktree. It now names a path
+  that genuinely goes RED→GREEN.
+
+Two findings that are provider facts, not product defects: the free nemotron
+endpoint rate-limits the coding agent into uselessness
+(`ResourceExhausted: Worker local total request limit reached`), handled
+correctly as capacity-waiting; and `anthropic/claude-3.5-haiku` is not a valid
+OpenRouter slug (404, surfaced as a clean terminal block).
+
 ### Exit criteria
 
-- Three consecutive real runs complete with no unexpected human code correction.
+- 🚧 Three consecutive real runs complete with no unexpected human code correction.
+  **One so far.**
 - No false terminal block or hot loop occurs.
 - Every accepted task has correct revision-bound verification evidence.
 - Work promotes through expected Git refs while the seed default branch remains
