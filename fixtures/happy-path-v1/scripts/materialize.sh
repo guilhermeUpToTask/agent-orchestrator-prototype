@@ -52,6 +52,10 @@ fi
 
 git -C "$TARGET" tag -f "$SEED_TAG"
 note "tagged $SEED_TAG at $(git -C "$TARGET" rev-parse --short HEAD)"
-note "export PROJECT_REPO_DIR=$TARGET"
+# NOT PROJECT_REPO_DIR: AppContainer does not read it here. A project created
+# without `repo_url` gets a fresh empty repo auto-seeded under ORCHESTRATOR_HOME,
+# and the run then "passes" against a tree the checker never looks at.
+note "bind this repo by creating the project WITH repo_url:"
+note "  POST /api/projects {\"name\":\"happy-path-v1\",\"repo_url\":\"$TARGET\"}"
 note "next: backend/scripts/dev.sh start   (API + worker; the walkthrough is API-only)"
 note "then: POST fixtures/happy-path-v1/brief.txt as a plan -- see the fixture README"

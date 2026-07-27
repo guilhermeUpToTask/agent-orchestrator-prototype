@@ -105,13 +105,26 @@ API, and basic UI wiring against the same disposable repository every time.
 - ✅ A precise command contract, not a driver: the walkthrough is API-only
   (`scripts/api.sh` + the exact `curl`/`jq` calls), so no step depends on
   reading a screen. Review gates stay explicit operator actions.
-- ⬜ Extend the checker (or add a companion) to validate plan/cycle state,
-  accepted evidence, disposition, promoted Git output, clean seed/default
-  branch, and repository isolation—not only `pytest`.
-- ⬜ Capture the plan snapshot, evidence bundle, worker-log reference, fixture
-  version, and orchestrator Git SHA in one consistently named run directory.
-- ⬜ Add a focused test for the locked seed/brief/checker contract without
-  duplicating the backend lifecycle suite.
+- ✅ A companion checker validates what `pytest` cannot: `scripts/verify_run.py`
+  asserts cycle activation (the durable proof both gates were approved — the
+  aggregate keeps no gate history), the goal/task size budget, tasks DONE with
+  **accepted, revision-bound** evidence, goals promoted, no open plan-wide or
+  per-goal block, disposition recorded with an output reference, root back to
+  IDLE, and the Git chain: cycle branch descends from the seed tag, goal branches
+  merged into it, default branch byte-identical to the seed, repository isolated
+  from the orchestrator checkout. Tier 1 adds `check-success.sh` as expectation 7.
+  Exit 1 is a failed check, exit 2 a broken harness — the two are different
+  findings and must not share a code.
+- ✅ `scripts/capture-run.sh` writes one run directory per run
+  (`runs/<UTC>-tier<N>-<plan prefix>/`): manifest (fixture version, seed commit,
+  orchestrator SHA + dirty flag, pinned reasoner/runner/agent bindings, failed
+  checks), verification result, plan snapshot, evidence bundle, attempt timeline,
+  telemetry, planning artifacts, and the worker-log reference. It captures a red
+  run too — that evidence is the point.
+- ✅ `backend/tests/integration/test_happy_path_fixture.py` locks the seed
+  (starts RED, exact promised assertion), the brief (postable verbatim, names the
+  verification command and the size budget), and the checker's judgement, without
+  driving the lifecycle the cyclic suite already owns.
 - 🚧 Version the fixture: the locked brief now lives in `brief.txt` so it can be
   posted verbatim (`BRIEF.md` had prose that would have been sent to the
   reasoner as part of the brief). The v1/v2 rule is documented; no bump needed

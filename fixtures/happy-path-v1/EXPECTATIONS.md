@@ -16,6 +16,11 @@ That is a valid architect/enrichment finding, not something to “push through.�
 
 ## Binary success (all required)
 
+These are checked for you — `scripts/verify_run.py --plan-id "$PLAN_ID"` asserts
+1-6 and 8 from persisted plan and Git facts, and `--tier 1` adds 7. The list
+below stays the human-readable contract; the script is what a run is measured
+against.
+
 A run is **green** only if every item holds:
 
 1. [ ] Intent review gate opened and was approved once  
@@ -44,9 +49,16 @@ A run is **green** only if every item holds:
 ```bash
 # plan id from the API (list order is not recency — sort explicitly):
 #   ./scripts/api.sh GET /api/plans | jq -r 'sort_by(.updated_at) | last | .id'
-python backend/scripts/snapshot_current_plan.py --plan-id "$PLAN_ID" --pretty \
-  --output "$ORCHESTRATOR_HOME/happy-path-v1/runs/$(date -u +%Y%m%dT%H%M%SZ).json"
+./scripts/capture-run.sh "$PLAN_ID" [0|1]
 ```
 
-Optional: worker log tail, `GET /api/plans/{id}/attempts`, attempt log stream.
-Everything here is checkable over HTTP — the walkthrough never needs the UI.
+One directory per run — `$ORCHESTRATOR_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan
+prefix>/` — holding `manifest.json` (fixture version, seed commit, orchestrator
+SHA + dirty flag, pinned reasoner/runner/agent bindings, failed checks),
+`verification.json`, `plan.json`, `attempts.json`, `agent-events.json`,
+`planning-artifacts.json`, the `bundle/`, and the worker log when
+`HAPPY_PATH_WORKER_LOG` names one.
+
+A snapshot with no version stamp is an anecdote: without the orchestrator SHA and
+the pinned model, two runs cannot be compared and a regression cannot be dated.
+Everything here is collected over HTTP and git — the walkthrough never needs the UI.
