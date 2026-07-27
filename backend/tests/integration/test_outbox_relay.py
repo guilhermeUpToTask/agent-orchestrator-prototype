@@ -19,6 +19,8 @@ from src.infra.db.engine import build_engine, make_session_factory
 from src.infra.db.tables import Base
 from src.infra.db.unit_of_work import SqliteUnitOfWork
 
+from tests.support import seed_plan_row
+
 pytestmark = pytest.mark.integration
 
 
@@ -35,6 +37,7 @@ class CollectingBroker(SSEBroker):
 def sf(tmp_path):
     engine = build_engine(f"sqlite:///{tmp_path / 'relay.db'}")
     Base.metadata.create_all(engine)
+    seed_plan_row(engine, "p1", "plan-1")
     return make_session_factory(engine)
 
 
@@ -157,6 +160,7 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
+    seed_plan_row(container.engine, "p1", "plan-1")
     container.project_repo.add(
         ProjectDefinition(id="project-1", name="Test project", repo_url=None)
     )

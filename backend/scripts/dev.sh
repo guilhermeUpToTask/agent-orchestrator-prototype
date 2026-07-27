@@ -110,11 +110,22 @@ load_environment() {
   fi
   # env.example defines shell-compatible assignments. A selected env file is
   # trusted local configuration; values are inherited but never printed.
+  #
+  # The env file provides DEFAULTS: anything already set in the process
+  # environment wins. `set -a; source` alone silently clobbered an explicit
+  # `export ORCHESTRATOR_HOME=…`, so a run an operator had carefully pointed at a
+  # disposable state directory went to `~/.orchestrator` instead — same class of
+  # trap as `PROJECT_REPO_DIR`: you set a variable, it was ignored, and the work
+  # happened somewhere else. Whether that overwrites real data is luck.
+  local preserved
+  preserved="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
-  note "loaded environment from $ENV_FILE"
+  # Re-apply what the caller had already exported, so the file cannot win.
+  eval "$preserved"
+  note "loaded environment from $ENV_FILE (process environment takes precedence)"
 }
 
 validate_port() {

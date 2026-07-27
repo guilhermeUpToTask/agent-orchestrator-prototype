@@ -124,11 +124,31 @@ def test_upgrade_from_0007_backfills_typed_observation_metadata(tmp_path):
     engine = create_engine(url)
     now = "2026-07-13T00:00:00+00:00"
     with engine.begin() as connection:
+        # 0015 adds a foreign key to agent_events, so the legacy row needs a plan
+        # to belong to; without one it is an orphan and gets swept.
+        connection.execute(
+            text(
+                "INSERT INTO plans (id, version, phase, iteration, data, "
+                "created_at, updated_at, paused) "
+                "VALUES ('p1', 1, 'RUNNING', 0, '{}', :now, :now, 0)"
+            ),
+            {"now": now},
+        )
         connection.execute(
             text(
                 "INSERT INTO agent_events "
                 "(event_id, plan_id, task_id, attempt, seq, type, payload, occurred_at) "
                 "VALUES ('legacy-1', 'p1', NULL, 0, 4, 'llm.call', '{}', :now)"
+            ),
+            {"now": now},
+        )
+        # An orphan: 0015 cannot add the foreign key while it exists, so the
+        # migration deletes it. That is deliberate data loss and worth locking.
+        connection.execute(
+            text(
+                "INSERT INTO agent_events "
+                "(event_id, plan_id, task_id, attempt, seq, type, payload, occurred_at) "
+                "VALUES ('orphan-1', 'gone', NULL, 0, 5, 'llm.call', '{}', :now)"
             ),
             {"now": now},
         )
@@ -147,6 +167,17 @@ def test_upgrade_from_0007_backfills_typed_observation_metadata(tmp_path):
         "recorded_at",
     }
     assert expected.issubset(_columns(engine, "agent_events"))
+
+    with engine.connect() as connection:
+        surviving = {
+            row[0]
+            for row in connection.execute(text("SELECT event_id FROM agent_events"))
+        }
+    assert "legacy-1" in surviving, "0015 must preserve telemetry whose plan still exists"
+    assert "orphan-1" not in surviving, (
+        "0015 sweeps telemetry whose plan is already gone — it has to, because the "
+        "foreign key it adds cannot be created while orphans exist"
+    )
     with engine.connect() as connection:
         row = connection.execute(
             text(

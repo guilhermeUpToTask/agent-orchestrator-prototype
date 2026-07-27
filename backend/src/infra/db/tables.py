@@ -88,7 +88,9 @@ class PlanRequestTable(Base):
     __tablename__ = "plan_requests"
 
     request_id: Mapped[str] = mapped_column(String, primary_key=True)
-    plan_id: Mapped[str] = mapped_column(String, ForeignKey("plans.id"), nullable=False)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +125,9 @@ class OutboxTable(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    plan_id: Mapped[str] = mapped_column(String, nullable=False)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
     type: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)  # event JSON
     occurred_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -315,7 +319,9 @@ class AgentEventTable(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    plan_id: Mapped[str] = mapped_column(String, nullable=False)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
     goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # NULL task_id = a plan-scoped telemetry row (e.g. the reasoner's llm.call);
     # task-scoped rows carry the task id as before.
@@ -365,7 +371,9 @@ class PlanChatMessageTable(Base):
     __tablename__ = "plan_chat_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    plan_id: Mapped[str] = mapped_column(String, ForeignKey("plans.id"), nullable=False)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
     role: Mapped[str] = mapped_column(String, nullable=False)  # 'user' | 'assistant'
     content: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON

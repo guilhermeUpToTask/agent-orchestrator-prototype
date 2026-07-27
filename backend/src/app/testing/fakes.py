@@ -93,6 +93,17 @@ class InMemoryPlanRepository:
             raise StaleVersionError(plan.id, plan.version, current.version)
         self._store[plan.id] = plan.model_copy(deep=True)
 
+    def delete(self, plan_id: str) -> None:
+        if plan_id not in self._store:
+            raise PlanNotFoundError(plan_id)
+        del self._store[plan_id]
+        # The SQLite adapter deletes plan_requests and releases the claim with the
+        # plan row; leaving either here would let a fake-backed test pass while
+        # the real one leaks a request binding or a live lease.
+        self._claims.pop(plan_id, None)
+        for request_id in [r for r, p in self._requests.items() if p == plan_id]:
+            del self._requests[request_id]
+
     def find_by_project_id(self, project_id: str) -> str | None:
         matches = [plan.id for plan in self._store.values() if plan.project_id == project_id]
         if len(matches) > 1:

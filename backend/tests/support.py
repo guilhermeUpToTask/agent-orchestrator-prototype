@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from src.app.ports import UnitOfWork
 from src.app.testing.fakes import (
@@ -150,3 +151,29 @@ def make_sqlite_env(
         stored=stored,
         outbox_types=outbox_types,
     )
+
+
+# Plan-scoped tables all declare ON DELETE CASCADE to `plans` (migration 0015),
+# so a test writing outbox rows or agent telemetry must have a plan to hang them
+# on. Before that constraint existed these rows could reference nothing; now the
+# foreign key rejects them, which is the point.
+_BARE_PLAN_SQL = text(
+    """
+    INSERT OR IGNORE INTO plans
+        (id, project_id, version, status, phase, iteration, data,
+         retry_not_before, paused, pause_requested, created_at, updated_at)
+    VALUES (:id, NULL, 1, 'running', 'RUNNING', 0, '{}', NULL, 0, 0, :now, :now)
+    """
+)
+
+
+def seed_plan_row(engine: Engine, *plan_ids: str) -> None:
+    """Insert minimal `plans` rows so plan-scoped inserts satisfy their FK.
+
+    Deliberately not a real aggregate: these tests exercise the outbox relay and
+    the observation store, which care only that the plan id resolves.
+    """
+    now = "2026-07-27T00:00:00+00:00"
+    with engine.begin() as connection:
+        for plan_id in plan_ids:
+            connection.execute(_BARE_PLAN_SQL, {"id": plan_id, "now": now})

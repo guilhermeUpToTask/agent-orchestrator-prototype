@@ -32,6 +32,21 @@ class PlanRepository(Protocol):
     def get(self, plan_id: str) -> Plan: ...
     def save(self, plan: Plan) -> None: ...  # version CAS -> StaleVersionError
 
+    def delete(self, plan_id: str) -> None:
+        """Remove a plan and everything produced under it.
+
+        Not a lifecycle transition — the cyclic root is never terminal, so
+        "finished with this plan" has no in-domain representation. This is the
+        operator disposing of a plan entirely, which is why it lives on the
+        repository rather than on the aggregate.
+
+        Implementations must leave no orphan behind: several plan-scoped tables
+        carry no `ON DELETE CASCADE`, and two more reference a plan without a
+        foreign key at all, so a bare `DELETE FROM plans` silently leaks rows.
+        Raises `PlanNotFoundError` when the plan does not exist.
+        """
+        ...
+
     # --- create idempotency ---
     def find_by_project_id(self, project_id: str) -> str | None: ...
     def find_by_request_id(self, request_id: str) -> str | None: ...
