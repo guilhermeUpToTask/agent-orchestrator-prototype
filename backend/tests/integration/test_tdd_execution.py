@@ -345,7 +345,13 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
         allowed_scope=["."],
         forbidden_scope=[".git/"],
         verification_commands=["git diff --check"],
-        verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+        # characterization, not executable_check: this fixture needs a GREEN
+        # baseline (`git diff --check` exits 0 on a clean worktree) to reach the
+        # "deleted or renamed" guard it is actually testing. `executable_check`
+        # now requires a FAILING baseline — a check that already passes proves
+        # nothing about the task. This is also characterization's only end-to-end
+        # coverage anywhere in the suite.
+        verification_strategy=VerificationStrategy.CHARACTERIZATION,
     )
     task = Task(
         id="task-1",
@@ -488,7 +494,13 @@ def test_capacity_waits_do_not_spend_the_verification_ceiling(tmp_path):
         allowed_scope=["."],
         forbidden_scope=[".git/"],
         verification_commands=["git diff --check"],
-        verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+        # characterization, not executable_check: this fixture needs a GREEN
+        # baseline (`git diff --check` exits 0 on a clean worktree) to reach the
+        # "deleted or renamed" guard it is actually testing. `executable_check`
+        # now requires a FAILING baseline — a check that already passes proves
+        # nothing about the task. This is also characterization's only end-to-end
+        # coverage anywhere in the suite.
+        verification_strategy=VerificationStrategy.CHARACTERIZATION,
     )
     task = Task(
         id="task-1",

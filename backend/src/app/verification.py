@@ -53,18 +53,9 @@ def _matches_scope(path: str, scope: str) -> bool:
     return normalized_path == normalized_scope or normalized_path.startswith(f"{normalized_scope}/")
 
 
-def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
-    """May the TEST-AUTHORING stage write this path?
-
-    The RED stage authors executable checks and must never touch production
-    files. Shared with the reasoner's submission-time check so a frozen contract
-    cannot declare a strategy whose first stage it makes impossible: a `tdd`
-    contract whose `allowed_scope` names only production files leaves the test
-    author with nowhere legal to write, and NO agent can satisfy it.
-    """
+def is_check_path(path: str) -> bool:
+    """Does this path hold executable checks rather than production code?"""
     normalized = path.replace("\\", "/")
-    if strategy == VerificationStrategy.EXECUTABLE_CHECK:
-        return True
     name = normalized.rstrip("/").rsplit("/", 1)[-1]
     return (
         normalized.startswith("tests/")
@@ -72,6 +63,33 @@ def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
         or name.startswith("test_")
         or name in {"conftest.py", "pytest.ini", "tests"}
     )
+
+
+def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
+    """May the TEST-AUTHORING stage write this path?
+
+    The RED stage authors executable checks and must never touch production
+    files — for EVERY strategy. This used to return True unconditionally for
+    `executable_check`, on the assumption that the strategy has no authoring
+    stage at all. It does: when a contract names no check that already exists,
+    the author still runs, and the blanket allow let it write production code
+    which then got hashed into `protected_file_hashes` as though it were a check
+    — making the implementer's scope guard skip it entirely.
+
+    `strategy` is retained in the signature because the reasoner's
+    submission-time validation and `contract_repair` both call it per strategy,
+    and because a future strategy may legitimately narrow it further.
+    """
+    del strategy  # every stage answers the same today; see the docstring
+    return is_check_path(path)
+
+
+# Deliberately NOT here: a `discover_executable_checks(root)` that scans the
+# repository for test files. It was written, and it is the wrong idea. A scan
+# cannot tell task 3's checks from task 1's, so on a multi-task goal it happily
+# freezes another task's failing test as this task's evidence. WHICH tests prove
+# a task is done is intent, not a property of the tree, so it has to be declared
+# — see `src/app/test_identity.py`.
 
 
 def validate_candidate(

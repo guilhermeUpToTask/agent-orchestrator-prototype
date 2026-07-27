@@ -328,3 +328,47 @@ def test_pointing_the_fixture_at_the_orchestrator_repo_fails() -> None:
         }
     )
     assert "repository_isolated" in _failed(verify_run.evaluate_git(facts))
+
+
+# --------------------------------------------------------------------------
+# happy-path-v2 — the fixture's verdict is independent of the agent's work
+# --------------------------------------------------------------------------
+
+FIXTURE_V2 = Path(__file__).resolve().parents[3] / "fixtures" / "happy-path-v2"
+SEED_V2 = FIXTURE_V2 / "seed"
+
+
+def test_v2_ships_no_tests_so_the_agent_authors_them() -> None:
+    """v1's seed contained the test, which is what collided with the pipeline's
+    author-then-implement shape. v2 hands the agent an empty `tests/`."""
+    assert (SEED_V2 / "src/happy_path/greeter.py").is_file()
+    assert "raise NotImplementedError" in (SEED_V2 / "src/happy_path/greeter.py").read_text()
+    authored = list((SEED_V2 / "tests").glob("test_*.py"))
+    assert authored == [], f"v2 seed must ship no tests, found {authored}"
+
+
+def test_v2_acceptance_lives_outside_the_repo() -> None:
+    """The whole point: v1 ran pytest inside the repo, in the same tests/ the
+    agent writes to, so a weak agent test would satisfy the fixture's own
+    verdict. The acceptance suite must not be part of the seed."""
+    assert (FIXTURE_V2 / "acceptance" / "test_acceptance.py").is_file()
+    seeded = [p.name for p in SEED_V2.rglob("*acceptance*")]
+    assert seeded == [], f"acceptance must never ship in the seed, found {seeded}"
+
+
+def test_v2_acceptance_probes_for_a_vacuous_test() -> None:
+    """The check that v1 could not make: an agent can write
+    `def test_greet(): greet("Ada")` — no assertion, always green — and satisfy
+    both the implementation and 'a test exists'. Only a mutation probe catches
+    it, and only from outside the repo."""
+    source = (FIXTURE_V2 / "acceptance" / "test_acceptance.py").read_text()
+    assert "def test_the_authored_check_fails_against_a_broken_implementation" in source
+    assert 'return ""' in source, "the probe must install a deliberately wrong greet"
+
+
+def test_v2_brief_asks_for_the_test_and_a_scoped_command() -> None:
+    brief = (FIXTURE_V2 / "brief.txt").read_text()
+    assert 'greet("Ada") == "Hello, Ada!"' in brief
+    assert "no test for this yet" in brief, "the brief must tell the agent to author"
+    assert "python -m pytest -q" in brief
+    assert "single goal" in brief

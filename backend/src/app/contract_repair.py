@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from src.app.verification import test_author_path_allowed
-from src.domain.entities.execution_contracts import TaskContract, VerificationStrategy
+from src.domain.entities.execution_contracts import TaskContract
 
 # A missing path with a close match is a typo; a missing path with none may be a
 # file the task is about to create. Strict, because a false positive here rewrites
@@ -100,8 +100,10 @@ def _repair_commands(
 
 def _repair_scope(contract: TaskContract, tracked: Sequence[str]) -> tuple[list[str] | None, str]:
     """Give a test-authoring stage somewhere legal to write."""
-    if contract.verification_strategy == VerificationStrategy.EXECUTABLE_CHECK:
-        return None, ""  # no RED stage, nothing to author
+    # No strategy short-circuit. `executable_check` used to return early here on
+    # the assumption that it has no authoring stage; it does whenever the
+    # contract names no check that already exists, and then it needs somewhere
+    # legal to write exactly like the others.
     if any(
         test_author_path_allowed(entry, contract.verification_strategy)
         for entry in contract.allowed_scope

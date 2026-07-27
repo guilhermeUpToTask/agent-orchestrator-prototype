@@ -1,0 +1,19 @@
+Implement `greet(name: str) -> str` in `src/happy_path/greeter.py` so that:
+
+    greet("Ada") == "Hello, Ada!"
+
+The repository has no test for this yet. Write one under `tests/` first, then
+make it pass.
+
+Constraints:
+
+- Do not add HTTP, database, CLI, packaging extras, or new third-party dependencies.
+- Do not create extra modules unless strictly required.
+- Do not refactor the project layout.
+- Verification is `python -m pytest -q` against the test file you create — name
+  that file in the verification command so it checks this task and nothing else.
+- Prefer a **single goal** and the **smallest possible task set** (ideally one
+  task covering the test and the implementation).
+
+Success means the test fails before the implementation and passes after it, and
+the default branch of the seed repo remains untouched.

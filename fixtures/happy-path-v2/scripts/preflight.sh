@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check everything a happy-path-v1 run needs BEFORE it starts spending.
+# Check everything a happy-path-v2 run needs BEFORE it starts spending.
 #
 #   ./scripts/preflight.sh 0 "$PROJECT_ID"    # expect stub + dry-run
 #   ./scripts/preflight.sh 1 "$PROJECT_ID"    # expect llm + real
@@ -20,7 +20,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SEED_TAG="happy-path-v1-seed"
+SEED_TAG="happy-path-v2-seed"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }
 pass() { printf '  [PASS] %s\n' "$*"; }
@@ -46,7 +46,7 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 api() { "$SCRIPT_DIR/api.sh" "$@"; }
 
 ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
-REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v1/repo}"
+REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 
 if [[ "$TIER" == "1" ]]; then
   WANT_REASONER=llm; WANT_RUNNER=real
@@ -54,7 +54,7 @@ else
   WANT_REASONER=stub; WANT_RUNNER=dry-run
 fi
 
-printf 'happy-path-v1 preflight — Tier %s (expecting reasoner=%s, runner=%s)\n\n' \
+printf 'happy-path-v2 preflight — Tier %s (expecting reasoner=%s, runner=%s)\n\n' \
   "$TIER" "$WANT_REASONER" "$WANT_RUNNER"
 
 # --- 1. control plane -------------------------------------------------------
@@ -169,16 +169,25 @@ fi
 
 # --- 4. the verification command the contract will freeze -------------------
 # `python -m pytest -q` is what brief.txt promises and what the task contract
-# will name. If it cannot execute, every attempt fails on infrastructure (126/127
-# -> retryable TOOL_ERROR) and burns the retry budget on a setup problem.
+# will name. If it cannot EXECUTE, every attempt fails on infrastructure
+# (126/127 -> retryable TOOL_ERROR) and burns the retry budget on a setup
+# problem.
+#
+# Collecting nothing is NOT a problem here: v2 ships `tests/` empty on purpose —
+# the agent authors the check. pytest exit 5 means "no tests collected", which is
+# the correct state before a run. Only a usage/internal error (2, 3, 4) or a
+# missing pytest is a real finding.
 if [[ -d "$REPO" ]]; then
-  if (cd "$REPO" && PYTHONPATH="$REPO/src" python3 -m pytest --collect-only -q >/dev/null 2>&1); then
-    pass "verification command runs and collects tests"
-  elif (cd "$REPO" && python3 -c "import pytest" 2>/dev/null); then
-    fail "pytest is importable but collection failed in $REPO — check the seed layout"
-  else
-    fail "pytest not importable — 'python -m pytest -q' will exit 127 in every attempt"
-  fi
+  set +e
+  (cd "$REPO" && PYTHONPATH="$REPO/src" python3 -m pytest --collect-only -q >/dev/null 2>&1)
+  collect_status=$?
+  set -e
+  case "$collect_status" in
+    0) pass "verification command runs; tests already present" ;;
+    5) pass "verification command runs; tests/ empty as expected (the agent authors it)" ;;
+    127) fail "pytest not importable — the command will exit 127 in every attempt" ;;
+    *) fail "pytest exits $collect_status in $REPO (usage or internal error, not an empty suite)" ;;
+  esac
 fi
 
 printf '\n'

@@ -98,13 +98,20 @@ def test_a_command_naming_something_with_no_near_twin_is_not_invented():
     assert propose_repair(broken, ["authoritative verification command failed"], TRACKED) is None
 
 
-def test_an_executable_check_contract_needs_no_test_path():
+def test_an_executable_check_contract_also_gets_somewhere_to_author():
+    """`executable_check` used to be exempt from this repair, on the assumption
+    that it has no authoring stage. It does — whenever the contract names no
+    check that already exists — so it needs somewhere legal to write exactly
+    like the others."""
     broken = contract(
         allowed_scope=["src/happy_path/greeter.py"],
         verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
     )
 
-    assert propose_repair(broken, ["authoritative verification command failed"], TRACKED) is None
+    repair = propose_repair(broken, ["test author produced no executable checks"], TRACKED)
+
+    assert repair is not None
+    assert repair.allowed_scope == ["src/happy_path/greeter.py", "tests/"]
 
 
 def test_a_repository_with_no_tests_cannot_supply_a_test_path():
