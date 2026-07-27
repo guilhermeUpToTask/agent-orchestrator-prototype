@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 from src.domain.aggregates.planner_orchestrator import Plan
+from src.infra.runtime.dummy_runner import dry_run_candidate_path
 from src.domain.entities.capability import Capability
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
@@ -180,16 +181,24 @@ class StubReasoner:
             id="task-outcome",
             description=f"Implement and verify {goal.name}",
         )
+        task_id = new_id()
         contract = TaskContract(
-            id=new_id(),
+            id=task_id,
             position=0,
             objective=f"Implement {goal.name}",
             acceptance_criteria=[task_criterion],
             goal_criterion_ids=[criterion.id],
             allowed_scope=["."],
             forbidden_scope=[".git/"],
-            verification_commands=["git diff --check"],
-            verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+            # A check that can actually fail. `git diff --check` exits 0 on any
+            # clean worktree, so Tier 0's verification chain was a no-op: every
+            # green run proved the lifecycle and the git plumbing and nothing at
+            # all about verification. The dry-run runner writes this path in the
+            # IMPLEMENTER stage only, so the command is RED at authoring time and
+            # GREEN afterwards — a real red/green transition, using POSIX `test`
+            # so Tier 0 stays deterministic and needs no pytest.
+            verification_commands=[f"test -f {dry_run_candidate_path(task_id)}"],
+            verification_strategy=VerificationStrategy.TDD,
         )
         return GoalContract(
             id=goal.id,

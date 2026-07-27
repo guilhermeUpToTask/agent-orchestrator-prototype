@@ -23,6 +23,27 @@ from src.domain.entities.task import Task
 from src.domain.value_objects.tasks_vos import TaskResult
 
 
+
+def safe_task_id(task_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", task_id).strip("_") or "task"
+
+
+def dry_run_check_path(task_id: str) -> str:
+    """Where the dry-run author writes its stand-in check."""
+    return f"tests/test_dry_run_{safe_task_id(task_id)}.txt"
+
+
+def dry_run_candidate_path(task_id: str) -> str:
+    """Where the dry-run implementer writes its stand-in candidate.
+
+    `StubReasoner` names this path in its verification command so Tier 0 has a
+    check that is genuinely RED before the implementer runs and GREEN after —
+    the stub used `git diff --check`, which cannot fail on a clean worktree, so
+    every green Tier 0 run proved the lifecycle and nothing about verification.
+    """
+    return f".orchestrator/dry-run/{safe_task_id(task_id)}.txt"
+
+
 class DryRunAgentRunner(DummyAgentRunner):
     """Exercise the cyclic execution pipeline with deterministic local artifacts.
 
@@ -33,7 +54,7 @@ class DryRunAgentRunner(DummyAgentRunner):
 
     @staticmethod
     def _safe_task_id(task_id: str) -> str:
-        return re.sub(r"[^A-Za-z0-9_-]+", "_", task_id).strip("_") or "task"
+        return safe_task_id(task_id)
 
     async def run(
         self,
@@ -45,12 +66,11 @@ class DryRunAgentRunner(DummyAgentRunner):
         workspace: WorkspaceHandle,
     ) -> TaskResult:
         root = Path(workspace.path)
-        safe_id = self._safe_task_id(task.id)
         if task.tdd_stage == "test_authoring":
-            artifact = root / "tests" / f"test_dry_run_{safe_id}.txt"
+            artifact = root / dry_run_check_path(task.id)
             content = f"dry-run executable check for {task.id}\n"
         else:
-            artifact = root / ".orchestrator" / "dry-run" / f"{safe_id}.txt"
+            artifact = root / dry_run_candidate_path(task.id)
             content = f"dry-run candidate for {task.id} revision {task.revision}\n"
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text(content)

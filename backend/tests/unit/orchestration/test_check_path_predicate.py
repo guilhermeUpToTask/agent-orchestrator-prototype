@@ -41,7 +41,17 @@ def test_production_paths_are_not_checks(path: str) -> None:
     assert not is_check_path(path)
 
 
-def test_the_authoring_write_guard_follows_the_strategy() -> None:
-    assert not author_path_allowed("src/greeter.py", VerificationStrategy.TDD)
-    assert author_path_allowed("tests/test_x.py", VerificationStrategy.TDD)
-    assert author_path_allowed("src/greeter.py", VerificationStrategy.EXECUTABLE_CHECK)
+@pytest.mark.parametrize("strategy", list(VerificationStrategy))
+def test_the_authoring_stage_may_never_write_production_code(
+    strategy: VerificationStrategy,
+) -> None:
+    """For EVERY strategy, including `executable_check`.
+
+    That one used to return True unconditionally, on the assumption that it has
+    no authoring stage. It does — whenever the contract names no check that
+    already exists — and the blanket allow let the author write production code
+    which was then hashed into `protected_file_hashes` as though it were a
+    check, so the implementer's scope guard skipped it entirely.
+    """
+    assert not author_path_allowed("src/greeter.py", strategy)
+    assert author_path_allowed("tests/test_x.py", strategy)

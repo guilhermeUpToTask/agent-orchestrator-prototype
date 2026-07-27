@@ -102,6 +102,7 @@ from src.app.agent_feedback import split_reasons
 from src.app.contract_repair import propose_repair
 from src.app.promotion_failures import is_transient_merge_failure
 from src.domain.services.edit_service import resync_goal_contract
+from src.app.test_identity import criterion_test_map, declared_checks
 from src.app.verification import (
     sha256_file,
     test_author_path_allowed,
@@ -598,30 +599,46 @@ class ExecutionHandler:
         assert contract is not None
         workspace_handle = handle
         base_ref = getattr(workspace_handle, "base_ref", None)
-        paths = await self._verifier.changed_paths(workspace_handle.path, base_ref)
-        if not paths:
+        # THREE names, never one reused. `checks` is what gets hashed into the
+        # bundle, and an earlier revision of this function recomputed `paths`
+        # after running the commands — silently replacing the protected set with
+        # whatever the commands happened to leave behind, which for an empty diff
+        # is nothing at all. A bundle protecting `{}` lets the implementer rewrite
+        # the very tests it must satisfy.
+        authored = await self._verifier.changed_paths(workspace_handle.path, base_ref)
+        declared = declared_checks(contract, Path(workspace_handle.path))
+        if authored:
+            disallowed = [
+                path
+                for path in authored
+                if not self._test_author_path_allowed(path, contract.verification_strategy)
+            ]
+            if disallowed:
+                raise TaskFailed(
+                    f"test author modified production paths: {disallowed}",
+                    FailureKind.VERIFICATION_ERROR,
+                )
+            checks, selectors = list(authored), list(authored)
+        elif declared.declared:
+            # Certain, or author. An empty diff is correct when the contract
+            # NAMES a check that already exists — the ordinary bug-fix workflow,
+            # where the repro test is already in the repo. The mapping comes from
+            # the contract, never from scanning the tree, so a multi-task goal
+            # cannot hand this task another task's failing test.
+            checks, selectors = list(declared.files), list(declared.node_ids)
+        else:
             raise TaskFailed(
                 "test author produced no executable checks",
-                FailureKind.VERIFICATION_ERROR,
-            )
-        disallowed = [
-            path
-            for path in paths
-            if not self._test_author_path_allowed(path, contract.verification_strategy)
-        ]
-        if disallowed:
-            raise TaskFailed(
-                f"test author modified production paths: {disallowed}",
                 FailureKind.VERIFICATION_ERROR,
             )
         outcomes = await self._verifier.run(
             workspace_handle.path,
             contract.verification_commands,
         )
-        paths = await self._verifier.changed_paths(workspace_handle.path, base_ref)
+        after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
         disallowed = [
             path
-            for path in paths
+            for path in after
             if not self._test_author_path_allowed(path, contract.verification_strategy)
         ]
         if disallowed:
@@ -630,27 +647,34 @@ class ExecutionHandler:
                 FailureKind.VERIFICATION_ERROR,
             )
         self._raise_on_infrastructure_exit(outcomes)
-        if contract.verification_strategy == VerificationStrategy.TDD:
-            valid_baseline = bool(outcomes) and any(item.exit_code != 0 for item in outcomes)
-        else:
+        # A check that already passes proves nothing about THIS task: the green
+        # after the implementation would be the same green as before it. So the
+        # baseline must FAIL — for a check the author just wrote (`tdd`) and
+        # equally for one the contract named (`executable_check`, the bug-fix
+        # workflow). They differ only in who typed the test.
+        #
+        # `characterization` is the one exception and the reason this is not a
+        # bare boolean: it pins behaviour that ALREADY works, so it must pass.
+        # It is being retired (no coverage, never run, and its prompt tells the
+        # agent to write failing tests) but is still honoured while it exists.
+        if contract.verification_strategy == VerificationStrategy.CHARACTERIZATION:
             valid_baseline = bool(outcomes) and all(item.exit_code == 0 for item in outcomes)
+            expected = "a passing characterization baseline"
+        else:
+            valid_baseline = bool(outcomes) and any(item.exit_code != 0 for item in outcomes)
+            expected = "a meaningful RED result"
         if not valid_baseline:
-            expected = (
-                "a meaningful RED result"
-                if contract.verification_strategy == VerificationStrategy.TDD
-                else "a passing characterization/check baseline"
-            )
             raise TaskFailed(
                 f"test bundle did not establish {expected}",
                 FailureKind.VERIFICATION_ERROR,
             )
-        missing = [path for path in paths if not (Path(workspace_handle.path) / path).is_file()]
+        missing = [path for path in checks if not (Path(workspace_handle.path) / path).is_file()]
         if missing:
             raise TaskFailed(
                 f"test author deleted or renamed executable checks: {missing}",
                 FailureKind.VERIFICATION_ERROR,
             )
-        protected = {path: sha256_file(Path(workspace_handle.path) / path) for path in paths}
+        protected = {path: sha256_file(Path(workspace_handle.path) / path) for path in checks}
         if not self._reserve_candidate(plan_id, unit, uow):
             await self._workspace.discard(workspace_handle)
             self._abandon_stale(plan_id, unit, uow)
@@ -662,9 +686,11 @@ class ExecutionHandler:
             task_revision=unit.task_revision,
             test_commit_sha=test_commit_sha,
             protected_file_hashes=protected,
-            criterion_to_tests={
-                criterion.id: list(paths) for criterion in contract.acceptance_criteria
-            },
+            # This task's checks, not "whatever the diff contained". `checks` is
+            # the authoring diff (unambiguously this task's) or the contract's
+            # own declaration — never a repository scan, which cannot tell one
+            # task's tests from another's.
+            criterion_to_tests=criterion_test_map(contract, selectors),
             verification_strategy=contract.verification_strategy,
             baseline_evidence_refs=[],
             red_or_baseline_evidence_refs=evidence_refs,

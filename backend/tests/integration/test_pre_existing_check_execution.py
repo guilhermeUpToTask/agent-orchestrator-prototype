@@ -1,0 +1,255 @@
+"""The bug-fix workflow: a failing test is already in the repo.
+
+This is the shape two Tier 1 runs of happy-path-v1 died on, and it is the most
+common way a developer hands work to an agent — an issue with a repro test, a red
+CI job, a TDD handoff. The reasoner produced a correct contract both times; the
+pipeline had nowhere to put it, because it assumed an agent always authors the
+checks and read "the author wrote nothing" as failure.
+
+The task's checks come from the contract's own `verification_commands`, which
+name a concrete file. Not from a repository scan: a scan cannot tell this task's
+checks from another task's, which is fatal on a multi-task goal.
+
+The protected-set assertion below is the one that matters most. An earlier fix
+recomputed the path list AFTER running the verification commands, which for an
+empty authoring diff left `protected_file_hashes == {}` — a bundle protecting
+nothing, letting the implementer rewrite the very test it must satisfy. That
+version would have passed a naive "the task completed" assertion.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from src.app.testing.fakes import (
+    CollectingEventSink,
+    FakeClock,
+    InMemoryAgentRepository,
+    InMemoryOutbox,
+    InMemoryPlanRepository,
+    InMemoryUnitOfWork,
+)
+from src.app.handlers.execution_handler import ExecutionHandler
+from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from src.domain.entities.agent_spec import AgentSpec
+from src.domain.entities.capability import Capability
+from src.domain.entities.execution_contracts import (
+    ContractCriterion,
+    GoalContract,
+    TaskContract,
+    VerificationStrategy,
+)
+from src.domain.entities.goal import Goal
+from src.domain.entities.planning_artifacts import Cycle, PlanStatus
+from src.domain.entities.task import Task
+from src.domain.policies.retry_policies import RetryPolicy
+from src.domain.value_objects.tasks_vos import TaskResult
+from src.infra.git.workspace import GitBranchWorkspace
+from src.infra.runtime.verification_executor import LocalVerificationExecutor
+
+pytestmark = pytest.mark.integration
+NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
+
+CHECK = "tests/test_greeter.py"
+UNIMPLEMENTED = 'def greet(name):\n    raise NotImplementedError("implement me")\n'
+IMPLEMENTED = 'def greet(name):\n    return f"Hello, {name}!"\n'
+TEST_SOURCE = (
+    "from greeter import greet\n\n\n"
+    "def test_greet():\n"
+    '    assert greet("Ada") == "Hello, Ada!"\n'
+)
+
+
+def _seed_repo(repo: Path) -> None:
+    """A repository that already contains the failing check."""
+    (repo / "tests").mkdir(parents=True)
+    (repo / "greeter.py").write_text(UNIMPLEMENTED)
+    (repo / CHECK).write_text(TEST_SOURCE)
+    subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+    for args in (
+        ["config", "user.email", "t@example.test"],
+        ["config", "user.name", "t"],
+        ["add", "-A"],
+        ["commit", "-m", "seed: failing check, no implementation"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def _agent(agent_id: str, capability: str) -> AgentSpec:
+    return AgentSpec(
+        id=agent_id,
+        name=agent_id,
+        role=capability,
+        model_role="smart",
+        instructions="",
+        capabilities=[Capability(id=capability, name=capability, description="")],
+        default_retry=RetryPolicy(),
+    )
+
+
+class _Runner:
+    """Writes nothing while authoring; implements on the second stage.
+
+    The empty authoring diff is the CORRECT behaviour when the check already
+    exists — there is nothing to write — and is what the pipeline used to read as
+    "test author produced no executable checks".
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
+        self.calls.append(spec.id)
+        if spec.id == "implementer":
+            (Path(workspace.path) / "greeter.py").write_text(IMPLEMENTED)
+        return TaskResult.success("agent claimed success")
+
+
+def _plan_with_declared_check() -> tuple[Plan, Task]:
+    task_contract = TaskContract(
+        id="task-1",
+        position=0,
+        objective="implement greet",
+        acceptance_criteria=[ContractCriterion(id="t-1", description="greet returns a greeting")],
+        goal_criterion_ids=["g-1"],
+        allowed_scope=["greeter.py"],
+        # The check exists, so the agent must not touch it. This is the contract
+        # shape the real reasoner produced, and v1's pipeline rejected it.
+        forbidden_scope=["tests/"],
+        verification_commands=[f"python -m pytest -q {CHECK}"],
+        verification_strategy=VerificationStrategy.EXECUTABLE_CHECK,
+    )
+    task = Task(
+        id="task-1",
+        name="implement greet",
+        position=0,
+        description="implement greet",
+        contract=task_contract,
+        role_agent_ids={"test_author": "test-author", "implementer": "implementer"},
+    )
+    goal = Goal(
+        id="goal-1",
+        name="goal",
+        position=0,
+        description="goal",
+        tasks=[task],
+        contract=GoalContract(
+            id="goal-1",
+            objective="goal",
+            acceptance_criteria=[ContractCriterion(id="g-1", description="greet works")],
+            tasks=[task_contract],
+            frozen_at=NOW,
+        ),
+    )
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="brief",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                goals=[goal],
+                started_at=NOW,
+            )
+        ],
+    )
+    return plan, task
+
+
+def test_a_declared_pre_existing_check_drives_both_stages(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    plans.add(plan)
+    runner = _Runner()
+    handler = ExecutionHandler(
+        runner,
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    # Stage 1 — the author writes nothing, and that is correct.
+    assert asyncio.run(handler.handle(plan.id, plan, uow)).value == "continue"
+    after_red = plans.get(plan.id)
+    task_after_red = after_red.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    bundle = task_after_red.test_bundle
+    assert bundle is not None, "the declared check should have frozen a bundle"
+
+    # THE regression: the protected set must hold the declared check. The bug
+    # this replaces produced `{}` here, which protects nothing.
+    assert CHECK in bundle.protected_file_hashes, (
+        f"the pre-existing check is unprotected: {bundle.protected_file_hashes}"
+    )
+    # And the mapping records THIS task's check, not "every changed path".
+    assert bundle.criterion_to_tests == {"t-1": [CHECK]}
+
+    # Stage 2 — the implementer turns the declared check green.
+    assert asyncio.run(handler.handle(plan.id, after_red, uow)).value == "continue"
+    done = plans.get(plan.id)
+    finished = done.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert finished.status.value == "done"
+    assert finished.verification_evidence
+    assert all(item.accepted for item in finished.verification_evidence)
+    assert runner.calls == ["test-author", "implementer"]
+
+
+def test_an_already_green_check_is_rejected_as_non_discriminating(tmp_path: Path) -> None:
+    """A check that already passes proves nothing about this task: the green
+    after the work would be the same green as before it. Rejected loudly rather
+    than accepted silently — a silent accept lets an agent do nothing and still
+    be recorded as verified."""
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    (repo_dir / "greeter.py").write_text(IMPLEMENTED)  # already done
+    subprocess.run(["git", "-C", str(repo_dir), "commit", "-am", "already"], check=True,
+                   capture_output=True)
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    plans.add(plan)
+    handler = ExecutionHandler(
+        _Runner(),
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    asyncio.run(handler.handle(plan.id, plan, uow))
+
+    after = plans.get(plan.id)
+    rejected = after.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert rejected.test_bundle is None, "a non-discriminating check must not freeze"
+    assert rejected.status.value != "done"
+    # The attempt is retryable, so the task sits in backoff rather than carrying
+    # a terminal result; the reason lives on the attempt ledger.
+    assert rejected.retry_not_before is not None
+    reasons = [
+        item.safe_message
+        for item in uow.executions.list_attempts(plan.id)
+        if item.safe_message
+    ]
+    assert any("did not establish a meaningful RED result" in reason for reason in reasons), reasons

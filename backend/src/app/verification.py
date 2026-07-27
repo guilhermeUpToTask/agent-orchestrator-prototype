@@ -69,13 +69,18 @@ def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
     """May the TEST-AUTHORING stage write this path?
 
     The RED stage authors executable checks and must never touch production
-    files. Shared with the reasoner's submission-time check so a frozen contract
-    cannot declare a strategy whose first stage it makes impossible: a `tdd`
-    contract whose `allowed_scope` names only production files leaves the test
-    author with nowhere legal to write, and NO agent can satisfy it.
+    files — for EVERY strategy. This used to return True unconditionally for
+    `executable_check`, on the assumption that the strategy has no authoring
+    stage at all. It does: when a contract names no check that already exists,
+    the author still runs, and the blanket allow let it write production code
+    which then got hashed into `protected_file_hashes` as though it were a check
+    — making the implementer's scope guard skip it entirely.
+
+    `strategy` is retained in the signature because the reasoner's
+    submission-time validation and `contract_repair` both call it per strategy,
+    and because a future strategy may legitimately narrow it further.
     """
-    if strategy == VerificationStrategy.EXECUTABLE_CHECK:
-        return True
+    del strategy  # every stage answers the same today; see the docstring
     return is_check_path(path)
 
 
