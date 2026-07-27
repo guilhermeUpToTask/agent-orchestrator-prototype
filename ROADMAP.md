@@ -397,6 +397,35 @@ wall-clock bound, which is a capacity-policy change deserving its own decision
 rather than a drive-by. Note the interaction — the faster curve reaches the
 budget sooner in wall-clock terms, so this got *more* visible, not less.
 
+### Validated — a Tier 1 run that absorbed real concurrency refusals
+
+The evidence the backoff fix was missing, from a clean run with all fixes in
+place (`runs/20260727T223637Z-tier1-ae16ab2a`, **17/17 green** including pytest
+passing on a real checkout of the cycle branch):
+
+| attempt | outcome | gap before it |
+|---|---|---|
+| 1 | succeeded (test author) | — |
+| 2 | `rate_limit` / `request_concurrency` | — |
+| 3 | `rate_limit` / `request_concurrency` | **58s** |
+| 4 | succeeded (implementation) | **121s** |
+
+58s then 121s is the plan's ordinary configured curve — a 30s base doubling,
+jittered. Under the 4.0 rate-limit scale those same two waits would have been
+roughly 232s and 484s: ~12 minutes of waiting instead of ~3, for refusals the
+provider cleared in under a minute. That is the 37-minute measurement in
+miniature, and it no longer happens.
+
+The more important half: **the task recovered.** Two refusals were absorbed and
+the goal completed, where the pre-fix series runs exhausted the budget and
+blocked. Zero `Database stayed locked` events (seven in the pre-fix session) and
+the worker survived the whole run.
+
+Not exercised: `contract_repair` never fired, because the agent succeeded this
+time. The deadlock fix therefore remains verified by its regression test and by
+the absence of the failure mode, not by watching a repair persist live. That is
+still the open item for the next red run.
+
 **Controls — one defect, otherwise correct.**
 - Pausing a plan parked at a review gate is refused (422 `INVALID_TRANSITION`),
   and `legal_actions` correctly does not advertise `pause` there. Refusing what
