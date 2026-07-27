@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Set
+from typing import Iterable, Mapping, Sequence, Set
 
 from src.domain.entities.execution_contracts import (
     TaskContract,
@@ -33,6 +33,46 @@ _BYPASS_MARKERS = (
     "test.only(",
     ".skip(",
 )
+
+
+@dataclass(frozen=True)
+class BaselineOutcome:
+    """What the checks did BEFORE the work, and whether that is acceptable."""
+
+    verdict: str  # 'red' | 'green' — the observed fact
+    accepted: bool  # whether this strategy wanted that
+    expectation: str  # phrase for the rejection message
+
+
+def baseline_outcome(
+    strategy: VerificationStrategy, exit_codes: Sequence[int]
+) -> BaselineOutcome:
+    """One definition, used by the accept/reject branch AND by the recorded fact.
+
+    A check that already passes proves nothing about THIS task: the green after
+    the implementation would be the same green as before it. So the baseline must
+    FAIL — for a check the author just wrote (`tdd`) and equally for one the
+    contract named (`executable_check`, the bug-fix workflow). They differ only in
+    who typed the test.
+
+    `characterization` is the single exception, and the reason this returns a
+    verdict alongside the boolean: it pins behaviour that ALREADY works, so it
+    must pass. It is being retired — no coverage until recently, never run live,
+    and its prompt told the agent to write failing tests — but is honoured while
+    it exists.
+    """
+    verdict = "red" if any(code != 0 for code in exit_codes) else "green"
+    if strategy == VerificationStrategy.CHARACTERIZATION:
+        return BaselineOutcome(
+            verdict=verdict,
+            accepted=bool(exit_codes) and verdict == "green",
+            expectation="a passing characterization baseline",
+        )
+    return BaselineOutcome(
+        verdict=verdict,
+        accepted=bool(exit_codes) and verdict == "red",
+        expectation="a meaningful RED result",
+    )
 
 
 @dataclass(frozen=True)

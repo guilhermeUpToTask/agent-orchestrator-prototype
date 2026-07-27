@@ -19,13 +19,14 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Mapping, TypeVar
+from typing import Callable, Mapping, Sequence, TypeVar
 from uuid import uuid4
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.errors.tasks_errors import StaleVersionError
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.execution_contracts import (
+    TaskContract,
     TestBundle,
     VerificationEvidence,
     VerificationKind,
@@ -102,8 +103,15 @@ from src.app.agent_feedback import split_reasons
 from src.app.contract_repair import propose_repair
 from src.app.promotion_failures import is_transient_merge_failure
 from src.domain.services.edit_service import resync_goal_contract
-from src.app.test_identity import criterion_test_map, declared_checks, existing_checks
+from src.app.test_identity import (
+    DeclaredChecks,
+    criterion_test_map,
+    declared_checks,
+    existing_checks,
+)
 from src.app.verification import (
+    BaselineOutcome,
+    baseline_outcome,
     is_check_path,
     sha256_file,
     validate_authoring,
@@ -316,16 +324,38 @@ class ExecutionHandler:
         checks_before: dict[str, str] = (
             existing_checks(Path(handle.path)) if unit.run_role == "test_author" else {}
         )
+        # No agent when the contract NAMES a check that is already here. The
+        # authoring prompt says "write tests that fail"; handing that to an agent
+        # with nothing to write means relying on it to disobey, and the correct
+        # output — an empty diff — is indistinguishable from the agent giving up.
+        # Freezing from the declaration instead is deterministic and free.
+        #
+        # The decision needs the worktree (existence is a fact about the tree), so
+        # it lands here rather than beside `_start_unit`. Consequence: the
+        # admission and circuit gates upstream still applied, which can delay a
+        # stage needing no provider — conservative, and it never lets one proceed
+        # that should have waited.
+        # Resolved ONCE, here, before the agent could change the tree. That fixes
+        # what "declared" means: a check the contract named that was ALREADY
+        # present when the stage began. Resolving it again after the agent ran
+        # would quietly also match a file the agent just created.
+        declared = (
+            declared_checks(unit.task_snapshot.contract, Path(handle.path))
+            if unit.run_role == "test_author" and unit.task_snapshot.contract is not None
+            else DeclaredChecks()
+        )
         try:
             main_repo_before = await self._main_repo_status()
-            result: TaskResult = await self._runner.run(
-                unit.task_snapshot,
-                unit.spec,
-                idempotency_key=key,
-                event_sink=self._event_sink,
-                workspace=handle,
-            )
-            await self._raise_on_main_repo_changes(main_repo_before)
+            result: TaskResult = TaskResult.success("orchestrator froze a declared check")
+            if not declared.declared:
+                result = await self._runner.run(
+                    unit.task_snapshot,
+                    unit.spec,
+                    idempotency_key=key,
+                    event_sink=self._event_sink,
+                    workspace=handle,
+                )
+                await self._raise_on_main_repo_changes(main_repo_before)
             if unit.cycle_id is not None and unit.task_snapshot.contract is not None:
                 if self._verifier is None:
                     raise TaskFailed(
@@ -337,7 +367,7 @@ class ExecutionHandler:
                     )
                 if unit.run_role == "test_author":
                     return await self._finalize_test_author(
-                        plan_id, unit, handle, uow, checks_before
+                        plan_id, unit, handle, uow, checks_before, declared
                     )
                 return await self._finalize_verified_implementation(plan_id, unit, handle, uow)
             if not self._reserve_candidate(plan_id, unit, uow):
@@ -598,6 +628,94 @@ class ExecutionHandler:
         # contract cannot freeze a strategy its own scope makes unsatisfiable.
         return test_author_path_allowed(path, strategy)
 
+
+
+    def _record_baseline(
+        self,
+        plan_id: str,
+        unit: _Unit,
+        contract: TaskContract,
+        selectors: Sequence[str],
+        outcomes: Sequence[CommandExecution],
+        baseline: BaselineOutcome,
+    ) -> None:
+        """Whether the checks were red or green BEFORE the work.
+
+        That single fact decides whether the green afterwards means anything, and
+        it was stored nowhere queryable: `TestBundle.baseline_evidence_refs` is
+        always empty, and `red_or_baseline_evidence_refs` holds only sha256
+        digests of output text — you can prove a command ran, not what it decided.
+
+        A `PlanningArtifact` rather than a field on the bundle: the bundle rides
+        the plan's version CAS and would roll back with the transaction, while
+        these writes run on their own short transaction (the same reason
+        `ChatStore` does). Best-effort — losing the record must never fail a run
+        that succeeded. Served by `GET /plans/{id}/planning-artifacts`.
+        """
+        if self._planning_artifacts is None:
+            return
+        try:
+            self._planning_artifacts.append(
+                PlanningArtifact(
+                    plan_id=plan_id,
+                    goal_id=unit.goal_id,
+                    purpose="verification_baseline",
+                    operation_id=unit.execution.id,
+                    sequence=0,  # the store assigns the next one
+                    input_fingerprint=f"{unit.task_id}:{unit.task_revision}",
+                    outcome="committed",
+                    created_at=self._clock.now(),
+                    payload={
+                        "task_id": unit.task_id,
+                        "task_revision": unit.task_revision,
+                        "strategy": contract.verification_strategy.value,
+                        "checks": list(selectors),
+                        "commands": [item.command for item in outcomes],
+                        "exit_codes": [item.exit_code for item in outcomes],
+                        "verdict": baseline.verdict,
+                    },
+                )
+            )
+        except Exception:  # pragma: no cover - telemetry must never fail a run
+            log.warning("execution.baseline_record_failed", plan_id=plan_id, task_id=unit.task_id)
+
+    def _reject_authoring_violations(
+        self,
+        root: Path,
+        checks_before: Mapping[str, str],
+        changed: Sequence[str],
+        *,
+        violated: str,
+        intruded: str,
+    ) -> None:
+        """The authoring stage's rules, applied to whatever `actor` just touched.
+
+        The messages are passed in as whole literals rather than composed from an
+        actor noun, because `test_agent_feedback` greps `src` to prove every
+        whitelisted rejection prefix is still emitted somewhere — an f-string
+        would make that guard silently vacuous.
+
+        Called twice: once for the agent's diff, once for the tree AFTER its own
+        verification command ran. The second call is not paranoia — the command is
+        arbitrary shell from the contract, and until it shared this guard it was
+        judged by `is_check_path` alone, so a command could rewrite another task's
+        check during the baseline and freeze the result as this task's evidence.
+        """
+        verdict = validate_authoring(root, checks_before, changed)
+        if not verdict.accepted:
+            raise TaskFailed(
+                f"{violated}: " + "; ".join(verdict.reasons),
+                FailureKind.VERIFICATION_ERROR,
+            )
+        intruders = [
+            path for path in changed if path not in checks_before and not is_check_path(path)
+        ]
+        if intruders:
+            raise TaskFailed(
+                f"{intruded}: {intruders}",
+                FailureKind.VERIFICATION_ERROR,
+            )
+
     async def _finalize_test_author(
         self,
         plan_id: str,
@@ -605,6 +723,7 @@ class ExecutionHandler:
         handle: WorkspaceHandle,
         uow: UnitOfWork,
         checks_before: Mapping[str, str],
+        declared: DeclaredChecks,
     ) -> Signal:
         assert self._verifier is not None
         contract = unit.task_snapshot.contract
@@ -618,28 +737,19 @@ class ExecutionHandler:
         # is nothing at all. A bundle protecting `{}` lets the implementer rewrite
         # the very tests it must satisfy.
         authored = await self._verifier.changed_paths(workspace_handle.path, base_ref)
-        declared = declared_checks(contract, Path(workspace_handle.path))
 
-        # Same rules the implementer answers to: scope, forbidden paths,
-        # verification-config filenames, and the integrity of every check that
-        # already existed. This stage used to be judged by `is_check_path` alone.
-        authoring = validate_authoring(Path(workspace_handle.path), checks_before, authored)
-        if not authoring.accepted:
-            raise TaskFailed(
-                "test author violated the frozen checks: " + "; ".join(authoring.reasons),
-                FailureKind.VERIFICATION_ERROR,
-            )
+        self._reject_authoring_violations(
+            Path(workspace_handle.path),
+            checks_before,
+            authored,
+            violated="test author violated the frozen checks",
+            intruded="test author modified production paths",
+        )
 
         # New = this task's, by construction. A path that was already in the tree
         # belongs to whoever put it there, so it is never claimed here.
         new_checks = [path for path in authored if path not in checks_before]
         if new_checks:
-            not_checks = [path for path in new_checks if not is_check_path(path)]
-            if not_checks:
-                raise TaskFailed(
-                    f"test author modified production paths: {not_checks}",
-                    FailureKind.VERIFICATION_ERROR,
-                )
             checks, selectors = list(new_checks), list(new_checks)
         elif declared.declared:
             # Certain, or author. An empty diff is correct when the contract NAMES
@@ -656,37 +766,26 @@ class ExecutionHandler:
             workspace_handle.path,
             contract.verification_commands,
         )
-        after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
-        disallowed = [
-            path
-            for path in after
-            if not self._test_author_path_allowed(path, contract.verification_strategy)
-        ]
-        if disallowed:
-            raise TaskFailed(
-                f"verification command modified production paths: {disallowed}",
-                FailureKind.VERIFICATION_ERROR,
-            )
+        # Infrastructure first, matching the implementation stage: a command that
+        # exits 127 AND left a file behind is an infrastructure failure, not a
+        # contract violation, and reporting it as the latter sends the agent to
+        # repair something that never ran.
         self._raise_on_infrastructure_exit(outcomes)
-        # A check that already passes proves nothing about THIS task: the green
-        # after the implementation would be the same green as before it. So the
-        # baseline must FAIL — for a check the author just wrote (`tdd`) and
-        # equally for one the contract named (`executable_check`, the bug-fix
-        # workflow). They differ only in who typed the test.
-        #
-        # `characterization` is the one exception and the reason this is not a
-        # bare boolean: it pins behaviour that ALREADY works, so it must pass.
-        # It is being retired (no coverage, never run, and its prompt tells the
-        # agent to write failing tests) but is still honoured while it exists.
-        if contract.verification_strategy == VerificationStrategy.CHARACTERIZATION:
-            valid_baseline = bool(outcomes) and all(item.exit_code == 0 for item in outcomes)
-            expected = "a passing characterization baseline"
-        else:
-            valid_baseline = bool(outcomes) and any(item.exit_code != 0 for item in outcomes)
-            expected = "a meaningful RED result"
-        if not valid_baseline:
+        after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
+        self._reject_authoring_violations(
+            Path(workspace_handle.path),
+            checks_before,
+            after,
+            violated="verification command violated the frozen checks",
+            intruded="verification command modified production paths",
+        )
+        baseline = baseline_outcome(
+            contract.verification_strategy, [item.exit_code for item in outcomes]
+        )
+        self._record_baseline(plan_id, unit, contract, selectors, outcomes, baseline)
+        if not baseline.accepted:
             raise TaskFailed(
-                f"test bundle did not establish {expected}",
+                f"test bundle did not establish {baseline.expectation}",
                 FailureKind.VERIFICATION_ERROR,
             )
         missing = [path for path in checks if not (Path(workspace_handle.path) / path).is_file()]
@@ -743,9 +842,13 @@ class ExecutionHandler:
                         uow.plans.save(plan)
                     return Signal.PAUSED
                 plan.release_promotion(unit.goal_id, unit.execution.id)
+                # A stage that made no provider call proves nothing about the
+                # provider, so it must not retire an open circuit. Nothing else
+                # here is provider-dependent.
+                if not declared.declared:
+                    self._clear_runtime_circuit(uow, unit)
                 task.freeze_test_bundle(bundle)
                 plan.requeue_task(unit.goal_id, unit.task_id)
-                self._clear_runtime_circuit(uow, unit)
                 self._finish_execution(
                     uow,
                     unit,

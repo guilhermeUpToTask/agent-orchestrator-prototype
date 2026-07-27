@@ -156,3 +156,29 @@ def test_no_prior_rejection_leaves_the_prompt_untouched():
     task = Task(id="t1", name="Example", position=0, description="Do it.", contract=contract())
 
     assert build_task_prompt(task, spec()) == build_task_prompt(task, spec(), prior_rejection=None)
+
+
+def test_both_stages_are_told_to_escalate_rather_than_weaken_a_test():
+    """The orchestrator already rejects a weakened check by hash, so this is not
+    the enforcement — it is the cheaper half. A rejection costs an attempt against
+    a low ceiling; naming the legitimate alternative costs nothing, and an agent
+    with no legitimate move takes an illegitimate one."""
+    for stage, task in (
+        ("test_authoring", Task(id="t1", name="E", position=0, description="d", contract=contract())),
+        (
+            "implementation",
+            Task(
+                id="t1",
+                name="E",
+                position=0,
+                description="d",
+                contract=contract(),
+                test_bundle=_valid_bundle(),
+            ),
+        ),
+    ):
+        assert task.tdd_stage == stage
+        rendered = build_task_prompt(task, spec())
+        assert "STOP and say so" in rendered, stage
+        assert "never skip, xfail, delete, or narrow a test" in rendered, stage
+        assert "never edit verification configuration" in rendered, stage

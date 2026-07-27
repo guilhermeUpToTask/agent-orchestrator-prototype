@@ -20,6 +20,7 @@ import pytest
 
 from src.app.test_identity import existing_checks
 from src.app.verification import (
+    baseline_outcome,
     check_config_untouched,
     check_declared_scope,
     check_protected,
@@ -236,3 +237,38 @@ def test_the_config_guard_is_shared_by_both_stages(tmp_path: Path) -> None:
     assert check_config_untouched(["pytest.ini"], {"pytest.ini"}) == [], (
         "a protected path is covered by its hash, not re-judged here"
     )
+
+
+# --- the baseline rule, one definition ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("strategy", "codes", "accepted", "verdict"),
+    [
+        # tdd and executable_check differ only in who typed the test, so both
+        # demand a discriminating (failing) baseline.
+        (VerificationStrategy.TDD, [1], True, "red"),
+        (VerificationStrategy.TDD, [0], False, "green"),
+        (VerificationStrategy.EXECUTABLE_CHECK, [1], True, "red"),
+        (VerificationStrategy.EXECUTABLE_CHECK, [0], False, "green"),
+        (VerificationStrategy.TDD, [0, 1], True, "red"),
+        # characterization pins behaviour that already works.
+        (VerificationStrategy.CHARACTERIZATION, [0], True, "green"),
+        (VerificationStrategy.CHARACTERIZATION, [1], False, "red"),
+        (VerificationStrategy.CHARACTERIZATION, [0, 1], False, "red"),
+    ],
+)
+def test_baseline_rule(
+    strategy: VerificationStrategy, codes: list[int], accepted: bool, verdict: str
+) -> None:
+    outcome = baseline_outcome(strategy, codes)
+    assert outcome.accepted is accepted
+    assert outcome.verdict == verdict
+
+
+@pytest.mark.parametrize("strategy", list(VerificationStrategy))
+def test_no_commands_is_never_an_acceptable_baseline(strategy: VerificationStrategy) -> None:
+    """A stage that ran nothing measured nothing. `green` is the honest verdict
+    for an empty run, but it must never be accepted as evidence."""
+    outcome = baseline_outcome(strategy, [])
+    assert not outcome.accepted
