@@ -337,6 +337,68 @@ in-memory fake starved for its own reason (first claimable plan in insertion
 order, no fairness at all) and now mirrors the same cursor, per the
 fake/real-parity invariant.
 
+### Experiment results (2026-07-27, API-only operator session)
+
+Driven through the exposed API as the operator, Tier 0 unless noted. Findings
+that produced fixes are the two "Fixed" sections above; everything else is
+recorded here because a scenario that finds nothing is also a result.
+
+**Provider capacity — swept, no new defects.** All nine listed scenarios already
+have automated coverage on both backends (connection failure, rate limit, daily
+quota, request concurrency, admission, circuit scope, half-open probe, alternate
+routing, wall-clock ceilings). The remaining work in this category is Tier 1
+evidence, not more tests. A Tier 1 happy-path run went 17/17 green and hit **zero**
+capacity events, so it confirms no regression rather than confirming the backoff
+fix — free-tier refusals are not summonable on demand, and the original 37-minute
+measurement was opportunistic rather than a controlled experiment.
+
+**Controls — one defect, otherwise correct.**
+- Pausing a plan parked at a review gate is refused (422 `INVALID_TRANSITION`),
+  and `legal_actions` correctly does not advertise `pause` there. Refusing what
+  you never offered is the right shape.
+- Pause during execution settles PAUSED within ~2s, and `legal_actions` becomes
+  `[resume, start_replan, edit_pending_work]`.
+- Resume restores availability only, and the plan runs to publication.
+- **Defect: refusal messages mix two vocabularies.** `request_pause` reports
+  `status.value` (cyclic: "cannot transition from **waiting** to paused") while
+  `pause` and `resume` report `phase.value` (legacy nine-phase: "cannot
+  transition from **discovery** to resumed") — `planner_orchestrator.py:395` vs
+  `:419`/`:427`. A cyclic plan the API describes as `status: waiting, reason:
+  intent` is refused in nine-phase words, which is exactly the vocabulary the
+  cyclic model replaced. One-token fix each, but it edits the FROZEN aggregate,
+  so it is recorded rather than applied.
+- **Not reachable at Tier 0:** targeted retry and block resolution both need a
+  FAILED task, and the dry-run runner always succeeds. Their controls are
+  covered at the orchestration level instead. An API-only walkthrough cannot
+  exercise the failure-path controls without a fault-injection seam.
+
+**Recovery — works; the gap is visibility, not correctness.**
+- `kill -9` the worker *before* any attempt starts: a restarted worker reclaims
+  from persisted state and reaches publication in ~8s. Nothing was invented.
+- `kill -9` the worker *mid-attempt*, with attempt 1 RUNNING: startup
+  reconciliation closes the ledger row to `abandoned` without inventing an
+  outcome (correct), and the plan does eventually recover — attempts 2 and 3 run,
+  the task reaches DONE, publication opens.
+- **Measured recovery latency: ~6 minutes**, bounded by the 300s goal lease, not
+  by the attempt's death. Reconciliation deliberately does not revert the domain
+  task, so nothing shortens the wait.
+- **The whole window is invisible.** Throughout it the plan reports
+  `status: running` with its task `running` and `retry_not_before: null` —
+  identical to genuine work. This is run evidence for the standing
+  "Operational visibility" known issue: the read model exposes the active run
+  start but neither the lease deadline nor the last heartbeat, so an operator
+  cannot tell a live attempt from a dead worker's orphan.
+
+**Git and scheduling — covered by existing runs.** happy-path Tier 0/Tier 1 and
+parallel-goals-v1 together exercise failed-attempt cleanup, the protected default
+branch (`main` still at the seed tag every run), task→goal→cycle promotion, two
+independent goals promoting into one cycle branch, and publication output.
+Startup worktree audit ran clean on every restart.
+
+**Planning quality — not attempted.** Goal/task fan-out, duplicate test-only
+work, capability coverage, model-role adherence, and pre-execution cost
+visibility all need Tier 1 volume to judge, and one green run is not a sample.
+
 ### Priority experiments
 
 - Provider capacity: connection failure, rate limit, daily quota, request
