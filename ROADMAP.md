@@ -199,16 +199,21 @@ reasoner and coding runtime reliably complete a tiny, verifiable change.
 - Classify failures as product, setup/config, provider capacity, model quality,
   or fixture defects.
 
-### Result of the first green run (2026-07-27)
+### Result (2026-07-27)
 
-**One Tier 1 run is green end to end: 17/17, expectation 7 included.** Reasoner
-`nvidia/nemotron-3-ultra-550b-a55b:free`, coding agent `anthropic/claude-haiku-4.5`
-on the `pi` runtime, fixture `happy-path-v2`. The agent authored
-`tests/test_greeter.py`, the orchestrator established a RED baseline, the
-implementer turned it GREEN, and the out-of-repo acceptance check confirmed the
-authored test **discriminates** (it fails against a deliberately broken `greet`).
+**Three green Tier 1 runs, 17/17 each, expectation 7 included.** Two of them ran
+entirely on free OpenRouter models at **$0**; the first used
+`anthropic/claude-haiku-4.5` for the coding agent (well under $0.10) because the
+free endpoint was throttled at the time. Fixture `happy-path-v2`, reasoner
+`nvidia/nemotron-3-ultra-550b-a55b:free`, `pi` runtime.
 
-Getting there took a fixture change and a pipeline fix, both from run evidence:
+Each run: the agent authored `tests/test_greeter.py`, the orchestrator recorded a
+**RED** baseline, the implementer turned it GREEN, and the out-of-repo acceptance
+check confirmed the authored test **discriminates** — it fails against a
+deliberately broken `greet`.
+
+Getting there took a fixture change and a pipeline redesign, both from run
+evidence:
 
 - **The pipeline had one shape.** `_run_role_for` always ran an authoring stage
   and never read `verification_strategy`, so a repo that already contained a
@@ -216,28 +221,36 @@ Getting there took a fixture change and a pipeline fix, both from run evidence:
   `test author produced no executable checks` and
   `did not establish a passing characterization/check baseline`. The reasoner's
   contract was correct both times.
-- **A task's checks are now identified by declaration** (`src/app/test_identity.py`),
+- **A task's checks are identified by declaration** (`src/app/test_identity.py`),
   from the author's diff or a `verification_command` naming a concrete file —
-  never a repository scan, which cannot tell task 3's checks from task 1's.
-  `TestBundle.criterion_to_tests` finally holds the real mapping.
+  never a repository scan, which cannot tell task 3's checks from task 1's. When
+  the contract names a check that is already present, no agent runs at all.
+- **Checks a task did not write are protected**, at both stages, via a snapshot
+  taken before the author runs. That closed a real hole: task 2's author could
+  rewrite task 1's check into something trivially failing, have it hashed as task
+  2's evidence, and let the implementer "fix" it.
 - **The fixture's verdict was circular.** v1 ran `pytest` inside the repo, in the
   same `tests/` the agent writes to. v2 ships `tests/` empty and holds the
-  acceptance check outside the repo, with a mutation probe that catches a
-  vacuous test — something v1 could not detect at all.
+  acceptance check outside the repo, with a mutation probe that catches a vacuous
+  test — something v1 could not detect at all.
 - **Tier 0's verification proved nothing** until now: the stub used
   `git diff --check`, which cannot fail on a clean worktree. It now names a path
-  that genuinely goes RED→GREEN.
+  that genuinely goes RED→GREEN, and the recorded baseline shows exit code 1.
 
-Two findings that are provider facts, not product defects: the free nemotron
-endpoint rate-limits the coding agent into uselessness
-(`ResourceExhausted: Worker local total request limit reached`), handled
-correctly as capacity-waiting; and `anthropic/claude-3.5-haiku` is not a valid
-OpenRouter slug (404, surfaced as a clean terminal block).
+**Free-tier throughput is the remaining constraint on a longer series**, not the
+product. `nvidia/nemotron-3-ultra-550b-a55b:free` sustains roughly two full runs
+before `ResourceExhausted: Worker local total request limit reached (32/32)`,
+which the orchestrator handles correctly as capacity-waiting rather than failure.
+A fourth consecutive run stalled there mid-implementation. Also observed:
+`anthropic/claude-3.5-haiku` is not a valid OpenRouter slug (404 → clean
+terminal block).
 
 ### Exit criteria
 
 - 🚧 Three consecutive real runs complete with no unexpected human code correction.
-  **One so far.**
+  **Three green runs; two of them consecutive on an identical pin.** The third
+  consecutive is gated by free-tier throughput, not by the product — a paid agent
+  model clears it for a few cents.
 - No false terminal block or hot loop occurs.
 - Every accepted task has correct revision-bound verification evidence.
 - Work promotes through expected Git refs while the seed default branch remains
