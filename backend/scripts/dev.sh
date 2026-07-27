@@ -217,6 +217,12 @@ run_seed() {
     [[ -z "$base_url" ]] || args+=(--base-url "$base_url")
     [[ -z "$api_key_env" ]] || args+=(--api-key-env "$api_key_env")
   fi
+  # Seed writes into capabilities/agents/providers, so it needs the schema. Only
+  # `start` migrated, and seeding first — the documented order for a fresh state
+  # directory — died with a raw `no such table: capabilities` traceback. There is
+  # no case where seeding an unmigrated database is what the operator wanted.
+  note "migrating the development database to head"
+  (cd "$BACKEND_DIR" && uv run orchestrate db upgrade)
   note "seeding $mode development configuration"
   (cd "$BACKEND_DIR" && uv run orchestrate "${args[@]}")
 }

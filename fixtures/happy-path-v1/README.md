@@ -34,7 +34,9 @@ fixtures/happy-path-v1/
     ├── materialize.sh        ← create/reset the disposable git repo
     ├── reset.sh              ← hard-reset target to seed tag
     ├── api.sh                ← curl wrapper (base URL + bearer token)
-    └── check-success.sh      ← assert pytest green on a checkout
+    ├── check-success.sh      ← assert pytest green on a checkout (expectation 7)
+    ├── verify_run.py         ← assert expectations 1-6 + 8 from plan and git facts
+    └── capture-run.sh        ← collect one run into a named evidence directory
 ```
 
 Why not under `backend/tests/`? Those are automated dual-backend truth tests.
@@ -204,17 +206,32 @@ api POST "/api/plans/$PLAN_ID/publication" \
   "$(gate_body | jq -c --arg ref "cycle/$CYCLE_ID" \
        '. + {disposition:"retain_branch", output_reference:$ref}')"
 
-# verify the promoted work on a checkout of the cycle branch
-git -C "$HAPPY_PATH_REPO" worktree add -f /tmp/hp-cycle "cycle/$CYCLE_ID"
-./fixtures/happy-path-v1/scripts/check-success.sh /tmp/hp-cycle
+# verify the run against the binary success contract (EXPECTATIONS.md 1-6 + 8):
+# cycle activated, size budget, tasks DONE with accepted revision-bound evidence,
+# goals promoted, no open block, disposition recorded, root idle — plus the git
+# chain (cycle branch descends from the seed, goal branches merged into it, the
+# default branch untouched, the repo isolated from the orchestrator checkout).
+./fixtures/happy-path-v1/scripts/verify_run.py --plan-id "$PLAN_ID"
 
-# expectation 8: the seed default branch must be untouched
-git -C "$HAPPY_PATH_REPO" diff --quiet happy-path-v1-seed main -- src/happy_path/greeter.py \
-  && echo "main untouched"
-
-# optional: snapshot for the paper trail
-python backend/scripts/snapshot_current_plan.py --plan-id "$PLAN_ID" --pretty --output /tmp/happy-path-run.json
+# expectation 7 (Tier 1 only) — pytest green on a checkout of the cycle branch:
+./fixtures/happy-path-v1/scripts/verify_run.py --plan-id "$PLAN_ID" --tier 1
 ```
+
+**Capture every run, green or red**, into one named evidence directory —
+manifest (fixture version, orchestrator SHA, pinned runtime, check summary),
+plan snapshot, evidence bundle, attempt timeline, telemetry, and the worker-log
+reference. Two runs are only comparable if you can say what produced each:
+
+```bash
+export HAPPY_PATH_WORKER_LOG=…            # optional; copied into the run dir
+./fixtures/happy-path-v1/scripts/capture-run.sh "$PLAN_ID"      # Tier 0
+./fixtures/happy-path-v1/scripts/capture-run.sh "$PLAN_ID" 1    # Tier 1
+# → $ORCHESTRATOR_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan prefix>/
+```
+
+`capture-run.sh` exits 0 only when the run is green, 1 when a check failed (the
+capture still completes — a red run's evidence is the point), 2 when collection
+itself broke.
 
 `retain_branch` is the right disposition for re-runs. Recording it returns the
 root to IDLE (`status: "idle"`, `legal_actions: ["start_intent"]`).
@@ -229,8 +246,20 @@ lifecycle and the git promotion chain; only Tier 1 can turn that check green.
 ```bash
 # After the plan is idle / published (or abandoned)
 ./fixtures/happy-path-v1/scripts/reset.sh
-# Start a new cycle (or a new plan under the SAME project) with the SAME brief.
+# Re-POST the SAME brief.txt to the SAME project to open the next cycle.
 ```
+
+**There is no "new plan under the same project."** A `ProjectDefinition` owns
+exactly one long-lived `Plan` ([ADR-003](../../docs/decisions/adr-003-cyclic-project-plan-lifecycle.md)),
+so re-POSTing returns the *existing* `plan_id` and opens another cycle on it. Run
+*n* is cycle *n* of one plan — `GET /api/plans` still reports a single plan, and
+`.cycles` accumulates. Pass `--cycle-id` to `verify_run.py` to check an earlier
+cycle; the default is the most recently completed one.
+
+Whether the re-POST needs a discovery reply depends on state: with chat history
+present the stub often commits inline and opens the intent gate immediately, and
+posting a message then returns 422. Poll `pending_gate` before replying — as in
+step 3 — rather than assuming a turn is owed.
 
 Do **not** keep stacking failed cycles on a dirty worktree. Reset is part of the method.
 
