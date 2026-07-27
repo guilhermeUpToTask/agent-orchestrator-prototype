@@ -253,3 +253,98 @@ def test_an_already_green_check_is_rejected_as_non_discriminating(tmp_path: Path
         if item.safe_message
     ]
     assert any("did not establish a meaningful RED result" in reason for reason in reasons), reasons
+
+
+class _AuthorRewritesAnotherTasksCheck:
+    """An author that edits a check it did not write — the multi-task attack."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
+        self.calls.append(spec.id)
+        # Rewrite the pre-existing check into something trivially failing, which
+        # would satisfy the RED-baseline rule and let the implementer "fix" it.
+        (Path(workspace.path) / CHECK).write_text(
+            "def test_greet():\n    assert False\n"
+        )
+        return TaskResult.success("agent claimed success")
+
+
+def test_an_author_cannot_claim_another_tasks_check_by_rewriting_it(tmp_path: Path) -> None:
+    """On a multi-task goal the earlier tasks' checks are already on the goal
+    branch. Before the pre-authoring snapshot, an author could rewrite one into a
+    trivially failing test, have it hashed as THIS task's protected evidence, and
+    let the implementer make it pass — destroying the other task's verification
+    while every gate downstream reported green."""
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    plans.add(plan)
+    handler = ExecutionHandler(
+        _AuthorRewritesAnotherTasksCheck(),
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    asyncio.run(handler.handle(plan.id, plan, uow))
+
+    after = plans.get(plan.id)
+    task = after.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert task.test_bundle is None, "a rewritten foreign check must not freeze"
+    reasons = [
+        item.safe_message
+        for item in uow.executions.list_attempts(plan.id)
+        if item.safe_message
+    ]
+    assert any("protected test changed" in reason for reason in reasons), reasons
+
+
+def test_the_bundle_protects_checks_this_task_did_not_write(tmp_path: Path) -> None:
+    """Regression protection, free: every check that existed before the task is in
+    `protected_file_hashes`, so the IMPLEMENTER cannot weaken another task's test
+    either — `validate_candidate` already hash-checks every entry."""
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    # A second check, belonging to some other task.
+    (repo_dir / "tests" / "test_other.py").write_text("def test_other():\n    assert True\n")
+    subprocess.run(["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "commit", "-m", "another task's check"],
+        check=True, capture_output=True,
+    )
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    plans.add(plan)
+    handler = ExecutionHandler(
+        _Runner(),
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    asyncio.run(handler.handle(plan.id, plan, uow))
+
+    bundle = plans.get(plan.id).active_cycle.goals[0].tasks[0].test_bundle  # type: ignore[union-attr]
+    assert bundle is not None
+    assert "tests/test_other.py" in bundle.protected_file_hashes, (
+        "another task's check must be protected against the implementer"
+    )
+    # ...but it is NOT claimed as this task's evidence.
+    assert bundle.criterion_to_tests == {"t-1": [CHECK]}

@@ -5,12 +5,23 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping, Set
 
 from src.domain.entities.execution_contracts import (
     TaskContract,
     TestBundle,
     VerificationStrategy,
+)
+
+_CONFIG_NAMES = frozenset(
+    {
+        "pytest.ini",
+        "pyproject.toml",
+        "tox.ini",
+        "package.json",
+        "vitest.config.ts",
+        "jest.config.js",
+    }
 )
 
 _BYPASS_MARKERS = (
@@ -53,6 +64,42 @@ def _matches_scope(path: str, scope: str) -> bool:
     return normalized_path == normalized_scope or normalized_path.startswith(f"{normalized_scope}/")
 
 
+#: Directories regenerated per worktree or vendored. Pruned during a walk rather
+#: than filtered after it — `rglob` would descend into `node_modules` first.
+_BYPRODUCT_DIRS = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "htmlcov",
+    }
+)
+
+
+def is_byproduct_path(path: str) -> bool:
+    """Regenerated per worktree, never evidence.
+
+    A `.pyc` embeds the source mtime, and `tests/__pycache__/test_x.cpython-311.pyc`
+    matches `is_check_path` on its basename — so hashing it as a protected check
+    makes every later candidate fail a hash it can never reproduce.
+    """
+    parts = path.replace("\\", "/").split("/")
+    return (
+        bool(_BYPRODUCT_DIRS.intersection(parts))
+        or path.endswith((".pyc", ".pyo"))
+        or any(part.endswith(".egg-info") for part in parts)
+        or parts[-1].startswith(".coverage")
+    )
+
+
 def is_check_path(path: str) -> bool:
     """Does this path hold executable checks rather than production code?"""
     normalized = path.replace("\\", "/")
@@ -92,50 +139,118 @@ def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
 # — see `src/app/test_identity.py`.
 
 
+def check_protected(root: Path, protected: Mapping[str, str]) -> list[str]:
+    """Are the pinned checks still exactly what was frozen?
+
+    The bypass-marker scan runs ONLY on a file whose hash changed. It answers
+    "did the candidate weaken this check", and an untouched marker answers
+    nothing — a repository that already contains `@pytest.mark.skip` or
+    `@pytest.mark.xfail` is normal, and scanning unconditionally rejected every
+    candidate in it forever. That was survivable only while the protected set
+    held nothing but the author's own fresh files; it is fatal once checks that
+    were already in the repository are protected too.
+    """
+    reasons: list[str] = []
+    for path_text, expected_hash in protected.items():
+        path = root / path_text
+        if not path.is_file():
+            reasons.append(f"protected test missing or renamed: {path_text}")
+            continue
+        if sha256_file(path) == expected_hash:
+            continue  # untouched: nothing to weaken, nothing to scan
+        reasons.append(f"protected test changed: {path_text}")
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if any(marker in text for marker in _BYPASS_MARKERS):
+            reasons.append(f"test bypass marker present: {path_text}")
+    return reasons
+
+
+def check_config_untouched(changed_paths: Iterable[str], exempt: Set[str]) -> list[str]:
+    """Verification configuration must not move under either stage's feet.
+
+    Shared, because weakening collection (`pytest.ini`, `pyproject.toml`) makes a
+    green result meaningless no matter which stage did it.
+    """
+    reasons: list[str] = []
+    for changed_path in sorted({Path(path).as_posix() for path in changed_paths}):
+        if changed_path in exempt:
+            continue
+        if Path(changed_path).name in _CONFIG_NAMES:
+            reasons.append(f"verification configuration changed: {changed_path}")
+    return reasons
+
+
+def check_declared_scope(
+    contract: TaskContract, changed_paths: Iterable[str], exempt: Set[str]
+) -> list[str]:
+    """`allowed_scope` / `forbidden_scope` — the IMPLEMENTATION stage only.
+
+    Deliberately not shared with authoring, and the reason is worth stating: the
+    conventional way to keep the implementer out of the tests is
+    `forbidden_scope: ["tests/"]`, which is precisely where the author has to
+    write. The two stages have mirror-image legal areas, so one scope check
+    cannot serve both. The author's legal area is "check paths only", enforced by
+    `is_check_path` at the call site, plus the pre-existing checks it may not
+    touch.
+    """
+    allowed = tuple(contract.allowed_scope)
+    forbidden = tuple(contract.forbidden_scope)
+    reasons: list[str] = []
+    for changed_path in sorted({Path(path).as_posix() for path in changed_paths}):
+        if changed_path in exempt:
+            continue
+        if forbidden and any(_matches_scope(changed_path, prefix) for prefix in forbidden):
+            reasons.append(f"forbidden path changed: {changed_path}")
+        if allowed and not any(_matches_scope(changed_path, prefix) for prefix in allowed):
+            reasons.append(f"path outside allowed scope: {changed_path}")
+    return reasons
+
+
+def _verdict(*reason_groups: list[str]) -> CandidateValidation:
+    reasons = [reason for group in reason_groups for reason in group]
+    return CandidateValidation(not reasons, tuple(dict.fromkeys(reasons)))
+
+
 def validate_candidate(
     root: Path,
     contract: TaskContract,
     bundle: TestBundle,
     changed_paths: Iterable[str],
 ) -> CandidateValidation:
-    reasons: list[str] = []
-    if not bundle.validates(contract.id, contract.revision):
-        reasons.append("test bundle does not match task revision")
+    """The IMPLEMENTATION stage's verdict on a candidate tree."""
+    identity = (
+        []
+        if bundle.validates(contract.id, contract.revision)
+        else ["test bundle does not match task revision"]
+    )
+    return _verdict(
+        identity,
+        check_protected(root, bundle.protected_file_hashes),
+        check_config_untouched(changed_paths, set(bundle.protected_file_hashes)),
+        check_declared_scope(contract, changed_paths, set(bundle.protected_file_hashes)),
+    )
 
-    changed = {Path(path).as_posix() for path in changed_paths}
-    for protected, expected_hash in bundle.protected_file_hashes.items():
-        path = root / protected
-        if not path.is_file():
-            reasons.append(f"protected test missing or renamed: {protected}")
-            continue
-        if sha256_file(path) != expected_hash:
-            reasons.append(f"protected test changed: {protected}")
-        try:
-            text = path.read_text(errors="replace")
-        except OSError:
-            continue
-        if any(marker in text for marker in _BYPASS_MARKERS):
-            reasons.append(f"test bypass marker present: {protected}")
 
-    allowed = tuple(contract.allowed_scope)
-    forbidden = tuple(contract.forbidden_scope)
-    protected_paths = set(bundle.protected_file_hashes)
-    config_names = {
-        "pytest.ini",
-        "pyproject.toml",
-        "tox.ini",
-        "package.json",
-        "vitest.config.ts",
-        "jest.config.js",
-    }
-    for changed_path in sorted(changed):
-        if changed_path in protected_paths:
-            continue
-        if Path(changed_path).name in config_names:
-            reasons.append(f"verification configuration changed: {changed_path}")
-        if forbidden and any(_matches_scope(changed_path, prefix) for prefix in forbidden):
-            reasons.append(f"forbidden path changed: {changed_path}")
-        if allowed and not any(_matches_scope(changed_path, prefix) for prefix in allowed):
-            reasons.append(f"path outside allowed scope: {changed_path}")
+def validate_authoring(
+    root: Path,
+    existing_checks: Mapping[str, str],
+    changed_paths: Iterable[str],
+) -> CandidateValidation:
+    """The TEST-AUTHORING stage's verdict.
 
-    return CandidateValidation(not reasons, tuple(dict.fromkeys(reasons)))
+    Two rules, both previously absent — the stage was judged by `is_check_path`
+    alone, so an author could rewrite `pytest.ini` to weaken collection, or edit
+    another task's check and have the modified file hashed as this task's own
+    protected evidence.
+
+    `allowed_scope`/`forbidden_scope` are NOT applied here; see
+    `check_declared_scope` for why they cannot be. No bundle exists yet either,
+    hence a plain mapping — the rules only ever needed the hashes.
+    """
+    return _verdict(
+        check_protected(root, existing_checks),
+        check_config_untouched(changed_paths, set(existing_checks)),
+    )
