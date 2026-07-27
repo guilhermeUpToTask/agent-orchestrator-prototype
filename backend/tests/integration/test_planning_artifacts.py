@@ -122,3 +122,4 @@ def test_limit_bounds_the_read(store) -> None:
         store.append(_artifact(created_at=NOW + timedelta(minutes=index)))
 
     assert len(store.latest(PLAN, "goal_contract", goal_id=GOAL, limit=2)) == 2
+

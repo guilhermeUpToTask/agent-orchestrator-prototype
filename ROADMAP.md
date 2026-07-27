@@ -352,6 +352,51 @@ capacity events, so it confirms no regression rather than confirming the backoff
 fix — free-tier refusals are not summonable on demand, and the original 37-minute
 measurement was opportunistic rather than a controlled experiment.
 
+### Fixed — the Tier 1 series (three defects the green runs could not reach)
+
+A three-run Tier 1 series against the free models found more in one red run than
+four green ones had. All three need a *failing agent* to appear, which is why
+Tier 0 and a green Tier 1 both miss them.
+
+**1. `contract_repair` self-deadlocked SQLite and could never persist.**
+`PlanningArtifactStore` deliberately writes on its own short transaction so the
+record survives a plan rollback — which means a second connection, and
+SQLite/WAL allows exactly one writer. But `_repair_contract` ran *inside* the
+finalize transaction (`execution_handler` `with uow:`), so the plan connection
+held the write lock while synchronously waiting for the artifact connection to
+get it. `busy_timeout` and the `run_in_session` retry budget cannot break that —
+the caller is the holder. Live: five consecutive attempts died
+`InfrastructureError: Database stayed locked beyond retry budget` out of
+`drive_goal`, each abandoning its attempt and losing the repair, so the
+*identical* repair was recomputed every time until the retry budget ran out and
+the goal blocked. The machinery that exists to keep a repairable contract away
+from a human was itself what blocked the human in. Reproduced in a 30-line
+integration test with no agents or concurrency, then fixed by queueing the write
+and flushing it once the transaction closes (`_flush_pending_artifacts`, in a
+`finally` — the record matters most when finalize did *not* complete).
+
+**2. One exception in the goal-claim scan killed the worker process.** The scan
+sits after `worker_tick`'s try/except and had no guard of its own. A plan
+deleted between the readiness scan and the lease INSERT raised
+`FOREIGN KEY constraint failed` out of `claim_ready_goal`, unwound the loop, and
+exited the process 1 — under the dev supervisor that took the API down with it.
+A delete racing a claim is ordinary (`DELETE /api/plans/{id}` cascades while a
+scan is in flight), so it has to be survivable. This is exit criterion 2 in its
+starkest form: not starvation, termination.
+
+**3. A concurrency refusal still spends the per-task retry budget.** This is the
+half of the original `limit_scope` defect that the backoff fix did not touch,
+and the series is the first evidence of it. `capacity_wait` is set only when a
+circuit opens, and a `REQUEST_CONCURRENCY` refusal deliberately opens none — so
+unlike every other capacity failure it does *not* bypass the budget. Run 1
+ended `execution_failure` after 7 attempts with the last one
+`rate_limit/request_concurrency`; run 2 showed the same shape. A busy shared
+pool can therefore block a goal that has nothing wrong with it. Left unfixed on
+purpose: the fix is to make concurrency refusals budget-neutral inside a
+wall-clock bound, which is a capacity-policy change deserving its own decision
+rather than a drive-by. Note the interaction — the faster curve reaches the
+budget sooner in wall-clock terms, so this got *more* visible, not less.
+
 **Controls — one defect, otherwise correct.**
 - Pausing a plan parked at a review gate is refused (422 `INVALID_TRANSITION`),
   and `legal_actions` correctly does not advertise `pause` there. Refusing what

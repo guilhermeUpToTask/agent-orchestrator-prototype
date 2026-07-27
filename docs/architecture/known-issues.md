@@ -78,6 +78,21 @@ rather than remaining as warnings here.
   scenario, so these are recorded rather than engineered against.
 - SSE is bounded and non-durable for clients; reconnect relies on refetch.
   Relay and event-table retention remain operational work.
+- **A `request_concurrency` refusal still spends the per-task retry budget.**
+  `capacity_wait` is set only when a circuit opens, and a concurrency refusal
+  deliberately opens none, so alone among capacity failures it does not bypass
+  the budget. Run evidence (2026-07-27, Tier 1): a task ended
+  `execution_failure` after 7 attempts whose last was
+  `rate_limit/request_concurrency` — a busy shared pool blocking a goal that has
+  nothing wrong with it. The per-scope backoff curve fixed how long each wait
+  is, not whether the attempt is charged. Making it budget-neutral inside a
+  wall-clock bound is a capacity-policy decision, not a patch.
+- **Never write a `PlanningArtifact` from inside an open plan transaction.** The
+  store keeps its own short transaction so records survive a rollback, which
+  means a second SQLite connection; WAL allows one writer, so the plan
+  connection would hold the lock while waiting for the artifact connection and
+  neither can proceed. `ExecutionHandler` queues and flushes after the
+  transaction closes — new call sites must do the same.
 
 ## Git/process cleanup
 

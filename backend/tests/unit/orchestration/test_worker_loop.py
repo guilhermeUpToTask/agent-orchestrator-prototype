@@ -337,3 +337,71 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
     assert len(spawned) == 1
     assert spawned[0].result() == ("contention", 0)
     assert releases == [("p1", "g1", "w1")]
+
+
+def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
+    """The goal-claim scan sits AFTER the tick's try/except, so it had none of
+    its own — one exception unwound the whole loop and the process exited 1.
+
+    Observed live: a plan deleted between the readiness scan and the lease
+    INSERT raised `FOREIGN KEY constraint failed` out of `claim_ready_goal`,
+    killing the worker; under the dev supervisor that took the API down too.
+    A delete racing a claim is normal (`DELETE /api/plans/{id}` cascades while a
+    scan is in flight), so it has to be survivable."""
+    from src.app.use_cases import claim_ready_goal as claim_module
+    from src.app.use_cases import run_worker as worker_module
+    from src.infra.worker import main as worker_main
+
+    stop = asyncio.Event()
+    tick_count = 0
+    scans = 0
+
+    container = SimpleNamespace(
+        new_unit_of_work=lambda: SimpleNamespace(goal_leases=object()),
+        reasoner=object(),
+        agent_repo=object(),
+        capability_repo=object(),
+        clock=object(),
+        config_store=object(),
+        workspace=object(),
+        agent_runner=object(),
+        agent_event_sink=object(),
+        verification_executor=None,
+        provider_capacity_policy=ProviderCapacityPolicy(),
+        provider_repo=object(),
+        routing_policy=RoutingPolicy(),
+        planning_artifacts=None,
+        repository_reader=None,
+    )
+
+    async def fake_worker_tick(*args, **kwargs):
+        nonlocal tick_count
+        tick_count += 1
+        await asyncio.sleep(0)
+        if tick_count == 3:
+            stop.set()
+        return False
+
+    def exploding_claim(*args, **kwargs):
+        nonlocal scans
+        scans += 1
+        raise RuntimeError("FOREIGN KEY constraint failed")
+
+    monkeypatch.setattr(worker_module, "worker_tick", fake_worker_tick)
+    monkeypatch.setattr(claim_module, "claim_ready_goal", exploding_claim)
+    monkeypatch.setattr(worker_main, "reconcile_stale_attempts", lambda *args: [])
+    monkeypatch.setattr(
+        worker_main,
+        "validate_agent_runner_mode",
+        lambda config_store: RunnerModeStatus(mode="dry-run", valid=True),
+    )
+
+    # Must return normally: before the fix this propagated out and the process died.
+    asyncio.run(
+        run_worker_forever(
+            container, worker_id="w1", poll_seconds=0, stop=stop, max_concurrent_goals=1
+        )
+    )
+
+    assert tick_count == 3  # kept serving every poll despite the scan raising
+    assert scans == 3  # and kept retrying the scan rather than disabling it

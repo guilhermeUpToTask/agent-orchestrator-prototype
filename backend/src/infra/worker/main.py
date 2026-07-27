@@ -213,14 +213,26 @@ async def run_worker_forever(
         # concurrent with itself or with the spawned tasks' own UoWs.
         goal_progressed = False
         free_slots = max_concurrent_goals
-        for _ in range(max(0, free_slots)):
-            claimed = claim_ready_goal(uow, worker_id, lease_seconds, container.clock)
-            if claimed is None:
-                break
-            plan_id, goal_id = claimed
-            task = asyncio.ensure_future(_run_goal(plan_id, goal_id))
-            inflight[task] = (plan_id, goal_id)
-            goal_progressed = True  # a fresh claim is progress even before it finishes
+        try:
+            for _ in range(max(0, free_slots)):
+                claimed = claim_ready_goal(uow, worker_id, lease_seconds, container.clock)
+                if claimed is None:
+                    break
+                plan_id, goal_id = claimed
+                task = asyncio.ensure_future(_run_goal(plan_id, goal_id))
+                inflight[task] = (plan_id, goal_id)
+                goal_progressed = True  # a fresh claim is progress even before it finishes
+        except Exception:
+            # The SAME guarantee the tick above already had, and this scan was
+            # missing it: one bad plan must not kill the worker. Observed live —
+            # a plan deleted between the readiness scan and the lease INSERT
+            # raised `FOREIGN KEY constraint failed` out of `claim_ready_goal`,
+            # which is outside the tick's guard, so the exception unwound the
+            # whole loop and the process exited 1. Under the dev supervisor that
+            # also took the API down with it. A delete racing a claim is normal
+            # (`DELETE /api/plans/{id}` cascades while a scan is in flight), so
+            # this must be survivable, not fatal.
+            log.error("worker.goal_claim_scan_failed", worker_id=worker_id, exc_info=True)
 
         if not progressed and not goal_progressed and not inflight:
             await asyncio.sleep(poll_seconds)
