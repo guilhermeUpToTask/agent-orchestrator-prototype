@@ -180,7 +180,7 @@ Three defects, all found by running the walkthrough rather than reading it:
   yields `created=true`, a new plan id, exactly one cycle, and zero rows left in
   any plan-scoped table while the seeded catalog survives.
 
-## Phase 1 — Tier 1 real-runtime happy path 🚧
+## Phase 1 — Tier 1 real-runtime happy path ✅
 
 **External capability:** a developer can evaluate whether one pinned real
 reasoner and coding runtime reliably complete a tiny, verifiable change.
@@ -201,10 +201,11 @@ reasoner and coding runtime reliably complete a tiny, verifiable change.
 
 ### Result (2026-07-27)
 
-**Three green Tier 1 runs, 17/17 each, expectation 7 included.** Two of them ran
+**Four green Tier 1 runs, 17/17 each, expectation 7 included — three of them
+consecutive on an identical pin with no code change between them.** Three ran
 entirely on free OpenRouter models at **$0**; the first used
-`anthropic/claude-haiku-4.5` for the coding agent (well under $0.10) because the
-free endpoint was throttled at the time. Fixture `happy-path-v2`, reasoner
+`anthropic/claude-haiku-4.5` for the coding agent (under $0.10) because the free
+endpoint was saturated at the time. Fixture `happy-path-v2`, reasoner
 `nvidia/nemotron-3-ultra-550b-a55b:free`, `pi` runtime.
 
 Each run: the agent authored `tests/test_greeter.py`, the orchestrator recorded a
@@ -237,20 +238,24 @@ evidence:
   `git diff --check`, which cannot fail on a clean worktree. It now names a path
   that genuinely goes RED→GREEN, and the recorded baseline shows exit code 1.
 
-**Free-tier throughput is the remaining constraint on a longer series**, not the
-product. `nvidia/nemotron-3-ultra-550b-a55b:free` sustains roughly two full runs
-before `ResourceExhausted: Worker local total request limit reached (32/32)`,
-which the orchestrator handles correctly as capacity-waiting rather than failure.
-A fourth consecutive run stalled there mid-implementation. Also observed:
+**Free-tier contention makes a run slow, not unreliable.**
+`ResourceExhausted: Worker local total request limit reached (32/32)` is Nvidia's
+SHARED worker pool across every user of that free endpoint — six concurrent probes
+from one client succeed, so it is global load, not a client-side cap. One run
+needed six attempts across 37 minutes of capacity backoff and then completed
+green. The orchestrator classified every one correctly:
+`limit_scope: request_concurrency` opened **no** circuit and left
+`provider_waiting` null, requeueing that one task exactly as designed, with no
+false block and no other work stalled. Also observed:
 `anthropic/claude-3.5-haiku` is not a valid OpenRouter slug (404 → clean
 terminal block).
 
 ### Exit criteria
 
-- 🚧 Three consecutive real runs complete with no unexpected human code correction.
-  **Three green runs; two of them consecutive on an identical pin.** The third
-  consecutive is gated by free-tier throughput, not by the product — a paid agent
-  model clears it for a few cents.
+- ✅ Three consecutive real runs complete with no unexpected human code
+  correction. Four green in total, three consecutive on an identical pin. One
+  further run was abandoned mid-backoff during cleanup rather than by any
+  failure — the run after it proved that path completes given time.
 - No false terminal block or hot loop occurs.
 - Every accepted task has correct revision-bound verification evidence.
 - Work promotes through expected Git refs while the seed default branch remains
@@ -269,6 +274,26 @@ instead of redesigning it speculatively.
 Recovery work completed against run evidence this cycle is listed under the
 implemented foundation above; what remains here is the evidence still to
 collect, not a redesign.
+
+### Found by the Phase 1 series — capacity backoff ignores `limit_scope`
+
+`kind_backoff_scale` applies `{rate_limit: 4.0}` to every rate-limited attempt
+regardless of `limit_scope`, so a `request_concurrency` refusal escalates on the
+same curve as an account-level quota exhaustion: 2min, 4min, 8min, then capped at
+`max_backoff_seconds` (15min). But those two mean opposite things. A quota is
+exhausted and deserves a long wait; a concurrency refusal on a SHARED pool means
+"someone else is using it right now", and is the case the design already singles
+out as opening no circuit and requeueing just that task.
+
+Measured: one Tier 1 run spent 37 minutes in backoff over six attempts against a
+free endpoint that answered six concurrent probes instantly between them. The run
+completed green, so this costs wall-clock rather than correctness — but it backs
+off hardest exactly when a short retry would most likely succeed.
+
+The fix is a per-scope curve: keep 4.0 for `quota`/`daily`, use something near 1.0
+for `request_concurrency`. `RetryPolicy` already carries the scale as
+configuration, so this needs no domain change — only a scope-aware lookup where
+the failure is classified.
 
 ### Priority experiments
 
