@@ -369,6 +369,49 @@ def test_request_concurrency_requeues_without_opening_a_circuit(env_factory):
         assert env.uow.executions.get_runtime_circuit("pi", "openrouter", None) is None
 
 
+def _drive_one_capacity_refusal(env_factory, scope: LimitScope, *, backoff: int = 30):
+    """One rate-limited attempt at `scope`; returns the armed retry gate."""
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory(
+        {
+            "t1": DummyBehavior(
+                always_fail=True,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="rate limited",
+                fail_limit_scope=scope,
+            )
+        },
+        agents=[agent],
+    )
+    env.seed(_cyclic_plan(env, backoff=backoff))
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+    stored = env.stored("p1")
+    assert stored.active_cycle is not None
+    task = stored.active_cycle.goals[0].tasks[0]
+    assert task.retry_not_before is not None
+    return (task.retry_not_before - env.clock.now()).total_seconds()
+
+
+def test_a_concurrency_refusal_waits_the_ordinary_curve_not_the_patient_one(env_factory):
+    """Found by the Phase 1 series: `kind_backoff_scale` applied 4.0 to every
+    rate-limited attempt regardless of limit_scope, so a concurrency refusal
+    escalated on the same curve as an exhausted account quota. One Tier 1 run
+    spent 37 minutes in backoff against an endpoint that answered concurrent
+    probes instantly between attempts."""
+    assert _drive_one_capacity_refusal(env_factory, LimitScope.REQUEST_CONCURRENCY) == 30.0
+
+
+def test_an_account_quota_keeps_the_patient_curve(env_factory):
+    """The other half of the same rule: an exhausted allowance is not waited out
+    by retrying in 30 seconds, so the 4x scale must survive this change."""
+    assert _drive_one_capacity_refusal(env_factory, LimitScope.QUOTA) == 120.0
+
+
 def test_capacity_storm_inside_the_ceiling_never_latches_or_blocks(env_factory):
     """The old rule compared a provider-global failure_count against a PER-TASK
     attempt budget and latched manual_intervention after a handful of failures

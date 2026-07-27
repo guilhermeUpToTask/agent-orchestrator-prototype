@@ -49,6 +49,11 @@ class FakeClock:
         self._now = self._now + timedelta(seconds=seconds)
 
 
+# Sorts before any real claim time, so a plan nobody has claimed yet is picked
+# first. The real adapter spells this `COALESCE(claimed_at, 0)`.
+_NEVER_CLAIMED = datetime.min.replace(tzinfo=timezone.utc)
+
+
 @dataclass
 class _Claim:
     worker_id: str
@@ -76,6 +81,11 @@ class InMemoryPlanRepository:
         self._store: dict[str, Plan] = {}
         self._requests: dict[str, str] = {}
         self._claims: dict[str, _Claim] = {}
+        # When each plan was last CLAIMED, surviving release — the round-robin
+        # cursor that mirrors the real adapter's `claimed_at` column. Insertion
+        # order alone made this fake hand the same plan back on every poll, which
+        # starves every other plan when a tick keeps throwing.
+        self._last_claimed: dict[str, datetime] = {}
         self._clock: Clock = clock or FakeClock()
 
     def add(self, plan: Plan) -> None:
@@ -101,6 +111,7 @@ class InMemoryPlanRepository:
         # plan row; leaving either here would let a fake-backed test pass while
         # the real one leaks a request binding or a live lease.
         self._claims.pop(plan_id, None)
+        self._last_claimed.pop(plan_id, None)  # the row is gone; so is its cursor
         for request_id in [r for r, p in self._requests.items() if p == plan_id]:
             del self._requests[request_id]
 
@@ -120,7 +131,18 @@ class InMemoryPlanRepository:
     # --- lease ---
     def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None:
         now = self._clock.now()
-        for plan in self._store.values():
+        # Least-recently-claimed first, insertion order as the tiebreak — the
+        # fake's equivalent of `ORDER BY COALESCE(claimed_at, 0), updated_at`.
+        # A never-claimed plan sorts first so new work is not made to wait.
+        order = {plan_id: index for index, plan_id in enumerate(self._store)}
+        candidates = sorted(
+            self._store.values(),
+            key=lambda plan: (
+                self._last_claimed.get(plan.id, _NEVER_CLAIMED),
+                order[plan.id],
+            ),
+        )
+        for plan in candidates:
             if plan.status.value != "running" or plan.project_id is None:
                 continue
             if plan.planning_retry_not_before is not None and plan.planning_retry_not_before > now:
@@ -135,6 +157,7 @@ class InMemoryPlanRepository:
                 expires_at=now + timedelta(seconds=lease_seconds),
                 lease_seconds=lease_seconds,
             )
+            self._last_claimed[plan.id] = now
             return plan.model_copy(deep=True)
         return None
 

@@ -134,6 +134,44 @@ def test_claim_predicate_is_the_driver_model(env_factory):
     assert env.uow.plans.claim_one_unit("w1", 60) is None  # all leases live now
 
 
+def test_a_crashing_plan_does_not_monopolize_the_claim(env_factory):
+    """Phase 2 exit criterion: repeated unexpected worker exceptions must not
+    starve healthy plans.
+
+    A tick that throws never reaches `plans.save`, so that plan's `updated_at`
+    never advances — and the SQLite claim selects `ORDER BY updated_at LIMIT 1`
+    while `_CLAIM_SQL`/`_RELEASE_SQL` leave `updated_at` alone. The poisoned plan
+    therefore stays the oldest row and is re-selected on every single poll. The
+    worker survives (`worker.tick_failed` releases and backs off a poll), but the
+    plan-level claim slot is monopolized and every other running plan's planning
+    turns, gates, and enrichment stop happening.
+
+    The in-memory fake starves the same way for its own reason: it returns the
+    first claimable plan in insertion order, with no fairness at all."""
+    env = env_factory()
+    env.seed(Plan(project_id="project-a", id="poisoned", brief="b", phase=PlanPhase.RUNNING))
+    env.seed(Plan(project_id="project-b", id="healthy", brief="b", phase=PlanPhase.RUNNING))
+
+    # Six polls of a worker whose every tick on `poisoned` raises: claim, blow up
+    # before any save, release in the `finally`. Exactly what main.py does. The
+    # clock advances a poll interval each time, as a real cadence does — the
+    # fairness cursor is a timestamp, so a frozen clock would tie every plan and
+    # tell us nothing.
+    claimed = []
+    for _ in range(6):
+        plan = env.uow.plans.claim_one_unit("w1", 60)
+        assert plan is not None
+        claimed.append(plan.id)
+        env.uow.plans.release(plan.id, "w1")
+        env.clock.advance(1)
+
+    # Alternation, not merely "healthy appeared once": the poisoned plan is still
+    # claimable forever (nothing quarantines it, by design — it may recover), so
+    # fairness has to hold on EVERY poll, not just the first.
+    assert claimed.count("healthy") >= 3, f"healthy plan starved: {claimed}"
+    assert claimed.count("poisoned") >= 2, f"poisoned plan never retried: {claimed}"
+
+
 def test_release_frees_the_claim(env_factory):
     env = env_factory()
     env.seed(Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING))

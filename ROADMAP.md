@@ -50,7 +50,8 @@ These are current capabilities, not future roadmap work:
 - SQLite version CAS, leases, per-goal claims, transactional outbox, operational
   ledgers, provider circuits, and SSE.
 - Graceful pause, resume-only semantics, targeted retry, structured blocks,
-  live-registry recovery, and provider-capacity waiting/admission/routing.
+  live-registry recovery, and provider-capacity waiting/admission/routing on
+  per-`limit_scope` backoff curves.
 - Automatic recovery that keeps a repairable mistake away from a human: the
   orchestrator's own rejection reasons are fed into the next agent attempt, a
   rejected candidate earns a bounded second try, an unsatisfiable contract is
@@ -275,25 +276,66 @@ Recovery work completed against run evidence this cycle is listed under the
 implemented foundation above; what remains here is the evidence still to
 collect, not a redesign.
 
-### Found by the Phase 1 series — capacity backoff ignores `limit_scope`
+### Fixed — capacity backoff ignored `limit_scope`
 
-`kind_backoff_scale` applies `{rate_limit: 4.0}` to every rate-limited attempt
-regardless of `limit_scope`, so a `request_concurrency` refusal escalates on the
-same curve as an account-level quota exhaustion: 2min, 4min, 8min, then capped at
-`max_backoff_seconds` (15min). But those two mean opposite things. A quota is
-exhausted and deserves a long wait; a concurrency refusal on a SHARED pool means
-"someone else is using it right now", and is the case the design already singles
-out as opening no circuit and requeueing just that task.
+Found by the Phase 1 series. `kind_backoff_scale` applied `{rate_limit: 4.0}` to
+every rate-limited attempt regardless of `limit_scope`, so a
+`request_concurrency` refusal escalated on the same curve as an account-level
+quota exhaustion: 2min, 4min, 8min, then capped at 4x `max_backoff_seconds` —
+the scale multiplies the ceiling as well as the base delay. But those two mean
+opposite things. A quota is exhausted and deserves a long wait; a concurrency
+refusal on a SHARED pool means "someone else is using it right now", and is the
+case the design already singles out as opening no circuit and requeueing just
+that task.
 
 Measured: one Tier 1 run spent 37 minutes in backoff over six attempts against a
 free endpoint that answered six concurrent probes instantly between them. The run
-completed green, so this costs wall-clock rather than correctness — but it backs
+completed green, so this cost wall-clock rather than correctness — but it backed
 off hardest exactly when a short retry would most likely succeed.
 
-The fix is a per-scope curve: keep 4.0 for `quota`/`daily`, use something near 1.0
-for `request_concurrency`. `RetryPolicy` already carries the scale as
-configuration, so this needs no domain change — only a scope-aware lookup where
-the failure is classified.
+Fixed by a per-scope curve in `src/app/provider_capacity.py`
+(`capacity_backoff_seconds`): a positively identified `request_concurrency`
+refusal waits the plan's ordinary configured curve, unscaled, and every other
+scope — including an unclassified one, which degrades to patience for the same
+reason it degrades to the narrower circuit key — keeps 4.0. No domain change:
+`RetryPolicy` already carries the scale as configuration, and the app layer that
+classifies the failure hands it a scope-adjusted copy. Regression tests cover the
+policy directly and the armed gate through `ExecutionHandler` on both the fake
+and SQLite backends.
+
+### Fixed — a crashing plan starved every healthy plan
+
+Exit criterion 2 ("repeated unexpected worker exceptions cannot starve healthy
+plans") did not hold. It was a *known* risk — `known-issues.md` recorded it
+under Operational visibility ("a malformed plan that raises before any save can
+still be reclaimed first by oldest `updated_at`") — but nothing had reproduced
+it, and `execution-model.md` pointed at it by a label, "H2", that the entry
+never carried, so the cross-reference resolved to nothing.
+
+Reproduced at the truth-test level on both backends: two RUNNING plans, a worker
+whose tick throws on the first. Five polls claimed `['poisoned'] * 5` — the
+healthy plan was never claimed once.
+
+`_CLAIM_SQL` selected `ORDER BY updated_at LIMIT 1`, and neither the claim nor
+the release touches `updated_at` — only `plans.save` does. A tick that throws
+never reaches a save, so the poisoned plan's `updated_at` never moved, it stayed
+the oldest row, and every subsequent poll re-selected it. The worker itself
+survived exactly as designed (`worker.tick_failed` logs, releases, backs off one
+poll), which is why this never showed up as a crash: the plan-level claim slot
+was simply monopolized, and every other plan's planning turns, gates, and
+enrichment silently stopped. Goal-level execution was unaffected — it holds the
+separate `claim_ready_goal` lease.
+
+Fixed by making the claim round-robin on `claimed_at`: the claim stamps it, the
+release no longer clears it, and the order is
+`COALESCE(claimed_at, 0) ASC, updated_at ASC`. No migration — the column already
+existed and was written but never read anywhere, so it was free to become the
+fairness cursor; `claimed_by` remains the sole authority on "currently held". A
+never-claimed plan sorts first, so new work is not made to wait, and a poisoned
+plan is never quarantined (it may recover) — it just takes its turn. The
+in-memory fake starved for its own reason (first claimable plan in insertion
+order, no fairness at all) and now mirrors the same cursor, per the
+fake/real-parity invariant.
 
 ### Priority experiments
 

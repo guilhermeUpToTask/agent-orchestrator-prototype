@@ -79,6 +79,7 @@ from src.app.provider_capacity import (
     CapacityScope,
     ProviderCapacityPolicy,
     RoutingPolicy,
+    capacity_backoff_seconds,
     circuit_model_id,
     circuit_ref,
     resolve_capacity_scope,
@@ -1773,10 +1774,14 @@ class ExecutionHandler:
                         uow.plans.save(plan)
                     return Signal.PAUSED
 
-                delay = unit.retry_policy.backoff_for(
+                delay = capacity_backoff_seconds(
+                    unit.retry_policy,
                     unit.policy_attempt + 1,
                     jitter_unit=self._jitter_unit(unit.execution.id),
                     kind=exc.kind,
+                    # A concurrency refusal does not escalate like an exhausted
+                    # allowance; every other scope keeps the patient curve.
+                    limit_scope=exc.failure.limit_scope,
                 )
                 if exc.failure.retry_after_seconds is not None:
                     delay = max(delay, exc.failure.retry_after_seconds)

@@ -54,7 +54,21 @@ _CLAIM_SQL = text(
           AND (retry_not_before IS NULL OR retry_not_before < :now_epoch)
           AND paused = 0
           AND pause_requested = 0
-        ORDER BY updated_at
+        -- FAIRNESS, not recency. Ordering by `updated_at` alone starved healthy
+        -- plans: a tick that throws never reaches `plans.save`, so the poisoned
+        -- plan's `updated_at` never moved, it stayed the oldest row, and every
+        -- subsequent poll re-selected it forever. The worker survived
+        -- (`worker.tick_failed` releases and backs off) while the plan-level
+        -- claim slot was monopolized and every other plan's planning turns,
+        -- gates, and enrichment stopped happening.
+        --
+        -- `claimed_at` is the round-robin cursor: the claim stamps it and the
+        -- release deliberately does NOT clear it, so "when this plan was last
+        -- claimed" survives the release that ends the attempt. A plan just
+        -- claimed sorts last; a never-claimed plan (NULL -> 0) sorts first, so
+        -- new work is still picked up promptly. `claimed_by` remains the sole
+        -- authority on "currently held" -- see _RELEASE_SQL.
+        ORDER BY COALESCE(claimed_at, 0) ASC, updated_at ASC
         LIMIT 1
     )
     RETURNING data
@@ -69,10 +83,15 @@ _HEARTBEAT_SQL = text(
     """
 )
 
+# `claimed_at` is deliberately NOT cleared here: it is the claim-fairness cursor
+# (_CLAIM_SQL), and clearing it on release would reset the round-robin on every
+# tick — restoring the starvation exactly. Nothing reads it as "currently
+# claimed"; `claimed_by` is that fact, and the claim predicate tests
+# `claimed_by IS NULL OR lease_expires_at < now`, never `claimed_at`.
 _RELEASE_SQL = text(
     """
     UPDATE plans
-    SET claimed_by = NULL, claimed_at = NULL,
+    SET claimed_by = NULL,
         lease_expires_at = NULL, lease_seconds = NULL
     WHERE id = :plan_id AND claimed_by = :worker_id
     """

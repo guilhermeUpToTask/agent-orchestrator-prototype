@@ -37,9 +37,29 @@ rather than remaining as warnings here.
 - Lease heartbeat now runs during long actions, but the plan detail read model
   exposes the active run start rather than the promoted lease deadline and last
   heartbeat. Operational telemetry records liveness; a richer query DTO remains.
-- A malformed plan that raises before any save can still be reclaimed first by
-  oldest `updated_at` on a single worker. A dead-letter/operator quarantine
-  policy is still needed for repeated unexpected application exceptions.
+- **No dead-letter or quarantine for a persistently failing plan.** The claim is
+  now round-robin (`COALESCE(claimed_at, 0), updated_at`), so a plan that raises
+  before any save can no longer monopolize the claim — that starvation is fixed
+  and locked by `test_a_crashing_plan_does_not_monopolize_the_claim` on both
+  backends. What remains is that such a plan is retried forever, taking its fair
+  share of every poll cycle and reporting nothing to an operator beyond repeated
+  `worker.tick_failed` log lines. Deliberate for now: a plan that fails from a
+  transient cause must be free to recover, and nothing yet distinguishes that
+  from a permanently poisoned one. A quarantine policy needs a consecutive-
+  failure counter that a success resets, plus a surfaced block — neither exists.
+- **Claim fairness has one-second granularity.** `claimed_at` is stamped
+  `int(now.timestamp())`, so two claims inside the same wall-clock second tie and
+  fall back to the `updated_at` tiebreak — which favours the plan that never
+  saved, the exact bias the round-robin removes. The worker loop claims again
+  immediately after a productive tick, so this is reachable. The effect is
+  bounded (unfairness lasts until the second rolls over) rather than the previous
+  unbounded starvation, and sub-second stamping would fix it if it ever matters.
+  Not worth a change without evidence of multi-plan load — see the note below.
+- **Multi-plan concurrency is lightly exercised.** Every fixture runs a single
+  plan; parallel-goals-v1 runs two goals within one plan. The two entries above
+  are the known multi-plan risks, both found by reading the claim path rather
+  than by running it. Running many plans against one worker is not a near-term
+  scenario, so these are recorded rather than engineered against.
 - SSE is bounded and non-durable for clients; reconnect relies on refetch.
   Relay and event-table retention remain operational work.
 

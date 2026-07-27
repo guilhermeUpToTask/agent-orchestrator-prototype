@@ -1,4 +1,5 @@
-"""Provider capacity policy: which circuit a capacity failure belongs to.
+"""Provider capacity policy: which circuit a capacity failure belongs to, and how
+long it is worth waiting.
 
 A provider reports capacity exhaustion at two independent tiers, and conflating
 them is what makes a capacity outage look like a plan-stopping fault:
@@ -13,6 +14,10 @@ these are PER-MODEL: one saturated model must not throttle the others on the sam
 key. This is also correct for a direct paid API, where RPM/TPM ceilings are
 per-model while billing is account-wide.
 
+The same split sets the BACKOFF CURVE (`capacity_backoff_seconds`): an account
+allowance refills on the provider's clock and earns the patient curve, while a
+momentarily full pool is answered by trying again shortly.
+
 The mapping is a default, not a law. A single-endpoint provider (a self-hosted
 NIM deployment, a local server) shares one pool across every model it serves, so
 its concurrency limits are endpoint-wide too. That case is expressed by provider
@@ -26,6 +31,7 @@ from datetime import datetime
 from enum import Enum
 
 from src.app.runtime_failures import LimitScope
+from src.domain.policies.retry_policies import RetryPolicy
 from src.domain.value_objects.lifecycle import FailureKind
 
 # Limit tiers that a whole account shares, regardless of which model was called.
@@ -204,6 +210,51 @@ def circuit_model_id(
     if capacity_scope is CapacityScope.ENDPOINT_WIDE:
         return None
     return model_id
+
+
+# Scopes whose remedy is "try again shortly", not "wait for an allowance to
+# refill". Only a POSITIVELY identified one qualifies: an unclassified message
+# keeps the patient curve for the same reason it keeps the narrower circuit key
+# (`circuit_model_id`) -- of the two ways to be wrong about an unrecognized
+# provider message, the aggressive one is the one that costs requests.
+_IMPATIENT_SCOPES = frozenset({LimitScope.REQUEST_CONCURRENCY})
+
+
+def capacity_backoff_seconds(
+    policy: RetryPolicy,
+    attempt: int,
+    *,
+    jitter_unit: float = 0.5,
+    kind: FailureKind | None = None,
+    limit_scope: LimitScope | None = None,
+) -> float:
+    """How long to wait before `attempt`, given what the provider actually refused.
+
+    `RetryPolicy.kind_backoff_scale` grants RATE_LIMIT a patient 4x curve. That is
+    right for an account-level exhaustion -- a spend cap or daily allowance refills
+    on the provider's clock, and polling it faster changes nothing -- and backwards
+    for a REQUEST_CONCURRENCY refusal, which means one shared pool was momentarily
+    full while every other in-flight request succeeded. It is the same distinction
+    that already decides a concurrency refusal opens no circuit and requeues only
+    that task; applying it to the WAIT too is what makes the requeue quick enough
+    to matter.
+
+    The impatient curve is not a second knob: it is the plan's own configured
+    backoff, unscaled, so `execution.retry_initial_backoff_seconds` and the
+    multiplier remain the single place the base curve is tuned. Dropping the scale
+    also drops it from the ceiling, which `backoff_for` multiplies too -- that
+    product is what let a concurrency wait reach 4x `max_backoff_seconds`.
+
+    A domain-frozen `RetryPolicy` knows nothing of `LimitScope` (an app-layer
+    concept), so the scope-aware lookup lives here, at the layer that classifies
+    the failure, and hands the domain policy a scope-adjusted copy of its own
+    configuration.
+    """
+    if kind is not None and limit_scope in _IMPATIENT_SCOPES:
+        policy = policy.model_copy(
+            update={"kind_backoff_scale": {**policy.kind_backoff_scale, kind: 1.0}}
+        )
+    return policy.backoff_for(attempt, jitter_unit=jitter_unit, kind=kind)
 
 
 # A provider_capacity block carries the circuit it came from as an evidence ref so
