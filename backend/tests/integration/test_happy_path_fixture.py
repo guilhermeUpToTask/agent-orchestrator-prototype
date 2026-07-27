@@ -242,6 +242,26 @@ def test_goal_fan_out_is_a_finding_not_a_pass() -> None:
     assert "goal_count_within_budget" in _failed(verify_run.evaluate_plan(plan))
 
 
+def test_repeat_runs_accumulate_cycles_on_one_plan() -> None:
+    """A project owns ONE long-lived plan (ADR-003), so run *n* is cycle *n* and
+    ``cycles`` grows. The default must be the latest completed cycle — verifying
+    run 1's cycle after run 2 would silently report the wrong run — and
+    ``--cycle-id`` must be able to name an earlier one."""
+    plan = _green_plan()
+    first = plan["cycles"][0]
+    second = {**first, "id": "cycle-2", "output_reference": "cycle/cycle-2"}
+    plan["cycles"] = [first, second]
+
+    latest = verify_run._terminal_cycle(plan)
+    assert latest is not None and latest["id"] == "cycle-2"
+    assert verify_run._terminal_cycle(plan, "cycle-1")["id"] == "cycle-1"
+    assert verify_run._terminal_cycle(plan, "cycle-404") is None
+
+    checks = verify_run.evaluate_plan(plan, "cycle-404")
+    assert "cycle_activated" in _failed(checks)
+    assert _failed(verify_run.evaluate_plan(plan, "cycle-1")) == set()
+
+
 def test_a_mid_run_plan_reports_the_active_cycle() -> None:
     """Publication clears ``active_cycle``; before it, ``cycles`` may be empty.
     Both shapes must resolve to the same cycle rather than reporting nothing."""

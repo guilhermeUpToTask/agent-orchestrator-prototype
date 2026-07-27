@@ -88,41 +88,49 @@ def _tasks(goal: dict[str, Any]) -> list[dict[str, Any]]:
     return list(goal.get("tasks") or [])
 
 
-def _terminal_cycle(plan: dict[str, Any]) -> dict[str, Any] | None:
+def _terminal_cycle(plan: dict[str, Any], cycle_id: str | None = None) -> dict[str, Any] | None:
     """The cycle this run produced.
 
     Publication completes a cycle and returns the root to IDLE, which clears
     ``active_cycle`` — so a verified run finds its cycle in ``cycles``, not in the
     active slot. Prefer the completed one; fall back to the active cycle so a
     mid-run invocation still reports something useful rather than nothing.
+
+    A project owns ONE long-lived plan, so run *n* is cycle *n* of the same plan
+    and ``cycles`` accumulates. Defaulting to the most recent completed cycle is
+    right for "verify the run I just did" and wrong for anything else, hence
+    ``cycle_id``.
     """
     cycles = list(plan.get("cycles") or [])
+    active = plan.get("active_cycle")
+    if cycle_id is not None:
+        for cycle in [*cycles, *([active] if active else [])]:
+            if cycle.get("id") == cycle_id:
+                return cycle
+        return None
     completed = [c for c in cycles if c.get("status") == "completed"]
     if completed:
         return completed[-1]
-    active = plan.get("active_cycle")
     if active:
         return active
     return cycles[-1] if cycles else None
 
 
-def evaluate_plan(plan: dict[str, Any]) -> list[Check]:
+def evaluate_plan(plan: dict[str, Any], cycle_id: str | None = None) -> list[Check]:
     """Expectations 1-6 and the size budget, from persisted plan facts alone."""
     checks: list[Check] = []
-    cycle = _terminal_cycle(plan)
+    cycle = _terminal_cycle(plan, cycle_id)
 
     # 1 + 2. There is no gate history on the aggregate — `review_gate` is a single
     # current slot. A cycle EXISTS only via approve-intent then approve-draft, so
     # its presence is the durable proof both gates opened and were approved once.
     if cycle is None:
-        checks.append(
-            Check(
-                "cycle_activated",
-                False,
-                "no cycle on the plan: the intent and/or cycle-draft gate was never approved",
-                expectation=1,
-            )
+        detail = (
+            f"no cycle {cycle_id!r} on the plan"
+            if cycle_id
+            else "no cycle on the plan: the intent and/or cycle-draft gate was never approved"
         )
+        checks.append(Check("cycle_activated", False, detail, expectation=1))
         return checks
     checks.append(
         Check(
@@ -483,6 +491,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--plan-id", required=True)
     parser.add_argument(
+        "--cycle-id",
+        help="verify this exact cycle; defaults to the most recently completed one "
+        "(a project owns one long-lived plan, so cycles accumulate across runs)",
+    )
+    parser.add_argument(
         "--tier",
         type=int,
         choices=(0, 1),
@@ -502,9 +515,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         plan = fetch_plan(args.api, args.plan_id, os.environ.get("ORCHESTRATOR_API_TOKEN"))
-        checks = evaluate_plan(plan)
+        checks = evaluate_plan(plan, args.cycle_id)
 
-        cycle = _terminal_cycle(plan)
+        cycle = _terminal_cycle(plan, args.cycle_id)
         if cycle is not None and not args.skip_git:
             repo = Path(args.repo).expanduser()
             goal_ids = [g["id"] for g in (cycle.get("goals") or [])]

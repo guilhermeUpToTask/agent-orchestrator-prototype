@@ -132,13 +132,31 @@ API, and basic UI wiring against the same disposable repository every time.
 
 ### Exit criteria
 
-- A clean Tier 0 run repeats after `reset.sh` with the same result and no
-  network/API key.
-- The checker fails on the seed and passes only on the promoted result.
-- Artifacts identify fixture/code version, plan/cycle, timeline, evidence,
-  disposition, and Git refs.
-- The real API and worker are exercised; one manual pass confirms critical UI
-  wiring.
+- ✅ A clean Tier 0 run repeats after `reset.sh` with the same result and no
+  network/API key. Verified 2026-07-27: two consecutive stub + dry-run walkthroughs
+  (intent → draft → enrichment → execution → publication), 16/16 checks green
+  each, one goal and one task per cycle, default branch untouched.
+- ✅ The checker fails on the seed and passes only on the promoted result. Tier 1
+  against the same dry-run output fails on expectation 7 alone
+  (`NotImplementedError`), which is the seed code promoted unmodified — the
+  checker cannot be satisfied by promotion without implementation.
+- ✅ Artifacts identify fixture/code version, plan/cycle, timeline, evidence,
+  disposition, and Git refs (`capture-run.sh` manifest + bundle).
+- ⬜ The real API and worker are exercised (✅) **and one manual pass confirms
+  critical UI wiring** (not yet done — the frontend has never been driven through
+  this walkthrough). This is the only thing keeping Phase 0 open.
+
+### Found by the Tier 0 pass
+
+- `dev.sh seed` before `dev.sh start` dies with a raw
+  `OperationalError: no such table: capabilities` instead of telling the operator
+  to run `db upgrade`. `start` migrates; `seed` does not, and nothing says so.
+- Re-running against the same project does **not** create a second plan: a
+  `ProjectDefinition` owns exactly one long-lived `Plan` (ADR-003), so re-POSTing
+  the brief returns the existing `plan_id` and opens cycle *n+1* on it. The
+  fixture README said "or a new plan under the SAME project", which cannot
+  happen; corrected, and `verify_run.py` grew `--cycle-id` because "the latest
+  completed cycle" is the right default only for the run just finished.
 
 ## Phase 1 — Tier 1 real-runtime happy path ⬜
 

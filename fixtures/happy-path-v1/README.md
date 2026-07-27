@@ -246,8 +246,20 @@ lifecycle and the git promotion chain; only Tier 1 can turn that check green.
 ```bash
 # After the plan is idle / published (or abandoned)
 ./fixtures/happy-path-v1/scripts/reset.sh
-# Start a new cycle (or a new plan under the SAME project) with the SAME brief.
+# Re-POST the SAME brief.txt to the SAME project to open the next cycle.
 ```
+
+**There is no "new plan under the same project."** A `ProjectDefinition` owns
+exactly one long-lived `Plan` ([ADR-003](../../docs/decisions/adr-003-cyclic-project-plan-lifecycle.md)),
+so re-POSTing returns the *existing* `plan_id` and opens another cycle on it. Run
+*n* is cycle *n* of one plan — `GET /api/plans` still reports a single plan, and
+`.cycles` accumulates. Pass `--cycle-id` to `verify_run.py` to check an earlier
+cycle; the default is the most recently completed one.
+
+Whether the re-POST needs a discovery reply depends on state: with chat history
+present the stub often commits inline and opens the intent gate immediately, and
+posting a message then returns 422. Poll `pending_gate` before replying — as in
+step 3 — rather than assuming a turn is owed.
 
 Do **not** keep stacking failed cycles on a dirty worktree. Reset is part of the method.
 

@@ -37,7 +37,10 @@ note() { printf '==> %s\n' "$*"; }
 
 PLAN_ID="${1:-}"
 TIER="${2:-0}"
-[[ -n "$PLAN_ID" ]] || die "usage: capture-run.sh <plan-id> [tier]"
+# A project owns one long-lived plan, so cycles accumulate across runs. Empty
+# means "the most recently completed cycle" — right for the run just finished.
+CYCLE_ID="${3:-}"
+[[ -n "$PLAN_ID" ]] || die "usage: capture-run.sh <plan-id> [tier] [cycle-id]"
 [[ "$TIER" == "0" || "$TIER" == "1" ]] || die "tier must be 0 or 1 (got: $TIER)"
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
@@ -83,7 +86,9 @@ python3 "$REPO_ROOT/backend/scripts/export_plan_runs.py" \
 
 note "verification (tier $TIER)"
 VERIFY_EXIT=0
-python3 "$SCRIPT_DIR/verify_run.py" --plan-id "$PLAN_ID" --tier "$TIER" --json \
+verify_args=(--plan-id "$PLAN_ID" --tier "$TIER" --json)
+[[ -n "$CYCLE_ID" ]] && verify_args+=(--cycle-id "$CYCLE_ID")
+python3 "$SCRIPT_DIR/verify_run.py" "${verify_args[@]}" \
   >"$RUN_DIR/verification.json" || VERIFY_EXIT=$?
 # Exit 2 is a broken harness, not a failed run; keep the distinction in the file.
 if [[ "$VERIFY_EXIT" -ge 2 ]]; then
