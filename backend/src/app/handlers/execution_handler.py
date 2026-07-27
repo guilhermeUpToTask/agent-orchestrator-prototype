@@ -19,7 +19,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Mapping, TypeVar
+from typing import Callable, Mapping, Sequence, TypeVar
 from uuid import uuid4
 
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
@@ -598,6 +598,44 @@ class ExecutionHandler:
         # contract cannot freeze a strategy its own scope makes unsatisfiable.
         return test_author_path_allowed(path, strategy)
 
+
+    def _reject_authoring_violations(
+        self,
+        root: Path,
+        checks_before: Mapping[str, str],
+        changed: Sequence[str],
+        *,
+        violated: str,
+        intruded: str,
+    ) -> None:
+        """The authoring stage's rules, applied to whatever `actor` just touched.
+
+        The messages are passed in as whole literals rather than composed from an
+        actor noun, because `test_agent_feedback` greps `src` to prove every
+        whitelisted rejection prefix is still emitted somewhere — an f-string
+        would make that guard silently vacuous.
+
+        Called twice: once for the agent's diff, once for the tree AFTER its own
+        verification command ran. The second call is not paranoia — the command is
+        arbitrary shell from the contract, and until it shared this guard it was
+        judged by `is_check_path` alone, so a command could rewrite another task's
+        check during the baseline and freeze the result as this task's evidence.
+        """
+        verdict = validate_authoring(root, checks_before, changed)
+        if not verdict.accepted:
+            raise TaskFailed(
+                f"{violated}: " + "; ".join(verdict.reasons),
+                FailureKind.VERIFICATION_ERROR,
+            )
+        intruders = [
+            path for path in changed if path not in checks_before and not is_check_path(path)
+        ]
+        if intruders:
+            raise TaskFailed(
+                f"{intruded}: {intruders}",
+                FailureKind.VERIFICATION_ERROR,
+            )
+
     async def _finalize_test_author(
         self,
         plan_id: str,
@@ -620,26 +658,18 @@ class ExecutionHandler:
         authored = await self._verifier.changed_paths(workspace_handle.path, base_ref)
         declared = declared_checks(contract, Path(workspace_handle.path))
 
-        # Same rules the implementer answers to: scope, forbidden paths,
-        # verification-config filenames, and the integrity of every check that
-        # already existed. This stage used to be judged by `is_check_path` alone.
-        authoring = validate_authoring(Path(workspace_handle.path), checks_before, authored)
-        if not authoring.accepted:
-            raise TaskFailed(
-                "test author violated the frozen checks: " + "; ".join(authoring.reasons),
-                FailureKind.VERIFICATION_ERROR,
-            )
+        self._reject_authoring_violations(
+            Path(workspace_handle.path),
+            checks_before,
+            authored,
+            violated="test author violated the frozen checks",
+            intruded="test author modified production paths",
+        )
 
         # New = this task's, by construction. A path that was already in the tree
         # belongs to whoever put it there, so it is never claimed here.
         new_checks = [path for path in authored if path not in checks_before]
         if new_checks:
-            not_checks = [path for path in new_checks if not is_check_path(path)]
-            if not_checks:
-                raise TaskFailed(
-                    f"test author modified production paths: {not_checks}",
-                    FailureKind.VERIFICATION_ERROR,
-                )
             checks, selectors = list(new_checks), list(new_checks)
         elif declared.declared:
             # Certain, or author. An empty diff is correct when the contract NAMES
@@ -656,18 +686,19 @@ class ExecutionHandler:
             workspace_handle.path,
             contract.verification_commands,
         )
-        after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
-        disallowed = [
-            path
-            for path in after
-            if not self._test_author_path_allowed(path, contract.verification_strategy)
-        ]
-        if disallowed:
-            raise TaskFailed(
-                f"verification command modified production paths: {disallowed}",
-                FailureKind.VERIFICATION_ERROR,
-            )
+        # Infrastructure first, matching the implementation stage: a command that
+        # exits 127 AND left a file behind is an infrastructure failure, not a
+        # contract violation, and reporting it as the latter sends the agent to
+        # repair something that never ran.
         self._raise_on_infrastructure_exit(outcomes)
+        after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
+        self._reject_authoring_violations(
+            Path(workspace_handle.path),
+            checks_before,
+            after,
+            violated="verification command violated the frozen checks",
+            intruded="verification command modified production paths",
+        )
         # A check that already passes proves nothing about THIS task: the green
         # after the implementation would be the same green as before it. So the
         # baseline must FAIL — for a check the author just wrote (`tdd`) and

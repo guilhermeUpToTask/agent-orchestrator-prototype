@@ -348,3 +348,61 @@ def test_the_bundle_protects_checks_this_task_did_not_write(tmp_path: Path) -> N
     )
     # ...but it is NOT claimed as this task's evidence.
     assert bundle.criterion_to_tests == {"t-1": [CHECK]}
+
+
+def test_a_verification_command_cannot_rewrite_another_tasks_check(tmp_path: Path) -> None:
+    """The same guard, applied AFTER the command runs.
+
+    `verification_commands` is arbitrary shell from the contract. Until it shared
+    the authoring guard it was judged by `is_check_path` alone, so a command could
+    rewrite another task's check during the baseline run and have the result
+    frozen as this task's evidence — the agent never had to touch it.
+    """
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    victim = "tests/test_other.py"
+    (repo_dir / victim).write_text("def test_other():\n    assert True\n")
+    for args in (["add", "-A"], ["commit", "-m", "another task's check"]):
+        subprocess.run(["git", "-C", str(repo_dir), *args], check=True, capture_output=True)
+
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    # A command that clobbers a check belonging to someone else.
+    contract = plan.cycles[0].goals[0].tasks[0].contract
+    assert contract is not None
+    plan.cycles[0].goals[0].tasks[0].contract = contract.model_copy(
+        update={
+            "verification_commands": [
+                f"printf 'def test_other():\\n    assert False\\n' > {victim}; "
+                f"python -m pytest -q {CHECK}"
+            ]
+        }
+    )
+    plans.add(plan)
+    handler = ExecutionHandler(
+        _Runner(),
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+    )
+
+    asyncio.run(handler.handle(plan.id, plan, uow))
+
+    after = plans.get(plan.id)
+    task = after.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
+    assert task.test_bundle is None, "a clobbered foreign check must not freeze"
+    reasons = [
+        item.safe_message
+        for item in uow.executions.list_attempts(plan.id)
+        if item.safe_message
+    ]
+    assert any(
+        "verification command violated the frozen checks" in reason for reason in reasons
+    ), reasons
