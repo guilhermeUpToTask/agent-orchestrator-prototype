@@ -28,6 +28,7 @@ import pytest
 
 from src.app.testing.fakes import (
     CollectingEventSink,
+    InMemoryPlanningArtifactStore,
     FakeClock,
     InMemoryAgentRepository,
     InMemoryOutbox,
@@ -186,8 +187,10 @@ def test_a_declared_pre_existing_check_drives_both_stages(tmp_path: Path) -> Non
         LocalVerificationExecutor(clock),
     )
 
-    # Stage 1 — the author writes nothing, and that is correct.
+    # Stage 1 — NO agent runs at all. The contract names a check that is already
+    # here, so there is nothing to author and the orchestrator freezes it directly.
     assert asyncio.run(handler.handle(plan.id, plan, uow)).value == "continue"
+    assert runner.calls == [], f"the authoring stage spent an agent call: {runner.calls}"
     after_red = plans.get(plan.id)
     task_after_red = after_red.active_cycle.goals[0].tasks[0]  # type: ignore[union-attr]
     bundle = task_after_red.test_bundle
@@ -208,7 +211,7 @@ def test_a_declared_pre_existing_check_drives_both_stages(tmp_path: Path) -> Non
     assert finished.status.value == "done"
     assert finished.verification_evidence
     assert all(item.accepted for item in finished.verification_evidence)
-    assert runner.calls == ["test-author", "implementer"]
+    assert runner.calls == ["implementer"], "only the implementation stage needed an agent"
 
 
 def test_an_already_green_check_is_rejected_as_non_discriminating(tmp_path: Path) -> None:
@@ -283,6 +286,14 @@ def test_an_author_cannot_claim_another_tasks_check_by_rewriting_it(tmp_path: Pa
     plans = InMemoryPlanRepository(clock)
     uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
     plan, _ = _plan_with_declared_check()
+    # An UNSCOPED command declares nothing, so the author stage really runs — the
+    # only path on which this attack is reachable at all. (With a declared check
+    # the orchestrator freezes it and no agent is invoked.)
+    contract = plan.cycles[0].goals[0].tasks[0].contract
+    assert contract is not None
+    plan.cycles[0].goals[0].tasks[0].contract = contract.model_copy(
+        update={"verification_commands": ["python -m pytest -q"]}
+    )
     plans.add(plan)
     handler = ExecutionHandler(
         _AuthorRewritesAnotherTasksCheck(),
@@ -406,3 +417,40 @@ def test_a_verification_command_cannot_rewrite_another_tasks_check(tmp_path: Pat
     assert any(
         "verification command violated the frozen checks" in reason for reason in reasons
     ), reasons
+
+
+def test_the_baseline_verdict_is_recorded(tmp_path: Path) -> None:
+    """Whether the checks were RED or GREEN before the work decides whether the
+    green afterwards means anything, and it was stored nowhere queryable:
+    `baseline_evidence_refs` is always empty and `red_or_baseline_evidence_refs`
+    holds only sha256 digests of output — enough to prove a command ran, not what
+    it decided."""
+    repo_dir = tmp_path / "repo"
+    _seed_repo(repo_dir)
+    clock = FakeClock(NOW)
+    plans = InMemoryPlanRepository(clock)
+    uow = InMemoryUnitOfWork(plans, InMemoryOutbox())
+    plan, _ = _plan_with_declared_check()
+    plans.add(plan)
+    artifacts = InMemoryPlanningArtifactStore()
+    handler = ExecutionHandler(
+        _Runner(),
+        InMemoryAgentRepository(
+            [_agent("test-author", "test_authoring"), _agent("implementer", "implementation")],
+            default_id="implementer",
+        ),
+        GitBranchWorkspace(repo_dir),
+        CollectingEventSink(),
+        clock,
+        LocalVerificationExecutor(clock),
+        planning_artifacts=artifacts,
+    )
+
+    asyncio.run(handler.handle(plan.id, plan, uow))
+
+    recorded = artifacts.latest(plan.id, "verification_baseline", goal_id="goal-1")
+    assert recorded, "the baseline verdict was not recorded"
+    payload = recorded[-1].payload or {}
+    assert payload["verdict"] == "red", payload
+    assert payload["checks"] == [CHECK]
+    assert payload["exit_codes"] and all(code != 0 for code in payload["exit_codes"])

@@ -146,6 +146,19 @@ def _render_prior_rejection(prior: PriorAttemptRejection | None) -> str:
     )
 
 
+# The orchestrator already REJECTS a weakened check — hashes pin every protected
+# test and the candidate is refused. This line exists because a rejection costs an
+# attempt against a low ceiling, while telling the agent what to do instead costs
+# nothing: measured at a 93% -> 1% drop in one model's rate of carving out the code
+# rather than fixing it (ImpossibleBench, 2026). Naming the escape hatch is the
+# active ingredient — an agent with no legitimate move takes an illegitimate one.
+_ESCALATE_INSTEAD_OF_WEAKENING = (
+    "If a test looks wrong, STOP and say so in your final message instead of "
+    "changing it: never skip, xfail, delete, or narrow a test to make it pass, and "
+    "never edit verification configuration."
+)
+
+
 def build_task_prompt(
     task: Task, spec: AgentSpec, *, prior_rejection: PriorAttemptRejection | None = None
 ) -> str:
@@ -183,10 +196,13 @@ def build_task_prompt(
     commands = "\n".join("- `" + command + "`" for command in contract.verification_commands)
     if run_role in {"test_author", "test_writer"}:
         expectation = (
-            "Write ONLY tests that fail for the right reason; never modify production files."
+            "Write ONLY tests that fail for the right reason; never modify production files. "
+            + _ESCALATE_INSTEAD_OF_WEAKENING
         )
     elif run_role == "implementer":
-        expectation = "Make the frozen tests pass; never modify tests."
+        expectation = "Make the frozen tests pass; never modify tests. " + (
+            _ESCALATE_INSTEAD_OF_WEAKENING
+        )
     else:
         expectation = "Follow the contract and do not modify files outside the declared scope."
     return (
