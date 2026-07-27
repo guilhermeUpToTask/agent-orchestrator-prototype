@@ -82,7 +82,7 @@ These are current capabilities, not future roadmap work:
 Completed foundations stay in architecture docs and tests. They are not
 reintroduced below merely because further hardening is possible.
 
-## Phase 0 — reproducible validation baseline 🚧
+## Phase 0 — reproducible validation baseline ✅
 
 **External capability:** a developer can run one free, deterministic walkthrough
 that proves the lifecycle, gates, worker, Git/verification path, publication,
@@ -125,10 +125,11 @@ API, and basic UI wiring against the same disposable repository every time.
   (starts RED, exact promised assertion), the brief (postable verbatim, names the
   verification command and the size budget), and the checker's judgement, without
   driving the lifecycle the cyclic suite already owns.
-- 🚧 Version the fixture: the locked brief now lives in `brief.txt` so it can be
+- ✅ Version the fixture: the locked brief lives in `brief.txt` so it can be
   posted verbatim (`BRIEF.md` had prose that would have been sent to the
-  reasoner as part of the brief). The v1/v2 rule is documented; no bump needed
-  yet.
+  reasoner as part of the brief). The v1/v2 rule is documented. Still v1 — the
+  Phase 0 work changed tooling only; the seed, the brief, and the eight
+  expectations are untouched, so no recorded run series is invalidated.
 
 ### Exit criteria
 
@@ -142,21 +143,29 @@ API, and basic UI wiring against the same disposable repository every time.
   checker cannot be satisfied by promotion without implementation.
 - ✅ Artifacts identify fixture/code version, plan/cycle, timeline, evidence,
   disposition, and Git refs (`capture-run.sh` manifest + bundle).
-- ⬜ The real API and worker are exercised (✅) **and one manual pass confirms
-  critical UI wiring** (not yet done — the frontend has never been driven through
-  this walkthrough). This is the only thing keeping Phase 0 open.
+- ✅ The real API and worker are exercised. This fixture is **API-only by
+  design** (`curl` + `jq`), so it carries no UI criterion: frontend coverage is
+  Phase 5's job, against Phase 3's matrix.
 
-### Found by the Tier 0 pass
+### Fixed by the Tier 0 pass
 
-- `dev.sh seed` before `dev.sh start` dies with a raw
-  `OperationalError: no such table: capabilities` instead of telling the operator
-  to run `db upgrade`. `start` migrates; `seed` does not, and nothing says so.
+Three defects, all found by running the walkthrough rather than reading it:
+
+- `dev.sh seed` before `dev.sh start` died with a raw
+  `OperationalError: no such table: capabilities`. `start` migrated and `seed`
+  did not, so the documented order for a fresh state directory failed on the
+  first command. `seed` now migrates too.
 - Re-running against the same project does **not** create a second plan: a
   `ProjectDefinition` owns exactly one long-lived `Plan` (ADR-003), so re-POSTing
   the brief returns the existing `plan_id` and opens cycle *n+1* on it. The
   fixture README said "or a new plan under the SAME project", which cannot
   happen; corrected, and `verify_run.py` grew `--cycle-id` because "the latest
   completed cycle" is the right default only for the run just finished.
+- `reset.sh` reset `main` and the working tree but left every
+  `plan/`/`cycle/`/`goal/`/`task/` branch behind, so run *N* started carrying
+  ~3(*N*-1) stale branches and the runs stopped being comparable. It now deletes
+  that hierarchy — matching by ref prefix, since a task branch is
+  `task/<id>/a<attempt>` and `refs/heads/task/*` silently misses two levels.
 
 ## Phase 1 — Tier 1 real-runtime happy path ⬜
 
