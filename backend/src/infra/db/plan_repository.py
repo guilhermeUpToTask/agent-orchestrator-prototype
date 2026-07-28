@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from typing import Any
 
@@ -222,6 +223,23 @@ class SqlitePlanRepository:
                 {"plan_id": plan_id, "worker_id": worker_id, "now_epoch": now_epoch},
             ),
         )
+
+    def lease_holder(self, plan_id: str) -> tuple[str, datetime] | None:
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT claimed_by, lease_expires_at FROM plans "
+                    "WHERE id = :plan_id AND claimed_by IS NOT NULL "
+                    "AND lease_expires_at IS NOT NULL"
+                ),
+                {"plan_id": plan_id},
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return str(row[0]), datetime.fromtimestamp(int(row[1]), tz=timezone.utc)
 
     def is_claim_live(self, plan_id: str) -> bool:
         now_epoch = int(self._clock.now().timestamp())

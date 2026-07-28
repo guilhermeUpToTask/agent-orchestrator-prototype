@@ -269,7 +269,7 @@ terminal block).
 - Publication records the disposition and returns the project plan to `idle`.
 - Evidence, including usage when reported, is comparable across all three runs.
 
-## Phase 2 — walkthrough-driven backend hardening ⬜
+## Phase 2 — walkthrough-driven backend hardening ✅
 
 **External capability:** the tiny workflow survives common failures and either
 recovers automatically or tells the operator exactly what to do.
@@ -277,9 +277,12 @@ recovers automatically or tells the operator exactly what to do.
 The recovery architecture exists. Validate it with Tier 0/Tier 1 evidence
 instead of redesigning it speculatively.
 
-Recovery work completed against run evidence this cycle is listed under the
-implemented foundation above; what remains here is the evidence still to
-collect, not a redesign.
+**Closed 2026-07-28.** Six defects found and fixed, every one reproduced before
+it was touched and locked on both the fake and SQLite; one domain un-freeze
+(#18); one new fixture. The pattern worth keeping: a single RED Tier 1 run found
+three defects that four green runs had missed, because all three need a failing
+agent to exist at all. Green runs prove the happy path; only a failing one
+exercises recovery.
 
 ### Fixed — capacity backoff ignored `limit_scope`
 
@@ -666,14 +669,52 @@ sweeper for it — this codebase has no scheduler, and inventing one for garbage
 collection would be exactly the coordination infrastructure this phase says not
 to introduce without run evidence.
 
-### Exit criteria
+### Exit criteria — met 2026-07-28
 
-- No launch-critical defect can hot-loop, corrupt state, promote unverified
-  work, touch the default branch, or advertise an unusable recovery.
-- Repeated unexpected worker exceptions cannot starve healthy plans.
-- Operators can distinguish active work, capacity/backoff waiting, graceful
-  pause, recoverable block, and external terminal failure from persisted facts.
-- Relevant regressions pass the baseline fixture contract.
+- ✅ **No launch-critical defect can hot-loop, corrupt state, promote unverified
+  work, touch the default branch, or advertise an unusable recovery.** Six
+  defects found and fixed this phase, each reproduced first and locked on both
+  backends. `main` stayed at the seed tag in every one of six fixture runs;
+  `block_policy` keeps advertised resolutions honest; the one remaining capacity
+  gap is deferred below and ends in a recoverable block, not corruption.
+- ✅ **Repeated unexpected worker exceptions cannot starve healthy plans.** Two
+  distinct failures fixed: the claim is round-robin so a crashing plan cannot
+  monopolize it, and the goal-claim scan no longer terminates the process. Both
+  locked on the fake and SQLite.
+- ✅ **Operators can distinguish active work, capacity/backoff waiting, graceful
+  pause, recoverable block, and external terminal failure from persisted
+  facts.** The last gap was liveness — a dead worker's orphan read as active
+  work for the whole lease. Plan detail now serves `worker_lease` (scope,
+  holder, heartbeat deadline, `expired`, `seconds_remaining`) beside
+  `active_run`, which only ever said when work *began*.
+- ✅ **Relevant regressions pass the baseline fixture contract.** happy-path-v1
+  Tier 0 ×3 and Tier 1 ×2 (17/17 including pytest green on a real checkout),
+  parallel-goals-v1, and contract-repair-v1 all green.
+
+### Deferred out of Phase 2, with reasons
+
+Neither is a correctness hole; both are decisions rather than bugs, and holding
+the phase open for them would be holding it open for a preference.
+
+1. **A `request_concurrency` refusal spends the per-task retry budget.**
+   `capacity_wait` is set only when a circuit opens and a concurrency refusal
+   deliberately opens none, so alone among capacity failures it does not bypass
+   the budget — a busy shared pool can block a goal that has nothing wrong with
+   it (observed: `execution_failure` after 7 attempts, the last
+   `rate_limit/request_concurrency`). Making it budget-neutral inside a
+   wall-clock bound is a capacity-policy change with its own failure modes: the
+   bound has to exist, or a permanently saturated provider never escalates. It
+   ends in a recoverable block that advertises `retry_stage`, so the operator
+   has a move. Recorded in known-issues.
+2. **No operator control point at the contract boundary.** Priced concretely by
+   contract-repair-v1: the fixture must win a race for the window, so it is a
+   paid Tier 1 test that succeeds about half the time instead of a free
+   deterministic one. Still a review-gate-like opt-in hold, still not worth a
+   general "pause between units".
+
+Also standing, both recorded in known-issues and neither Phase 2 scope: no
+dead-letter/quarantine for a plan that fails forever (it now takes a fair share
+rather than starving others), and one-second claim-fairness granularity.
 
 ## Phase 3 — capability-to-product coverage audit ⬜
 

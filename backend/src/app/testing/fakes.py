@@ -170,6 +170,10 @@ class InMemoryPlanRepository:
         claim = self._claims.get(plan_id)
         return claim is not None and claim.expires_at > self._clock.now()
 
+    def lease_holder(self, plan_id: str) -> tuple[str, datetime] | None:
+        claim = self._claims.get(plan_id)
+        return None if claim is None else (claim.worker_id, claim.expires_at)
+
     def release(self, plan_id: str, worker_id: str) -> None:
         claim = self._claims.get(plan_id)
         if claim is not None and claim.worker_id == worker_id:
@@ -237,6 +241,12 @@ class InMemoryGoalLeaseRepository:
     def is_claim_live(self, plan_id: str, goal_id: str, now: datetime) -> bool:
         claim = self._claims.get((plan_id, goal_id))
         return claim is not None and claim.expires_at_epoch > int(now.timestamp())
+
+    def lease_holder(self, plan_id: str, goal_id: str) -> tuple[str, datetime] | None:
+        claim = self._claims.get((plan_id, goal_id))
+        if claim is None:
+            return None
+        return claim.worker_id, datetime.fromtimestamp(claim.expires_at_epoch, tz=timezone.utc)
 
 
 # ---- in-memory outbox ----

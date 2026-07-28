@@ -203,6 +203,21 @@ export interface Plan {
     task_id: string;
     started_at: string;
   } | null;
+  /** Whether the claim behind `activity` is alive, or a dead worker's orphan.
+   *  `active_run.started_at` says when work began, never whether anyone is
+   *  still doing it — so a killed worker looked identical to real progress for
+   *  the whole lease. `expires_at` is renewed by the heartbeat, so it is the
+   *  liveness signal; `expired` is server-computed because the client's clock
+   *  is not the server's. `scope` distinguishes the goal lease (execution) from
+   *  the plan claim (planning and gates). */
+  worker_lease: {
+    scope: 'goal' | 'plan';
+    goal_id: string | null;
+    worker_id: string;
+    expires_at: string;
+    expired: boolean;
+    seconds_remaining: number;
+  } | null;
   planning_operation: {
     id: string;
     purpose: string;

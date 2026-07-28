@@ -34,17 +34,14 @@ rather than remaining as warnings here.
 
 ## Operational visibility
 
-- Lease heartbeat now runs during long actions, but the plan detail read model
-  exposes the active run start rather than the promoted lease deadline and last
-  heartbeat. Operational telemetry records liveness; a richer query DTO remains.
-  **Run evidence (2026-07-27):** `kill -9` on a worker holding a RUNNING attempt
-  leaves the plan reporting `status: running`, task `running`,
-  `retry_not_before: null` — indistinguishable from real work — for the **full
-  300s goal lease**, measured at ~6 minutes end to end before attempts resumed
-  and the plan completed normally. Recovery itself is correct: startup
-  reconciliation closes the ledger row to `abandoned` and deliberately does not
-  invent a task outcome, so nothing shortens the wait. The defect is purely that
-  an operator cannot see which of the two is happening.
+- A dead worker's orphan is no longer indistinguishable from live work: plan
+  detail serves `worker_lease` (scope, holder, heartbeat deadline, `expired`,
+  `seconds_remaining`) alongside `active_run`, which only ever said when work
+  *began*. Locked by
+  `test_plan_detail_distinguishes_a_live_worker_from_a_dead_one`. The ~6 minute
+  recovery latency behind it is by design and documented in ROADMAP.md with
+  options — reconciliation deliberately never reverts the domain task, so
+  goal-lease expiry is the only correct trigger.
 - **Refusal messages mix the cyclic and legacy vocabularies.**
   `Plan.request_pause` raises `InvalidTransitionError` with `status.value`
   (`planner_orchestrator.py:395`) while `Plan.pause` and `Plan.resume` use
