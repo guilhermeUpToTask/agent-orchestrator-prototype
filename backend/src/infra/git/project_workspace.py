@@ -33,14 +33,16 @@ class ProjectWorkspaceResolver:
 
     def resolve(self, project_id: str) -> GitBranchWorkspace:
         project = self._projects.get(project_id)
-        repo = self._repository_path(project)
+        repo = self.repository_path_for(project)
         self._materialize_remote(project, repo)
         default_branch = self._default_branch(repo)
         identity = (project.repo_url, str(repo), default_branch)
         existing = self._cache.get(project_id)
         if existing is not None and existing.identity == identity:
             return existing.workspace
-        workspace = GitBranchWorkspace(repo, default_branch=default_branch)
+        workspace = GitBranchWorkspace(
+            repo, default_branch=default_branch, allow_init=project.repo_url is None
+        )
         self._cache[project_id] = _CachedWorkspace(identity, workspace)
         return workspace
 
@@ -48,14 +50,16 @@ class ProjectWorkspaceResolver:
         """Return local workspace adapters without cloning remote repositories."""
         workspaces: list[tuple[str, GitBranchWorkspace]] = []
         for project in self._projects.list():
-            repo = self._repository_path(project)
+            repo = self.repository_path_for(project)
             default_branch = self._default_branch(repo)
             identity = (project.repo_url, str(repo), default_branch)
             cached = self._cache.get(project.id)
             if cached is None or cached.identity != identity:
                 cached = _CachedWorkspace(
                     identity,
-                    GitBranchWorkspace(repo, default_branch=default_branch),
+                    GitBranchWorkspace(
+                        repo, default_branch=default_branch, allow_init=project.repo_url is None
+                    ),
                 )
                 self._cache[project.id] = cached
             workspaces.append((project.id, cached.workspace))
@@ -94,7 +98,14 @@ class ProjectWorkspaceResolver:
             return branches[0]
         raise ValueError(f"cannot determine default branch for repository {repo}")
 
-    def _repository_path(self, project: ProjectDefinition) -> Path:
+    def repository_path_for(self, project: ProjectDefinition) -> Path:
+        """Where this project's repository lives (or will live) on disk.
+
+        Public so readiness reads (`routers/readiness.py`, `routers/reference.py`)
+        can report the same scratch/local/remote location this resolver actually
+        uses, instead of re-deriving the `$ORCHESTRATOR_HOME/projects/<id>/repo`
+        rule a second time.
+        """
         if project.repo_url:
             parsed = urlparse(project.repo_url)
             if parsed.scheme == "file":
@@ -104,6 +115,12 @@ class ProjectWorkspaceResolver:
             repository_identity = hashlib.sha256(project.repo_url.encode()).hexdigest()[:16]
             return self._home / "projects" / project.id / "repos" / repository_identity
         return self._home / "projects" / project.id / "repo"
+
+    def _repository_path(self, project: ProjectDefinition) -> Path:
+        """Private alias kept for existing internal callers/tests written
+        against the resolver's original name; the rule itself lives only in
+        `repository_path_for`."""
+        return self.repository_path_for(project)
 
     def _materialize_remote(self, project: ProjectDefinition, destination: Path) -> None:
         if not project.repo_url:

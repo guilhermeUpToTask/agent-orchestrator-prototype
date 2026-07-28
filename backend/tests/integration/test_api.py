@@ -1304,3 +1304,45 @@ def test_plan_detail_distinguishes_a_live_worker_from_a_dead_one(client, tmp_pat
     assert dead["status"] == "running"  # unchanged: the aggregate cannot know
     assert dead["worker_lease"]["expired"] is True
     assert dead["worker_lease"]["seconds_remaining"] < 0
+
+
+def test_retry_policy_can_be_retuned_over_http(client):
+    """The one route the Phase 3 audit found with no test exercising it.
+
+    There is no version parameter on this route, so there is no CAS/409 case —
+    the contract is that it applies, that an unknown plan 404s, and that it
+    refuses a budget that is not a budget.
+    """
+    project_id = client.post("/api/projects", json={"name": "Retry project"}).json()["id"]
+    plan_id = client.post(
+        "/api/plans", json={"brief": "goal: G\ntask: t", "project_id": project_id}
+    ).json()["plan_id"]
+
+    applied = client.post(
+        f"/api/plans/{plan_id}/retry-policy",
+        json={"max_attempts": 9, "max_backoff_seconds": 1800.0},
+    )
+    assert applied.status_code == 204
+
+    # Unset fields keep their current value — the merge is partial by design.
+    policy = _stored_retry_policy(plan_id)
+    assert policy.max_attempts == 9
+    assert policy.max_backoff_seconds == 1800.0
+    assert policy.backoff_multiplier == 2.0
+
+    assert (
+        client.post("/api/plans/ghost/retry-policy", json={"max_attempts": 9}).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/api/plans/{plan_id}/retry-policy", json={"max_attempts": 0}
+        ).status_code
+        == 422
+    ), "a retry budget of zero attempts is not a policy"
+
+
+def _stored_retry_policy(plan_id: str):
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        return uow.plans.get(plan_id).retry_policy

@@ -14,8 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from src.app.ports import TaskFailed
 from src.app.testing.fakes import FakeClock
 from src.domain.entities.project_definition import ProjectDefinition
+from src.domain.value_objects.lifecycle import FailureKind
 from src.infra.git.project_workspace import ProjectWorkspaceResolver
 from src.infra.git.workspace import GitBranchWorkspace, LocalDirWorkspace
 from src.infra.runtime.verification_executor import LocalVerificationExecutor
@@ -466,3 +468,82 @@ def test_remote_repo_url_changes_use_distinct_clone_destinations(tmp_path):
 
     assert first != second
     assert first.parent == second.parent
+
+
+def test_a_named_repository_is_never_created(tmp_path):
+    """The regression lock on "green against nothing".
+
+    A project that NAMES a repository has made a claim about the world. If the
+    path is wrong — a typo, a rename, a directory deleted after binding — the
+    workspace used to create it, git-init it and commit into it, and the plan
+    published green against an empty repository. Only a scratch project (no
+    repo_url) may be created on demand.
+    """
+    missing = tmp_path / "not-there"
+    workspace = GitBranchWorkspace(missing, default_branch="main", allow_init=False)
+
+    async def flow():
+        await workspace.begin("plan-1", "task-1", 1)
+
+    with pytest.raises(TaskFailed) as caught:
+        asyncio.run(flow())
+
+    assert caught.value.kind is FailureKind.AUTH_ERROR
+    assert not missing.exists(), "a named repository must never be created"
+
+
+def test_a_scratch_repository_is_still_created(tmp_path):
+    scratch = tmp_path / "scratch"
+    workspace = GitBranchWorkspace(scratch, default_branch="main", allow_init=True)
+
+    async def flow():
+        handle = await workspace.begin("plan-1", "task-1", 1)
+        await workspace.discard(handle)
+
+    asyncio.run(flow())
+
+    assert (scratch / ".git").exists()
+
+
+def test_a_project_that_names_a_missing_repository_is_refused_by_the_resolver(tmp_path):
+    """The wiring, not just the guard.
+
+    `GitBranchWorkspace(allow_init=False)` is only a defence if the resolver
+    actually sets it from the project. This is the whole defect path: a project
+    whose `repo_url` points nowhere used to get a freshly initialized empty
+    repository and publish a green cycle against it.
+    """
+    missing = tmp_path / "gone"
+    projects = MutableProjects(
+        ProjectDefinition(id="project-1", name="Project", repo_url=str(missing))
+    )
+    resolver = ProjectWorkspaceResolver(projects, tmp_path / "home")
+
+    workspace = resolver.resolve("project-1")
+
+    async def flow():
+        await workspace.begin("plan-1", "task-1", 1)
+
+    with pytest.raises(TaskFailed) as caught:
+        asyncio.run(flow())
+
+    assert caught.value.kind is FailureKind.AUTH_ERROR
+    assert not missing.exists()
+
+
+def test_a_project_without_a_repo_url_still_gets_its_scratch_repository(tmp_path):
+    """The deliberate exception: a scratch project asked for an empty repo."""
+    projects = MutableProjects(
+        ProjectDefinition(id="project-1", name="Project", repo_url=None)
+    )
+    resolver = ProjectWorkspaceResolver(projects, tmp_path / "home")
+
+    workspace = resolver.resolve("project-1")
+
+    async def flow():
+        handle = await workspace.begin("plan-1", "task-1", 1)
+        await workspace.discard(handle)
+
+    asyncio.run(flow())
+
+    assert (workspace.repo_dir / ".git").exists()

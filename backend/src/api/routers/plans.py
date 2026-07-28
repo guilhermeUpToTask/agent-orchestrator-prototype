@@ -13,7 +13,7 @@ from typing import Any, AsyncIterator, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_container
 from src.app.execution_records import (
@@ -1182,13 +1182,19 @@ def retry_blocked_planning_stage(
 class RetryPolicyUpdateRequest(BaseModel):
     """All fields optional: only the ones an operator sets are changed (partial
     merge over the plan's current retry policy); the rest keep their current
-    value. Mirrors execution.retry_* config field-for-field."""
+    value. Mirrors execution.retry_* config field-for-field.
 
-    max_attempts: int | None = None
-    initial_backoff_seconds: float | None = None
-    backoff_multiplier: float | None = None
-    max_backoff_seconds: float | None = None
-    jitter_ratio: float | None = None
+    The bounds reject a policy that is not one — a budget of zero attempts, a
+    negative wait, a multiplier that shrinks the backoff — rather than storing
+    it and discovering it during an outage. They live on the DTO because the
+    domain `RetryPolicy` is frozen.
+    """
+
+    max_attempts: int | None = Field(default=None, ge=1)
+    initial_backoff_seconds: float | None = Field(default=None, ge=0)
+    backoff_multiplier: float | None = Field(default=None, ge=1)
+    max_backoff_seconds: float | None = Field(default=None, ge=0)
+    jitter_ratio: float | None = Field(default=None, ge=0, le=1)
 
 
 @router.post("/{plan_id}/retry-policy", status_code=204)

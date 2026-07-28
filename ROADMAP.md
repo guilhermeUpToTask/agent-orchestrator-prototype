@@ -818,11 +818,13 @@ its objective test stated in the matrix:
 - **G10 — a worker-health read.** `worker_lease` answers "is this plan claimed"
   and only while it is; nothing answers "is a worker running at all", which is
   the most common local-setup failure and a J2 checklist item.
-- **G11 — validate repository binding at write time.** `POST`/`PUT
-  /api/projects` store `repo_url` unchecked; the first symptom is an
-  execution-stage failure that reads as an orchestrator bug. Note that a project
-  with no `repo_url` silently gets a fresh empty repo, so a mis-set binding
-  "passes" against nothing.
+- **G11 — validate repository binding, and never initialize a named repository.**
+  `POST`/`PUT /api/projects` store `repo_url` unchecked, and there is no late
+  failure to catch: a path with no `.git` reports default branch `main`
+  (`project_workspace.py:66`) and is then created, `git init`ed and given an
+  empty initial commit (`workspace.py:150-153`). A mistyped `repo_url` runs to a
+  green publication against an empty repository, so write-time validation alone
+  does not close it.
 - **G6 — a route contract test for `POST /api/plans/{plan_id}/retry-policy`**,
   the only route in the app no test exercises.
 

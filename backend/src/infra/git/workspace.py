@@ -75,9 +75,15 @@ class GitWorkspaceHandle:
 
 
 class GitBranchWorkspace:
-    def __init__(self, repo_dir: Path, default_branch: str = "main") -> None:
+    def __init__(
+        self, repo_dir: Path, default_branch: str = "main", allow_init: bool = True
+    ) -> None:
         self._repo = Path(repo_dir)
         self._default_branch = default_branch
+        # A project that NAMES a repository has made a claim about the world;
+        # creating one silently turns a typo into a green run against nothing.
+        # Only a scratch project (no repo_url) may be created on demand.
+        self._allow_init = allow_init
 
     # Read-only identity, for adapters that inspect the same repository without
     # taking a worktree (see infra/git/repository_reader.py).
@@ -146,12 +152,19 @@ class GitBranchWorkspace:
 
     # ---- sync internals (worker thread) ----
     def _ensure_repo(self) -> None:
-        if not (self._repo / ".git").exists():
-            self._repo.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "init", str(self._repo)], check=True, capture_output=True)
-            _git(self._repo, "checkout", "-B", self._default_branch)
-            _git(self._repo, "commit", "--allow-empty", "-m", "chore: initial commit")
-            log.info("workspace.repo_seeded", repo=str(self._repo))
+        if (self._repo / ".git").exists():
+            return
+        if not self._allow_init:
+            raise TaskFailed(
+                f"repository {self._repo} does not exist or is not a git repository; "
+                "fix the project's repo_url and retry",
+                FailureKind.AUTH_ERROR,
+            )
+        self._repo.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(self._repo)], check=True, capture_output=True)
+        _git(self._repo, "checkout", "-B", self._default_branch)
+        _git(self._repo, "commit", "--allow-empty", "-m", "chore: initial commit")
+        log.info("workspace.repo_seeded", repo=str(self._repo))
 
     def _prune_sync(self) -> None:
         if (self._repo / ".git").exists():

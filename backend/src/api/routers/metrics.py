@@ -5,7 +5,8 @@ Aggregates the agent_events stream (decision #33: no separate metrics store) int
 the numbers the run's failure modes need visible: LLM sessions/calls and token
 usage (from the reasoner's llm.call rows) and agent run/failure counts grouped by
 FailureKind — so a rate-limit storm is one number, not a scroll through the feed.
-Always 200; token-guarded like the other control-plane status endpoints.
+Always 200; token-guarded like every other router (applied at mount time in
+`server.py::create_app`).
 """
 
 from __future__ import annotations
@@ -14,12 +15,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
-from src.api.security import require_api_token
 from src.infra.container import AppContainer
 
 router = APIRouter(
     prefix="/metrics",
-    dependencies=[Depends(require_api_token)],
     tags=["metrics"],
 )
 

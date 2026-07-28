@@ -1,8 +1,12 @@
 """AppContainer — the composition root (rebuilt during the integration).
 
-Runtime selection (composition-root config):
-  PROJECT_REPO_DIR      target repo for the git-branching workspace
-                        (defaults to <orchestrator_home>/workspace-repo)
+Repository routing is NOT env-selected either. This container does not read
+PROJECT_REPO_DIR — locked by tests/unit/test_fixture_docs_contract.py. A plan
+reaches a repository through its project: `ProjectDefinition.repo_url`, resolved
+by `infra/git/project_workspace.py` and validated on write by
+`infra/git/repository_binding.py`. A project WITHOUT a repo_url gets a scratch
+repository under <orchestrator_home>/projects/<id>/repo; a project that names
+one and gets it wrong is refused rather than silently given an empty repo.
 
 Neither the REASONER nor the AGENT RUNNER is env-selected — both resolve from
 SQLite:

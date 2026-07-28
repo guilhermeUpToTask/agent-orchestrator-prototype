@@ -22,6 +22,12 @@ class SecretNotFoundError(InfrastructureError):
     code = "SECRET_NOT_FOUND"
 
 
+class ProjectBindingInvalidError(InfrastructureError):
+    """A project names a repository that cannot be used as one."""
+
+    code = "PROJECT_BINDING_INVALID"
+
+
 class AttemptNotFoundError(InfrastructureError):
     code = "ATTEMPT_NOT_FOUND"
 

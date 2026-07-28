@@ -76,8 +76,8 @@ Serves **J1**. All routes token-guarded.
 | Rename model / set capacity | `model_repo` | `PUT /api/models/{model_id}` | `ProvidersSection` | `test_api.py` | ui-partial ([G7](#g7)) | critical |
 | Delete model (bind-guarded) | `model_repo` | `DELETE /api/models/{model_id}` | `ProvidersSection` | `test_api.py` (409) | full | critical |
 | List projects | `project_repo` | `GET /api/projects` | `ProjectsSection`, `Plans` | `test_api.py` | full | critical |
-| Create project | `project_repo` | `POST /api/projects` | `ProjectsSection`, `Plans` | `test_api.py` | full ([G11](#g11)) | critical |
-| Edit project | `project_repo` | `PUT /api/projects/{project_id}` | `ProjectsSection` | `test_api.py` | full ([G11](#g11)) | critical |
+| Create project (binding validated) | `project_repo`, `repository_binding` | `POST /api/projects` | `ProjectsSection`, `Plans` | `test_api.py`, `test_repository_binding.py` | full | critical |
+| Edit project (binding validated) | `project_repo`, `repository_binding` | `PUT /api/projects/{project_id}` | `ProjectsSection` | `test_api.py`, `test_repository_binding.py` | full | critical |
 | Delete project | `project_repo` | `DELETE /api/projects/{project_id}` | `ProjectsSection` | `test_api.py` | full | critical |
 | Read config scope | `config_repo` | `GET /api/config/{scope}` | `ReasonerSection`, `RunnerSection` | `test_api.py` | full | critical |
 | Set config key | `config_repo` | `PUT /api/config/{scope}/{key}` | `ReasonerSection`, `RunnerSection` | `test_api.py` | full | critical |
@@ -93,10 +93,11 @@ Serves **J2**.
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
 | API liveness + version | — | `GET /health` | — | `test_api.py` | api-only | critical |
+| Whole-installation readiness | `routers/readiness.py` (composes the validators below) | `GET /api/readiness` | — | `test_readiness.py` | api-only | critical |
 | Reasoner wiring check | `reasoner/factory.validate_reasoner_config` | `GET /api/reasoner/status` | `ReasonerSection` | `test_api.py`, `test_reasoner_factory.py` | full | critical |
 | Runner mode, bindings, binary probes | `runtime/factory`, `dependency_checker` | `GET /api/runner/status` | `RunnerSection` | `test_api.py`, `test_agent_runner_factory.py` | full | critical |
 | Worker liveness (is anyone running?) | plan/goal lease | — (per-plan `worker_lease` only) | — | `test_worker_pool.py` | hidden ([G10](#g10)) | critical |
-| Repository / workspace readiness | `project_workspace` | — | — | `test_git_workspace.py` | hidden ([G11](#g11)) | critical |
+| Repository / workspace readiness | `repository_binding`, `ProjectWorkspaceResolver.repository_path_for` | `GET /api/projects/{project_id}/readiness` | — | `test_readiness.py`, `test_repository_binding.py` | api-only | critical |
 
 ## 3. Plan lifecycle
 
@@ -170,7 +171,7 @@ Serves **J9**.
 | Retry a blocked planning stage | `pause_resume.retry_planning_stage` | `POST /api/plans/{plan_id}/retry-stage` | `LifecycleRail` | `test_api.py`, `test_agent_binding_recovery.py` | full | critical |
 | Surgical structural edit | `apply_edit.apply_edit` | `POST /api/plans/{plan_id}/edits` | `DetailPanel` | `test_api.py`, `test_contract_editing.py` | ui-partial ([G4](#g4)) | critical |
 | Holistic replan | `request_replan.request_replan` | `POST /api/plans/{plan_id}/replan` | `queries` (`replanMidRunning`) | `test_api.py`, `test_replan_loop.py` | full | critical |
-| Change the retry budget | `update_retry_policy.update_retry_policy` | `POST /api/plans/{plan_id}/retry-policy` | — | `test_retry_policy_update.py` (use case only) | untested ([G6](#g6)) | critical |
+| Change the retry budget | `update_retry_policy.update_retry_policy` | `POST /api/plans/{plan_id}/retry-policy` | — | `test_retry_policy_update.py`, `test_api.py` | api-only | critical |
 | Per-goal blocks and their resolutions | `Plan.goal_blocks`, `block_policy` | `goal_blocks` in `GET /api/plans/{plan_id}` | — | `test_goal_blocks.py`, `test_block_policy.py` | api-only ([G2](#g2)) | critical |
 | Plan-wide block and its resolutions | `Plan.block`, `block_policy` | `block` in `GET /api/plans/{plan_id}` | `Overview`, `AttentionItem` | `test_block_report.py`, `test_block_policy.py` | full | critical |
 | "Is this block mine or the orchestrator's?" | `block_policy.requires_human` | — (`PlanBlock` has no such field to serve) | — | `test_block_policy.py` | hidden — already owned by Phase 5, item 1 | critical |
@@ -220,24 +221,14 @@ Every gap below is verified, has an owner phase, and names the objective test
 that will prove it closed. Nothing here is a request for symmetry: each one
 breaks or hides a step of a job an operator actually performs.
 
-### G1 — The plan lifecycle and the event stream are not token-guarded {#g1}
-
-`src/api/security.py:5` states that when `ORCHESTRATOR_API_TOKEN` is set "every
-control-plane request must present it". It is applied to the `reference`,
-`config`, `reasoner`, `runner` and `metrics` routers only. `plans.router`
-(`routers/plans.py:83`) and `events.router` (`routers/events.py:21`) declare no
-dependency, so the 34 plan operations and the event stream — 35 of the 64,
-including `POST …/publication`, `DELETE /api/plans/{plan_id}`, every gate approval
-and the full plan document with its brief and chat — are served to any
-unauthenticated caller that can reach the port.
-`test_control_plane_token_guard` only exercises `GET /api/providers`.
-
-Mitigated in practice by `api start --host 127.0.0.1`, and the fixtures send the
-token on every call, so an operator reasonably believes it is enforced.
-
-**Owner: Phase 4.** **Test:** parametrize every mutating plan operation plus
-`GET /api/events` with a token set and assert 401 without the header — the same
-shape as `test_control_plane_token_guard`, over the whole surface.
+**Closed by P4.1** (2026-07-28), and deleted from this list per the repo rule
+that a fixed defect is replaced by the test that locks it — G1 (the guard is
+applied at mount time now, proven over the whole OpenAPI inventory by
+`test_control_plane_auth.py`), G6 (`test_api.py::test_retry_policy_can_be_retuned_over_http`,
+which also found that a zero-attempt budget was accepted), and G11
+(`test_repository_binding.py` plus the runtime lock in
+`test_git_workspace.py::test_a_project_that_names_a_missing_repository_is_refused_by_the_resolver`).
+The numbering is left as-is: G2 still means what it meant in the Phase 3 audit.
 
 ### G2 — Per-goal blocks are invisible in the UI {#g2}
 
@@ -285,16 +276,6 @@ curl. The roadmap names this endpoint explicitly.
 **Owner: Phase 5.** **Test:** selecting a running attempt opens the stream and
 appends rendered lines; selecting a finished one renders the captured log.
 
-### G6 — `POST /api/plans/{plan_id}/retry-policy` is untested and unexposed {#g6}
-
-The only route in the app with no test that exercises it. The use case is
-covered (`test_retry_policy_update.py`), the route is not, and no client calls
-it — so raising a retry budget mid-run means curl.
-
-**Owner: Phase 4** (route contract test), **Phase 5** (control). **Test:** post
-a new policy, read it back on the plan document, and assert a stale-version
-conflict returns 409.
-
 ### G7 — The UI silently clears provider and model capacity overrides {#g7}
 
 `PUT /api/providers/{provider_id}` assigns `max_inflight` and `capacity_scope`
@@ -340,18 +321,6 @@ idle" from "worker never started", the single most common local-setup failure.
 **Owner: Phase 4.** **Test:** a worker-health read (last poll, mode, claimed
 plan count) reports a live worker and, after its lease expires, reports it as
 stale.
-
-### G11 — Repository binding is never validated {#g11}
-
-`create_project`/`update_project` (`routers/reference.py:294`, `:303`) store
-`repo_url` with no check that the path exists, is a git repository, or has a
-detectable default branch. The first symptom is an execution-stage failure long
-after the plan was opened, which reads as an orchestrator bug rather than a
-setup mistake.
-
-**Owner: Phase 4.** **Test:** creating a project against a non-repository path
-returns a 422 naming the problem; a valid repo returns the detected default
-branch.
 
 ### G12 — A wedged task cannot be skipped {#g12}
 

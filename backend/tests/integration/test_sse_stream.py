@@ -47,11 +47,21 @@ _TIMEOUT = 10.0
 
 
 @pytest.fixture
-def live_server(tmp_path, monkeypatch):
+def api_token() -> str | None:
+    """No token by default. A test that needs a guarded server overrides this
+    with `@pytest.mark.parametrize("api_token", ["sekrit"])`."""
+    return None
+
+
+@pytest.fixture
+def live_server(tmp_path, monkeypatch, api_token):
     """A real API process (uvicorn, in-thread) with the outbox relay running,
     reachable over an actual loopback socket."""
     monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    if api_token:
+        monkeypatch.setenv("ORCHESTRATOR_API_TOKEN", api_token)
+    else:
+        monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(ProjectDefinition(id="project-1", name="Test project", repo_url=None))
@@ -266,3 +276,25 @@ def test_attempt_log_stream_unknown_attempt_is_404(live_stack):
         plan_id = created.json()["plan_id"]
         resp = client.get(f"/api/plans/{plan_id}/attempts/does-not-exist/log/stream")
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("api_token", ["sekrit"])
+def test_the_guarded_stream_opens_with_a_query_token(live_server):
+    """The one route a browser opens directly, opened the way a browser opens it.
+
+    `EventSource` cannot set headers, so `/api/events` accepts `?token=` — and
+    nothing else does (test_control_plane_auth.py). This is the only place the
+    ACCEPTING side can be asserted: TestClient would block forever on a stream
+    that never completes, so the connection is closed by the reader here.
+    """
+    base_url = live_server
+
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        with client.stream("GET", f"{base_url}/api/events?token=sekrit") as response:
+            assert response.status_code == 200
+
+        with client.stream("GET", f"{base_url}/api/events") as response:
+            assert response.status_code == 401
+
+        with client.stream("GET", f"{base_url}/api/events?token=wrong") as response:
+            assert response.status_code == 401

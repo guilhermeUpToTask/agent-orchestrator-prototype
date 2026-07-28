@@ -560,7 +560,12 @@ export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
   let closed = false;
 
   function connect() {
-    es = new EventSource(`${BASE}/api/events`);
+    // EventSource cannot set request headers, so the token travels in the query
+    // string here — the ONLY route that accepts it that way (see
+    // backend/src/api/security.py::require_api_token_or_query). The server runs
+    // uvicorn with access_log=False so it is never written to a log.
+    const query = API_TOKEN ? `?token=${encodeURIComponent(API_TOKEN)}` : "";
+    es = new EventSource(`${BASE}/api/events${query}`);
 
     es.onopen = () => {
       if (hadError) {

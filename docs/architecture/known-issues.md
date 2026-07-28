@@ -112,29 +112,20 @@ rather than remaining as warnings here.
 
 ## Control-plane exposure
 
-Found by the Phase 3 capability audit (2026-07-28); both rows are classified in
+Found by the Phase 3 capability audit (2026-07-28); classified in
 [capability-matrix.md](capability-matrix.md) with an owner phase and the test
-that closes them.
+that closes it. The token-guard entry that stood here was fixed by P4.1 — the
+guard is applied once at mount time and proven over the whole OpenAPI inventory
+by `tests/integration/test_control_plane_auth.py`.
 
-- **The token guard covers the catalogs, not the plan lifecycle.**
-  `require_api_token` is declared on the `reference`, `config`, `reasoner`,
-  `runner` and `metrics` routers; `plans.router` (`routers/plans.py:83`) and
-  `events.router` (`routers/events.py:21`) declare no dependency. With
-  `ORCHESTRATOR_API_TOKEN` set, 36 of the 64 served operations — every gate
-  approval, `POST …/publication`, `DELETE /api/plans/{plan_id}`, and the whole
-  plan document including brief and chat — still answer an unauthenticated
-  caller, while `security.py:5` states that "every control-plane request must
-  present it". Bounded in practice by the default `--host 127.0.0.1`, and the
-  fixtures send the token on every call, so an operator reasonably believes it
-  is enforced. `test_control_plane_token_guard` only covers `GET /api/providers`.
 - **The settings forms silently clear provider and model capacity overrides.**
   `PUT /api/providers/{provider_id}` assigns `max_inflight` and `capacity_scope`
-  unconditionally from the request body (`routers/reference.py:222`), and `PUT
-  /api/models/{model_id}` rebuilds the row from `{name, max_inflight}` (`:266`).
-  `ProvidersSection.tsx:283` sends neither field, so renaming a provider or
-  model through the UI resets its in-flight ceiling to NULL — reverting an
-  un-freeze #16 capacity decision with no warning and no event. Either the
-  forms carry the fields or the update becomes partial.
+  unconditionally from the request body (`routers/reference.py`), and `PUT
+  /api/models/{model_id}` rebuilds the row from `{name, max_inflight}`.
+  `ProvidersSection.tsx` sends neither field, so renaming a provider or model
+  through the UI resets its in-flight ceiling to NULL — reverting an un-freeze
+  #16 capacity decision with no warning and no event. Either the forms carry the
+  fields or the update becomes partial. Owned by Phase 5.
 
 ## Invariants to preserve
 
