@@ -24,6 +24,7 @@ Read in this order the first time:
 | [events-and-observability.md](architecture/events-and-observability.md) | Transactional outbox, the relay, SSE, agent telemetry, structured logging, secrets hygiene |
 | [data-model.md](architecture/data-model.md) | Every SQLite table, the plan-as-document decision, envelope-encrypted secrets, migrations |
 | [frontend.md](architecture/frontend.md) | The React dashboard: views, data layer, SSE bridge, type generation |
+| [capability-matrix.md](architecture/capability-matrix.md) | **What is supported and where it is exposed**: every capability traced domain → use case → route → frontend → tests, with launch priority and the verified gaps |
 | [known-issues.md](architecture/known-issues.md) | **Verified defects and fragile spots**, with `file:line` evidence — read before operating or reviewing |
 
 The backend's **frozen port contracts** (exact SQL shapes, method signatures, API→use-case map) live next to the code: [`backend/docs/INTEGRATION_GUIDE.md`](../backend/docs/INTEGRATION_GUIDE.md). Per-layer and per-package READMEs live inside `backend/src/` — they are the closest documentation to each line of code.

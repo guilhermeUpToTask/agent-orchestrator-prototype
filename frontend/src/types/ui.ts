@@ -218,6 +218,25 @@ export interface Plan {
     expired: boolean;
     seconds_remaining: number;
   } | null;
+  /** An open provider capacity circuit gating this plan's work. A SIBLING of
+   *  `status_reason`, never folded into it: the root stays RUNNING while this
+   *  is set — it IS running, merely unclaimable until `retry_at`. This is the
+   *  "waiting, recovering automatically" signal; `needs_attention` is the only
+   *  thing here that means a human is required (the outage outlived its
+   *  wall-clock ceiling and opened a block). */
+  provider_waiting: {
+    provider_id: string;
+    /** null = a provider-wide (account-level) circuit. */
+    model_id: string | null;
+    runtime: string;
+    limit_scope: string | null;
+    retry_at: string;
+    /** When the outage started, not when it last failed. */
+    since: string;
+    failure_count: number;
+    safe_message: string;
+    needs_attention: boolean;
+  } | null;
   planning_operation: {
     id: string;
     purpose: string;
@@ -239,6 +258,9 @@ export interface Plan {
   intent_proposal: IntentProposal | null;
   cycle_draft: CycleDraft | null;
   brief: string;
+  /** Nine-phase compatibility only — never the authority for a plan with an
+   *  active cycle. Render `status` / `activity` / `legal_actions` instead. */
+  legacy_phase: string | null;
   phase: PlanPhase;
   iteration: number;
   version: number;
