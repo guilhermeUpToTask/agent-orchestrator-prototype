@@ -1447,6 +1447,44 @@ export type ProjectDefinition = {
 };
 
 /**
+ * ProjectReadinessResponse
+ */
+export type ProjectReadinessResponse = {
+    /**
+     * Binding
+     */
+    binding: string;
+    /**
+     * Repo Url
+     */
+    repo_url: string | null;
+    /**
+     * Resolved Path
+     */
+    resolved_path: string | null;
+    /**
+     * Exists
+     */
+    exists: boolean;
+    /**
+     * Is Git Repository
+     */
+    is_git_repository: boolean;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+    /**
+     * Clean
+     */
+    clean: boolean | null;
+    /**
+     * Problem
+     */
+    problem: string | null;
+};
+
+/**
  * ProposalKind
  */
 export type ProposalKind = 'initial' | 'replan';
@@ -1576,6 +1614,38 @@ export type PublicationRequest = {
 };
 
 /**
+ * ReadinessCheck
+ */
+export type ReadinessCheck = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Status
+     */
+    status: 'ok' | 'warn' | 'fail';
+    /**
+     * Detail
+     */
+    detail: string;
+};
+
+/**
+ * ReadinessResponse
+ */
+export type ReadinessResponse = {
+    /**
+     * Ok
+     */
+    ok: boolean;
+    /**
+     * Checks
+     */
+    checks: Array<ReadinessCheck>;
+};
+
+/**
  * ReasonerStatusResponse
  */
 export type ReasonerStatusResponse = {
@@ -1670,6 +1740,11 @@ export type RetryPolicy = {
  * All fields optional: only the ones an operator sets are changed (partial
  * merge over the plan's current retry policy); the rest keep their current
  * value. Mirrors execution.retry_* config field-for-field.
+ *
+ * The bounds reject a policy that is not one — a budget of zero attempts, a
+ * negative wait, a multiplier that shrinks the backoff — rather than storing
+ * it and discovering it during an outage. They live on the DTO because the
+ * domain `RetryPolicy` is frozen.
  */
 export type RetryPolicyUpdateRequest = {
     /**
@@ -2328,6 +2403,16 @@ export type WorkerLeaseResponse = {
 
 export type PlansBindProjectRouteData = {
     body: ProjectBindingRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2358,10 +2443,29 @@ export type PlansBindProjectRouteResponse = PlansBindProjectRouteResponses[keyof
 
 export type PlansListPlansData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/api/plans';
 };
+
+export type PlansListPlansErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansListPlansError = PlansListPlansErrors[keyof PlansListPlansErrors];
 
 export type PlansListPlansResponses = {
     /**
@@ -2383,6 +2487,14 @@ export type PlansCreateData = {
          * Idempotency-Key
          */
         'Idempotency-Key'?: string | null;
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
     };
     path?: never;
     query?: never;
@@ -2409,6 +2521,16 @@ export type PlansCreateResponse = PlansCreateResponses[keyof PlansCreateResponse
 
 export type PlansDeletePlanRouteData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2439,6 +2561,16 @@ export type PlansDeletePlanRouteResponse = PlansDeletePlanRouteResponses[keyof P
 
 export type PlansGetPlanData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2469,6 +2601,16 @@ export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanRespo
 
 export type PlansClearPlanningArtifactsData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2508,6 +2650,16 @@ export type PlansClearPlanningArtifactsResponse = PlansClearPlanningArtifactsRes
 
 export type PlansListPlanningArtifactsData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2553,6 +2705,16 @@ export type PlansListPlanningArtifactsResponse = PlansListPlanningArtifactsRespo
 
 export type PlansAttemptTimelineData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2583,6 +2745,16 @@ export type PlansAttemptTimelineResponse = PlansAttemptTimelineResponses[keyof P
 
 export type PlansCancelIntentRouteData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2613,6 +2785,16 @@ export type PlansCancelIntentRouteResponse = PlansCancelIntentRouteResponses[key
 
 export type PlansProposeIntentRouteData = {
     body: IntentProposalRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2647,6 +2829,16 @@ export type PlansProposeIntentRouteResponse = PlansProposeIntentRouteResponses[k
 
 export type PlansReviseIntentRouteData = {
     body: IntentProposalRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2681,6 +2873,16 @@ export type PlansReviseIntentRouteResponse = PlansReviseIntentRouteResponses[key
 
 export type PlansApproveIntentRouteData = {
     body: ReviewDecisionRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2711,6 +2913,16 @@ export type PlansApproveIntentRouteResponse = PlansApproveIntentRouteResponses[k
 
 export type PlansCancelCycleDraftRouteData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2741,6 +2953,16 @@ export type PlansCancelCycleDraftRouteResponse = PlansCancelCycleDraftRouteRespo
 
 export type PlansSubmitCycleDraftRouteData = {
     body: CycleDraftRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2775,6 +2997,16 @@ export type PlansSubmitCycleDraftRouteResponse = PlansSubmitCycleDraftRouteRespo
 
 export type PlansReviseCycleDraftRouteData = {
     body: CycleDraftRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2809,6 +3041,16 @@ export type PlansReviseCycleDraftRouteResponse = PlansReviseCycleDraftRouteRespo
 
 export type PlansActivateCycleRouteData = {
     body: ReviewDecisionRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2843,6 +3085,16 @@ export type PlansActivateCycleRouteResponse = PlansActivateCycleRouteResponses[k
 
 export type PlansPublishCycleRouteData = {
     body: PublicationRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2873,6 +3125,16 @@ export type PlansPublishCycleRouteResponse = PlansPublishCycleRouteResponses[key
 
 export type PlansEditPlanData = {
     body: EditRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2906,6 +3168,16 @@ export type PlansPauseData = {
      * Body
      */
     body?: PauseRequest | null;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2936,6 +3208,16 @@ export type PlansPauseResponse = PlansPauseResponses[keyof PlansPauseResponses];
 
 export type PlansResumeData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2966,6 +3248,16 @@ export type PlansResumeResponse = PlansResumeResponses[keyof PlansResumeResponse
 
 export type PlansRetryBlockedTaskData = {
     body: RetryTaskRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -2999,6 +3291,16 @@ export type PlansRetryBlockedPlanningStageData = {
      * Body
      */
     body?: RetryStageRequest | null;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3029,6 +3331,16 @@ export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningSt
 
 export type PlansUpdateRetryPolicyRouteData = {
     body: RetryPolicyUpdateRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3059,6 +3371,16 @@ export type PlansUpdateRetryPolicyRouteResponse = PlansUpdateRetryPolicyRouteRes
 
 export type PlansApproveData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3089,6 +3411,16 @@ export type PlansApproveResponse = PlansApproveResponses[keyof PlansApproveRespo
 
 export type PlansReopenData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3119,6 +3451,16 @@ export type PlansReopenResponse = PlansReopenResponses[keyof PlansReopenResponse
 
 export type PlansFinishData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3149,6 +3491,16 @@ export type PlansFinishResponse = PlansFinishResponses[keyof PlansFinishResponse
 
 export type PlansReplanFromReviewData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3179,6 +3531,16 @@ export type PlansReplanFromReviewResponse = PlansReplanFromReviewResponses[keyof
 
 export type PlansReplanMidRunningData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3209,6 +3571,16 @@ export type PlansReplanMidRunningResponse = PlansReplanMidRunningResponses[keyof
 
 export type PlansDiscoveryData = {
     body: MessageRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3239,6 +3611,16 @@ export type PlansDiscoveryResponse = PlansDiscoveryResponses[keyof PlansDiscover
 
 export type PlansReplanningData = {
     body: MessageRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3269,6 +3651,16 @@ export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplan
 
 export type PlansAttemptLogData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3308,6 +3700,16 @@ export type PlansAttemptLogResponse = PlansAttemptLogResponses[keyof PlansAttemp
 
 export type PlansAttemptLogStreamData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3345,6 +3747,16 @@ export type PlansAttemptLogStreamResponses = {
 
 export type PlansAgentEventsData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -3390,6 +3802,16 @@ export type PlansAgentEventsResponse = PlansAgentEventsResponses[keyof PlansAgen
 
 export type PlansChatHistoryData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path: {
         /**
          * Plan Id
@@ -4260,6 +4682,46 @@ export type ReferenceUpdateProjectResponses = {
 
 export type ReferenceUpdateProjectResponse = ReferenceUpdateProjectResponses[keyof ReferenceUpdateProjectResponses];
 
+export type ReferenceProjectReadinessData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}/readiness';
+};
+
+export type ReferenceProjectReadinessErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceProjectReadinessError = ReferenceProjectReadinessErrors[keyof ReferenceProjectReadinessErrors];
+
+export type ReferenceProjectReadinessResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProjectReadinessResponse;
+};
+
+export type ReferenceProjectReadinessResponse = ReferenceProjectReadinessResponses[keyof ReferenceProjectReadinessResponses];
+
 export type ConfigGetScopeData = {
     body?: never;
     headers?: {
@@ -4502,12 +4964,71 @@ export type MetricsMetricsResponses = {
 
 export type MetricsMetricsResponse = MetricsMetricsResponses[keyof MetricsMetricsResponses];
 
-export type EventsStreamEventsData = {
+export type ReadinessReadinessData = {
     body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
     path?: never;
     query?: never;
+    url: '/api/readiness';
+};
+
+export type ReadinessReadinessErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReadinessReadinessError = ReadinessReadinessErrors[keyof ReadinessReadinessErrors];
+
+export type ReadinessReadinessResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReadinessResponse;
+};
+
+export type ReadinessReadinessResponse = ReadinessReadinessResponses[keyof ReadinessReadinessResponses];
+
+export type EventsStreamEventsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: {
+        /**
+         * Token
+         */
+        token?: string | null;
+    };
     url: '/api/events';
 };
+
+export type EventsStreamEventsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EventsStreamEventsError = EventsStreamEventsErrors[keyof EventsStreamEventsErrors];
 
 export type EventsStreamEventsResponses = {
     /**

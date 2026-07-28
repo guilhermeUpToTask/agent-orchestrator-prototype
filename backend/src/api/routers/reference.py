@@ -13,6 +13,9 @@ there. Open when no token is configured, i.e. local dev.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -26,7 +29,7 @@ from src.domain.factories.identity import new_id
 from src.domain.policies.retry_policies import RetryPolicy
 from src.infra.container import AppContainer
 from src.infra.db.secret_ref import SecretRef
-from src.infra.errors import InfrastructureError
+from src.infra.errors import InfrastructureError, ProjectBindingInvalidError
 from src.infra.git.repository_binding import validate_repo_url
 from src.infra.runtime.factory import AGENT_RUNNER_CONFIG_INVALID, RUNTIME_TYPES
 
@@ -315,3 +318,72 @@ def update_project(
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.project_repo.delete(project_id)
+
+
+class ProjectReadinessResponse(BaseModel):
+    binding: str
+    repo_url: str | None
+    resolved_path: str | None
+    exists: bool
+    is_git_repository: bool
+    default_branch: str | None
+    # Informational, never a readiness verdict: attempts branch from a COMMITTED
+    # ref, so uncommitted changes in the target's main worktree do not affect a
+    # run. An operator about to start a 25-minute cycle still wants to know.
+    # None when the path is not a repository at all.
+    clean: bool | None
+    problem: str | None
+
+
+@router.get("/projects/{project_id}/readiness", response_model=ProjectReadinessResponse)
+def project_readiness(
+    project_id: str, container: AppContainer = Depends(get_container)
+) -> ProjectReadinessResponse:
+    """Diagnose one project's repository without running a plan against it.
+
+    Write-time validation (`validate_repo_url`, called from create/update
+    above) cannot cover a path that disappears afterwards, so this re-checks
+    the live filesystem on every call. The scratch/local/remote path itself is
+    NOT re-derived here — `ProjectWorkspaceResolver.repository_path_for` is the
+    one place that rule lives.
+    """
+    project = container.project_repo.get(project_id)
+    resolved_path = container.workspace_resolver.repository_path_for(project)
+
+    try:
+        binding = validate_repo_url(project.repo_url)
+        kind = binding.kind
+        default_branch = binding.default_branch
+        problem: str | None = None
+    except ProjectBindingInvalidError as exc:
+        # A readiness probe that raises is useless. validate_repo_url only
+        # ever raises for a local-looking repo_url (scratch and remote never
+        # do), so catching exactly its declared error type here — the one
+        # broad-looking catch that is correct — turns the failure into data.
+        kind = "local"
+        default_branch = None
+        problem = exc.message
+
+    is_repository = (resolved_path / ".git").exists()
+    return ProjectReadinessResponse(
+        binding=kind,
+        repo_url=project.repo_url,
+        resolved_path=str(resolved_path),
+        exists=resolved_path.exists(),
+        is_git_repository=is_repository,
+        default_branch=default_branch,
+        clean=_worktree_is_clean(resolved_path) if is_repository else None,
+        problem=problem,
+    )
+
+
+def _worktree_is_clean(repo: Path) -> bool | None:
+    """None when git itself cannot answer — an unreadable repo is not "dirty"."""
+    result = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() == ""

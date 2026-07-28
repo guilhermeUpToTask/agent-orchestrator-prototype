@@ -39,6 +39,7 @@ from src.api.routers import (
     events,
     metrics,
     plans,
+    readiness,
     reasoner,
     reference,
     runner,
@@ -102,10 +103,14 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         title="AIPOM Orchestrator API",
         version=_API_VERSION,
         description=(
-            "RESTful API for the AIPOM AI project orchestrator: the 9-phase "
-            "plan lifecycle (discovery, architecture, enriching, the two human "
-            "gates, execution, the replan loop), reference-data catalogs, "
-            "two-tier config, and the live SSE event stream."
+            "RESTful API for the AIPOM AI project orchestrator: the cyclic "
+            "project-plan lifecycle (intent, cycle architecture, JIT goal "
+            "enrichment, execution, publication) behind human review gates, "
+            "reference-data catalogs, two-tier config, readiness reads, and the "
+            "live SSE event stream. A project owns exactly one long-lived plan "
+            "whose root is never terminal; the nine-phase `phase` field is a "
+            "compatibility projection for migrated plans and is never the "
+            "authority for a plan with an active cycle."
         ),
         generate_unique_id_function=_unique_operation_id,
         lifespan=lifespan,
@@ -139,6 +144,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(reasoner.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(runner.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(metrics.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(readiness.router, prefix=_prefix, dependencies=_guarded)
     # The one exception, and only to the MECHANISM: EventSource cannot send
     # headers, so the stream a browser opens directly also accepts `?token=`.
     app.include_router(
