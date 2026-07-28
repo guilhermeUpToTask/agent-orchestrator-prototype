@@ -127,6 +127,10 @@ export interface PlanBlock {
   run_id: string | null;
   evidence_refs: string[];
   legal_resolutions: string[];
+  /** Whether resolving this needs a human at all, or whether the orchestrator
+   *  recovers on its own. Projected from `block_policy` server-side — this is
+   *  what separates "needs you" from "waiting, recovering automatically". */
+  requires_human: boolean;
   created_at: string;
   resolved_at: string | null;
   resolution: string | null;
@@ -194,6 +198,11 @@ export interface Plan {
   current_task_id: string | null;
   tdd_stage: string | null;
   legal_actions: string[];
+  /** Where each advertised action is served, e.g.
+   *  `{ pause: "POST /api/plans/{plan_id}/pause" }`. `{plan_id}` stays a
+   *  template. A `review:*` entry resolves against whichever gate is open —
+   *  the one mapping a client cannot derive for itself. */
+  action_endpoints: Record<string, string>;
   pause_requested: boolean;
   active_run: {
     run_id: string;

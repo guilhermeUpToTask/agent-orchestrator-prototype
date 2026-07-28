@@ -255,6 +255,76 @@ export type AttemptTimelineResponse = {
 };
 
 /**
+ * BlockResponse
+ *
+ * The domain `PlanBlock` plus the one fact only `block_policy` knows.
+ *
+ * `requires_human` is a pure function of `kind` (`src/app/block_policy.py`),
+ * so it is projected here rather than persisted: a policy change must not
+ * leave stale copies in old rows, and adding a field to the FROZEN
+ * `PlanBlock` would need a domain un-freeze for a value the block can
+ * already derive from a field it carries today.
+ */
+export type BlockResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Stage
+     */
+    stage: string;
+    /**
+     * Explanation
+     */
+    explanation: string;
+    /**
+     * Goal Id
+     */
+    goal_id: string | null;
+    /**
+     * Task Id
+     */
+    task_id: string | null;
+    /**
+     * Task Revision
+     */
+    task_revision: number | null;
+    /**
+     * Run Id
+     */
+    run_id: string | null;
+    /**
+     * Evidence Refs
+     */
+    evidence_refs: Array<string>;
+    /**
+     * Legal Resolutions
+     */
+    legal_resolutions: Array<string>;
+    /**
+     * Requires Human
+     */
+    requires_human: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Resolved At
+     */
+    resolved_at: string | null;
+    /**
+     * Resolution
+     */
+    resolution: string | null;
+};
+
+/**
  * Capability
  *
  * A named capability an agent can satisfy, bundling the tools it implies.
@@ -1079,64 +1149,6 @@ export type PauseRequest = {
 };
 
 /**
- * PlanBlock
- */
-export type PlanBlock = {
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Kind
-     */
-    kind: string;
-    /**
-     * Explanation
-     */
-    explanation: string;
-    /**
-     * Stage
-     */
-    stage: string;
-    /**
-     * Goal Id
-     */
-    goal_id?: string | null;
-    /**
-     * Task Id
-     */
-    task_id?: string | null;
-    /**
-     * Task Revision
-     */
-    task_revision?: number | null;
-    /**
-     * Run Id
-     */
-    run_id?: string | null;
-    /**
-     * Evidence Refs
-     */
-    evidence_refs?: Array<string>;
-    /**
-     * Legal Resolutions
-     */
-    legal_resolutions?: Array<string>;
-    /**
-     * Created At
-     */
-    created_at: string;
-    /**
-     * Resolved At
-     */
-    resolved_at?: string | null;
-    /**
-     * Resolution
-     */
-    resolution?: string | null;
-};
-
-/**
  * PlanCreatedResponse
  */
 export type PlanCreatedResponse = {
@@ -1225,6 +1237,12 @@ export type PlanDetailResponse = {
      */
     legal_actions: Array<string>;
     /**
+     * Action Endpoints
+     */
+    action_endpoints: {
+        [key: string]: string;
+    };
+    /**
      * Pause Requested
      */
     pause_requested: boolean;
@@ -1251,12 +1269,12 @@ export type PlanDetailResponse = {
     planning_progress: string | null;
     active_cycle: Cycle | null;
     pending_gate: ReviewGate | null;
-    block: PlanBlock | null;
+    block: BlockResponse | null;
     /**
      * Goal Blocks
      */
     goal_blocks: {
-        [key: string]: PlanBlock;
+        [key: string]: BlockResponse;
     };
     /**
      * Goals
@@ -2399,6 +2417,52 @@ export type WorkerLeaseResponse = {
      * Seconds Remaining
      */
     seconds_remaining: number;
+};
+
+/**
+ * WorkerStatusResponse
+ */
+export type WorkerStatusResponse = {
+    /**
+     * Worker Id
+     */
+    worker_id: string;
+    /**
+     * Mode
+     */
+    mode: string;
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Last Seen At
+     */
+    last_seen_at: string;
+    /**
+     * Poll Seconds
+     */
+    poll_seconds: number;
+    /**
+     * Lease Seconds
+     */
+    lease_seconds: number;
+    /**
+     * Max Concurrent Goals
+     */
+    max_concurrent_goals: number;
+    /**
+     * Inflight Goals
+     */
+    inflight_goals: number;
+    /**
+     * Seconds Since Seen
+     */
+    seconds_since_seen: number;
+    /**
+     * Stale
+     */
+    stale: boolean;
 };
 
 export type PlansBindProjectRouteData = {
@@ -4998,6 +5062,43 @@ export type ReadinessReadinessResponses = {
 };
 
 export type ReadinessReadinessResponse = ReadinessReadinessResponses[keyof ReadinessReadinessResponses];
+
+export type WorkersListWorkersData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/workers';
+};
+
+export type WorkersListWorkersErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WorkersListWorkersError = WorkersListWorkersErrors[keyof WorkersListWorkersErrors];
+
+export type WorkersListWorkersResponses = {
+    /**
+     * Response Workers-List Workers
+     *
+     * Successful Response
+     */
+    200: Array<WorkerStatusResponse>;
+};
+
+export type WorkersListWorkersResponse = WorkersListWorkersResponses[keyof WorkersListWorkersResponses];
 
 export type EventsStreamEventsData = {
     body?: never;

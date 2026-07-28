@@ -17,7 +17,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -526,3 +535,29 @@ class SecretTable(Base):
     updated_at: Mapped[str] = mapped_column(
         String, nullable=False, default=_utcnow_iso, onupdate=_utcnow_iso
     )
+
+
+# ---------------------------------------------------------------------------
+# Worker registry — best-effort liveness, written off the event loop by the
+# worker's own heartbeat task (never inside the plan UnitOfWork).
+# ---------------------------------------------------------------------------
+
+
+class WorkerTable(Base):
+    """A worker process reporting that it is alive.
+
+    NOT plan-scoped: a worker outlives every plan, so no FK and no cascade.
+    Upserted by worker_id rather than appended, so a restarted worker replaces
+    its own row and the table stays the size of the fleet.
+    """
+
+    __tablename__ = "workers"
+
+    worker_id: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[str] = mapped_column(String, nullable=False)
+    last_seen_at: Mapped[str] = mapped_column(String, nullable=False)
+    poll_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    lease_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_concurrent_goals: Mapped[int] = mapped_column(Integer, nullable=False)
+    inflight_goals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

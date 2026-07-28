@@ -34,6 +34,7 @@ concurrent with itself). Every spawned goal-worker task gets its OWN fresh
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
 import structlog
 
@@ -43,6 +44,11 @@ from src.domain.errors.tasks_errors import StaleVersionError
 from src.infra.container import AppContainer
 from src.infra.runtime.dependency_checker import check_dependencies
 from src.infra.runtime.factory import validate_agent_runner_mode
+
+# Deliberately independent of poll_seconds, which defaults to 1.0 and is driven
+# far lower in tests: a heartbeat is liveness, not a poll, and there is no value
+# in a write per tick against the database the claim scan is tuned around.
+_HEARTBEAT_SECONDS = 5.0
 
 log = structlog.get_logger(__name__)
 
@@ -158,6 +164,35 @@ async def run_worker_forever(
             # natural expiry.
             goal_uow.goal_leases.release(plan_id, goal_id, worker_id)
 
+    async def _heartbeat() -> None:
+        """Liveness, reported from its OWN task rather than the loop body.
+
+        The coordinator loop below parks in `asyncio.wait(FIRST_COMPLETED)` for
+        the whole of a long goal, so a beat written inline would go silent for
+        exactly that window and report a BUSY worker as dead — an operator would
+        restart a worker that is working.
+
+        `WorkerRegistry.beat` writes through `asyncio.to_thread`, which matters
+        here for the same reason the loop below refuses to claim while goals are
+        in flight: a blocking SQLite write on the event-loop thread can wedge
+        against a lock whose owner is a coroutine waiting for that same loop.
+        The write is best-effort — it logs and returns rather than raising, so a
+        telemetry hiccup never takes down a working worker.
+        """
+        while stop is None or not stop.is_set():
+            await container.worker_registry.beat(
+                worker_id,
+                mode=runner_mode.mode,
+                poll_seconds=poll_seconds,
+                lease_seconds=lease_seconds,
+                max_concurrent_goals=max_concurrent_goals,
+                inflight_goals=len(inflight),
+                now=container.clock.now(),
+            )
+            await asyncio.sleep(_HEARTBEAT_SECONDS)
+
+    heartbeat = asyncio.ensure_future(_heartbeat())
+
     while stop is None or not stop.is_set():
         # SQLite access is synchronous. Do not let the coordinator perform a
         # plan claim (or another goal-claim scan) while goal tasks are in
@@ -240,4 +275,7 @@ async def run_worker_forever(
     if inflight:
         log.info("worker.draining_goal_pool", worker_id=worker_id, count=len(inflight))
         await asyncio.gather(*inflight.keys(), return_exceptions=True)
+    heartbeat.cancel()
+    with suppress(asyncio.CancelledError):
+        await heartbeat
     log.info("worker.stopped", worker_id=worker_id)

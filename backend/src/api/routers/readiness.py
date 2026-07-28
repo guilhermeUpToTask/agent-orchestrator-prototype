@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
+from src.api.routers.workers import STALE_AFTER_SECONDS
 from src.infra.container import AppContainer
 from src.infra.db.secret_store import MASTER_KEY_ENV
 from src.infra.errors import ProjectBindingInvalidError
@@ -69,6 +70,7 @@ def readiness(container: AppContainer = Depends(get_container)) -> ReadinessResp
         _secrets(reasoner_status.mode, runner_status.mode),
         _catalog(container),
         _projects(container),
+        _workers(container),
     ]
     return ReadinessResponse(ok=all(check.status != "fail" for check in checks), checks=checks)
 
@@ -155,6 +157,36 @@ def _catalog(container: AppContainer) -> ReadinessCheck:
     status: Status = "ok" if agents and providers and models else "fail"
     detail = f"{len(capabilities)} capabilities · {len(agents)} agents · {len(models)} provider/model"
     return ReadinessCheck(name="catalog", status=status, detail=detail)
+
+
+def _workers(container: AppContainer) -> ReadinessCheck:
+    """`fail` for never-started, `warn` for went-quiet.
+
+    They are different mistakes. No row at all means the operator has not run
+    `orchestrate worker start` — nothing will ever pick up a plan, and the
+    checklist should say so plainly. A row that has gone stale usually means a
+    restart in progress, which resolves itself; calling that a failure would
+    train an operator to ignore this check.
+    """
+    now = container.clock.now()
+    rows = container.worker_registry.list_workers()
+    if not rows:
+        return ReadinessCheck(
+            name="workers",
+            status="fail",
+            detail="no worker has reported — start one with `orchestrate worker start`",
+        )
+    ages = [(now - row.last_seen_at).total_seconds() for row in rows]
+    fresh = [age for age in ages if age <= STALE_AFTER_SECONDS]
+    if not fresh:
+        return ReadinessCheck(
+            name="workers",
+            status="warn",
+            detail=f"{len(rows)} worker(s) known, none seen in the last {min(ages):.0f}s",
+        )
+    return ReadinessCheck(
+        name="workers", status="ok", detail=f"{len(fresh)} of {len(rows)} worker(s) live"
+    )
 
 
 def _projects(container: AppContainer) -> ReadinessCheck:

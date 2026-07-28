@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_container
+from src.app.block_policy import requires_human
 from src.app.execution_records import (
     ExecutionAttemptStatus,
     PlanningOperation,
@@ -62,6 +63,7 @@ from src.app.use_cases.update_retry_policy import update_retry_policy
 from src.domain.errors.base import DomainError
 from src.domain.entities.execution_contracts import ContractCriterion, VerificationStrategy
 from src.domain.entities.goal import Goal
+from src.domain.aggregates.planner_orchestrator import Plan
 from src.domain.entities.planning_artifacts import (
     Cycle,
     CycleDraft,
@@ -71,6 +73,7 @@ from src.domain.entities.planning_artifacts import (
     PlanBlock,
     ProposalKind,
     ReviewGate,
+    ReviewSubjectType,
 )
 from src.domain.entities.task import Task
 from src.domain.errors.planning_errors import InvalidEditError
@@ -168,6 +171,109 @@ class ProviderWaitingResponse(BaseModel):
     needs_attention: bool  # the outage outlived its ceiling and opened a block
 
 
+class BlockResponse(BaseModel):
+    """The domain `PlanBlock` plus the one fact only `block_policy` knows.
+
+    `requires_human` is a pure function of `kind` (`src/app/block_policy.py`),
+    so it is projected here rather than persisted: a policy change must not
+    leave stale copies in old rows, and adding a field to the FROZEN
+    `PlanBlock` would need a domain un-freeze for a value the block can
+    already derive from a field it carries today.
+    """
+
+    id: str
+    kind: str
+    stage: str
+    explanation: str
+    goal_id: str | None
+    task_id: str | None
+    task_revision: int | None
+    run_id: str | None
+    evidence_refs: list[str]
+    legal_resolutions: list[str]
+    requires_human: bool
+    created_at: datetime
+    resolved_at: datetime | None
+    resolution: str | None
+
+
+def _block_response(block: PlanBlock) -> BlockResponse:
+    """Project a domain block into its served shape.
+
+    Fields are listed explicitly rather than via `**block.model_dump()` so
+    that a future field added to `PlanBlock` fails loudly here (a KeyError on
+    an unexpected/missing name) instead of silently passing through — see
+    the design's "no catch-all" rule (P4.2 §3.4).
+    """
+    return BlockResponse(
+        id=block.id,
+        kind=block.kind,
+        stage=block.stage,
+        explanation=block.explanation,
+        goal_id=block.goal_id,
+        task_id=block.task_id,
+        task_revision=block.task_revision,
+        run_id=block.run_id,
+        evidence_refs=block.evidence_refs,
+        legal_resolutions=block.legal_resolutions,
+        requires_human=requires_human(block.kind),
+        created_at=block.created_at,
+        resolved_at=block.resolved_at,
+        resolution=block.resolution,
+    )
+
+
+# Where each advertised action is actually served. `Plan.legal_actions`
+# publishes raw strings, and `block_policy.py` has mapped them to routes in a
+# COMMENT — which no client can read and no test can execute. This is that
+# comment, promoted to data.
+#
+# `{plan_id}` stays a template rather than being interpolated: the value is then
+# directly comparable to `app.openapi()["paths"]`, which is what lets
+# test_legal_actions_contract.py verify the map instead of trusting it.
+_ACTION_ROUTES: dict[str, str] = {
+    "pause": "POST /api/plans/{plan_id}/pause",
+    "resume": "POST /api/plans/{plan_id}/resume",
+    "start_replan": "POST /api/plans/{plan_id}/replan",
+    "start_intent": "POST /api/plans/{plan_id}/intent",
+    "edit_pending_work": "POST /api/plans/{plan_id}/edits",
+    "edit_task": "POST /api/plans/{plan_id}/edits",
+    "retry_stage": "POST /api/plans/{plan_id}/retry-stage",
+    "wait_and_retry": "POST /api/plans/{plan_id}/retry",
+    "bind_project": "POST /api/plans/{plan_id}/project-binding",
+}
+
+# A `review:<decision>` is served by a different route depending on WHICH gate
+# is open — the one part of the vocabulary a client genuinely cannot derive,
+# because only the server knows the open gate's subject.
+_GATE_ROUTES: dict[ReviewSubjectType, str] = {
+    ReviewSubjectType.INTENT: "POST /api/plans/{plan_id}/intent/approve",
+    ReviewSubjectType.CYCLE_DRAFT: "POST /api/plans/{plan_id}/cycle-draft/approve",
+    ReviewSubjectType.CYCLE_COMPLETION: "POST /api/plans/{plan_id}/publication",
+}
+
+
+def action_endpoints_for(plan: Plan) -> dict[str, str]:
+    """The route serving each currently-advertised action.
+
+    An action with no known route is OMITTED rather than guessed: a wrong
+    endpoint is worse than a missing one, because the client would call it and
+    get a 404 it cannot interpret. `test_legal_actions_contract.py` asserts the
+    omission never happens, so a new action cannot ship unmapped.
+    """
+    endpoints: dict[str, str] = {}
+    for action in plan.legal_actions:
+        if action.startswith("review:"):
+            gate = plan.review_gate
+            if gate is not None and gate.subject_type in _GATE_ROUTES:
+                endpoints[action] = _GATE_ROUTES[gate.subject_type]
+            continue
+        route = _ACTION_ROUTES.get(action)
+        if route is not None:
+            endpoints[action] = route
+    return endpoints
+
+
 class PlanDetailResponse(BaseModel):
     id: str
     project_id: str | None
@@ -180,6 +286,9 @@ class PlanDetailResponse(BaseModel):
     current_task_id: str | None
     tdd_stage: str | None
     legal_actions: list[str]
+    # Parallel to `legal_actions`: the route serving each one. The strings stay
+    # exactly as they were for existing clients; this is purely additive.
+    action_endpoints: dict[str, str]
     pause_requested: bool
     paused: bool
     paused_reason: str | None
@@ -190,13 +299,13 @@ class PlanDetailResponse(BaseModel):
     planning_progress: str | None
     active_cycle: Cycle | None
     pending_gate: ReviewGate | None
-    block: PlanBlock | None
+    block: BlockResponse | None
     # Domain unfreeze #14 — per-goal blocks: goal_id -> that goal's own active
     # (or resolved-but-recent) PlanBlock, independent of the plan-wide `block`
     # scalar above. Only entries with `.active` True are currently unresolved;
     # callers resolving one pass its goal_id to POST /retry (or the relevant
     # resolution endpoint) exactly as they already do for `block.goal_id`.
-    goal_blocks: dict[str, PlanBlock]
+    goal_blocks: dict[str, BlockResponse]
     goals: list[Goal]
     cycles: list[Cycle]
     intent_proposal: IntentProposal | None
@@ -729,6 +838,7 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         current_task_id=current_task.id if current_task is not None else None,
         tdd_stage=current_task.tdd_stage if current_task is not None else None,
         legal_actions=plan.legal_actions,
+        action_endpoints=action_endpoints_for(plan),
         pause_requested=plan.pause_requested,
         paused=plan.paused,
         paused_reason=plan.paused_reason,
@@ -770,9 +880,15 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
             if plan.review_gate is not None and plan.review_gate.unresolved
             else None
         ),
-        block=(plan.block if plan.block is not None and plan.block.active else None),
+        block=(
+            _block_response(plan.block)
+            if plan.block is not None and plan.block.active
+            else None
+        ),
         goal_blocks={
-            goal_id: block for goal_id, block in plan.goal_blocks.items() if block.active
+            goal_id: _block_response(block)
+            for goal_id, block in plan.goal_blocks.items()
+            if block.active
         },
         goals=goals,
         cycles=plan.cycles,
