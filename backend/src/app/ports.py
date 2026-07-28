@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from src.app.execution_records import ExecutionRecordRepository
+from src.app.promotion_records import GoalPromotion, GoalPromotionRepository
 from src.app.runtime_failures import RuntimeFailure
 from src.app.sandbox_port import Sandbox, SandboxPolicy, SandboxProbeResult
 from src.domain.events.base import DomainEvent
@@ -47,6 +48,8 @@ __all__ = [
     "ConversationMode",
     "ExecutionRecordRepository",
     "GoalLeaseRepository",
+    "GoalPromotion",
+    "GoalPromotionRepository",
     "Outbox",
     "PlanningArtifact",
     "PlanningArtifactStore",
@@ -362,6 +365,8 @@ class UnitOfWork(Protocol):
     def executions(self) -> ExecutionRecordRepository: ...
     @property
     def goal_leases(self) -> GoalLeaseRepository: ...
+    @property
+    def promotions(self) -> GoalPromotionRepository: ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...
