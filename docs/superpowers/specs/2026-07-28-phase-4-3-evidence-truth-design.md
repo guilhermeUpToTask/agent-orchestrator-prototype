@@ -157,6 +157,24 @@ silently go missing makes the read model under-report where code went, which
 defeats the sub-project. It belongs in the transaction that records the goal
 completing.
 
+**It is also the option that reduces lock contention, not the one that adds it.**
+`engine.py:43-46` runs `journal_mode=WAL` — concurrent readers and exactly **one
+writer** — with `busy_timeout` so contention waits, and `_session.py:34-51`
+retries lock errors on exponential backoff before failing with `DB_LOCKED`. The
+`db.locked_retry` warning at `:48` exists because that contention is real.
+
+Inside the UoW, the `INSERT` rides in a transaction that already holds the single
+writer slot: **no new lock acquisition and no new contender**. On its own
+connection it would open a second transaction competing with the plan finalize
+path — the hottest write in the system — burning `busy_timeout` and retries, and
+reproducing the shape behind the worker self-deadlock P4.2 designed the heartbeat
+around (a blocking SQLite wait on the event-loop thread while the lock's owner is
+a coroutine waiting for that same loop).
+
+The honest cost is that the finalize transaction holds the writer lock marginally
+longer for one extra `INSERT`, once per goal promotion — against an entire extra
+transaction and a possible retry storm.
+
 ### 3.3 The write seam already exists and is already guarded
 
 `_promote_goal` does the merge *outside* the transaction at `:1306` — correct
@@ -198,6 +216,17 @@ infra, and the domain is frozen. So app is the one layer both
 `infra/git/workspace.py` and `app/handlers/execution_handler.py` can share. Both
 call sites in `workspace.py` and the promotion recorder then read from a single
 definition, and the convention has exactly one home.
+
+The objection — *branch naming is an infrastructure detail, and putting it in
+`app` leaks it upward* — was considered and does not hold. These names are part
+of the orchestration contract rather than an implementation choice: CLAUDE.md
+documents the ladder as an architectural invariant, the fixtures assert the
+branches by name, and the execution handler needs them to record truthful
+evidence. `src/app/` already hosts exactly this kind of cross-cutting convention
+(`block_policy.py`, `agent_feedback.py`, `promotion_failures.py`).
+
+The module carries **both** shapes — cyclic and legacy — so the §5 documentation
+fix has a single authority to cite instead of restating the convention in prose.
 
 This is a small refactor of existing code in the path of the work, not unrelated
 cleanup: without it, recording promoted refs would create the third copy of the
