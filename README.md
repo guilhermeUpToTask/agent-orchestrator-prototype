@@ -247,8 +247,8 @@ accordingly.
 |---|---|---|
 | `ORCHESTRATOR_HOME` | `~/.orchestrator` | State directory (SQLite DB, default workspace repo) |
 | `ORCHESTRATOR_MASTER_KEY` | unset | Fernet key wrapping the secret store. Only needed when a real provider key must be decrypted — dry-run/stub never ask for it |
-| `PROJECT_REPO_DIR` | `<home>/workspace-repo` | The git repo task agents work on (auto-seeded if absent) |
-| `ORCHESTRATOR_API_TOKEN` | unset | Control-plane bearer token; the API is open when unset |
+| `PROJECT_REPO_DIR` | — | **Not read.** Repository routing is project-scoped: a plan works on its `ProjectDefinition.repo_url`, validated when written. A project without one gets a scratch repo at `<home>/projects/<id>/repo` |
+| `ORCHESTRATOR_API_TOKEN` | unset | Bearer token for **every** API operation except `GET /health`; the API is open when unset. `GET /api/events` also accepts it as `?token=` because EventSource cannot send headers — mirror it to the frontend as `VITE_API_TOKEN` |
 | `CORS_ALLOW_ORIGINS` | Vite dev origins | Comma-separated allowed origins |
 | `REASONER_SMOKE_API_KEY` (+`_BASE_URL`, `_MODEL`) | unset | Enables the cost-gated real-LLM smoke test only |
 
