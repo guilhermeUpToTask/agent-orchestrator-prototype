@@ -11,10 +11,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
-from src.api.security import require_api_token
 from src.infra.container import AppContainer
 
-router = APIRouter(prefix="/config", dependencies=[Depends(require_api_token)], tags=["config"])
+router = APIRouter(prefix="/config", tags=["config"])
 
 
 class ConfigValue(BaseModel):

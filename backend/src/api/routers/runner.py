@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
-from src.api.security import require_api_token
 from src.infra.container import AppContainer
 from src.infra.runtime.dependency_checker import check_dependencies
 from src.infra.runtime.factory import (
@@ -25,7 +24,6 @@ from src.infra.runtime.factory import (
 
 router = APIRouter(
     prefix="/runner",
-    dependencies=[Depends(require_api_token)],
     tags=["runner"],
 )
 

@@ -6,8 +6,9 @@ Secrets rule: a provider is created/rotated with a plaintext key ONCE in the
 request body; it goes straight into the envelope-encrypted secret store and
 only the `api_key_ref` URI is ever stored or returned. No route echoes a key.
 
-All routes are token-guarded (require_api_token — open when no token is
-configured, i.e. local dev).
+All routes are token-guarded, like every other router: the guard is applied once
+at mount time in `server.py::create_app`, not declared here — see the comment
+there. Open when no token is configured, i.e. local dev.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies import get_container
-from src.api.security import require_api_token
 from src.domain.entities.agent_spec import AgentSpec
 from src.domain.entities.capability import Capability
 from src.domain.entities.ia_model import IAModel
@@ -29,7 +29,7 @@ from src.infra.db.secret_ref import SecretRef
 from src.infra.errors import InfrastructureError
 from src.infra.runtime.factory import AGENT_RUNNER_CONFIG_INVALID, RUNTIME_TYPES
 
-router = APIRouter(dependencies=[Depends(require_api_token)], tags=["reference"])
+router = APIRouter(tags=["reference"])
 
 
 # ---------------------------------------------------------------------------

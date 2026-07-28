@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
@@ -33,6 +33,7 @@ from src.api.exceptions import register_exception_handlers
 from src.api.logging.config import configure_logging
 from src.api.middleware.request_logging import RequestLoggingMiddleware
 from src.api.outbox_relay import run_outbox_relay
+from src.api.security import require_api_token
 from src.api.routers import (
     config,
     events,
@@ -125,13 +126,20 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     )
 
     _prefix = "/api"
-    app.include_router(plans.router, prefix=_prefix)
-    app.include_router(reference.router, prefix=_prefix)
-    app.include_router(config.router, prefix=_prefix)
-    app.include_router(reasoner.router, prefix=_prefix)
-    app.include_router(runner.router, prefix=_prefix)
-    app.include_router(metrics.router, prefix=_prefix)
-    app.include_router(events.router, prefix=_prefix)
+    # The guard is applied HERE, once, rather than declared per router. The
+    # Phase 3 audit found two routers that had simply never opted in — 36 of 64
+    # operations, including every gate approval and the whole plan document —
+    # and an opt-in guard makes that the default outcome for the next router
+    # too. tests/integration/test_control_plane_auth.py parametrizes over the
+    # OpenAPI inventory, so a route added later is covered before it is written.
+    _guarded = [Depends(require_api_token)]
+    app.include_router(plans.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(reference.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(config.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(reasoner.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(runner.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(metrics.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(events.router, prefix=_prefix, dependencies=_guarded)
 
     @app.get(
         "/health",
