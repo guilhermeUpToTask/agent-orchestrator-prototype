@@ -345,9 +345,15 @@ stale.
 
 `create_project`/`update_project` (`routers/reference.py:294`, `:303`) store
 `repo_url` with no check that the path exists, is a git repository, or has a
-detectable default branch. The first symptom is an execution-stage failure long
-after the plan was opened, which reads as an orchestrator bug rather than a
-setup mistake.
+detectable default branch.
+
+There is no late failure to notice, either: `_default_branch` returns `"main"`
+for a path with no `.git` (`project_workspace.py:66`) and `GitBranchWorkspace`
+then creates the directory, `git init`s it and writes an empty initial commit
+(`workspace.py:150-153`). **A mistyped `repo_url` runs to a green publication
+against a brand-new empty repository.** Closing this needs the runtime guard as
+well as the write-time check — see
+[the P4.1 design](../superpowers/specs/2026-07-28-phase-4-1-access-and-setup-truth-design.md).
 
 **Owner: Phase 4.** **Test:** creating a project against a non-repository path
 returns a 422 naming the problem; a valid repo returns the detected default
