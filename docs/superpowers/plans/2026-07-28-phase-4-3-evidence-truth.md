@@ -1244,9 +1244,16 @@ def get_cycle_evidence(
         # Cycles promoted before migration 0017 have SHAs with no attribution.
         # Serving them under an honest name beats an empty `promotion` that
         # would imply nothing was ever promoted.
-        unattributed_evidence_refs=(
-            [] if promotions else list(cycle.evidence_refs)
-        ),
+        #
+        # Matched by SHA rather than "are there any rows at all": exactly one
+        # cycle per install can straddle the migration, with goals promoted
+        # before it (ref, no row) and after it (both). A presence check would
+        # return [] for that cycle and silently hide the pre-migration refs.
+        unattributed_evidence_refs=[
+            ref
+            for ref in cycle.evidence_refs
+            if ref not in {f"git:{item.merge_sha}" for item in promotions}
+        ],
     )
 ```
 
@@ -1280,7 +1287,7 @@ survives a replan."
 
 ### Task 6: The read model's edge cases
 
-The happy path is not where a read model lies. These five cases are.
+The happy path is not where a read model lies. These six cases are.
 
 **Files:**
 - Modify: `backend/tests/integration/test_cycle_evidence_api.py`
@@ -1355,6 +1362,54 @@ def test_pre_0017_cycle_serves_unattributed_refs(evidence_walk) -> None:
     assert all(goal["promotion"] is None for goal in body["goals"])
 
 
+def test_cycle_straddling_the_migration_reports_only_the_unmatched_refs(
+    evidence_walk,
+) -> None:
+    """Exactly one cycle per install can have goals promoted before migration
+    0017 (ref, no row) and after it (both). A presence check would return [] and
+    hide the pre-migration half."""
+    from sqlalchemy import text
+
+    client, plan_id, cycle_id = (
+        evidence_walk.client,
+        evidence_walk.plan_id,
+        evidence_walk.cycle_id,
+    )
+
+    with evidence_walk.container.engine.begin() as connection:
+        # Orphan exactly one promotion's ref. Works whether the walk promoted
+        # one goal or several — do not assume a goal count here.
+        orphaned = connection.execute(
+            text(
+                "SELECT merge_sha FROM goal_promotions "
+                "WHERE cycle_id = :cycle_id ORDER BY promoted_at LIMIT 1"
+            ),
+            {"cycle_id": cycle_id},
+        ).scalar_one()
+        connection.execute(
+            text(
+                "DELETE FROM goal_promotions "
+                "WHERE cycle_id = :cycle_id AND merge_sha = :sha"
+            ),
+            {"cycle_id": cycle_id, "sha": orphaned},
+        )
+        survivors = [
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT merge_sha FROM goal_promotions WHERE cycle_id = :cycle_id"
+                ),
+                {"cycle_id": cycle_id},
+            ).all()
+        ]
+
+    body = client.get(f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence").json()
+    unattributed = body["unattributed_evidence_refs"]
+    assert f"git:{orphaned}" in unattributed, "the pre-migration half is shown"
+    for sha in survivors:
+        assert f"git:{sha}" not in unattributed, "an attributed ref is not repeated"
+
+
 def test_superseded_cycle_still_serves_its_evidence(replanned_client) -> None:
     """Replan is source-preserving: the source cycle stays visible and
     immutable. Its evidence must remain addressable after a new cycle
@@ -1386,11 +1441,11 @@ Build the four new fixtures on top of `drive_cycle_to_publication` from Task 5:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/integration/test_cycle_evidence_api.py -v`
-Expected: the five new tests FAIL (fixtures missing), the two from Task 5 still PASS.
+Expected: the six new tests FAIL (fixtures missing), the two from Task 5 still PASS.
 
 - [ ] **Step 3: Make them pass**
 
-The endpoint logic from Task 5 already implements all five behaviours — the revision filter, the plan-scoped cycle lookup, the nullable disposition reference, the `unattributed_evidence_refs` fallback, and serving any cycle in `plan.cycles` rather than only the active one. This step is building the fixtures until the assertions hold. If any assertion fails against correct fixtures, fix `evidence.py`, not the test.
+The endpoint logic from Task 5 already implements all six behaviours — the revision filter, the plan-scoped cycle lookup, the nullable disposition reference, the SHA-matched `unattributed_evidence_refs` fallback, the straddling-cycle case that fallback exists for, and serving any cycle in `plan.cycles` rather than only the active one. This step is building the fixtures until the assertions hold. If any assertion fails against correct fixtures, fix `evidence.py`, not the test.
 
 - [ ] **Step 4: Run the whole suite**
 
