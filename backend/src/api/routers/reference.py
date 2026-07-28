@@ -27,6 +27,7 @@ from src.domain.policies.retry_policies import RetryPolicy
 from src.infra.container import AppContainer
 from src.infra.db.secret_ref import SecretRef
 from src.infra.errors import InfrastructureError
+from src.infra.git.repository_binding import validate_repo_url
 from src.infra.runtime.factory import AGENT_RUNNER_CONFIG_INVALID, RUNTIME_TYPES
 
 router = APIRouter(tags=["reference"])
@@ -295,6 +296,7 @@ def list_projects(
 def create_project(
     body: ProjectBody, container: AppContainer = Depends(get_container)
 ) -> ProjectDefinition:
+    validate_repo_url(body.repo_url)
     project = ProjectDefinition(id=new_id(), name=body.name, repo_url=body.repo_url)
     container.project_repo.add(project)
     return project
@@ -304,6 +306,7 @@ def create_project(
 def update_project(
     project_id: str, body: ProjectBody, container: AppContainer = Depends(get_container)
 ) -> None:
+    validate_repo_url(body.repo_url)
     container.project_repo.update(
         ProjectDefinition(id=project_id, name=body.name, repo_url=body.repo_url)
     )
