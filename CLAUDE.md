@@ -135,7 +135,9 @@ agent-orchestrator/
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
 ├── docs/                   # system documentation:
 │   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,
-│   │                       #   data-model, frontend, known-issues (verified defects)
+│   │                       #   data-model, frontend, known-issues (verified defects),
+│   │                       #   capability-matrix (what is supported + where it is
+│   │                       #   exposed; route inventory is test-locked)
 │   ├── decisions/          #   decision-log.md, ADRs, domain-design-decisions.md
 │   ├── legacy/             #   pre-refactor features kept for reintroduction analysis
 │   └── history/            #   archived plans/analyses/pre-refactor docs (immutable)

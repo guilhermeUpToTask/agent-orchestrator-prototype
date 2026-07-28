@@ -717,7 +717,7 @@ Also standing, both recorded in known-issues and neither Phase 2 scope: no
 dead-letter/quarantine for a plan that fails forever (it now takes a fair share
 rather than starving others), and one-second claim-fairness granularity.
 
-## Phase 3 — capability-to-product coverage audit ⬜
+## Phase 3 — capability-to-product coverage audit ✅
 
 **External capability:** maintainers can state exactly which operator workflows
 are supported and where each capability is exposed.
@@ -742,19 +742,91 @@ Audit setup, readiness, planning/gates, execution visibility, capacity,
 recovery, evidence, repository/Git output, publication, diagnostics, and health.
 Include backend routes not consumed by the UI, such as live attempt-log SSE.
 
-### Exit criteria
+### Result (2026-07-28)
 
-- No endpoint is proposed merely for completeness; every launch-critical row
-  maps to a walkthrough operator job.
-- Nine-phase fields/routes are labelled compatibility-only.
-- Each launch-critical gap has an owner phase (4, 5, or 6) and objective test.
+The matrix lives at
+[`docs/architecture/capability-matrix.md`](docs/architecture/capability-matrix.md)
+and covers all **64 served operations** plus the capabilities that reach no
+route at all, classified across the eleven audit areas and anchored to the nine
+operator jobs the walkthrough fixtures actually execute (J1 install → J9
+intervene).
+
+It is machine-locked in both directions by
+`backend/tests/unit/test_capability_matrix.py`: a route the app serves but the
+matrix does not classify fails the build, and so does a matrix row naming a
+route that no longer exists. The frontend and tests columns cannot be
+machine-checked and are re-audited when a phase closes.
+
+**Twelve gaps**, each verified by reading the code, each given an owner phase
+and an objective test (G1–G12 in the matrix). What the audit changed about the
+plan:
+
+- Five gaps went to **Phase 4**, the largest being that the token guard covers
+  28 of 64 operations — the whole plan lifecycle and the event stream are
+  unauthenticated even when `ORCHESTRATOR_API_TOKEN` is set, contradicting
+  `security.py`'s own docstring.
+- Six went to **Phase 5**. Two are capabilities the backend finished and nothing
+  renders: per-goal blocks (un-freeze #14) and `provider_waiting` — so the
+  partially-blocked plan and the "waiting, recovering automatically" state that
+  Phase 5 exists to distinguish are both currently invisible.
+- One (skip/abandon a wedged task) went to **Phase 8**: retry, edit and replan
+  have covered every case the walkthroughs produced so far.
+
+Two defects surfaced and are recorded in
+[known issues](docs/architecture/known-issues.md): the settings forms silently
+clear provider/model capacity overrides on every save, and
+`POST /api/plans/{plan_id}/retry-policy` is the one route with no test that
+exercises it. One drift was fixed in place — the hand-declared frontend read
+model never declared `provider_waiting` or `legacy_phase`, now locked by
+`backend/tests/unit/test_plan_read_model_parity.py`.
+
+No endpoint was proposed for symmetry. Four candidates were explicitly recorded
+as **non-gaps** so a later audit does not re-propose them: a generic
+`resolve_block` route, operator control points inside the automatic recovery
+loops, nine-phase transitions for cyclic plans, and forge/PR writes.
+
+### Exit criteria — met 2026-07-28
+
+- ✅ No endpoint is proposed merely for completeness; every launch-critical row
+  maps to a walkthrough operator job (J1–J9, cited per section).
+- ✅ Nine-phase fields/routes are labelled compatibility-only (matrix §9: four
+  routes, plus `phase`, `legacy_phase`, `iteration` and root `goals`).
+- ✅ Each launch-critical gap has an owner phase and an objective test. Eleven
+  landed in Phases 4 and 5; none needed Phase 6, and the single deferral (G12)
+  is owned by Phase 8 with the evidence that would promote it stated.
 
 ## Phase 4 — API control-plane completion ⬜
 
 **External capability:** a technical operator can set up, drive, inspect,
 recover, and publish the happy path without database surgery.
 
-Close only launch-critical matrix gaps. Investigate:
+Close only launch-critical matrix gaps. The audit assigned five here, each with
+its objective test stated in the matrix:
+
+- **G1 — extend the control-plane token guard to the plan lifecycle and
+  `GET /api/events`.** `require_api_token` is declared on the `reference`,
+  `config`, `reasoner`, `runner` and `metrics` routers only, so 36 of 64
+  operations — every gate approval, `POST …/publication`,
+  `DELETE /api/plans/{plan_id}`, and the full plan document with its brief and
+  chat — are open to anyone who can reach the port while
+  `security.py` states the opposite. Parametrize the guard test over the whole
+  mutating surface, not one GET.
+- **G9 — one evidence read model per cycle**: accepted evidence refs, protected
+  paths, promoted refs (today reconstructed from the `cycle/<id>` convention by
+  `verify_run.py`) and the recorded disposition. Today all of it is reachable
+  only by reading the whole plan document, or by a CLI export script.
+- **G10 — a worker-health read.** `worker_lease` answers "is this plan claimed"
+  and only while it is; nothing answers "is a worker running at all", which is
+  the most common local-setup failure and a J2 checklist item.
+- **G11 — validate repository binding at write time.** `POST`/`PUT
+  /api/projects` store `repo_url` unchecked; the first symptom is an
+  execution-stage failure that reads as an orchestrator bug. Note that a project
+  with no `repo_url` silently gets a fresh empty repo, so a mis-set binding
+  "passes" against nothing.
+- **G6 — a route contract test for `POST /api/plans/{plan_id}/retry-policy`**,
+  the only route in the app no test exercises.
+
+Then investigate:
 
 - project/repository binding, local/remote validation, and workspace readiness;
 - canonical legal actions for intent, gates, pause/resume, retry/edit, block
@@ -783,7 +855,34 @@ boundaries, and the dependency rule.
 legal actions, recover, and find the verified result.
 
 The React shell, composer, settings CRUD, gates, status surface, attempt history,
-and SSE bridge are foundations. Improve them in this order:
+and SSE bridge are foundations.
+
+The audit assigned six gaps here. Two are backend capabilities that shipped and
+nothing renders, so the feature is currently invisible rather than merely
+awkward — they belong to item 1 below:
+
+- **G2 — per-goal blocks.** `goal_blocks` is served and declared in the read
+  model, and no component reads it; `Overview`/`AttentionItem` render only the
+  plan-wide scalar. A partially-blocked plan therefore looks like a healthy
+  running one, which is exactly the state un-freeze #14 created.
+- **G3 — `provider_waiting`.** Served since the capacity work; the hand-declared
+  read model never carried it (fixed and locked by
+  `backend/tests/unit/test_plan_read_model_parity.py`), so "waiting, recovering
+  automatically" has never been renderable.
+
+The other four attach to items 2, 3 and 4:
+
+- **G4 — `update_task_contract` edits** are accepted by `POST …/edits` and
+  missing from the frontend's edit union, so the one manual move at the contract
+  boundary (what `contract-repair-v1` exists to exercise) needs curl.
+- **G5 — the attempt log and its live SSE tail** have no UI consumer at all.
+- **G7 — the settings forms silently clear provider/model capacity overrides**
+  on every save (`max_inflight`, `capacity_scope`); a rename reverts an
+  un-freeze #16 decision. Phase 4 may instead make the update partial.
+- **G8 — plan deletion has no UI**, so the reset half of J8 is curl-only and the
+  plan list only ever grows.
+
+Improve them in this order:
 
 1. **Status truth**
    - Render root status, activity, planning operation, current work/TDD stage,
@@ -914,6 +1013,12 @@ Take these up only when preview evidence proves the need:
   and visible: the budget runs out and a block opens advertising `retry_stage`.
   Preview evidence should say whether real operators hit it often enough to
   justify a per-task concurrency-wait deadline;
+- **an operator command to skip or abandon a wedged task** (Phase 3 audit, G12).
+  `Plan.abandon_task` exists and is driven only by exhausted-retry paths; an
+  operator facing a task that should not be attempted again has retry, edit, and
+  replan — the last being the whole-cycle hammer. Deferred because no
+  walkthrough has yet produced a case the other three cannot cover; a preview
+  report that names one promotes it;
 - proactive concurrent-goal scope-disjointness validation;
 - advanced scheduling, load-tested pools, and additional runtimes;
 - multi-worker/multi-machine execution, distributed claims, or Redis;
