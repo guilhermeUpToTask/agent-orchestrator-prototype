@@ -33,7 +33,7 @@ from src.api.exceptions import register_exception_handlers
 from src.api.logging.config import configure_logging
 from src.api.middleware.request_logging import RequestLoggingMiddleware
 from src.api.outbox_relay import run_outbox_relay
-from src.api.security import require_api_token
+from src.api.security import require_api_token, require_api_token_or_query
 from src.api.routers import (
     config,
     events,
@@ -139,7 +139,11 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(reasoner.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(runner.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(metrics.router, prefix=_prefix, dependencies=_guarded)
-    app.include_router(events.router, prefix=_prefix, dependencies=_guarded)
+    # The one exception, and only to the MECHANISM: EventSource cannot send
+    # headers, so the stream a browser opens directly also accepts `?token=`.
+    app.include_router(
+        events.router, prefix=_prefix, dependencies=[Depends(require_api_token_or_query)]
+    )
 
     @app.get(
         "/health",

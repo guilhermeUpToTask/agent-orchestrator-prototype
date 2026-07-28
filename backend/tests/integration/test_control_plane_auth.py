@@ -88,3 +88,18 @@ def test_no_operation_answers_without_a_token(guarded_client, method, path):
 
 def test_health_stays_open(guarded_client):
     assert guarded_client.get("/health").status_code == 200
+
+
+def test_a_wrong_query_token_is_refused_by_the_stream(guarded_client):
+    """The stream's rejection boundary. A CORRECT token is not exercised here —
+    the response would never complete — but against a real socket in
+    test_sse_stream.py::test_the_guarded_stream_opens_with_a_query_token."""
+    assert guarded_client.get("/api/events", params={"token": "wrong"}).status_code == 401
+
+
+def test_no_other_route_accepts_a_query_token(guarded_client):
+    """Confining the URL-borne token to the stream is the point: everywhere a
+    header works, a header is required."""
+    response = guarded_client.get("/api/providers", params={"token": "sekrit"})
+
+    assert response.status_code == 401
