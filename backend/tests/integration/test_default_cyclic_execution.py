@@ -181,6 +181,27 @@ def test_shipped_stub_and_dry_run_execute_a_cycle_to_publication_gate(
     assert goal_signal == "paused"
     assert goal_progressed >= 1
 
+    # G9: "where did the code go" must be answerable without reconstructing a
+    # branch name from a convention the cyclic ladder does not follow.
+    with container.new_unit_of_work() as uow:
+        promotions = uow.promotions.list_for_cycle(plan.id, cycle.id)
+        current_plan = uow.plans.get(plan.id)
+
+    current_cycle = next(item for item in current_plan.cycles if item.id == cycle.id)
+    promoted_goal_ids = [
+        goal.id for goal in current_cycle.goals if goal.status.value == "done"
+    ]
+    assert [item.goal_id for item in promotions] == promoted_goal_ids
+
+    for item in promotions:
+        assert item.from_ref == f"goal/{item.goal_id}"
+        assert item.into_ref == f"cycle/{cycle.id}"
+        # The recorded refs must resolve in the REAL repo this walk built, so
+        # the naming module and the git adapter cannot drift apart silently.
+        _git(repo, "rev-parse", "--verify", item.from_ref)
+        _git(repo, "rev-parse", "--verify", item.into_ref)
+        _git(repo, "cat-file", "-e", item.merge_sha)
+
     review_signal, _ = asyncio.run(drive())
     assert review_signal == "paused"
     with container.new_unit_of_work() as uow:

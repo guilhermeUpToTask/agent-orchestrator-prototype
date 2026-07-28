@@ -66,6 +66,8 @@ from src.domain.value_objects.lifecycle import FailureKind
 from src.domain.value_objects.tasks_vos import TaskResult
 
 from src.app.block_policy import resolutions_for
+from src.app.branch_names import cycle_branch, goal_branch
+from src.app.promotion_records import GoalPromotion
 from src.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
@@ -1365,6 +1367,23 @@ class ExecutionHandler:
                     failure=_orchestration_failure("goal evidence changed during promotion"),
                 )
             cycle.evidence_refs.append(f"git:{commit_sha}")
+            # Recorded HERE, not at the merge call: everything above this line
+            # in the transaction has already re-guarded the promotion
+            # reservation, so a promotion that lost its reservation returned
+            # PAUSED without leaving a phantom row. The refs come from the same
+            # module the workspace adapter builds its branches from.
+            uow.promotions.add(
+                GoalPromotion(
+                    id=new_id(),
+                    plan_id=plan_id,
+                    cycle_id=cycle_id,
+                    goal_id=goal_id,
+                    from_ref=goal_branch(goal_id),
+                    into_ref=cycle_branch(cycle_id),
+                    merge_sha=commit_sha,
+                    promoted_at=self._clock.now(),
+                )
+            )
             plan.complete_goal(goal_id)
             plan.release_promotion(goal_id, reservation)
             plan.bump_version()
