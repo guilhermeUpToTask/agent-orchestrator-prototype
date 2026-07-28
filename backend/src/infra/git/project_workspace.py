@@ -40,7 +40,9 @@ class ProjectWorkspaceResolver:
         existing = self._cache.get(project_id)
         if existing is not None and existing.identity == identity:
             return existing.workspace
-        workspace = GitBranchWorkspace(repo, default_branch=default_branch)
+        workspace = GitBranchWorkspace(
+            repo, default_branch=default_branch, allow_init=project.repo_url is None
+        )
         self._cache[project_id] = _CachedWorkspace(identity, workspace)
         return workspace
 
@@ -55,7 +57,9 @@ class ProjectWorkspaceResolver:
             if cached is None or cached.identity != identity:
                 cached = _CachedWorkspace(
                     identity,
-                    GitBranchWorkspace(repo, default_branch=default_branch),
+                    GitBranchWorkspace(
+                        repo, default_branch=default_branch, allow_init=project.repo_url is None
+                    ),
                 )
                 self._cache[project.id] = cached
             workspaces.append((project.id, cached.workspace))
