@@ -8,7 +8,7 @@ Code anchors: `backend/src/app/use_cases/run_worker.py` (the loop), `backend/src
 
 ```mermaid
 flowchart TB
-    start([run_worker_forever]) --> claim["claim_one_unit(worker_id, lease)<br/>ONE atomic UPDATE…RETURNING:<br/>status='running' AND project_id IS NOT NULL<br/>AND paused=0 AND pause_requested=0<br/>AND (unclaimed OR lease expired)<br/>ORDER BY updated_at"]
+    start([run_worker_forever]) --> claim["claim_one_unit(worker_id, lease)<br/>ONE atomic UPDATE…RETURNING:<br/>status='running' AND project_id IS NOT NULL<br/>AND paused=0 AND pause_requested=0<br/>AND (unclaimed OR lease expired)<br/>ORDER BY COALESCE(claimed_at,0), updated_at"]
     claim -->|no plan| sleep["sleep poll_seconds (1s)<br/>— the ONLY polling in the system"]
     sleep --> claim
     claim -->|"plan (lease acquired)"| drive
@@ -29,7 +29,8 @@ flowchart TB
 Three hard-won behaviors are encoded here:
 
 - **The tick reports *progress*, not *claiming*** (`worker_tick`). A claim that immediately comes back `not_ready`/`paused` with zero steps returns `False` so the caller sleeps — returning `True` there produced a verified hot claim→release CPU spin on any plan whose work was entirely backing off.
-- **A tick exception never kills the worker** (`infra/worker/main.py`): log, release (the `finally` already did), sleep one poll, keep serving. ⚠ This combines badly with the claim ordering — see [known-issues.md](known-issues.md) H2 (poisoned-plan starvation).
+- **A tick exception never kills the worker** (`infra/worker/main.py`): log, release (the `finally` already did), sleep one poll, keep serving.
+- **The claim is round-robin, so a crashing plan cannot starve the others.** A tick that throws never reaches `plans.save`, so ordering by `updated_at` alone kept re-selecting the *same* poisoned plan on every poll — the worker survived while the plan-level claim slot was monopolized, and every other plan's planning turns, gates, and enrichment stopped. The cursor is `claimed_at`: the claim stamps it, the release deliberately leaves it (`claimed_by` is the "currently held" fact), and a never-claimed plan sorts first so new work is not made to wait. A poisoned plan is never quarantined — it may recover — it simply takes its turn. Locked by `test_a_crashing_plan_does_not_monopolize_the_claim` on both backends.
 - **Crash recovery separates authority from evidence.** Lease expiry lets another worker resume persisted domain state. Worker startup marks orphaned operational attempts/runs ABANDONED only when `is_claim_live(plan_id)` is false; it leaves the task RUNNING for the existing reclaim choreography. Startup also runs conservative `git worktree prune` and audits worktrees/refs. Lease times use the injected `Clock`, so fake and SQLite truth tests drive expiry deterministically.
 
 Concurrency today is **sequential per plan** by decision ([ADR-001](../decisions/adr-001-concurrency-lease.md)): the lease is plan-granular, and its granularity (plan → goal → task) is the designed future parallelism switch.
@@ -116,6 +117,8 @@ While paused, goals/tasks are editable (`apply_edit` passes `plan.paused` to the
 | `auth_error` | 401/403/invalid-key patterns — **also** raised for broken agent bindings | ❌ terminal — config never fixes itself mid-retry-loop |
 
 `RetryPolicy` defaults to three attempts with exponential jittered backoff from 30s, capped at 15 minutes. Provider `Retry-After` is a floor; daily-quota evidence receives a long window. A persistent runtime/provider/model circuit prevents fresh invocations during the window and opens a provider-capacity block after the threshold. The wait is a persisted timestamp, never a sleep.
+
+**The curve depends on what was refused.** `kind_backoff_scale` grants `rate_limit` a patient 4x curve (base delay *and* ceiling), which is right for an account allowance that refills on the provider's clock and backwards for a `request_concurrency` refusal — one momentarily full pool, while every other in-flight request succeeded. `capacity_backoff_seconds` (`src/app/provider_capacity.py`) applies the scope-aware lookup: a positively identified concurrency refusal waits the plan's ordinary configured curve unscaled, every other scope keeps 4.0, and an unclassified message keeps patience for the same reason it keeps the narrower circuit key. The domain `RetryPolicy` stays free of `LimitScope`; the app layer that classifies the failure hands it a scope-adjusted copy of its own configuration.
 
 ## Agent runners — catalog-resolved, per run
 

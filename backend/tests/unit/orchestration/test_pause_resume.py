@@ -168,6 +168,30 @@ def test_resume_unpaused_raises_invalid_transition(env_factory):
         resume_plan("p1", env.uow)
 
 
+def test_refusals_speak_the_cyclic_vocabulary_not_the_legacy_phase(env_factory):
+    """Unfreeze #18. `request_pause` reported `status.value` while `pause` and
+    `resume` reported `phase.value`, so the same API surface refused an operator
+    in two different vocabularies — and the cyclic one is the only one the API
+    reports a plan in. A plan shown as `status: waiting` was told it "cannot
+    transition from discovery", naming the nine-phase machine the cyclic model
+    replaced and that the operator never saw."""
+    env = env_factory()
+    plan = running_plan()
+    plan.phase = PlanPhase.DISCOVERY
+    plan.status = PlanStatus.WAITING
+    env.seed(plan)
+
+    with pytest.raises(InvalidTransitionError) as resumed:
+        resume_plan("p1", env.uow)
+    assert "waiting" in str(resumed.value)
+    assert "discovery" not in str(resumed.value)
+
+    with pytest.raises(InvalidTransitionError) as paused:
+        pause_plan("p1", env.uow, None)
+    assert "waiting" in str(paused.value)
+    assert "discovery" not in str(paused.value)
+
+
 # ---- resume and retry are separate commands ----
 def test_resume_changes_availability_only(env_factory):
     env = env_factory()

@@ -1237,6 +1237,7 @@ export type PlanDetailResponse = {
      */
     paused_reason: string | null;
     active_run: ActiveRunResponse | null;
+    worker_lease: WorkerLeaseResponse | null;
     provider_waiting: ProviderWaitingResponse | null;
     /**
      * Planning Operation
@@ -2273,6 +2274,57 @@ export type VerificationKind = 'baseline' | 'red' | 'characterization' | 'execut
  * VerificationStrategy
  */
 export type VerificationStrategy = 'tdd' | 'characterization' | 'executable_check';
+
+/**
+ * WorkerLeaseResponse
+ *
+ * Whether the claim behind `activity` is ALIVE, or a dead worker's orphan.
+ *
+ * Phase 2 exit criterion 3: an operator must be able to tell active work from
+ * every other state using persisted facts. Everything else on this document
+ * already distinguishes waiting, paused, blocked, and failed — but "running"
+ * covered two opposite realities. Measured on 2026-07-27: `kill -9` on a
+ * worker holding a RUNNING attempt left the plan reporting `status: running`
+ * with its task `running` and `retry_not_before: null` for the full 300s goal
+ * lease, indistinguishable from genuine work, because the only thing served
+ * was the active run's START time.
+ *
+ * `expires_at` is renewed by the heartbeat every third of the lease, so it is
+ * the liveness signal: comfortably in the future means a live worker is
+ * checking in; in the past means nobody is coming back and the work resumes
+ * when the lease expires. `expired` is served rather than left to the client
+ * to compute against its own clock, which may not be the server's.
+ *
+ * `scope` names WHICH lease, because they mean different things: a `goal`
+ * lease is held by the goal worker actually running attempts, a `plan` claim
+ * by the tick doing planning and gates.
+ */
+export type WorkerLeaseResponse = {
+    /**
+     * Scope
+     */
+    scope: 'goal' | 'plan';
+    /**
+     * Goal Id
+     */
+    goal_id: string | null;
+    /**
+     * Worker Id
+     */
+    worker_id: string;
+    /**
+     * Expires At
+     */
+    expires_at: string;
+    /**
+     * Expired
+     */
+    expired: boolean;
+    /**
+     * Seconds Remaining
+     */
+    seconds_remaining: number;
+};
 
 export type PlansBindProjectRouteData = {
     body: ProjectBindingRequest;

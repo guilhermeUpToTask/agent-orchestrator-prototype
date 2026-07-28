@@ -1259,3 +1259,48 @@ def test_update_task_contract_repairs_a_frozen_contract_over_http(client):
         "python -m pytest -q tests/test_greeter.py"
     ]
     assert repaired["revision"] == 1  # a command fix does not re-author the tests
+
+
+def test_plan_detail_distinguishes_a_live_worker_from_a_dead_one(client, tmp_path):
+    """Phase 2 exit criterion 3. `status: running` covered two opposite
+    realities: a worker checking in, and a worker that died holding the lease.
+
+    Measured 2026-07-27 — `kill -9` on a worker mid-attempt left the plan
+    reporting RUNNING with its task RUNNING and `retry_not_before: null` for the
+    full 300s goal lease, identical to genuine work, because the read model
+    served only the active run's START time. `worker_lease` serves the heartbeat
+    deadline instead, which is renewed every third of the lease and so is the
+    liveness signal.
+    """
+    from datetime import timedelta
+
+    from src.api import dependencies
+    from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        uow.plans.save(
+            Plan(id="lease-plan", project_id="project-1", brief="b", phase=PlanPhase.RUNNING)
+        )
+
+    # No claim at all — nothing to report, and no field to misread.
+    assert client.get("/api/plans/lease-plan").json()["worker_lease"] is None
+
+    with container.new_unit_of_work() as uow:
+        claimed = uow.plans.claim_one_unit("worker-alive", lease_seconds=300)
+    assert claimed is not None
+
+    live = client.get("/api/plans/lease-plan").json()["worker_lease"]
+    assert live["scope"] == "plan"
+    assert live["worker_id"] == "worker-alive"
+    assert live["expired"] is False
+    assert 0 < live["seconds_remaining"] <= 300
+
+    # The worker dies. Nothing releases the lease, nothing heartbeats it, and
+    # the plan still says RUNNING — this is the exact state the operator could
+    # not previously tell apart from work in progress.
+    container.clock.now = lambda: datetime.now(timezone.utc) + timedelta(seconds=600)  # type: ignore[method-assign]
+    dead = client.get("/api/plans/lease-plan").json()
+    assert dead["status"] == "running"  # unchanged: the aggregate cannot know
+    assert dead["worker_lease"]["expired"] is True
+    assert dead["worker_lease"]["seconds_remaining"] < 0

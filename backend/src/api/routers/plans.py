@@ -6,6 +6,7 @@ errors bubble to the global mapping layer.
 
 from __future__ import annotations
 
+from datetime import datetime
 import uuid
 import json
 from typing import Any, AsyncIterator, Literal
@@ -112,6 +113,37 @@ class ActiveRunResponse(BaseModel):
     started_at: str
 
 
+class WorkerLeaseResponse(BaseModel):
+    """Whether the claim behind `activity` is ALIVE, or a dead worker's orphan.
+
+    Phase 2 exit criterion 3: an operator must be able to tell active work from
+    every other state using persisted facts. Everything else on this document
+    already distinguishes waiting, paused, blocked, and failed — but "running"
+    covered two opposite realities. Measured on 2026-07-27: `kill -9` on a
+    worker holding a RUNNING attempt left the plan reporting `status: running`
+    with its task `running` and `retry_not_before: null` for the full 300s goal
+    lease, indistinguishable from genuine work, because the only thing served
+    was the active run's START time.
+
+    `expires_at` is renewed by the heartbeat every third of the lease, so it is
+    the liveness signal: comfortably in the future means a live worker is
+    checking in; in the past means nobody is coming back and the work resumes
+    when the lease expires. `expired` is served rather than left to the client
+    to compute against its own clock, which may not be the server's.
+
+    `scope` names WHICH lease, because they mean different things: a `goal`
+    lease is held by the goal worker actually running attempts, a `plan` claim
+    by the tick doing planning and gates.
+    """
+
+    scope: Literal["goal", "plan"]
+    goal_id: str | None
+    worker_id: str
+    expires_at: str
+    expired: bool
+    seconds_remaining: int
+
+
 class ProviderWaitingResponse(BaseModel):
     """An open provider capacity circuit gating this plan's work.
 
@@ -152,6 +184,7 @@ class PlanDetailResponse(BaseModel):
     paused: bool
     paused_reason: str | None
     active_run: ActiveRunResponse | None
+    worker_lease: WorkerLeaseResponse | None
     provider_waiting: ProviderWaitingResponse | None
     planning_operation: dict[str, Any] | None
     planning_progress: str | None
@@ -537,6 +570,40 @@ def list_plans(container: AppContainer = Depends(get_container)) -> list[dict]:
     return container.new_unit_of_work().plans.list_summaries()
 
 
+def _worker_lease(
+    plan_id: str,
+    current_goal_id: str | None,
+    now: datetime,
+    uow: SqliteUnitOfWork,
+) -> WorkerLeaseResponse | None:
+    """The lease actually holding this plan's work, expired or not.
+
+    Goal lease first: execution runs under it, and it is the one that goes stale
+    when a goal worker dies mid-attempt. The plan claim is the fallback, since
+    planning turns and gates run under that instead.
+    """
+    holder: tuple[str, datetime] | None = None
+    scope: Literal["goal", "plan"] = "goal"
+    goal_id = current_goal_id
+    if current_goal_id is not None:
+        holder = uow.goal_leases.lease_holder(plan_id, current_goal_id)
+    if holder is None:
+        holder = uow.plans.lease_holder(plan_id)
+        scope, goal_id = "plan", None
+    if holder is None:
+        return None
+    worker_id, expires_at = holder
+    remaining = (expires_at - now).total_seconds()
+    return WorkerLeaseResponse(
+        scope=scope,
+        goal_id=goal_id,
+        worker_id=worker_id,
+        expires_at=expires_at.isoformat(),
+        expired=remaining <= 0,
+        seconds_remaining=int(remaining),
+    )
+
+
 def _provider_waiting(
     current_task: Task | None,
     container: AppContainer,
@@ -619,6 +686,12 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
     # takes its own short read transaction.
     with uow:
         provider_waiting = _provider_waiting(current_task, container, uow)
+        worker_lease = _worker_lease(
+            plan.id,
+            current_goal.id if current_goal is not None else None,
+            container.clock.now(),
+            uow,
+        )
     planning_operation = planning_operations[-1] if planning_operations else None
     goal_position = (
         next(
@@ -659,6 +732,7 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
         pause_requested=plan.pause_requested,
         paused=plan.paused,
         paused_reason=plan.paused_reason,
+        worker_lease=worker_lease,
         provider_waiting=provider_waiting,
         active_run=(
             ActiveRunResponse(

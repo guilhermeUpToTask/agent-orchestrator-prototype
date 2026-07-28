@@ -50,7 +50,8 @@ These are current capabilities, not future roadmap work:
 - SQLite version CAS, leases, per-goal claims, transactional outbox, operational
   ledgers, provider circuits, and SSE.
 - Graceful pause, resume-only semantics, targeted retry, structured blocks,
-  live-registry recovery, and provider-capacity waiting/admission/routing.
+  live-registry recovery, and provider-capacity waiting/admission/routing on
+  per-`limit_scope` backoff curves.
 - Automatic recovery that keeps a repairable mistake away from a human: the
   orchestrator's own rejection reasons are fed into the next agent attempt, a
   rejected candidate earns a bounded second try, an unsatisfiable contract is
@@ -68,16 +69,21 @@ These are current capabilities, not future roadmap work:
   plus an operator frontend with gates and catalog settings.
 - Dual fake/SQLite orchestration tests, Git/API/SSE integration tests, CI quality
   gates, a supervised dev launcher, release automation, and run-evidence export.
-- Three operator fixtures, all API-only (`curl` + `jq`, no frontend):
+- Four operator fixtures, all API-only (`curl` + `jq`, no frontend):
   [`happy-path-v1`](fixtures/happy-path-v1/) (the locked one-goal walkthrough,
   Tier 0 and Tier 1), [`planning-recovery-v1`](fixtures/planning-recovery-v1/)
   (a starved planning session leaves evidence the retry can use),
-  and [`parallel-goals-v1`](fixtures/parallel-goals-v1/) (two goals promote into
-  one cycle branch, so the second merge hits a base the first moved).
+  [`parallel-goals-v1`](fixtures/parallel-goals-v1/) (two goals promote into
+  one cycle branch, so the second merge hits a base the first moved), and
+  [`contract-repair-v1`](fixtures/contract-repair-v1/) (Tier 1: poison a frozen
+  contract with a command that cannot pass, and prove it is repaired in place
+  rather than escalated — the first fixture that drives a run which must FAIL
+  first).
   Between them they found the repository-binding trap, an unhandled
   `RoleUnsatisfiableError` that crash-looped the worker, a contract whose
-  strategy contradicted its own scope, and capacity failures spending the
-  verification retry ceiling.
+  strategy contradicted its own scope, capacity failures spending the
+  verification retry ceiling, and the contract-repair write that deadlocked
+  SQLite against the transaction that called it.
 
 Completed foundations stay in architecture docs and tests. They are not
 reintroduced below merely because further hardening is possible.
@@ -263,7 +269,7 @@ terminal block).
 - Publication records the disposition and returns the project plan to `idle`.
 - Evidence, including usage when reported, is comparable across all three runs.
 
-## Phase 2 — walkthrough-driven backend hardening ⬜
+## Phase 2 — walkthrough-driven backend hardening ✅
 
 **External capability:** the tiny workflow survives common failures and either
 recovers automatically or tells the operator exactly what to do.
@@ -271,29 +277,268 @@ recovers automatically or tells the operator exactly what to do.
 The recovery architecture exists. Validate it with Tier 0/Tier 1 evidence
 instead of redesigning it speculatively.
 
-Recovery work completed against run evidence this cycle is listed under the
-implemented foundation above; what remains here is the evidence still to
-collect, not a redesign.
+**Closed 2026-07-28.** Six defects found and fixed, every one reproduced before
+it was touched and locked on both the fake and SQLite; one domain un-freeze
+(#18); one new fixture. The pattern worth keeping: a single RED Tier 1 run found
+three defects that four green runs had missed, because all three need a failing
+agent to exist at all. Green runs prove the happy path; only a failing one
+exercises recovery.
 
-### Found by the Phase 1 series — capacity backoff ignores `limit_scope`
+### Fixed — capacity backoff ignored `limit_scope`
 
-`kind_backoff_scale` applies `{rate_limit: 4.0}` to every rate-limited attempt
-regardless of `limit_scope`, so a `request_concurrency` refusal escalates on the
-same curve as an account-level quota exhaustion: 2min, 4min, 8min, then capped at
-`max_backoff_seconds` (15min). But those two mean opposite things. A quota is
-exhausted and deserves a long wait; a concurrency refusal on a SHARED pool means
-"someone else is using it right now", and is the case the design already singles
-out as opening no circuit and requeueing just that task.
+Found by the Phase 1 series. `kind_backoff_scale` applied `{rate_limit: 4.0}` to
+every rate-limited attempt regardless of `limit_scope`, so a
+`request_concurrency` refusal escalated on the same curve as an account-level
+quota exhaustion: 2min, 4min, 8min, then capped at 4x `max_backoff_seconds` —
+the scale multiplies the ceiling as well as the base delay. But those two mean
+opposite things. A quota is exhausted and deserves a long wait; a concurrency
+refusal on a SHARED pool means "someone else is using it right now", and is the
+case the design already singles out as opening no circuit and requeueing just
+that task.
 
 Measured: one Tier 1 run spent 37 minutes in backoff over six attempts against a
 free endpoint that answered six concurrent probes instantly between them. The run
-completed green, so this costs wall-clock rather than correctness — but it backs
+completed green, so this cost wall-clock rather than correctness — but it backed
 off hardest exactly when a short retry would most likely succeed.
 
-The fix is a per-scope curve: keep 4.0 for `quota`/`daily`, use something near 1.0
-for `request_concurrency`. `RetryPolicy` already carries the scale as
-configuration, so this needs no domain change — only a scope-aware lookup where
-the failure is classified.
+Fixed by a per-scope curve in `src/app/provider_capacity.py`
+(`capacity_backoff_seconds`): a positively identified `request_concurrency`
+refusal waits the plan's ordinary configured curve, unscaled, and every other
+scope — including an unclassified one, which degrades to patience for the same
+reason it degrades to the narrower circuit key — keeps 4.0. No domain change:
+`RetryPolicy` already carries the scale as configuration, and the app layer that
+classifies the failure hands it a scope-adjusted copy. Regression tests cover the
+policy directly and the armed gate through `ExecutionHandler` on both the fake
+and SQLite backends.
+
+### Fixed — a crashing plan starved every healthy plan
+
+Exit criterion 2 ("repeated unexpected worker exceptions cannot starve healthy
+plans") did not hold. It was a *known* risk — `known-issues.md` recorded it
+under Operational visibility ("a malformed plan that raises before any save can
+still be reclaimed first by oldest `updated_at`") — but nothing had reproduced
+it, and `execution-model.md` pointed at it by a label, "H2", that the entry
+never carried, so the cross-reference resolved to nothing.
+
+Reproduced at the truth-test level on both backends: two RUNNING plans, a worker
+whose tick throws on the first. Five polls claimed `['poisoned'] * 5` — the
+healthy plan was never claimed once.
+
+`_CLAIM_SQL` selected `ORDER BY updated_at LIMIT 1`, and neither the claim nor
+the release touches `updated_at` — only `plans.save` does. A tick that throws
+never reaches a save, so the poisoned plan's `updated_at` never moved, it stayed
+the oldest row, and every subsequent poll re-selected it. The worker itself
+survived exactly as designed (`worker.tick_failed` logs, releases, backs off one
+poll), which is why this never showed up as a crash: the plan-level claim slot
+was simply monopolized, and every other plan's planning turns, gates, and
+enrichment silently stopped. Goal-level execution was unaffected — it holds the
+separate `claim_ready_goal` lease.
+
+Fixed by making the claim round-robin on `claimed_at`: the claim stamps it, the
+release no longer clears it, and the order is
+`COALESCE(claimed_at, 0) ASC, updated_at ASC`. No migration — the column already
+existed and was written but never read anywhere, so it was free to become the
+fairness cursor; `claimed_by` remains the sole authority on "currently held". A
+never-claimed plan sorts first, so new work is not made to wait, and a poisoned
+plan is never quarantined (it may recover) — it just takes its turn. The
+in-memory fake starved for its own reason (first claimable plan in insertion
+order, no fairness at all) and now mirrors the same cursor, per the
+fake/real-parity invariant.
+
+### Experiment results (2026-07-27, API-only operator session)
+
+Driven through the exposed API as the operator, Tier 0 unless noted. Findings
+that produced fixes are the two "Fixed" sections above; everything else is
+recorded here because a scenario that finds nothing is also a result.
+
+**Provider capacity — swept, no new defects.** All nine listed scenarios already
+have automated coverage on both backends (connection failure, rate limit, daily
+quota, request concurrency, admission, circuit scope, half-open probe, alternate
+routing, wall-clock ceilings). The remaining work in this category is Tier 1
+evidence, not more tests. A Tier 1 happy-path run went 17/17 green and hit **zero**
+capacity events, so it confirms no regression rather than confirming the backoff
+fix — free-tier refusals are not summonable on demand, and the original 37-minute
+measurement was opportunistic rather than a controlled experiment.
+
+### Fixed — the Tier 1 series (three defects the green runs could not reach)
+
+A three-run Tier 1 series against the free models found more in one red run than
+four green ones had. All three need a *failing agent* to appear, which is why
+Tier 0 and a green Tier 1 both miss them.
+
+**1. `contract_repair` self-deadlocked SQLite and could never persist.**
+`PlanningArtifactStore` deliberately writes on its own short transaction so the
+record survives a plan rollback — which means a second connection, and
+SQLite/WAL allows exactly one writer. But `_repair_contract` ran *inside* the
+finalize transaction (`execution_handler` `with uow:`), so the plan connection
+held the write lock while synchronously waiting for the artifact connection to
+get it. `busy_timeout` and the `run_in_session` retry budget cannot break that —
+the caller is the holder. Live: five consecutive attempts died
+`InfrastructureError: Database stayed locked beyond retry budget` out of
+`drive_goal`, each abandoning its attempt and losing the repair, so the
+*identical* repair was recomputed every time until the retry budget ran out and
+the goal blocked. The machinery that exists to keep a repairable contract away
+from a human was itself what blocked the human in. Reproduced in a 30-line
+integration test with no agents or concurrency, then fixed by queueing the write
+and flushing it once the transaction closes (`_flush_pending_artifacts`, in a
+`finally` — the record matters most when finalize did *not* complete).
+
+**2. One exception in the goal-claim scan killed the worker process.** The scan
+sits after `worker_tick`'s try/except and had no guard of its own. A plan
+deleted between the readiness scan and the lease INSERT raised
+`FOREIGN KEY constraint failed` out of `claim_ready_goal`, unwound the loop, and
+exited the process 1 — under the dev supervisor that took the API down with it.
+A delete racing a claim is ordinary (`DELETE /api/plans/{id}` cascades while a
+scan is in flight), so it has to be survivable. This is exit criterion 2 in its
+starkest form: not starvation, termination.
+
+**3. A concurrency refusal still spends the per-task retry budget.** This is the
+half of the original `limit_scope` defect that the backoff fix did not touch,
+and the series is the first evidence of it. `capacity_wait` is set only when a
+circuit opens, and a `REQUEST_CONCURRENCY` refusal deliberately opens none — so
+unlike every other capacity failure it does *not* bypass the budget. Run 1
+ended `execution_failure` after 7 attempts with the last one
+`rate_limit/request_concurrency`; run 2 showed the same shape. A busy shared
+pool can therefore block a goal that has nothing wrong with it. Left unfixed on
+purpose: the fix is to make concurrency refusals budget-neutral inside a
+wall-clock bound, which is a capacity-policy change deserving its own decision
+rather than a drive-by. Note the interaction — the faster curve reaches the
+budget sooner in wall-clock terms, so this got *more* visible, not less.
+
+### Validated — a Tier 1 run that absorbed real concurrency refusals
+
+The evidence the backoff fix was missing, from a clean run with all fixes in
+place (`runs/20260727T223637Z-tier1-ae16ab2a`, **17/17 green** including pytest
+passing on a real checkout of the cycle branch):
+
+| attempt | outcome | gap before it |
+|---|---|---|
+| 1 | succeeded (test author) | — |
+| 2 | `rate_limit` / `request_concurrency` | — |
+| 3 | `rate_limit` / `request_concurrency` | **58s** |
+| 4 | succeeded (implementation) | **121s** |
+
+58s then 121s is the plan's ordinary configured curve — a 30s base doubling,
+jittered. Under the 4.0 rate-limit scale those same two waits would have been
+roughly 232s and 484s: ~12 minutes of waiting instead of ~3, for refusals the
+provider cleared in under a minute. That is the 37-minute measurement in
+miniature, and it no longer happens.
+
+The more important half: **the task recovered.** Two refusals were absorbed and
+the goal completed, where the pre-fix series runs exhausted the budget and
+blocked. Zero `Database stayed locked` events (seven in the pre-fix session) and
+the worker survived the whole run.
+
+Not exercised in that run: `contract_repair` never fired, because the agent
+succeeded. **Closed since, by [`contract-repair-v1`](fixtures/contract-repair-v1/)**
+— a fixture that poisons a frozen contract on purpose so the repair path is
+reachable on demand instead of by luck. Green end to end: the poisoned command
+produced a contract-shaped failure, the repair was recorded `committed`, the
+contract was snapped to the real path, the task reached DONE with no block, and
+**zero** `Database stayed locked` events. The deadlock fix is now validated
+live, not merely by its regression test.
+
+One property of that fixture is itself a finding: the operator window it needs
+is a **race**. `update_task_contract` requires the task PENDING (or FAILED while
+paused), enrichment and the first attempt run under one claim, and the pause has
+to settle on a TDD stage boundary. It won two runs of four; the losses exit 2
+(SETUP), never a false FAIL. That is the deferred "no operator control point at
+the contract boundary" item priced in a concrete unit: a free deterministic
+regression test versus a paid one that needs to win a race.
+
+**Controls — one defect, otherwise correct.**
+- Pausing a plan parked at a review gate is refused (422 `INVALID_TRANSITION`),
+  and `legal_actions` correctly does not advertise `pause` there. Refusing what
+  you never offered is the right shape.
+- Pause during execution settles PAUSED within ~2s, and `legal_actions` becomes
+  `[resume, start_replan, edit_pending_work]`.
+- Resume restores availability only, and the plan runs to publication.
+- **Defect: refusal messages mix two vocabularies.** `request_pause` reports
+  `status.value` (cyclic: "cannot transition from **waiting** to paused") while
+  `pause` and `resume` report `phase.value` (legacy nine-phase: "cannot
+  transition from **discovery** to resumed") — `planner_orchestrator.py:395` vs
+  `:419`/`:427`. A cyclic plan the API describes as `status: waiting, reason:
+  intent` is refused in nine-phase words, which is exactly the vocabulary the
+  cyclic model replaced. One-token fix each, but it edits the FROZEN aggregate,
+  so it is recorded rather than applied.
+- **Not reachable at Tier 0:** targeted retry and block resolution both need a
+  FAILED task, and the dry-run runner always succeeds. Their controls are
+  covered at the orchestration level instead. An API-only walkthrough cannot
+  exercise the failure-path controls without a fault-injection seam.
+
+**Recovery — one defect fixed; the latency itself is by design.**
+
+The mid-attempt crash experiment turned up a real bug on the way past:
+`reconcile_stale_attempts` gated only on `plans.is_claim_live`, but since goal
+leases (un-freeze #13) attempts are created by goal workers, which do not hold
+the plan claim while they run. A second worker's STARTUP reconciliation
+therefore saw a RUNNING attempt with no live plan claim and abandoned a ledger
+row whose process was alive and about to finalize it. Single-worker restart
+never exposed it — there the old process really is dead — so it took two
+workers to surface, which is how it survived. Now checks both leases; locked by
+`test_startup_reconciliation_respects_a_live_GOAL_lease` on both backends.
+
+The ~6 minute recovery latency around it is **not** a bug:
+
+- Startup reconciliation deliberately does not revert the domain task. It
+  closes the ledger row and stops, precisely so a dead process is never
+  mistaken for a task outcome. That restraint is load-bearing.
+- The goal lease expiring is therefore the only correct recovery trigger, and
+  it is the designed one: "a dead worker's lease expires and any worker
+  reclaims from persisted state". A restarting worker has no other liveness
+  signal about the previous holder.
+- So the wait equals `lease_seconds` (300s default for goals) plus poll
+  cadence, which is what was measured. Working as intended.
+
+If it is ever worth shortening, in increasing order of cost:
+
+1. **Lower the goal `lease_seconds`.** Pure configuration, and cheaper than it
+   looks: the lease does NOT have to cover a whole attempt, because an active
+   action renews it every `lease_seconds / 3`. That is why the 300s default
+   already sits below `agent_runner.timeout_seconds` (600) without a live
+   worker ever losing its goal. The real floor is the worst-case gap between
+   heartbeats — a renewal must land before expiry under scheduling jitter, GC
+   pauses, and a loaded host — so the tunable quantity is that safety margin,
+   not the attempt duration. Recovery latency falls linearly with it.
+2. **Have a worker release its goal leases on graceful shutdown.** Turns an
+   orderly restart into instant recovery and leaves only `kill -9` paying the
+   full lease. Does nothing for a hard crash, which is the case that matters.
+3. **A liveness registry** (worker heartbeat rows, reclaim when the *worker* is
+   dead rather than when the lease expires). Correct and fast, and the most
+   coordination infrastructure — the phase's own rule says not to add that
+   without run evidence, and one crash test is not it.
+
+The recommendation is (1) after checking it against the runner timeout, and
+otherwise to leave the latency alone and fix the *visibility*, below — an
+operator who can see "lease expires in 4m12s, last heartbeat 90s ago" does not
+experience a correct 6-minute wait as a hang.
+
+**Recovery — the remaining gap is visibility, not correctness.**
+- `kill -9` the worker *before* any attempt starts: a restarted worker reclaims
+  from persisted state and reaches publication in ~8s. Nothing was invented.
+- `kill -9` the worker *mid-attempt*, with attempt 1 RUNNING: startup
+  reconciliation closes the ledger row to `abandoned` without inventing an
+  outcome (correct), and the plan does eventually recover — attempts 2 and 3 run,
+  the task reaches DONE, publication opens.
+- **Measured recovery latency: ~6 minutes**, bounded by the 300s goal lease, not
+  by the attempt's death. Reconciliation deliberately does not revert the domain
+  task, so nothing shortens the wait.
+- **The whole window is invisible.** Throughout it the plan reports
+  `status: running` with its task `running` and `retry_not_before: null` —
+  identical to genuine work. This is run evidence for the standing
+  "Operational visibility" known issue: the read model exposes the active run
+  start but neither the lease deadline nor the last heartbeat, so an operator
+  cannot tell a live attempt from a dead worker's orphan.
+
+**Git and scheduling — covered by existing runs.** happy-path Tier 0/Tier 1 and
+parallel-goals-v1 together exercise failed-attempt cleanup, the protected default
+branch (`main` still at the seed tag every run), task→goal→cycle promotion, two
+independent goals promoting into one cycle branch, and publication output.
+Startup worktree audit ran clean on every restart.
+
+**Planning quality — not attempted.** Goal/task fan-out, duplicate test-only
+work, capability coverage, model-role adherence, and pre-execution cost
+visibility all need Tier 1 volume to judge, and one green run is not a sample.
 
 ### Priority experiments
 
@@ -424,14 +669,53 @@ sweeper for it — this codebase has no scheduler, and inventing one for garbage
 collection would be exactly the coordination infrastructure this phase says not
 to introduce without run evidence.
 
-### Exit criteria
+### Exit criteria — met 2026-07-28
 
-- No launch-critical defect can hot-loop, corrupt state, promote unverified
-  work, touch the default branch, or advertise an unusable recovery.
-- Repeated unexpected worker exceptions cannot starve healthy plans.
-- Operators can distinguish active work, capacity/backoff waiting, graceful
-  pause, recoverable block, and external terminal failure from persisted facts.
-- Relevant regressions pass the baseline fixture contract.
+- ✅ **No launch-critical defect can hot-loop, corrupt state, promote unverified
+  work, touch the default branch, or advertise an unusable recovery.** Six
+  defects found and fixed this phase, each reproduced first and locked on both
+  backends. `main` stayed at the seed tag in every one of six fixture runs;
+  `block_policy` keeps advertised resolutions honest; the one remaining capacity
+  gap is deferred below and ends in a recoverable block, not corruption.
+- ✅ **Repeated unexpected worker exceptions cannot starve healthy plans.** Two
+  distinct failures fixed: the claim is round-robin so a crashing plan cannot
+  monopolize it, and the goal-claim scan no longer terminates the process. Both
+  locked on the fake and SQLite.
+- ✅ **Operators can distinguish active work, capacity/backoff waiting, graceful
+  pause, recoverable block, and external terminal failure from persisted
+  facts.** The last gap was liveness — a dead worker's orphan read as active
+  work for the whole lease. Plan detail now serves `worker_lease` (scope,
+  holder, heartbeat deadline, `expired`, `seconds_remaining`) beside
+  `active_run`, which only ever said when work *began*.
+- ✅ **Relevant regressions pass the baseline fixture contract.** happy-path-v1
+  Tier 0 ×3 and Tier 1 ×2 (17/17 including pytest green on a real checkout),
+  parallel-goals-v1, and contract-repair-v1 all green.
+
+### Deferred out of Phase 2, with reasons
+
+Neither is a correctness hole; both are decisions rather than bugs, and holding
+the phase open for them would be holding it open for a preference.
+
+1. **A `request_concurrency` refusal spends the per-task retry budget.**
+   *Revisit after launch — carried to Phase 8.*
+   `capacity_wait` is set only when a circuit opens and a concurrency refusal
+   deliberately opens none, so alone among capacity failures it does not bypass
+   the budget — a busy shared pool can block a goal that has nothing wrong with
+   it (observed: `execution_failure` after 7 attempts, the last
+   `rate_limit/request_concurrency`). Making it budget-neutral inside a
+   wall-clock bound is a capacity-policy change with its own failure modes: the
+   bound has to exist, or a permanently saturated provider never escalates. It
+   ends in a recoverable block that advertises `retry_stage`, so the operator
+   has a move. Recorded in known-issues.
+2. **No operator control point at the contract boundary.** Priced concretely by
+   contract-repair-v1: the fixture must win a race for the window, so it is a
+   paid Tier 1 test that succeeds about half the time instead of a free
+   deterministic one. Still a review-gate-like opt-in hold, still not worth a
+   general "pause between units".
+
+Also standing, both recorded in known-issues and neither Phase 2 scope: no
+dead-letter/quarantine for a plan that fails forever (it now takes a fair share
+rather than starving others), and one-second claim-fairness granularity.
 
 ## Phase 3 — capability-to-product coverage audit ⬜
 
@@ -619,6 +903,17 @@ Take these up only when preview evidence proves the need:
 - workspace/branch/checkpoint retention and garbage collection;
 - richer telemetry analytics, OpenTelemetry, and retention;
 - repository indexing, symbol graphs, and context packaging;
+- **capacity-budget policy: stop a `request_concurrency` refusal spending the
+  per-task retry budget** (deferred out of Phase 2 on 2026-07-28, revisit after
+  launch). Every other capacity failure bypasses the budget because opening a
+  circuit records `opened_at` for the wall-clock ceiling to measure; a
+  concurrency refusal deliberately opens no circuit, so there is nowhere to
+  record when the waiting began and nothing for a bound to measure. Making it
+  budget-neutral without inventing that bound would let a permanently saturated
+  provider wait forever with nobody told. Current behaviour is wrong but safe
+  and visible: the budget runs out and a block opens advertising `retry_stage`.
+  Preview evidence should say whether real operators hit it often enough to
+  justify a per-task concurrency-wait deadline;
 - proactive concurrent-goal scope-disjointness validation;
 - advanced scheduling, load-tested pools, and additional runtimes;
 - multi-worker/multi-machine execution, distributed claims, or Redis;

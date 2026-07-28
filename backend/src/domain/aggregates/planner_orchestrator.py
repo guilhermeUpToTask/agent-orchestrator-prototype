@@ -416,7 +416,9 @@ class Plan(BaseModel):
                 self.paused_reason = reason
             return
         if self.active_cycle is None and self.phase not in WORKER_CLAIMABLE_PHASES:
-            raise InvalidTransitionError("Plan", self.id, self.phase.value, "paused")
+            # `status`, not `phase` (unfreeze #18): the refusal an operator reads
+            # must use the same vocabulary the API reports the plan in.
+            raise InvalidTransitionError("Plan", self.id, self.status.value, "paused")
         self.paused = True
         self.paused_reason = reason
         self.status = PlanStatus.PAUSED
@@ -424,7 +426,8 @@ class Plan(BaseModel):
     def resume(self) -> None:
         """Remove a manual pause without mutating retry or backoff state."""
         if not self.paused:
-            raise InvalidTransitionError("Plan", self.id, self.phase.value, "resumed")
+            # `status`, not `phase` (unfreeze #18) — see `pause`.
+            raise InvalidTransitionError("Plan", self.id, self.status.value, "resumed")
         self.paused = False
         self.pause_requested = False
         self.paused_reason = None

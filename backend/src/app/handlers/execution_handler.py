@@ -79,6 +79,7 @@ from src.app.provider_capacity import (
     CapacityScope,
     ProviderCapacityPolicy,
     RoutingPolicy,
+    capacity_backoff_seconds,
     circuit_model_id,
     circuit_ref,
     resolve_capacity_scope,
@@ -213,6 +214,15 @@ class ExecutionHandler:
         # fires and a block opens exactly as before.
         self._repository_reader = repository_reader
         self._planning_artifacts = planning_artifacts
+        # Artifact writes queued while a plan transaction is OPEN, flushed once
+        # it closes. This store deliberately writes on its own short transaction
+        # so the record survives a plan rollback — which means a second SQLite
+        # connection, and SQLite/WAL allows exactly one writer. Appending from
+        # inside `with uow:` therefore self-deadlocks: the plan connection holds
+        # the write lock and blocks waiting for the artifact connection, which is
+        # waiting for the plan connection. `busy_timeout` and the `run_in_session`
+        # retry budget cannot break it, because the caller IS the holder.
+        self._pending_artifacts: list[PlanningArtifact] = []
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -470,6 +480,27 @@ class ExecutionHandler:
         log.info("promotion.retrying", plan_id=plan_id, goal_id=goal_id, error=str(exc)[:200])
         return True
 
+    def _flush_pending_artifacts(self) -> None:
+        """Write everything queued during a now-closed plan transaction.
+
+        Best-effort by the store's own contract: losing the record must never
+        fail a run. Draining before the write means a store that raises cannot
+        make the next flush replay the same rows.
+        """
+        pending, self._pending_artifacts = self._pending_artifacts, []
+        if self._planning_artifacts is None:
+            return
+        for artifact in pending:
+            try:
+                self._planning_artifacts.append(artifact)
+            except Exception as error:  # noqa: BLE001 — never fail a run for a record
+                log.warning(
+                    "planning_artifact.write_failed",
+                    plan_id=artifact.plan_id,
+                    purpose=artifact.purpose,
+                    error=str(error),
+                )
+
     def _repair_contract(
         self,
         plan_id: str,
@@ -538,7 +569,10 @@ class ExecutionHandler:
             log.warning("contract_repair.rejected", task_id=task.id, error=str(amend_error))
             return False
 
-        self._planning_artifacts.append(
+        # QUEUED, not written: this runs inside the finalize transaction, and
+        # writing here deadlocks the two connections against each other. Flushed
+        # by `_finalize_failure` once the transaction closes.
+        self._pending_artifacts.append(
             PlanningArtifact(
                 plan_id=plan_id,
                 goal_id=unit.goal_id,
@@ -1740,6 +1774,9 @@ class ExecutionHandler:
         self, plan_id: str, unit: _Unit, exc: TaskFailed, uow: UnitOfWork
     ) -> Signal:
         def finalize() -> Signal:
+            # A CAS retry re-runs this whole closure, so anything queued by the
+            # abandoned attempt must go with it or the repair is recorded twice.
+            self._pending_artifacts.clear()
             with uow:
                 plan = uow.plans.get(plan_id)
                 plan.release_promotion(unit.goal_id, unit.execution.id)
@@ -1773,10 +1810,14 @@ class ExecutionHandler:
                         uow.plans.save(plan)
                     return Signal.PAUSED
 
-                delay = unit.retry_policy.backoff_for(
+                delay = capacity_backoff_seconds(
+                    unit.retry_policy,
                     unit.policy_attempt + 1,
                     jitter_unit=self._jitter_unit(unit.execution.id),
                     kind=exc.kind,
+                    # A concurrency refusal does not escalate like an exhausted
+                    # allowance; every other scope keeps the patient curve.
+                    limit_scope=exc.failure.limit_scope,
                 )
                 if exc.failure.retry_after_seconds is not None:
                     delay = max(delay, exc.failure.retry_after_seconds)
@@ -2025,7 +2066,14 @@ class ExecutionHandler:
         # See _finalize_test_author's identical comment on why re-running
         # the whole block (including _finish_execution / open_block) is
         # safe on retry -- the with-uow block rolls back atomically.
-        return self._run_with_cas_retry(finalize)
+        try:
+            return self._run_with_cas_retry(finalize)
+        finally:
+            # `finally`, not the success path: the artifact records WHY an
+            # attempt failed, so it is worth most when finalize itself did not
+            # complete. The store's own contract is best-effort and
+            # rollback-independent.
+            self._flush_pending_artifacts()
 
     def _finalize_success(
         self, plan_id: str, unit: _Unit, result: TaskResult, uow: UnitOfWork

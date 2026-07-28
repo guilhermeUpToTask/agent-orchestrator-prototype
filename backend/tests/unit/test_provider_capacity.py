@@ -7,11 +7,14 @@ import pytest
 from src.app.provider_capacity import (
     CapacityScope,
     ProviderCapacityPolicy,
+    capacity_backoff_seconds,
     circuit_model_id,
     circuit_ref,
     parse_circuit_ref,
 )
 from src.app.runtime_failures import LimitScope
+from src.domain.policies.retry_policies import RetryPolicy
+from src.domain.value_objects.lifecycle import FailureKind
 
 
 @pytest.mark.parametrize(
@@ -129,3 +132,69 @@ def test_an_outage_old_enough_to_escalate_is_not_reset_by_its_own_age():
     now = _dt(500)  # far past a 100s ceiling, but nowhere near a day
     assert policy.outage_start(opened, retry_at, now, None) == opened
     assert policy.outage_exceeded(opened, now, None)
+
+
+# --- per-limit_scope backoff curves ------------------------------------------
+
+_CURVE = RetryPolicy(
+    initial_backoff_seconds=30,
+    backoff_multiplier=2,
+    max_backoff_seconds=900,
+    jitter_ratio=0,
+)
+
+
+def test_a_concurrency_refusal_uses_the_plans_ordinary_curve():
+    """`kind_backoff_scale` grants RATE_LIMIT a 4x patient curve because an
+    exhausted account allowance needs a long wait. A concurrency refusal on a
+    SHARED pool means the opposite -- 'someone else is using it right now' -- and
+    is the case that opens no circuit and requeues just this task, so it must not
+    ride the patient curve."""
+    assert (
+        capacity_backoff_seconds(
+            _CURVE,
+            2,
+            kind=FailureKind.RATE_LIMIT,
+            limit_scope=LimitScope.REQUEST_CONCURRENCY,
+        )
+        == 30.0
+    )
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [LimitScope.QUOTA, LimitScope.DAILY_QUOTA, LimitScope.UNKNOWN_CAPACITY, None],
+)
+def test_every_other_scope_keeps_the_patient_rate_limit_curve(scope):
+    """Only a POSITIVELY identified concurrency refusal is impatient. An
+    unclassified message degrades to patience for the same reason it degrades to
+    the narrower circuit key: the harmful mistake is the aggressive one."""
+    assert capacity_backoff_seconds(_CURVE, 2, kind=FailureKind.RATE_LIMIT, limit_scope=scope) == (
+        120.0
+    )
+
+
+def test_a_concurrency_refusal_is_capped_by_the_unscaled_ceiling():
+    """The scale multiplies the cap as well as the base delay, so leaving it at 4.0
+    let a concurrency wait grow to 4x max_backoff_seconds (1h against a 15min
+    ceiling) -- the tail of the 37-minute Tier 1 measurement."""
+    assert (
+        capacity_backoff_seconds(
+            _CURVE,
+            9,  # 30 * 2**7 = 3840s uncapped
+            kind=FailureKind.RATE_LIMIT,
+            limit_scope=LimitScope.REQUEST_CONCURRENCY,
+        )
+        == 900.0
+    )
+    assert (
+        capacity_backoff_seconds(_CURVE, 9, kind=FailureKind.RATE_LIMIT, limit_scope=None) == 3600.0
+    )
+
+
+def test_a_non_capacity_failure_is_unaffected_by_the_scope_lookup():
+    """A TOOL_ERROR carries no limit_scope and has no per-kind scale; the wrapper
+    must be a pass-through for it, not a second opinion on the plan's curve."""
+    assert capacity_backoff_seconds(
+        _CURVE, 3, kind=FailureKind.TOOL_ERROR, limit_scope=None
+    ) == _CURVE.backoff_for(3, kind=FailureKind.TOOL_ERROR)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -130,6 +130,22 @@ class SqliteGoalLeaseRepository:
                 {"plan_id": plan_id, "goal_id": goal_id, "worker_id": worker_id},
             ),
         )
+
+    def lease_holder(self, plan_id: str, goal_id: str) -> tuple[str, datetime] | None:
+        def read(session: Session) -> tuple[str, datetime] | None:
+            row = session.execute(
+                text(
+                    "SELECT claimed_by, lease_expires_at FROM goal_leases "
+                    "WHERE plan_id = :plan_id AND goal_id = :goal_id "
+                    "AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL"
+                ),
+                {"plan_id": plan_id, "goal_id": goal_id},
+            ).one_or_none()
+            if row is None:
+                return None
+            return str(row[0]), datetime.fromtimestamp(int(row[1]), tz=timezone.utc)
+
+        return run_in_session(self._session_factory, read)
 
     def is_claim_live(self, plan_id: str, goal_id: str, now: datetime) -> bool:
         now_epoch = int(now.timestamp())

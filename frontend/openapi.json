@@ -5905,6 +5905,16 @@
               }
             ]
           },
+          "worker_lease": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerLeaseResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider_waiting": {
             "anyOf": [
               {
@@ -6060,6 +6070,7 @@
           "paused",
           "paused_reason",
           "active_run",
+          "worker_lease",
           "provider_waiting",
           "planning_operation",
           "planning_progress",
@@ -7770,6 +7781,56 @@
           "executable_check"
         ],
         "title": "VerificationStrategy"
+      },
+      "WorkerLeaseResponse": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "goal",
+              "plan"
+            ],
+            "title": "Scope"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "worker_id": {
+            "type": "string",
+            "title": "Worker Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At"
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired"
+          },
+          "seconds_remaining": {
+            "type": "integer",
+            "title": "Seconds Remaining"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "goal_id",
+          "worker_id",
+          "expires_at",
+          "expired",
+          "seconds_remaining"
+        ],
+        "title": "WorkerLeaseResponse",
+        "description": "Whether the claim behind `activity` is ALIVE, or a dead worker's orphan.\n\nPhase 2 exit criterion 3: an operator must be able to tell active work from\nevery other state using persisted facts. Everything else on this document\nalready distinguishes waiting, paused, blocked, and failed \u2014 but \"running\"\ncovered two opposite realities. Measured on 2026-07-27: `kill -9` on a\nworker holding a RUNNING attempt left the plan reporting `status: running`\nwith its task `running` and `retry_not_before: null` for the full 300s goal\nlease, indistinguishable from genuine work, because the only thing served\nwas the active run's START time.\n\n`expires_at` is renewed by the heartbeat every third of the lease, so it is\nthe liveness signal: comfortably in the future means a live worker is\nchecking in; in the past means nobody is coming back and the work resumes\nwhen the lease expires. `expired` is served rather than left to the client\nto compute against its own clock, which may not be the server's.\n\n`scope` names WHICH lease, because they mean different things: a `goal`\nlease is held by the goal worker actually running attempts, a `plan` claim\nby the tick doing planning and gates."
       }
     }
   }

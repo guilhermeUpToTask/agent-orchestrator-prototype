@@ -132,3 +132,71 @@ def test_failures_that_say_nothing_about_the_contract_produce_no_repair(reasons)
     broken = contract(verification_commands=["python -m pytest -q tests/test_greet.py"])
 
     assert propose_repair(broken, reasons, TRACKED) is None
+
+
+def test_queued_artifacts_flush_after_the_transaction_and_tolerate_a_failing_store():
+    """The repair record is QUEUED during the finalize transaction and written
+    once it closes.
+
+    Writing it inline self-deadlocks on real SQLite: the store keeps its own
+    short transaction so the record survives a plan rollback, which means a
+    second connection, and SQLite/WAL allows one writer. The plan connection
+    holds the lock while synchronously waiting for the artifact connection.
+    Observed live in a Tier 1 run — five attempts died `Database stayed locked
+    beyond retry budget`, each losing the repair, so the identical repair was
+    recomputed until the retry budget ran out and the goal blocked.
+
+    The in-memory fakes cannot reproduce that (one process, no lock), so this
+    locks the two properties the fix owns: the queue drains, and a store that
+    raises never fails the run.
+    """
+    from datetime import datetime, timezone
+
+    from src.app.handlers.execution_handler import ExecutionHandler
+    from src.app.ports import PlanningArtifact
+    from src.app.testing.fakes import (
+        CollectingEventSink,
+        DummyAgentRunner,
+        FakeClock,
+        InMemoryAgentRepository,
+        InMemoryPlanningArtifactStore,
+        NoOpWorkspace,
+    )
+
+    def artifact(purpose: str) -> PlanningArtifact:
+        return PlanningArtifact(
+            plan_id="p1",
+            goal_id="g1",
+            purpose=purpose,
+            sequence=0,
+            input_fingerprint="t1:1",
+            outcome="committed",
+            payload={"repair": "x"},
+            rejection_reasons=(),
+            created_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
+        )
+
+    store = InMemoryPlanningArtifactStore()
+    handler = ExecutionHandler(
+        DummyAgentRunner({}),
+        InMemoryAgentRepository([], None),
+        NoOpWorkspace(),
+        CollectingEventSink(),
+        FakeClock(),
+        planning_artifacts=store,
+    )
+
+    handler._pending_artifacts.append(artifact("contract_repair"))
+    assert store.latest("p1", "contract_repair", goal_id="g1") == []  # not yet written
+    handler._flush_pending_artifacts()
+    assert len(store.latest("p1", "contract_repair", goal_id="g1")) == 1
+    assert handler._pending_artifacts == []  # drained
+
+    class Raising:
+        def append(self, _artifact):
+            raise RuntimeError("store is down")
+
+    handler._planning_artifacts = Raising()  # type: ignore[assignment]
+    handler._pending_artifacts.append(artifact("contract_repair"))
+    handler._flush_pending_artifacts()  # best-effort: must not raise
+    assert handler._pending_artifacts == []  # drained even though the write failed

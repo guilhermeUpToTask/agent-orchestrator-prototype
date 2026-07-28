@@ -34,14 +34,62 @@ rather than remaining as warnings here.
 
 ## Operational visibility
 
-- Lease heartbeat now runs during long actions, but the plan detail read model
-  exposes the active run start rather than the promoted lease deadline and last
-  heartbeat. Operational telemetry records liveness; a richer query DTO remains.
-- A malformed plan that raises before any save can still be reclaimed first by
-  oldest `updated_at` on a single worker. A dead-letter/operator quarantine
-  policy is still needed for repeated unexpected application exceptions.
+- A dead worker's orphan is no longer indistinguishable from live work: plan
+  detail serves `worker_lease` (scope, holder, heartbeat deadline, `expired`,
+  `seconds_remaining`) alongside `active_run`, which only ever said when work
+  *began*. Locked by
+  `test_plan_detail_distinguishes_a_live_worker_from_a_dead_one`. The ~6 minute
+  recovery latency behind it is by design and documented in ROADMAP.md with
+  options — reconciliation deliberately never reverts the domain task, so
+  goal-lease expiry is the only correct trigger.
+- **Refusal messages mix the cyclic and legacy vocabularies.**
+  `Plan.request_pause` raises `InvalidTransitionError` with `status.value`
+  (`planner_orchestrator.py:395`) while `Plan.pause` and `Plan.resume` use
+  `phase.value` (`:419`, `:427`). A cyclic plan the API reports as
+  `status: waiting, reason: intent` is refused with "cannot transition from
+  discovery to resumed" — the nine-phase vocabulary the cyclic model replaced.
+  One token each, but in the FROZEN aggregate, so it needs a deliberate change
+  rather than a drive-by edit.
+- **No dead-letter or quarantine for a persistently failing plan.** The claim is
+  now round-robin (`COALESCE(claimed_at, 0), updated_at`), so a plan that raises
+  before any save can no longer monopolize the claim — that starvation is fixed
+  and locked by `test_a_crashing_plan_does_not_monopolize_the_claim` on both
+  backends. What remains is that such a plan is retried forever, taking its fair
+  share of every poll cycle and reporting nothing to an operator beyond repeated
+  `worker.tick_failed` log lines. Deliberate for now: a plan that fails from a
+  transient cause must be free to recover, and nothing yet distinguishes that
+  from a permanently poisoned one. A quarantine policy needs a consecutive-
+  failure counter that a success resets, plus a surfaced block — neither exists.
+- **Claim fairness has one-second granularity.** `claimed_at` is stamped
+  `int(now.timestamp())`, so two claims inside the same wall-clock second tie and
+  fall back to the `updated_at` tiebreak — which favours the plan that never
+  saved, the exact bias the round-robin removes. The worker loop claims again
+  immediately after a productive tick, so this is reachable. The effect is
+  bounded (unfairness lasts until the second rolls over) rather than the previous
+  unbounded starvation, and sub-second stamping would fix it if it ever matters.
+  Not worth a change without evidence of multi-plan load — see the note below.
+- **Multi-plan concurrency is lightly exercised.** Every fixture runs a single
+  plan; parallel-goals-v1 runs two goals within one plan. The two entries above
+  are the known multi-plan risks, both found by reading the claim path rather
+  than by running it. Running many plans against one worker is not a near-term
+  scenario, so these are recorded rather than engineered against.
 - SSE is bounded and non-durable for clients; reconnect relies on refetch.
   Relay and event-table retention remain operational work.
+- **A `request_concurrency` refusal still spends the per-task retry budget.**
+  `capacity_wait` is set only when a circuit opens, and a concurrency refusal
+  deliberately opens none, so alone among capacity failures it does not bypass
+  the budget. Run evidence (2026-07-27, Tier 1): a task ended
+  `execution_failure` after 7 attempts whose last was
+  `rate_limit/request_concurrency` — a busy shared pool blocking a goal that has
+  nothing wrong with it. The per-scope backoff curve fixed how long each wait
+  is, not whether the attempt is charged. Making it budget-neutral inside a
+  wall-clock bound is a capacity-policy decision, not a patch.
+- **Never write a `PlanningArtifact` from inside an open plan transaction.** The
+  store keeps its own short transaction so records survive a rollback, which
+  means a second SQLite connection; WAL allows one writer, so the plan
+  connection would hold the lock while waiting for the artifact connection and
+  neither can proceed. `ExecutionHandler` queues and flushes after the
+  transaction closes — new call sites must do the same.
 
 ## Git/process cleanup
 

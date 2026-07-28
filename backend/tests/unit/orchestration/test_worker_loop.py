@@ -134,6 +134,44 @@ def test_claim_predicate_is_the_driver_model(env_factory):
     assert env.uow.plans.claim_one_unit("w1", 60) is None  # all leases live now
 
 
+def test_a_crashing_plan_does_not_monopolize_the_claim(env_factory):
+    """Phase 2 exit criterion: repeated unexpected worker exceptions must not
+    starve healthy plans.
+
+    A tick that throws never reaches `plans.save`, so that plan's `updated_at`
+    never advances — and the SQLite claim selects `ORDER BY updated_at LIMIT 1`
+    while `_CLAIM_SQL`/`_RELEASE_SQL` leave `updated_at` alone. The poisoned plan
+    therefore stays the oldest row and is re-selected on every single poll. The
+    worker survives (`worker.tick_failed` releases and backs off a poll), but the
+    plan-level claim slot is monopolized and every other running plan's planning
+    turns, gates, and enrichment stop happening.
+
+    The in-memory fake starves the same way for its own reason: it returns the
+    first claimable plan in insertion order, with no fairness at all."""
+    env = env_factory()
+    env.seed(Plan(project_id="project-a", id="poisoned", brief="b", phase=PlanPhase.RUNNING))
+    env.seed(Plan(project_id="project-b", id="healthy", brief="b", phase=PlanPhase.RUNNING))
+
+    # Six polls of a worker whose every tick on `poisoned` raises: claim, blow up
+    # before any save, release in the `finally`. Exactly what main.py does. The
+    # clock advances a poll interval each time, as a real cadence does — the
+    # fairness cursor is a timestamp, so a frozen clock would tie every plan and
+    # tell us nothing.
+    claimed = []
+    for _ in range(6):
+        plan = env.uow.plans.claim_one_unit("w1", 60)
+        assert plan is not None
+        claimed.append(plan.id)
+        env.uow.plans.release(plan.id, "w1")
+        env.clock.advance(1)
+
+    # Alternation, not merely "healthy appeared once": the poisoned plan is still
+    # claimable forever (nothing quarantines it, by design — it may recover), so
+    # fairness has to hold on EVERY poll, not just the first.
+    assert claimed.count("healthy") >= 3, f"healthy plan starved: {claimed}"
+    assert claimed.count("poisoned") >= 2, f"poisoned plan never retried: {claimed}"
+
+
 def test_release_frees_the_claim(env_factory):
     env = env_factory()
     env.seed(Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.RUNNING))
@@ -299,3 +337,71 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
     assert len(spawned) == 1
     assert spawned[0].result() == ("contention", 0)
     assert releases == [("p1", "g1", "w1")]
+
+
+def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
+    """The goal-claim scan sits AFTER the tick's try/except, so it had none of
+    its own — one exception unwound the whole loop and the process exited 1.
+
+    Observed live: a plan deleted between the readiness scan and the lease
+    INSERT raised `FOREIGN KEY constraint failed` out of `claim_ready_goal`,
+    killing the worker; under the dev supervisor that took the API down too.
+    A delete racing a claim is normal (`DELETE /api/plans/{id}` cascades while a
+    scan is in flight), so it has to be survivable."""
+    from src.app.use_cases import claim_ready_goal as claim_module
+    from src.app.use_cases import run_worker as worker_module
+    from src.infra.worker import main as worker_main
+
+    stop = asyncio.Event()
+    tick_count = 0
+    scans = 0
+
+    container = SimpleNamespace(
+        new_unit_of_work=lambda: SimpleNamespace(goal_leases=object()),
+        reasoner=object(),
+        agent_repo=object(),
+        capability_repo=object(),
+        clock=object(),
+        config_store=object(),
+        workspace=object(),
+        agent_runner=object(),
+        agent_event_sink=object(),
+        verification_executor=None,
+        provider_capacity_policy=ProviderCapacityPolicy(),
+        provider_repo=object(),
+        routing_policy=RoutingPolicy(),
+        planning_artifacts=None,
+        repository_reader=None,
+    )
+
+    async def fake_worker_tick(*args, **kwargs):
+        nonlocal tick_count
+        tick_count += 1
+        await asyncio.sleep(0)
+        if tick_count == 3:
+            stop.set()
+        return False
+
+    def exploding_claim(*args, **kwargs):
+        nonlocal scans
+        scans += 1
+        raise RuntimeError("FOREIGN KEY constraint failed")
+
+    monkeypatch.setattr(worker_module, "worker_tick", fake_worker_tick)
+    monkeypatch.setattr(claim_module, "claim_ready_goal", exploding_claim)
+    monkeypatch.setattr(worker_main, "reconcile_stale_attempts", lambda *args: [])
+    monkeypatch.setattr(
+        worker_main,
+        "validate_agent_runner_mode",
+        lambda config_store: RunnerModeStatus(mode="dry-run", valid=True),
+    )
+
+    # Must return normally: before the fix this propagated out and the process died.
+    asyncio.run(
+        run_worker_forever(
+            container, worker_id="w1", poll_seconds=0, stop=stop, max_concurrent_goals=1
+        )
+    )
+
+    assert tick_count == 3  # kept serving every poll despite the scan raising
+    assert scans == 3  # and kept retrying the scan rather than disabling it

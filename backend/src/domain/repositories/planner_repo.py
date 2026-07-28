@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from src.domain.aggregates.planner_orchestrator import Plan
@@ -55,6 +56,18 @@ class PlanRepository(Protocol):
     # --- lease (liveness / crash recovery) ---
     def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None: ...
     def is_claim_live(self, plan_id: str) -> bool: ...
+
+    def lease_holder(self, plan_id: str) -> tuple[str, datetime] | None:
+        """`(worker_id, lease_expires_at)` for the current claim, expired or not.
+
+        `is_claim_live` collapses this to a bool, which is all the claim path
+        needs but strictly less than an operator does: a plan reporting RUNNING
+        with a lease that expired minutes ago is a dead worker's orphan, and one
+        with a lease renewed seconds ago is genuine work. Both look identical
+        without the timestamp. Returns the row even when expired — "expired" is
+        the answer, not the absence of one.
+        """
+        ...
     def heartbeat(self, plan_id: str, worker_id: str) -> None: ...
     def release(self, plan_id: str, worker_id: str) -> None: ...
 
