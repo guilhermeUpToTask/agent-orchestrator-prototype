@@ -41,6 +41,7 @@ PLAN_SCOPED = (
     "execution_attempts",
     "planning_operations",
     "planning_artifacts",
+    "goal_promotions",
 )
 
 
