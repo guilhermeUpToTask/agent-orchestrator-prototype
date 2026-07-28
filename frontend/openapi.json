@@ -4895,6 +4895,75 @@
         }
       }
     },
+    "/api/workers": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "List Workers",
+        "operationId": "workers-list_workers",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerStatusResponse"
+                  },
+                  "title": "Response Workers-List Workers"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
@@ -5369,6 +5438,135 @@
           "tasks"
         ],
         "title": "AttemptTimelineResponse"
+      },
+      "BlockResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "task_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Revision"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Refs"
+          },
+          "legal_resolutions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Legal Resolutions"
+          },
+          "requires_human": {
+            "type": "boolean",
+            "title": "Requires Human"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "stage",
+          "explanation",
+          "goal_id",
+          "task_id",
+          "task_revision",
+          "run_id",
+          "evidence_refs",
+          "legal_resolutions",
+          "requires_human",
+          "created_at",
+          "resolved_at",
+          "resolution"
+        ],
+        "title": "BlockResponse",
+        "description": "The domain `PlanBlock` plus the one fact only `block_policy` knows.\n\n`requires_human` is a pure function of `kind` (`src/app/block_policy.py`),\nso it is projected here rather than persisted: a policy change must not\nleave stale copies in old rows, and adding a field to the FROZEN\n`PlanBlock` would need a domain un-freeze for a value the block can\nalready derive from a field it carries today."
       },
       "Capability": {
         "properties": {
@@ -6898,121 +7096,6 @@
         "type": "object",
         "title": "PauseRequest"
       },
-      "PlanBlock": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "explanation": {
-            "type": "string",
-            "title": "Explanation"
-          },
-          "stage": {
-            "type": "string",
-            "title": "Stage"
-          },
-          "goal_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Goal Id"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          },
-          "task_revision": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Revision"
-          },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Evidence Refs"
-          },
-          "legal_resolutions": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Legal Resolutions"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "resolved_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved At"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "explanation",
-          "stage",
-          "created_at"
-        ],
-        "title": "PlanBlock"
-      },
       "PlanCreatedResponse": {
         "properties": {
           "plan_id": {
@@ -7176,6 +7259,13 @@
             "type": "array",
             "title": "Legal Actions"
           },
+          "action_endpoints": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Action Endpoints"
+          },
           "pause_requested": {
             "type": "boolean",
             "title": "Pause Requested"
@@ -7271,7 +7361,7 @@
           "block": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PlanBlock"
+                "$ref": "#/components/schemas/BlockResponse"
               },
               {
                 "type": "null"
@@ -7280,7 +7370,7 @@
           },
           "goal_blocks": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/PlanBlock"
+              "$ref": "#/components/schemas/BlockResponse"
             },
             "type": "object",
             "title": "Goal Blocks"
@@ -7366,6 +7456,7 @@
           "current_task_id",
           "tdd_stage",
           "legal_actions",
+          "action_endpoints",
           "pause_requested",
           "paused",
           "paused_reason",
@@ -9269,6 +9360,64 @@
         ],
         "title": "WorkerLeaseResponse",
         "description": "Whether the claim behind `activity` is ALIVE, or a dead worker's orphan.\n\nPhase 2 exit criterion 3: an operator must be able to tell active work from\nevery other state using persisted facts. Everything else on this document\nalready distinguishes waiting, paused, blocked, and failed \u2014 but \"running\"\ncovered two opposite realities. Measured on 2026-07-27: `kill -9` on a\nworker holding a RUNNING attempt left the plan reporting `status: running`\nwith its task `running` and `retry_not_before: null` for the full 300s goal\nlease, indistinguishable from genuine work, because the only thing served\nwas the active run's START time.\n\n`expires_at` is renewed by the heartbeat every third of the lease, so it is\nthe liveness signal: comfortably in the future means a live worker is\nchecking in; in the past means nobody is coming back and the work resumes\nwhen the lease expires. `expired` is served rather than left to the client\nto compute against its own clock, which may not be the server's.\n\n`scope` names WHICH lease, because they mean different things: a `goal`\nlease is held by the goal worker actually running attempts, a `plan` claim\nby the tick doing planning and gates."
+      },
+      "WorkerStatusResponse": {
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "title": "Worker Id"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "title": "Last Seen At"
+          },
+          "poll_seconds": {
+            "type": "number",
+            "title": "Poll Seconds"
+          },
+          "lease_seconds": {
+            "type": "integer",
+            "title": "Lease Seconds"
+          },
+          "max_concurrent_goals": {
+            "type": "integer",
+            "title": "Max Concurrent Goals"
+          },
+          "inflight_goals": {
+            "type": "integer",
+            "title": "Inflight Goals"
+          },
+          "seconds_since_seen": {
+            "type": "number",
+            "title": "Seconds Since Seen"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "worker_id",
+          "mode",
+          "started_at",
+          "last_seen_at",
+          "poll_seconds",
+          "lease_seconds",
+          "max_concurrent_goals",
+          "inflight_goals",
+          "seconds_since_seen",
+          "stale"
+        ],
+        "title": "WorkerStatusResponse"
       }
     }
   }

@@ -473,3 +473,35 @@ states from persisted facts) for the same reason `block_policy` exists: a
 control surface that misdescribes itself is worse than one that says nothing.
 Locked by `test_refusals_speak_the_cyclic_vocabulary_not_the_legacy_phase` on
 both backends.
+
+**Decision 60 (2026-07-28) — domain unfreeze #19: a cyclic plan is cyclic
+before its cycle exists.** `Plan.request_pause` and `Plan.pause` decide whether
+a plan is governed by the cyclic lifecycle with a new `Plan._is_cyclic` (any
+cycle, intent proposal, or cycle draft) instead of `active_cycle is not None`.
+No state, persisted shape, or transition is added — one predicate is replaced by
+a more accurate one.
+
+`active_cycle is not None` was standing in for "is this a cyclic plan", and the
+two are not the same question. Between an approved intent and an activated
+cycle a plan is fully cyclic and has **no cycle yet**: `status` is RUNNING,
+`activity` is `cycle_architecture`, and the legacy `phase` is still `discovery`
+because cyclic planning never advances the compatibility projection. The guard
+fell through to that phase, found it outside `WORKER_CLAIMABLE_PHASES`, and
+refused — while `_CLAIM_SQL` considered the same plan claimable and
+`Plan.legal_actions` advertised `pause`. An operator watching a plan the API
+described as `status: running, legal_actions: ["pause", "start_replan"]` pressed
+pause and got 422 `INVALID_TRANSITION`, in the exact window they most want it:
+waiting on the planner.
+
+Found by the Phase 4 advertised-action contract test
+(`tests/integration/test_legal_actions_contract.py`) on its first run — the test
+Phase 4's exit criterion *every advertised action works in the state that
+advertises it* exists to produce. That criterion is why the fix belongs in the
+domain rather than in the API: narrowing `legal_actions` instead would have made
+the two agree by removing a control that should work, and the claim predicate
+already treats the plan as live.
+
+The legacy half is unchanged and locked: a plan with no cyclic artifact is still
+judged by its phase, so a legacy row in REPLANNING still refuses to pause.
+Locked by `test_a_cyclic_plan_awaiting_architecture_can_pause` and
+`test_a_legacy_plan_is_still_judged_by_its_phase`.

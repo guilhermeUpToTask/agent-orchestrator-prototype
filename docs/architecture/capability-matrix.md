@@ -96,7 +96,7 @@ Serves **J2**.
 | Whole-installation readiness | `routers/readiness.py` (composes the validators below) | `GET /api/readiness` | — | `test_readiness.py` | api-only | critical |
 | Reasoner wiring check | `reasoner/factory.validate_reasoner_config` | `GET /api/reasoner/status` | `ReasonerSection` | `test_api.py`, `test_reasoner_factory.py` | full | critical |
 | Runner mode, bindings, binary probes | `runtime/factory`, `dependency_checker` | `GET /api/runner/status` | `RunnerSection` | `test_api.py`, `test_agent_runner_factory.py` | full | critical |
-| Worker liveness (is anyone running?) | plan/goal lease | — (per-plan `worker_lease` only) | — | `test_worker_pool.py` | hidden ([G10](#g10)) | critical |
+| Worker liveness (is anyone running?) | `WorkerRegistry` heartbeat | `GET /api/workers` | — | `test_workers_api.py`, `test_worker_registry.py`, `test_worker_pool.py` | api-only | critical |
 | Repository / workspace readiness | `repository_binding`, `ProjectWorkspaceResolver.repository_path_for` | `GET /api/projects/{project_id}/readiness` | — | `test_readiness.py`, `test_repository_binding.py` | api-only | critical |
 
 ## 3. Plan lifecycle
@@ -174,7 +174,8 @@ Serves **J9**.
 | Change the retry budget | `update_retry_policy.update_retry_policy` | `POST /api/plans/{plan_id}/retry-policy` | — | `test_retry_policy_update.py`, `test_api.py` | api-only | critical |
 | Per-goal blocks and their resolutions | `Plan.goal_blocks`, `block_policy` | `goal_blocks` in `GET /api/plans/{plan_id}` | — | `test_goal_blocks.py`, `test_block_policy.py` | api-only ([G2](#g2)) | critical |
 | Plan-wide block and its resolutions | `Plan.block`, `block_policy` | `block` in `GET /api/plans/{plan_id}` | `Overview`, `AttentionItem` | `test_block_report.py`, `test_block_policy.py` | full | critical |
-| "Is this block mine or the orchestrator's?" | `block_policy.requires_human` | — (`PlanBlock` has no such field to serve) | — | `test_block_policy.py` | hidden — already owned by Phase 5, item 1 | critical |
+| Where each advertised action is served | `action_endpoints_for` | `action_endpoints` in `GET /api/plans/{plan_id}` | — | `test_legal_actions_contract.py` | api-only | critical |
+| "Is this block mine or the orchestrator's?" | `block_policy.requires_human` | `requires_human` on every block in `GET /api/plans/{plan_id}` | — | `test_block_report.py`, `test_block_policy.py` | api-only | critical |
 | Bounded automatic repair | `contract_repair`, `promotion_failures`, `agent_feedback` | — (automatic) | — | `test_execution_handler_unpromotable_goal.py` | hidden by design | — |
 | Skip / abandon a wedged task | `Plan.abandon_task` | — | — | `test_transitions.py` | hidden ([G12](#g12)) | post-launch |
 
@@ -220,6 +221,11 @@ real work is `active_cycle.goals`). `legacy_phase` has no frontend consumer;
 Every gap below is verified, has an owner phase, and names the objective test
 that will prove it closed. Nothing here is a request for symmetry: each one
 breaks or hides a step of a job an operator actually performs.
+
+**Closed by P4.2** (2026-07-28) — G10, by `GET /api/workers` plus the readiness
+`workers` check, locked by `test_workers_api.py`. The same branch served
+`requires_human` and `action_endpoints`, and its advertised-action contract test
+found the domain inconsistency recorded as un-freeze #19 (decision 60).
 
 **Closed by P4.1** (2026-07-28), and deleted from this list per the repo rule
 that a fixed defect is replaced by the test that locks it — G1 (the guard is
@@ -311,16 +317,6 @@ Phase 4 lists exactly this set.
 **Owner: Phase 4.** **Test:** one evidence read model per cycle returning
 accepted evidence refs, protected paths, promoted refs and the disposition,
 asserted against a completed dry-run cycle.
-
-### G10 — No route says whether a worker is running {#g10}
-
-`worker_lease` answers it per plan and only while a plan is claimed. Before the
-first plan — the J2 setup checklist — nothing distinguishes "worker running,
-idle" from "worker never started", the single most common local-setup failure.
-
-**Owner: Phase 4.** **Test:** a worker-health read (last poll, mode, claimed
-plan count) reports a live worker and, after its lease expires, reports it as
-stale.
 
 ### G12 — A wedged task cannot be skipped {#g12}
 

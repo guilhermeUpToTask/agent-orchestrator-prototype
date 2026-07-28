@@ -383,14 +383,29 @@ class Plan(BaseModel):
             self.status = PlanStatus.RUNNING
 
     # ---- graceful human pause gate ----
+    @property
+    def _is_cyclic(self) -> bool:
+        """Whether this plan is governed by the cyclic lifecycle at all.
+
+        Domain unfreeze #19. `active_cycle is not None` was standing in for
+        this, and it is not the same question: between an approved intent and
+        an activated cycle a plan is fully cyclic and has NO cycle yet. Any
+        cyclic planning artifact settles it — a legacy row can never have one.
+        """
+        return bool(self.cycles) or self.intent_proposal is not None or self.cycle_draft is not None
+
     def request_pause(self, active_action: bool, reason: str | None = None) -> None:
         """Block new claims immediately; settle only after an active action finalizes."""
         if self.paused or self.pause_requested:
             if reason is not None:
                 self.paused_reason = reason
             return
+        # For a cyclic plan, RUNNING alone decides — the same predicate
+        # `_CLAIM_SQL` uses to decide claimability, which is exactly what pause
+        # gates. The legacy phase check applies only to legacy rows, which have
+        # no cyclic artifact to judge them by (unfreeze #19).
         if self.status != PlanStatus.RUNNING or (
-            self.active_cycle is None and self.phase not in WORKER_CLAIMABLE_PHASES
+            not self._is_cyclic and self.phase not in WORKER_CLAIMABLE_PHASES
         ):
             raise InvalidTransitionError("Plan", self.id, self.status.value, "paused")
         self.paused_reason = reason
@@ -415,9 +430,12 @@ class Plan(BaseModel):
             if reason is not None:
                 self.paused_reason = reason
             return
-        if self.active_cycle is None and self.phase not in WORKER_CLAIMABLE_PHASES:
+        if not self._is_cyclic and self.phase not in WORKER_CLAIMABLE_PHASES:
             # `status`, not `phase` (unfreeze #18): the refusal an operator reads
             # must use the same vocabulary the API reports the plan in.
+            # `_is_cyclic`, not `active_cycle is not None` (unfreeze #19): the
+            # auto-pause path must not refuse a cyclic plan for a legacy phase
+            # that cyclic planning never advances.
             raise InvalidTransitionError("Plan", self.id, self.status.value, "paused")
         self.paused = True
         self.paused_reason = reason

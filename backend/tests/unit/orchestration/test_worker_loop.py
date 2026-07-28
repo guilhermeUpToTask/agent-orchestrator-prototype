@@ -10,6 +10,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
+from src.app.testing.fakes import FakeClock
 from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from src.domain.entities.goal import Goal
 from src.domain.entities.task import Task
@@ -21,6 +22,16 @@ from src.app.use_cases.control import finish_review
 from src.app.use_cases.run_worker import _advance_with_heartbeats, drive_plan, worker_tick
 from src.infra.runtime.factory import RunnerModeStatus
 from src.infra.worker.main import run_worker_forever
+
+
+class _NoopRegistry:
+    """Stands in for WorkerRegistry: the real one is best-effort telemetry, so
+    the loop must behave identically whether or not a beat lands."""
+
+    async def beat(self, *args, **kwargs) -> None:
+        return None
+
+
 
 
 def plan_with_chain():
@@ -277,7 +288,7 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
         reasoner=object(),
         agent_repo=object(),
         capability_repo=object(),
-        clock=object(),
+        clock=FakeClock(),
         config_store=object(),
         workspace=object(),
         agent_runner=object(),
@@ -288,6 +299,10 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
         routing_policy=RoutingPolicy(),
         planning_artifacts=None,
         repository_reader=None,
+        # The heartbeat task's only container dependency. A no-op keeps these
+        # loop tests about the loop; WorkerRegistry itself is covered by
+        # tests/integration/test_worker_registry.py.
+        worker_registry=_NoopRegistry(),
     )
 
     async def fake_worker_tick(*args, **kwargs):
@@ -310,7 +325,11 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
 
     def capture_task(coro):
         task = original_ensure_future(coro)
-        spawned.append(task)
+        # GOAL spawns only. The loop also starts a heartbeat task (liveness
+        # reporting, not work), and this test is about how many goals a stale
+        # claim produces.
+        if "_heartbeat" not in getattr(coro, "__qualname__", ""):
+            spawned.append(task)
         return task
 
     monkeypatch.setattr(worker_module, "worker_tick", fake_worker_tick)
@@ -361,7 +380,7 @@ def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
         reasoner=object(),
         agent_repo=object(),
         capability_repo=object(),
-        clock=object(),
+        clock=FakeClock(),
         config_store=object(),
         workspace=object(),
         agent_runner=object(),
@@ -372,6 +391,10 @@ def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
         routing_policy=RoutingPolicy(),
         planning_artifacts=None,
         repository_reader=None,
+        # The heartbeat task's only container dependency. A no-op keeps these
+        # loop tests about the loop; WorkerRegistry itself is covered by
+        # tests/integration/test_worker_registry.py.
+        worker_registry=_NoopRegistry(),
     )
 
     async def fake_worker_tick(*args, **kwargs):
