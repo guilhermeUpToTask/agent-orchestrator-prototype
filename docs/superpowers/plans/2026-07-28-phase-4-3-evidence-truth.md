@@ -13,8 +13,9 @@
 - **Approved spec:** `docs/superpowers/specs/2026-07-28-phase-4-3-evidence-truth-design.md`. Read it before Task 1.
 - **No domain change.** Nothing under `src/domain/` is modified. No `docs/decisions/decision-log.md` entry — deliberately.
 - **Dependency rule:** `domain -> app -> infra & api`. `src/app/` must never import `src/infra/`. Infra importing app is fine and is what makes Task 1 legal.
-- **Type checking:** `mypy src` must pass with **zero errors and no new excludes**.
-- **Lint:** `ruff check src tests --fix` clean.
+- **Run every backend command through `uv run`.** The project pins ruff 0.15.21; a bare `ruff` picks up whatever is on PATH (0.16.0 here) and reports ~332 findings from rules this project does not enable. CI runs `uv run ruff check src tests`. The same applies to `pytest` and `mypy`.
+- **Type checking:** `uv run mypy src` must pass with **zero errors and no new excludes**.
+- **Lint:** `uv run ruff check src tests` clean.
 - **Every file starts with** `from __future__ import annotations`.
 - **No `print()` and no stdlib `logging`.** Use `structlog.get_logger(__name__)` with namespaced event names.
 - **No `HTTPException` in routers.** There are currently zero in the codebase. Every non-2xx goes through an error class with a stable `code`, mapped once in `src/api/exceptions.py::_STATUS_BY_CODE`.
@@ -74,7 +75,7 @@ def test_cyclic_task_branch_keys_on_run_not_attempt() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/unit/test_branch_names.py -v`
+Run: `uv run pytest tests/unit/test_branch_names.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.app.branch_names'`
 
 - [ ] **Step 3: Write the implementation**
@@ -127,7 +128,7 @@ def legacy_task_branch(task_id: str, attempt: int) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/unit/test_branch_names.py -v`
+Run: `uv run pytest tests/unit/test_branch_names.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Adopt the module in the git adapter**
@@ -179,7 +180,7 @@ Then rename the locals `cycle_branch` / `goal_branch` to `cycle_branch_name` / `
 
 - [ ] **Step 6: Verify nothing regressed**
 
-Run: `pytest tests/integration/test_git_workspace.py -v && mypy src && ruff check src tests`
+Run: `uv run pytest tests/integration/test_git_workspace.py -v && uv run mypy src && uv run ruff check src tests`
 Expected: all PASS, mypy zero errors. The workspace tests assert real branch names against a real repo, so they are the proof the refactor is behaviour-preserving.
 
 - [ ] **Step 7: Commit**
@@ -225,7 +226,7 @@ PLAN_SCOPED = (
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/integration/test_delete_plan_leaves_nothing.py -v`
+Run: `uv run pytest tests/integration/test_delete_plan_leaves_nothing.py -v`
 Expected: FAIL — the table does not exist yet (`no such table: goal_promotions`).
 
 - [ ] **Step 3: Write the migration**
@@ -329,7 +330,7 @@ class GoalPromotionTable(Base):
 Run:
 ```bash
 pytest tests/integration/test_delete_plan_leaves_nothing.py tests/integration/test_migrations.py -v
-alembic heads
+uv run alembic heads
 ```
 Expected: tests PASS; `alembic heads` prints exactly one head, `0017_goal_promotions`.
 
@@ -443,7 +444,7 @@ def promotion_env(request, tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/integration/test_goal_promotion_repository.py -v`
+Run: `uv run pytest tests/integration/test_goal_promotion_repository.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.app.promotion_records'`
 
 - [ ] **Step 3: Write the record and the port**
@@ -737,7 +738,7 @@ If the `plans` table requires columns beyond those five, read its definition in 
 
 - [ ] **Step 8: Run tests to verify they pass**
 
-Run: `pytest tests/integration/test_goal_promotion_repository.py -v && mypy src`
+Run: `uv run pytest tests/integration/test_goal_promotion_repository.py -v && uv run mypy src`
 Expected: 6 PASS (3 tests × 2 backends), mypy zero errors.
 
 - [ ] **Step 9: Commit**
@@ -797,7 +798,7 @@ Add these assertions **inside that existing test**, after the cycle's goals have
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/integration/test_default_cyclic_execution.py -v -k shipped_stub`
+Run: `uv run pytest tests/integration/test_default_cyclic_execution.py -v -k shipped_stub`
 Expected: FAIL — `assert [] == ['g1', ...]`, because nothing writes the rows yet.
 
 - [ ] **Step 3: Write the implementation**
@@ -840,8 +841,8 @@ Leave `cycle.evidence_refs.append(...)` in place — removing it would change a 
 Run:
 ```bash
 pytest tests/integration/test_default_cyclic_execution.py -v
-pytest -m "not integration"
-mypy src
+uv run pytest -m "not integration"
+uv run mypy src
 ```
 Expected: all PASS, mypy zero errors.
 
@@ -919,7 +920,7 @@ def drive_cycle_to_publication(
 
 Fill the body by moving the existing test's code verbatim, parameterising only the publication step on `disposition` / `output_reference` / `publish`. Then rewrite `test_shipped_stub_and_dry_run_execute_a_cycle_to_publication_gate` to call `drive_cycle_to_publication(...)` and keep its own assertions — **including the promotion assertions added in Task 4**. Run it to confirm the extraction changed no behaviour:
 
-Run: `pytest tests/integration/test_default_cyclic_execution.py -v`
+Run: `uv run pytest tests/integration/test_default_cyclic_execution.py -v`
 Expected: PASS, unchanged.
 
 - [ ] **Step 2: Write the failing test**
@@ -990,7 +991,7 @@ def evidence_client(tmp_path, monkeypatch):
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `pytest tests/integration/test_cycle_evidence_api.py -v`
+Run: `uv run pytest tests/integration/test_cycle_evidence_api.py -v`
 Expected: FAIL — 404 on the evidence route, which is not registered yet.
 
 - [ ] **Step 4: Add the not-found error**
@@ -1269,7 +1270,7 @@ Evidence carries commands, commit SHAs and output refs. It is control-plane data
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `pytest tests/integration/test_cycle_evidence_api.py tests/integration/test_default_cyclic_execution.py -v && mypy src && ruff check src tests`
+Run: `uv run pytest tests/integration/test_cycle_evidence_api.py tests/integration/test_default_cyclic_execution.py -v && uv run mypy src && uv run ruff check src tests`
 Expected: all PASS, mypy zero errors.
 
 - [ ] **Step 8: Commit**
@@ -1440,7 +1441,7 @@ Build the four new fixtures on top of `drive_cycle_to_publication` from Task 5:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pytest tests/integration/test_cycle_evidence_api.py -v`
+Run: `uv run pytest tests/integration/test_cycle_evidence_api.py -v`
 Expected: the six new tests FAIL (fixtures missing), the two from Task 5 still PASS.
 
 - [ ] **Step 3: Make them pass**
@@ -1451,9 +1452,9 @@ The endpoint logic from Task 5 already implements all six behaviours — the rev
 
 Run:
 ```bash
-pytest -m "not integration"
-pytest -m integration
-mypy src
+uv run pytest -m "not integration"
+uv run pytest -m integration
+uv run mypy src
 ruff check src tests
 ```
 Expected: all PASS, zero mypy errors.
@@ -1491,7 +1492,7 @@ Open `backend/tests/integration/test_control_plane_auth.py`. It parametrizes ove
 
 - [ ] **Step 2: Run it to verify the route is guarded**
 
-Run: `pytest tests/integration/test_control_plane_auth.py -v`
+Run: `uv run pytest tests/integration/test_control_plane_auth.py -v`
 Expected: PASS. If it FAILS with a 200 where 401 was expected, the router was registered without `dependencies=_guarded` in Task 5 — fix `server.py`.
 
 - [ ] **Step 3: Regenerate the API types**
@@ -1618,11 +1619,11 @@ Expected: PASS. If it fails, the new route must be added to the matrix's route i
 
 ```bash
 cd backend
-ruff check src tests --fix
-mypy src
-pytest -m "not integration"
-pytest -m integration
-alembic heads
+uv run ruff check src tests
+uv run mypy src
+uv run pytest -m "not integration"
+uv run pytest -m integration
+uv run alembic heads
 cd ../frontend && npm run build
 ```
 Expected: all clean; `alembic heads` shows one head at `0017_goal_promotions`.
@@ -1651,12 +1652,12 @@ Phase 4 closes when all of these hold:
 
 | Claim | Command |
 |---|---|
-| G9's objective test passes | `pytest tests/integration/test_cycle_evidence_api.py -v` |
-| A superseded cycle's evidence survives a replan | `pytest tests/integration/test_cycle_evidence_api.py -v -k superseded` |
-| Promotions are transactional on both backends | `pytest tests/integration/test_goal_promotion_repository.py -v` |
-| Deleting a plan leaves no promotion rows | `pytest tests/integration/test_delete_plan_leaves_nothing.py -v` |
-| The refactor did not change any branch name | `pytest tests/integration/test_git_workspace.py -v` |
-| The route is token-guarded | `pytest tests/integration/test_control_plane_auth.py -v` |
+| G9's objective test passes | `uv run pytest tests/integration/test_cycle_evidence_api.py -v` |
+| A superseded cycle's evidence survives a replan | `uv run pytest tests/integration/test_cycle_evidence_api.py -v -k superseded` |
+| Promotions are transactional on both backends | `uv run pytest tests/integration/test_goal_promotion_repository.py -v` |
+| Deleting a plan leaves no promotion rows | `uv run pytest tests/integration/test_delete_plan_leaves_nothing.py -v` |
+| The refactor did not change any branch name | `uv run pytest tests/integration/test_git_workspace.py -v` |
+| The route is token-guarded | `uv run pytest tests/integration/test_control_plane_auth.py -v` |
 | Nothing else regressed | `pytest -m "not integration"` then `pytest -m integration` |
 | Types and lint | `mypy src` · `ruff check src tests` |
 | One migration head | `alembic heads` |
