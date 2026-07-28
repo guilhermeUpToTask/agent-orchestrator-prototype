@@ -191,6 +191,7 @@ Serves **J7**.
 | Record the output disposition | `cyclic_planning.record_output_disposition` | `POST /api/plans/{plan_id}/publication` | `GatePanel` | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |
 | Recorded disposition + output reference | `Cycle.output_disposition/_reference` | inside `cycles` of `GET /api/plans/{plan_id}` | — | `test_api.py` | api-only ([G9](#g9)) | critical |
 | Export a run's evidence bundle | `backend/scripts/export_plan_runs.py` | — (CLI only) | — | `test_plan_run_export.py` | hidden ([G9](#g9)) | critical |
+| One evidence read model per cycle — accepted evidence, protected scope, promoted refs, disposition | `routers/evidence.py` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py` | api-only ([G9](#g9)) | critical |
 | Authenticated PR / forge write | — | — | — | — | not implemented (deliberate) | post-launch |
 
 ## 9. Nine-phase compatibility surface
