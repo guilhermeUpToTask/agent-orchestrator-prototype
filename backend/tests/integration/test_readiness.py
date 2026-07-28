@@ -37,7 +37,7 @@ def test_readiness_names_every_check(client):
     body = client.get("/api/readiness").json()
 
     assert {check["name"] for check in body["checks"]} == {
-        "reasoner", "runner", "binaries", "secrets", "catalog", "projects",
+        "reasoner", "runner", "binaries", "secrets", "catalog", "projects", "workers",
     }
     assert all(check["status"] in {"ok", "warn", "fail"} for check in body["checks"])
 

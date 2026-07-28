@@ -43,6 +43,7 @@ from src.api.routers import (
     reasoner,
     reference,
     runner,
+    workers,
 )
 from src.api.schemas.common import HealthResponse
 from src.api.sse import get_broker
@@ -145,6 +146,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(runner.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(metrics.router, prefix=_prefix, dependencies=_guarded)
     app.include_router(readiness.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(workers.router, prefix=_prefix, dependencies=_guarded)
     # The one exception, and only to the MECHANISM: EventSource cannot send
     # headers, so the stream a browser opens directly also accepts `?token=`.
     app.include_router(

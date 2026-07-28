@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_container
+from src.app.block_policy import requires_human
 from src.app.execution_records import (
     ExecutionAttemptStatus,
     PlanningOperation,
@@ -168,6 +169,58 @@ class ProviderWaitingResponse(BaseModel):
     needs_attention: bool  # the outage outlived its ceiling and opened a block
 
 
+class BlockResponse(BaseModel):
+    """The domain `PlanBlock` plus the one fact only `block_policy` knows.
+
+    `requires_human` is a pure function of `kind` (`src/app/block_policy.py`),
+    so it is projected here rather than persisted: a policy change must not
+    leave stale copies in old rows, and adding a field to the FROZEN
+    `PlanBlock` would need a domain un-freeze for a value the block can
+    already derive from a field it carries today.
+    """
+
+    id: str
+    kind: str
+    stage: str
+    explanation: str
+    goal_id: str | None
+    task_id: str | None
+    task_revision: int | None
+    run_id: str | None
+    evidence_refs: list[str]
+    legal_resolutions: list[str]
+    requires_human: bool
+    created_at: datetime
+    resolved_at: datetime | None
+    resolution: str | None
+
+
+def _block_response(block: PlanBlock) -> BlockResponse:
+    """Project a domain block into its served shape.
+
+    Fields are listed explicitly rather than via `**block.model_dump()` so
+    that a future field added to `PlanBlock` fails loudly here (a KeyError on
+    an unexpected/missing name) instead of silently passing through — see
+    the design's "no catch-all" rule (P4.2 §3.4).
+    """
+    return BlockResponse(
+        id=block.id,
+        kind=block.kind,
+        stage=block.stage,
+        explanation=block.explanation,
+        goal_id=block.goal_id,
+        task_id=block.task_id,
+        task_revision=block.task_revision,
+        run_id=block.run_id,
+        evidence_refs=block.evidence_refs,
+        legal_resolutions=block.legal_resolutions,
+        requires_human=requires_human(block.kind),
+        created_at=block.created_at,
+        resolved_at=block.resolved_at,
+        resolution=block.resolution,
+    )
+
+
 class PlanDetailResponse(BaseModel):
     id: str
     project_id: str | None
@@ -190,13 +243,13 @@ class PlanDetailResponse(BaseModel):
     planning_progress: str | None
     active_cycle: Cycle | None
     pending_gate: ReviewGate | None
-    block: PlanBlock | None
+    block: BlockResponse | None
     # Domain unfreeze #14 — per-goal blocks: goal_id -> that goal's own active
     # (or resolved-but-recent) PlanBlock, independent of the plan-wide `block`
     # scalar above. Only entries with `.active` True are currently unresolved;
     # callers resolving one pass its goal_id to POST /retry (or the relevant
     # resolution endpoint) exactly as they already do for `block.goal_id`.
-    goal_blocks: dict[str, PlanBlock]
+    goal_blocks: dict[str, BlockResponse]
     goals: list[Goal]
     cycles: list[Cycle]
     intent_proposal: IntentProposal | None
@@ -770,9 +823,15 @@ def get_plan(plan_id: str, container: AppContainer = Depends(get_container)) -> 
             if plan.review_gate is not None and plan.review_gate.unresolved
             else None
         ),
-        block=(plan.block if plan.block is not None and plan.block.active else None),
+        block=(
+            _block_response(plan.block)
+            if plan.block is not None and plan.block.active
+            else None
+        ),
         goal_blocks={
-            goal_id: block for goal_id, block in plan.goal_blocks.items() if block.active
+            goal_id: _block_response(block)
+            for goal_id, block in plan.goal_blocks.items()
+            if block.active
         },
         goals=goals,
         cycles=plan.cycles,

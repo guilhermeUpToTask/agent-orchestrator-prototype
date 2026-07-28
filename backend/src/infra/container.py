@@ -49,6 +49,7 @@ from src.infra.db.agent_event_sink import SqliteAgentEventSink
 from src.infra.db.chat_repository import SqliteChatRepository
 from src.infra.db.secret_store import SqliteSecretStore, load_master_key
 from src.infra.db.unit_of_work import SqliteUnitOfWork
+from src.infra.db.worker_registry import WorkerRegistry
 from src.infra.git.repository_reader import GitRepositoryReader
 from src.infra.git.project_workspace import (
     ProjectRoutingWorkspace,
@@ -169,6 +170,10 @@ class AppContainer:
     @cached_property
     def agent_event_reader(self) -> SqliteAgentEventReader:
         return SqliteAgentEventReader(self.session_factory)
+
+    @cached_property
+    def worker_registry(self) -> WorkerRegistry:
+        return WorkerRegistry(self.session_factory)
 
     @cached_property
     def observation_repository(self) -> SqliteProcessObservationRepository:

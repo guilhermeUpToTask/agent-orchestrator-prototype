@@ -1,4 +1,7 @@
-"""Black-box coverage for the standalone, read-only block frequency report."""
+"""Black-box coverage for the standalone, read-only block frequency report,
+plus (below) coverage for the `requires_human` projection served on every
+block in `GET /api/plans/{id}` -- unrelated to the standalone script, but
+placed here per the implementation plan for phase 4.2."""
 
 from __future__ import annotations
 
@@ -8,10 +11,20 @@ import json
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
 
+from src.api import dependencies
+from src.api.server import create_app
+from src.app import block_policy
+from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from src.domain.entities.planning_artifacts import PlanBlock, PlanStatus
+from src.domain.entities.project_definition import ProjectDefinition
+from src.infra.container import AppContainer
 from src.infra.db.engine import build_engine
 from src.infra.db.tables import Base
 
@@ -184,3 +197,94 @@ def test_rejects_unmigrated_database_with_actionable_error(tmp_path: Path) -> No
     assert completed.returncode == 2
     assert "database schema is missing required tables; run migrations first" in completed.stderr
     assert completed.stdout == ""
+
+
+# ---- `requires_human` served on every block (P4.2 Task 4) ----
+#
+# `src/app/block_policy.py` is the single source of the "is this my problem, or
+# does the orchestrator recover on its own?" verdict. Nothing served it before
+# this projection -- these tests iterate the policy table itself (never a
+# hard-coded kind list), so a newly added kind cannot ship unserved.
+
+NOW = datetime(2026, 7, 28, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    container = AppContainer(orchestrator_home=tmp_path)
+    Base.metadata.create_all(container.engine)
+    container.project_repo.add(
+        ProjectDefinition(id="project-1", name="Test project", repo_url=None)
+    )
+    app = create_app(container)
+    with TestClient(app) as test_client:
+        yield test_client
+    dependencies.set_container(None)  # type: ignore[arg-type]
+
+
+def _save(plan: Plan) -> None:
+    container = dependencies.get_container()
+    with container.new_unit_of_work() as uow:
+        uow.plans.save(plan)
+
+
+@pytest.mark.parametrize("policy", block_policy._POLICIES, ids=lambda p: p.kind)
+def test_plan_wide_block_reports_requires_human_over_http(
+    client: TestClient, policy: block_policy.BlockPolicy
+) -> None:
+    plan = Plan(
+        id="plan-wide-block",
+        brief="requires_human projection",
+        project_id="project-1",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.BLOCKED,
+        block=PlanBlock(
+            id="block-plan-wide",
+            kind=policy.kind,
+            explanation=f"{policy.kind} needs attention",
+            stage="implementation",
+            legal_resolutions=block_policy.resolutions_for(policy.kind),
+            created_at=NOW,
+        ),
+    )
+    _save(plan)
+
+    detail = client.get(f"/api/plans/{plan.id}").json()
+
+    assert detail["block"]["kind"] == policy.kind
+    assert detail["block"]["requires_human"] == policy.requires_human
+    assert detail["block"]["requires_human"] == block_policy.requires_human(policy.kind)
+
+
+@pytest.mark.parametrize("policy", block_policy._POLICIES, ids=lambda p: p.kind)
+def test_goal_block_reports_requires_human_over_http(
+    client: TestClient, policy: block_policy.BlockPolicy
+) -> None:
+    plan = Plan(
+        id="goal-block",
+        brief="requires_human projection",
+        project_id="project-1",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.BLOCKED,
+        goal_blocks={
+            "g1": PlanBlock(
+                id="block-goal-1",
+                kind=policy.kind,
+                explanation=f"{policy.kind} needs attention",
+                stage="implementation",
+                goal_id="g1",
+                legal_resolutions=block_policy.resolutions_for(policy.kind),
+                created_at=NOW,
+            )
+        },
+    )
+    _save(plan)
+
+    detail = client.get(f"/api/plans/{plan.id}").json()
+
+    goal_block = detail["goal_blocks"]["g1"]
+    assert goal_block["kind"] == policy.kind
+    assert goal_block["requires_human"] == policy.requires_human
+    assert goal_block["requires_human"] == block_policy.requires_human(policy.kind)
