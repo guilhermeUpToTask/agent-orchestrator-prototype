@@ -79,7 +79,11 @@ def api_start(host: str, port: int) -> None:
 
     from src.api.server import create_app
 
-    uvicorn.run(create_app(), host=host, port=port)
+    # No uvicorn access log: RequestLoggingMiddleware already records every
+    # request structurally (path only — never the query string), and /api/events
+    # carries the API token in its query string because EventSource cannot send
+    # headers. See src/api/security.py::require_api_token_or_query.
+    uvicorn.run(create_app(), host=host, port=port, access_log=False)
 
 
 @cli.group()
