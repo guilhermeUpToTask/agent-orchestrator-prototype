@@ -697,6 +697,7 @@ Neither is a correctness hole; both are decisions rather than bugs, and holding
 the phase open for them would be holding it open for a preference.
 
 1. **A `request_concurrency` refusal spends the per-task retry budget.**
+   *Revisit after launch — carried to Phase 8.*
    `capacity_wait` is set only when a circuit opens and a concurrency refusal
    deliberately opens none, so alone among capacity failures it does not bypass
    the budget — a busy shared pool can block a goal that has nothing wrong with
@@ -902,6 +903,17 @@ Take these up only when preview evidence proves the need:
 - workspace/branch/checkpoint retention and garbage collection;
 - richer telemetry analytics, OpenTelemetry, and retention;
 - repository indexing, symbol graphs, and context packaging;
+- **capacity-budget policy: stop a `request_concurrency` refusal spending the
+  per-task retry budget** (deferred out of Phase 2 on 2026-07-28, revisit after
+  launch). Every other capacity failure bypasses the budget because opening a
+  circuit records `opened_at` for the wall-clock ceiling to measure; a
+  concurrency refusal deliberately opens no circuit, so there is nowhere to
+  record when the waiting began and nothing for a bound to measure. Making it
+  budget-neutral without inventing that bound would let a permanently saturated
+  provider wait forever with nobody told. Current behaviour is wrong but safe
+  and visible: the budget runs out and a block opens advertising `retry_stage`.
+  Preview evidence should say whether real operators hit it often enough to
+  justify a per-task concurrency-wait deadline;
 - proactive concurrent-goal scope-disjointness validation;
 - advanced scheduling, load-tested pools, and additional runtimes;
 - multi-worker/multi-machine execution, distributed claims, or Redis;
