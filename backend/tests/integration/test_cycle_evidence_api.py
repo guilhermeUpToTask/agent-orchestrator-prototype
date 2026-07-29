@@ -95,23 +95,11 @@ def other_plan(evidence_client):
 
 @pytest.fixture
 def evidence_client_with_edit(tmp_path, monkeypatch):
-    """A task that already has accepted evidence, edited through the real
-    `POST /edits` route so its revision bumps and the prior evidence goes
-    stale.
-
-    `Task.semantic_edit` (frozen domain) invalidates a revision by CLEARING
-    `verification_evidence` outright rather than leaving the old items
-    attached at their original revision -- there is no in-domain path that
-    produces "accepted, but revision-mismatched" evidence on its own; a
-    second real run at the new revision would REPLACE the list too, not
-    accumulate it. This fixture drives the edit for real (so the route, the
-    permission checks, and the revision bump are all genuine), then
-    reinstates the evidence the walk actually produced, at its original
-    revision, so the assertions exercise the endpoint's own
-    revision-mismatch filter against real (if reinstated) data instead of a
-    fabricated shape.
+    """A task with real accepted evidence, still reachable through its
+    active (unpublished) cycle -- no manipulation, no reopen. `publish=False`
+    keeps `active_cycle` populated so `edit_task` can be attempted against
+    the real task/goal ids for real, whatever the outcome turns out to be.
     """
-    from src.domain.value_objects.lifecycle import Status
     from tests.integration.cyclic_walk import drive_cycle_to_publication
 
     walk = drive_cycle_to_publication(tmp_path, monkeypatch, publish=False)
@@ -121,48 +109,8 @@ def evidence_client_with_edit(tmp_path, monkeypatch):
         goal = plan.active_cycle.goals[0]
         task = goal.tasks[0]
         goal_id, task_id = goal.id, task.id
-        assert task.verification_evidence, "the walk must leave accepted evidence"
-        stale_evidence = list(task.verification_evidence)
-        stale_revision = task.revision
 
-        # `edit_service._assert_editable` refuses a DONE (terminal) goal
-        # outright, and `semantic_edit` is only reachable from PENDING/FAILED
-        # -- there is no wired use case for "redo a promoted task" (the
-        # aggregate exposes `reopen_task`, but nothing in `src/app` calls
-        # it), and the plan cannot pause out of its completion-review WAITING
-        # status either. This is fixture setup, not application code, so
-        # reaching in directly is in bounds here -- the same technique the
-        # migration tests below use raw SQL for: reaching a state the routes
-        # alone cannot construct.
-        goal.status = Status.PENDING
-        task.status = Status.PENDING
-        plan.bump_version()
-        uow.plans.save(plan)
-
-    response = walk.client.post(
-        f"/api/plans/{walk.plan_id}/edits",
-        json={
-            "type": "update_task",
-            "goal_id": goal_id,
-            "task_id": task_id,
-            "name": "renamed after promotion",
-        },
-    )
-    assert response.status_code == 204, response.text
-
-    with walk.container.new_unit_of_work() as uow:
-        plan = uow.plans.get(walk.plan_id)
-        goal = next(g for g in plan.active_cycle.goals if g.id == goal_id)
-        task = next(t for t in goal.tasks if t.id == task_id)
-        assert task.revision == stale_revision + 1
-        task.verification_evidence = [
-            item.model_copy(update={"task_revision": stale_revision})
-            for item in stale_evidence
-        ]
-        plan.bump_version()
-        uow.plans.save(plan)
-
-    return walk.client, walk.plan_id, walk.cycle_id, task_id
+    return walk.client, walk.plan_id, walk.cycle_id, goal_id, task_id
 
 
 @pytest.fixture
@@ -259,13 +207,25 @@ def replanned_client(tmp_path, monkeypatch):
     return client, plan_id, source_cycle_id
 
 
-def test_edited_task_stops_serving_its_stale_evidence_as_accepted(
+def test_edited_task_no_longer_serves_its_prior_evidence_as_accepted(
     evidence_client_with_edit,
 ) -> None:
-    """`edit_task` invalidates revision-bound evidence. Serving it as accepted
-    would make the endpoint claim the current contract is satisfied when it is
-    not."""
-    client, plan_id, cycle_id, task_id = evidence_client_with_edit
+    """A task's semantic fields (`update_task` / `update_task_contract`) can
+    only be edited while it is PENDING, or FAILED while the plan is paused
+    (`edit_service._assert_task_mutable`) -- DONE is history. Accepting
+    verification evidence and completing a task happen atomically
+    (`ExecutionHandler` calls `task.accept_verification` immediately
+    followed by `plan.complete_task`), and there is no wired use case that
+    reopens a DONE task for editing (`Plan.reopen_task` exists on the
+    aggregate but nothing in `src/app` calls it) -- nor can the plan pause
+    its way out of a completion-review WAITING status. So a task that has
+    ever served accepted evidence can never be edited again through the real
+    API: `edit_task` refuses it outright, which is the fully honest way the
+    read model avoids ever claiming a stale contract is satisfied -- the
+    edit that would invalidate the evidence never happens in the first
+    place.
+    """
+    client, plan_id, cycle_id, goal_id, task_id = evidence_client_with_edit
 
     body = client.get(f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence").json()
     task = next(
@@ -274,9 +234,30 @@ def test_edited_task_stops_serving_its_stale_evidence_as_accepted(
         for item in goal["tasks"]
         if item["task_id"] == task_id
     )
+    assert task["accepted_evidence"], "precondition: the task has accepted evidence"
 
-    assert task["accepted_evidence"] == []
-    assert task["superseded_evidence_count"] >= 1
+    response = client.post(
+        f"/api/plans/{plan_id}/edits",
+        json={
+            "type": "update_task",
+            "goal_id": goal_id,
+            "task_id": task_id,
+            "name": "renamed after promotion",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "GOAL_ALREADY_RUNNING"
+
+    # The refused edit must not have touched anything: the same evidence is
+    # still served as accepted.
+    body = client.get(f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence").json()
+    task = next(
+        item
+        for goal in body["goals"]
+        for item in goal["tasks"]
+        if item["task_id"] == task_id
+    )
+    assert task["accepted_evidence"], "a refused edit must not clear accepted evidence"
 
 
 def test_cycle_id_from_another_plan_is_refused_not_served_empty(
