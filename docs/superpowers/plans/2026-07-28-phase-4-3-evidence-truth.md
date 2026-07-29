@@ -1482,18 +1482,24 @@ unattributed instead of looking unpromoted."
 **Interfaces:**
 - Consumes: the endpoint from Task 5. Produces no new interface.
 
-- [ ] **Step 1: Add the route to the auth guard test**
+- [ ] **Step 1: Confirm the route is already covered — do NOT add an entry**
 
-Open `backend/tests/integration/test_control_plane_auth.py`. It parametrizes over the mutating surface from P4.1. Add the evidence route to whatever collection drives the parametrization, following the file's existing entry format exactly:
+`backend/tests/integration/test_control_plane_auth.py:48-49` parametrizes over `create_app().openapi()["paths"]`, so it **auto-discovers every route**. There is no manual collection to append to; the evidence route was covered the moment Task 5 registered it. The file's only hand-maintained sets are the deliberate exemptions, `OPEN_OPERATIONS` (`:26`) and `STREAMING_OPERATIONS` (`:33`) — the evidence route belongs in **neither**.
 
-```python
-    ("GET", "/api/plans/{plan_id}/cycles/{cycle_id}/evidence"),
+Verify by name rather than by assuming:
+
+```bash
+cd /workspaces/agent-orchestrator/backend
+uv run pytest tests/integration/test_control_plane_auth.py -v | grep -i evidence
 ```
+Expected: a passing parametrized case naming `/api/plans/{plan_id}/cycles/{cycle_id}/evidence`.
 
-- [ ] **Step 2: Run it to verify the route is guarded**
+If it does NOT appear, the router was not registered in `server.py`. If it appears but FAILS with 200 where 401 was expected, it was registered without `dependencies=_guarded` — fix `server.py`, not the test.
+
+- [ ] **Step 2: Run the full guard suite**
 
 Run: `uv run pytest tests/integration/test_control_plane_auth.py -v`
-Expected: PASS. If it FAILS with a 200 where 401 was expected, the router was registered without `dependencies=_guarded` in Task 5 — fix `server.py`.
+Expected: PASS, with one more case than before Task 5 (auto-discovery means the count grows with the route).
 
 - [ ] **Step 3: Regenerate the API types**
 
