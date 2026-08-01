@@ -6,11 +6,26 @@ The map of everything written down about this system. Start at the root [`README
 
 ```text
 docs/
+├── guides/           HOW TO USE IT — install, first cycle, real models, evidence, fixes
 ├── architecture/     HOW the system works today — one file per subsystem, diagram-first
 ├── decisions/        WHY it works that way — ADRs and the consolidated decision log
 ├── legacy/           WHAT the old backend had — preserved for reintroduction analysis
 └── history/          The paper trail — archived plans, analyses, pre-refactor docs
 ```
+
+## Guides — how to use it
+
+Start here if you want to run the thing rather than modify it.
+
+| Guide | Covers |
+|---|---|
+| [getting-started.md](guides/getting-started.md) | Install, one-command start, the setup wizard, a first Tier 0 cycle, where the result lands |
+| [tier-1.md](guides/tier-1.md) | Real models and real agent CLIs: what it costs, how to pin a run, what a normal noisy run looks like |
+| [evidence.md](guides/evidence.md) | What the system can prove about a run, verifying merge SHAs against git, and sharing a report |
+| [troubleshooting.md](guides/troubleshooting.md) | Real failure signatures and their fixes — nothing hypothetical |
+
+Read [`SECURITY.md`](../SECURITY.md) before pointing it at a repository you care
+about: agent runtimes execute unsandboxed, as your user.
 
 ## Architecture — how it works
 
