@@ -5,9 +5,10 @@
 ### Backend (Python) — all commands run from `backend/`
 - **Install**: `cd backend && uv pip install -e .[dev]` (or `pip install -e .[dev]`)
 - **DB migrations**: `python -m src.infra.cli.main db upgrade` (DB lives under `ORCHESTRATOR_HOME`, default `~/.orchestrator`)
+- **Run everything (one command)**: `python -m src.infra.cli.main serve --port 8000` — migrates, starts the API with the packaged UI, and supervises a worker subprocess (`--no-worker` / `--no-migrate` to opt out). This is the installed-user path; the two commands below stay for development.
 - **Run API**: `python -m src.infra.cli.main api start --port 8000`
 - **Run Worker**: `python -m src.infra.cli.main worker start` (dry-run by default — the config key `agent_runner.mode` selects the runtime, NOT an env var)
-- **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed) — commands: `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
+- **CLI Entry Point**: `python -m src.infra.cli.main` (or `orchestrate` if installed) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check src tests --fix`
 - **Type Check**: `mypy src` (zero errors, no excludes)
 - **Test All**: `pytest`
@@ -25,6 +26,8 @@ Environment: `ORCHESTRATOR_HOME` (state dir), `ORCHESTRATOR_MASTER_KEY` (Fernet 
 - **Install**: `npm install`
 - **Run Dev**: `npm run dev`
 - **Build**: `npm run build` (tsc + vite)
+- **Stage the UI into the wheel**: `backend/scripts/build_frontend.sh` — builds `frontend/dist` into `backend/src/api/static/` (git-ignored) so `uv build` ships one artifact. The release workflow runs it BEFORE `uv build` and then verifies the wheel carries both the UI and the migrations.
+- **Browser checks**: `npm run test:e2e` (Playwright, needs the API running with a staged bundle). Light by design — full-cycle browser E2E is Phase 8.
 - **Regenerate API types**: `npm run generate:api` (backend/scripts/export_openapi.py + openapi-ts → `src/types/generated/`). The plan DETAIL read model (the aggregate document) is hand-declared in `src/types/ui.ts` — keep it in sync with the domain.
 
 ## 🏗️ Architectural Invariants (Backend)
@@ -130,8 +133,10 @@ agent-orchestrator/
 │   │                       #   outbox relay, security, request logging
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
-│   ├── alembic/            # migration chain (0001_core through
-│   │                       #   0015_plan_delete_cascade; one linear head)
+│   │                       #   src/infra/db/migrations/ holds the migration
+│   │                       #   chain (0001_core .. 0017_goal_promotions; one
+│   │                       #   linear head) INSIDE the package — an installed
+│   │                       #   copy has no repo to find them beside
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
 ├── docs/                   # system documentation:
 │   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,

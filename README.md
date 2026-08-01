@@ -92,6 +92,24 @@ Key mechanics, each explained in depth in [`docs/architecture/`](docs/architectu
 
 ## Quick start (dry-run, no API key)
 
+### Install it
+
+Requires Python 3.11+ and Git.
+
+```bash
+pipx install agent-orchestrator     # or: uvx --from agent-orchestrator orchestrate
+orchestrate serve                   # migrates, starts API + worker + UI on :8000
+```
+
+One command. `serve` prepares the state directory (`ORCHESTRATOR_HOME`, default
+`~/.orchestrator`), starts a worker as its own process, and serves the console —
+the wheel carries the built UI, so there is no second thing to install or a
+second port to reach. Then open <http://127.0.0.1:8000> and follow **Settings →
+Get started**, which sequences setup in dependency order and never asks a Tier 0
+operator for an API key.
+
+### Or work on it
+
 Requires Python 3.11+ and Node 18+.
 
 ```bash
@@ -105,7 +123,7 @@ python -m src.infra.cli.main seed demo --stub  # capabilities, default agent, st
 python -m src.infra.cli.main api start --port 8000
 python -m src.infra.cli.main worker start
 
-# 3. Frontend
+# 3. Frontend (Vite dev server, hot reload — the packaged UI is served by the API)
 cd ../frontend
 npm install && npm run dev                     # http://localhost:5173
 ```
@@ -164,9 +182,11 @@ agent-orchestrator/
 │   │   ├── domain/          ← FROZEN core: Plan aggregate, 9-phase machine, ports (README inside)
 │   │   ├── app/             ← use cases + phase handlers + worker loop (README inside)
 │   │   ├── infra/           ← SQLite, git workspace, CLI runners, reasoner, container (README inside)
-│   │   └── api/             ← FastAPI: thin routers, SSE, outbox relay (README inside)
+│   │   │   └── db/migrations/ ← the migration chain (0001_core … 0017_goal_promotions,
+│   │   │                        one linear head). INSIDE the package: an installed
+│   │   │                        copy has no repository to find them beside.
+│   │   └── api/             ← FastAPI: thin routers, SSE, outbox relay, packaged UI (static/)
 │   ├── tests/               ← dual-backend truth tests + integration (README inside)
-│   ├── alembic/             ← migrations 0001_core … 0004_agent_runtime
 │   └── docs/                ← INTEGRATION_GUIDE.md — the frozen port contracts
 └── frontend/                ← React 18 + Vite dashboard (README inside)
 ```
@@ -177,6 +197,7 @@ Entry point: `python -m src.infra.cli.main` (or `orchestrate` once installed). A
 
 | Command | Purpose |
 |---|---|
+| `serve` | **The one command a fresh install needs**: migrate, then run the API (with the packaged UI) and a worker together. `--no-worker` for API only; `--no-migrate` to pin the schema |
 | `db upgrade` | Apply Alembic migrations to the DB under `ORCHESTRATOR_HOME`. Run it after every pull, before `seed demo`/`api start`/`worker start` — a stale schema fails with `no such column: …` |
 | `api start [--host] [--port]` | Serve the API (runs the outbox→SSE relay in-process) |
 | `worker start [--worker-id] [--poll-seconds] [--lease-seconds]` | Run the claim-and-drive worker loop |

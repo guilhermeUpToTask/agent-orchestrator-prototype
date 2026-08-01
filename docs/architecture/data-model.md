@@ -2,7 +2,7 @@
 
 *One SQLite file holds everything. The plan is a document; the catalogs are relational; secrets are envelope-encrypted.*
 
-Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `goal_promotion_repository.py` (promoted git refs), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0017_goal_promotions`).
+Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `goal_promotion_repository.py` (promoted git refs), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/src/infra/db/migrations/versions/` (the migration chain, currently through `0017_goal_promotions`; inside the package so an installed copy ships it).
 
 ## Schema at a glance
 
