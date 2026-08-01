@@ -1,8 +1,8 @@
 /**
  * src/lib/api.ts
  *
- * All HTTP + SSE against the thin orchestrator API. Plan-scoped endpoints
- * (the 9-phase lifecycle), the two chat endpoints (DISCOVERY / REPLANNING),
+ * All HTTP + SSE against the thin orchestrator API. Plan-scoped cyclic and
+ * compatibility endpoints, the two discovery chat endpoints,
  * reference-data CRUD, two-tier config, and the /api/events stream.
  *
  * Errors carry the server's enveloped body text so the toast layer can
@@ -14,6 +14,8 @@ import type {
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  ContractCriterion,
+  CycleEvidenceResponse,
   CycleDraft,
   GoalOutline,
   IntentProposal,
@@ -24,11 +26,14 @@ import type {
   Plan,
   PlanSummary,
   ProjectDefinition,
+  ProjectReadinessResponse,
   ProviderCreateBody,
   ProviderUpdateBody,
+  ReadinessResponse,
   ReasonerStatusResponse,
   RunnerStatusResponse,
   SSEPayload,
+  VerificationStrategy,
 } from "../types/ui";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -78,6 +83,12 @@ export const listPlans = (): Promise<PlanSummary[]> => get("/api/plans");
 
 export const fetchPlan = (planId: string): Promise<Plan> =>
   get(`/api/plans/${encodeURIComponent(planId)}`);
+
+export const deletePlan = (planId: string): Promise<void> =>
+  del(`/api/plans/${enc(planId)}`);
+
+export const bindProject = (planId: string, projectId: string): Promise<void> =>
+  post(`/api/plans/${enc(planId)}/project-binding`, { project_id: projectId });
 
 export const createPlan = (
   brief: string,
@@ -247,6 +258,7 @@ export interface EditBody {
     | "edit_task_requirements"
     | "rebind_task_agent"
     | "update_task"
+    | "update_task_contract"
     | "update_goal"
     | "remove_goal";
   goal_id: string;
@@ -262,6 +274,13 @@ export interface EditBody {
   name?: string;
   description?: string;
   depends_on?: string[];
+  objective?: string;
+  acceptance_criteria?: ContractCriterion[];
+  verification_strategy?: VerificationStrategy;
+  allowed_scope?: string[];
+  forbidden_scope?: string[];
+  verification_commands?: string[];
+  goal_criterion_ids?: string[];
 }
 
 export const applyEdit = (planId: string, edit: EditBody): Promise<void> =>
@@ -339,8 +358,46 @@ export interface AttemptTimelineResponse {
   tasks: Array<{ goal_id: string; task_id: string; runs: ExecutionRunRow[] }>;
 }
 
+export interface AttemptLogEntry {
+  monotonic_seconds: number;
+  stream: "stdout" | "stderr";
+  text: string;
+}
+
+export interface AttemptLogResponse {
+  entries: AttemptLogEntry[];
+  truncated: boolean;
+}
+
+export interface PlanningArtifactRow {
+  goal_id: string | null;
+  purpose: string;
+  sequence: number;
+  outcome: string;
+  input_fingerprint: string;
+  rejection_reasons: string[];
+  turns_used: number | null;
+  has_payload: boolean;
+  created_at: string;
+}
+
 export const fetchAttemptTimeline = (planId: string): Promise<AttemptTimelineResponse> =>
   get(`/api/plans/${enc(planId)}/attempts`);
+
+export const fetchAttemptLog = (
+  planId: string,
+  attemptId: string,
+): Promise<AttemptLogResponse> =>
+  get(`/api/plans/${enc(planId)}/attempts/${enc(attemptId)}/log`);
+
+export const fetchPlanningArtifacts = (planId: string): Promise<PlanningArtifactRow[]> =>
+  get(`/api/plans/${enc(planId)}/planning-artifacts`);
+
+export const fetchCycleEvidence = (
+  planId: string,
+  cycleId: string,
+): Promise<CycleEvidenceResponse> =>
+  get(`/api/plans/${enc(planId)}/cycles/${enc(cycleId)}/evidence`);
 
 /** A plan's fine-grained agent/reasoner telemetry history (most-recent first). */
 export const fetchAgentEvents = (
@@ -445,10 +502,15 @@ export const deleteProvider = (id: string): Promise<void> =>
 export const createModel = (
   providerId: string,
   name: string,
+  maxInflight: number | null = null,
 ): Promise<IaModel> =>
-  post(`/api/providers/${enc(providerId)}/models`, { name });
-export const renameModel = (modelId: string, name: string): Promise<void> =>
-  put(`/api/models/${enc(modelId)}`, { name });
+  post(`/api/providers/${enc(providerId)}/models`, { name, max_inflight: maxInflight });
+export const updateModel = (
+  modelId: string,
+  name: string,
+  maxInflight: number | null,
+): Promise<void> =>
+  put(`/api/models/${enc(modelId)}`, { name, max_inflight: maxInflight });
 export const deleteModel = (modelId: string): Promise<void> =>
   del(`/api/models/${enc(modelId)}`);
 
@@ -464,6 +526,11 @@ export const updateProject = (
 ): Promise<void> => put(`/api/projects/${enc(id)}`, body);
 export const deleteProject = (id: string): Promise<void> =>
   del(`/api/projects/${enc(id)}`);
+
+export const getReadiness = (): Promise<ReadinessResponse> => get("/api/readiness");
+
+export const getProjectReadiness = (projectId: string): Promise<ProjectReadinessResponse> =>
+  get(`/api/projects/${enc(projectId)}/readiness`);
 
 // ─── Two-tier config + reasoner status ────────────────────────────────────────
 
@@ -604,5 +671,104 @@ export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
     closed = true;
     if (retryTimer) clearTimeout(retryTimer);
     es?.close();
+  };
+}
+
+export interface AttemptLogCallbacks {
+  onEntry: (entry: AttemptLogEntry) => void;
+  onTruncated: () => void;
+  onEnd: () => void;
+  onStatus?: (status: "connecting" | "live" | "reconnecting" | "down") => void;
+}
+
+/**
+ * Fetch-stream the attempt SSE endpoint. Unlike EventSource, fetch can carry
+ * the control-plane token header. The last byte offset is retained across
+ * reconnects, so a transient disconnect neither duplicates nor drops output.
+ */
+export function subscribeToAttemptLog(
+  planId: string,
+  attemptId: string,
+  callbacks: AttemptLogCallbacks,
+): () => void {
+  let closed = false;
+  let offset = 0;
+  let controller: AbortController | null = null;
+
+  const wait = (milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+  const consume = async () => {
+    let first = true;
+    while (!closed) {
+      controller = new AbortController();
+      callbacks.onStatus?.(first ? "connecting" : "reconnecting");
+      try {
+        const response = await fetch(
+          `${BASE}/api/plans/${enc(planId)}/attempts/${enc(attemptId)}/log/stream?offset=${offset}`,
+          {
+            headers: API_TOKEN ? { "X-API-Token": API_TOKEN } : undefined,
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok || !response.body) {
+          throw new Error(`Attempt log stream returned ${response.status}`);
+        }
+        callbacks.onStatus?.("live");
+        first = false;
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let ended = false;
+
+        while (!closed) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary >= 0) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+
+            let event = "message";
+            let id: string | null = null;
+            const data: string[] = [];
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) event = line.slice(6).trim();
+              else if (line.startsWith("id:")) id = line.slice(3).trim();
+              else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+            }
+            if (id && /^\d+$/.test(id)) offset = Number(id);
+            if (event === "truncated") {
+              callbacks.onTruncated();
+            } else if (event === "end") {
+              ended = true;
+              callbacks.onEnd();
+              break;
+            } else if (data.length > 0) {
+              try {
+                callbacks.onEntry(JSON.parse(data.join("\n")) as AttemptLogEntry);
+              } catch {
+                // Ignore one malformed runtime record; keep the stream alive.
+              }
+            }
+          }
+          if (ended || done) break;
+        }
+        reader.releaseLock();
+        if (ended || closed) return;
+      } catch (error) {
+        if (closed || (error instanceof DOMException && error.name === "AbortError")) return;
+        callbacks.onStatus?.("down");
+      }
+      await wait(1_000);
+    }
+  };
+
+  void consume();
+  return () => {
+    closed = true;
+    controller?.abort();
   };
 }

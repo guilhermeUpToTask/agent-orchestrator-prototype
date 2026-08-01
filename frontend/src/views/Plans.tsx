@@ -1,11 +1,28 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Clock, Plus } from 'lucide-react';
-import { useCreatePlan, useCreateProject, usePlans, useProjects } from '../lib/queries';
+import {
+  useCreatePlan,
+  useCreateProject,
+  useDeletePlan,
+  usePlans,
+  useProjects,
+  useReadiness,
+} from '../lib/queries';
 import { errorDetail } from '../lib/toast';
 import { absTime, relTime, useNow } from '../lib/time';
 import { StatusBadge } from '../components/StatusBadge';
-import { Button, Card, CountChip, ErrorState, Field, Input, Select, TextArea } from '../components/ui';
+import {
+  Button,
+  Card,
+  ConfirmAction,
+  CountChip,
+  ErrorState,
+  Field,
+  Input,
+  Select,
+  TextArea,
+} from '../components/ui';
 import { PLAN_STATUS } from '../styles/tokens';
 import type { PlanStatus } from '../types/ui';
 import styles from './Overview.module.css';
@@ -31,6 +48,8 @@ export function PlansView() {
   const { data: plans = [], isLoading, error, refetch } = usePlans();
   const createPlan = useCreatePlan();
   const createProject = useCreateProject();
+  const deletePlan = useDeletePlan();
+  const readiness = useReadiness();
   const { data: projects = [] } = useProjects();
   const navigate = useNavigate();
   const now = useNow(30_000);
@@ -95,6 +114,23 @@ export function PlansView() {
           run verified work, publish a cycle, then return to idle.
         </p>
       </header>
+
+      {readiness.data && !readiness.data.ok && (
+        <Card
+          title="Setup needs attention"
+          actions={<CountChip tone="fail">not ready</CountChip>}
+        >
+          <div className={styles.readinessBanner}>
+            <span>
+              {readiness.data.checks.filter((check) => check.status === 'fail').length} required
+              readiness check(s) are failing. Configure the runtime before starting a cycle.
+            </span>
+            <Link className={styles.readinessCta} to="/settings/readiness">
+              Open readiness checklist
+            </Link>
+          </div>
+        </Card>
+      )}
 
       {composing && (
         <Card title="Open project plan — the brief">
@@ -176,32 +212,41 @@ export function PlansView() {
         ) : (
           <div className={styles.planList}>
             {plans.map((p) => (
-              <Link key={p.id} className={styles.planRow} to={`/plans/${encodeURIComponent(p.id)}`}>
-                <StatusBadge domain="plan" value={p.status} bare />
+              <div key={p.id} className={styles.planRowShell}>
+                <Link className={styles.planRow} to={`/plans/${encodeURIComponent(p.id)}`}>
+                  <StatusBadge domain="plan" value={p.status} bare />
 
-                <span className={styles.planTitle}>
-                  <span className={styles.planTitleName}>
-                    {projectNameFor(p.project_id) ?? 'Unassigned project'}
+                  <span className={styles.planTitle}>
+                    <span className={styles.planTitleName}>
+                      {projectNameFor(p.project_id) ?? 'Unassigned project'}
+                    </span>
+                    <span className={styles.planTitleId}>{p.id}</span>
+                    {p.paused ? (
+                      <StatusBadge domain="plan" value="paused" bare />
+                    ) : p.pause_requested ? (
+                      <CountChip tone="gate">pause requested</CountChip>
+                    ) : null}
                   </span>
-                  <span className={styles.planTitleId}>{p.id}</span>
-                  {p.paused ? (
-                    <StatusBadge domain="plan" value="paused" bare />
-                  ) : p.pause_requested ? (
-                    <CountChip tone="gate">pause requested</CountChip>
-                  ) : null}
-                </span>
 
-                <AttentionChip status={p.status} />
+                  <AttentionChip status={p.status} />
 
-                <span className={styles.rowMeta}>
-                  iter {p.iteration} · v{p.version}
-                  {p.claimed_by && ` · claimed by ${p.claimed_by}`}
-                </span>
+                  <span className={styles.rowMeta}>
+                    v{p.version}{p.claimed_by && ` · claimed by ${p.claimed_by}`}
+                  </span>
 
-                <span className={styles.planActivity} title={absTime(p.updated_at)}>
-                  <Clock size={11} aria-hidden /> {relTime(p.updated_at, now)}
-                </span>
-              </Link>
+                  <span className={styles.planActivity} title={absTime(p.updated_at)}>
+                    <Clock size={11} aria-hidden /> {relTime(p.updated_at, now)}
+                  </span>
+                </Link>
+                <ConfirmAction
+                  label="Delete"
+                  consequence="Deletes cycles, attempts, evidence, chat, and telemetry. Export evidence first. Active leases must finish before deletion."
+                  pending={deletePlan.isPending && deletePlan.variables === p.id}
+                  demoted
+                  tone="danger"
+                  onConfirm={() => deletePlan.mutate(p.id)}
+                />
+              </div>
             ))}
           </div>
         )}

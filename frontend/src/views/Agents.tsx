@@ -7,6 +7,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Card, CountChip, ErrorState } from '../components/ui';
 import type { Goal, Task } from '../types/ui';
 import styles from './Agents.module.css';
+import { currentPlanGoals } from '../lib/planTruth';
 
 /** The task an agent is currently executing in this plan, if any. */
 function currentTaskFor(agentId: string, goals: Goal[]): Task | null {
@@ -43,7 +44,7 @@ export function AgentsView() {
   const { data: plan } = usePlan(planId || null);
   const { data: defaultAgent } = useDefaultAgent();
   const selectTask = usePlannerStore((s) => s.selectTask);
-  const goals = plan?.goals ?? [];
+  const goals = currentPlanGoals(plan);
   const base = `/plans/${encodeURIComponent(planId)}`;
 
   return (

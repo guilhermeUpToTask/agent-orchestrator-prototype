@@ -54,15 +54,17 @@ export function GatePanel({ planId }: { planId: string }) {
       {cyclicGate && gate && (
         <CyclicReviewGate plan={plan} planId={planId} onDone={close} />
       )}
-      {!cyclicGate && plan.phase === 'awaiting_review' && (
+      {!cyclicGate && plan.legacy_phase != null && plan.phase === 'awaiting_review' && (
         <PreExecutionGate plan={plan} planId={planId} onDone={close} />
       )}
-      {!cyclicGate && plan.phase === 'review' && (
+      {!cyclicGate && plan.legacy_phase != null && plan.phase === 'review' && (
         <PostExecutionGate plan={plan} planId={planId} onDone={close} />
       )}
-      {!cyclicGate && !['awaiting_review', 'review'].includes(plan.phase) && (
+      {!cyclicGate && (
+        plan.legacy_phase == null || !['awaiting_review', 'review'].includes(plan.phase)
+      ) && (
         <p className={styles.body}>
-          Nothing is waiting on you — the plan is in “{plan.phase}”.
+          Nothing is waiting on you — status is “{plan.status}” and activity is “{plan.activity}”.
         </p>
       )}
     </Dialog>

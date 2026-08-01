@@ -5,6 +5,7 @@ import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { useChat, usePlan, useSendMessage } from '../lib/queries';
 import type { ChatMessageResponse } from '../types/ui';
+import { conversationMode } from '../lib/planTruth';
 
 /**
  * The conversation surface for the two chat-driven phases. History is SERVER
@@ -82,7 +83,7 @@ const MODE_HINTS: Record<string, string> = {
   discovery:
     'Describe what you want built. The reasoner may ask questions; when the direction is clear it commits the goal roadmap.',
   replanning:
-    'Plan the next iteration. Completed goals are history; describe what should happen next.',
+    'Plan the next cycle. Completed goals are history; describe what should happen next.',
 };
 
 export function ChatPanel() {
@@ -103,9 +104,8 @@ export function ChatPanel() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history.length, thinking]);
 
-  const phase = plan?.phase ?? 'discovery';
-  const inputEnabled =
-    (phase === 'discovery' || phase === 'replanning') && !plan?.pending_gate;
+  const mode = conversationMode(plan);
+  const inputEnabled = mode !== null && !plan?.pending_gate;
 
   const send = useCallback(
     (text: string) => {
@@ -138,8 +138,8 @@ export function ChatPanel() {
   }
 
   const hint = inputEnabled
-    ? MODE_HINTS[phase]
-    : `The plan is in “${phase}” — chat re-opens in DISCOVERY or REPLANNING.`;
+    ? MODE_HINTS[mode!]
+    : `Current activity is “${humanize(plan?.activity ?? 'loading')}” — chat opens during intent or replan discovery.`;
   const inputLocked = thinking || !inputEnabled;
 
   return (
@@ -166,7 +166,7 @@ export function ChatPanel() {
           color: inputEnabled ? tokens.purple : tokens.textMuted,
           marginLeft: 4,
         }}>
-          {phase.toUpperCase()}
+          {(mode ?? plan?.activity ?? 'loading').toUpperCase()}
         </span>
         <div style={{ flex: 1 }} />
         <button onClick={toggleChatPanel} style={{ background: 'transparent', border: 'none', color: tokens.textMuted, cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
@@ -231,4 +231,8 @@ export function ChatPanel() {
       </div>
     </div>
   );
+}
+
+function humanize(value: string): string {
+  return value.replace(/_/g, ' ');
 }

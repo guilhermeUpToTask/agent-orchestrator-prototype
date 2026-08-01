@@ -1,15 +1,17 @@
 import React from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
-import { BrainCircuit, Boxes, Bot, TerminalSquare, Wrench, FolderGit2 } from 'lucide-react';
+import { BrainCircuit, Boxes, Bot, TerminalSquare, Wrench, FolderGit2, ListChecks } from 'lucide-react';
 import { ReasonerSection } from './ReasonerSection';
 import { RunnerSection } from './RunnerSection';
 import { ProvidersSection } from './ProvidersSection';
 import { AgentsSection } from './AgentsSection';
 import { CapabilitiesSection } from './CapabilitiesSection';
 import { ProjectsSection } from './ProjectsSection';
+import { ReadinessSection } from './ReadinessSection';
 import styles from './Settings.module.css';
 
 const SECTIONS = [
+  { path: 'readiness', label: 'Readiness', Icon: ListChecks },
   { path: 'reasoner', label: 'Reasoner', Icon: BrainCircuit },
   { path: 'runner', label: 'Agent runtime', Icon: TerminalSquare },
   { path: 'providers', label: 'Providers & models', Icon: Boxes },
@@ -43,14 +45,15 @@ export function SettingsLayout() {
       </nav>
       <div className={styles.content}>
         <Routes>
-          <Route index element={<Navigate to="reasoner" replace />} />
+          <Route index element={<Navigate to="readiness" replace />} />
+          <Route path="readiness" element={<ReadinessSection />} />
           <Route path="reasoner" element={<ReasonerSection />} />
           <Route path="runner" element={<RunnerSection />} />
           <Route path="providers" element={<ProvidersSection />} />
           <Route path="agents" element={<AgentsSection />} />
           <Route path="capabilities" element={<CapabilitiesSection />} />
           <Route path="projects" element={<ProjectsSection />} />
-          <Route path="*" element={<Navigate to="reasoner" replace />} />
+          <Route path="*" element={<Navigate to="readiness" replace />} />
         </Routes>
       </div>
     </div>

@@ -25,6 +25,7 @@ import {
 import { usePlannerStore } from '../store/plannerStore';
 import { StatusBadge } from './StatusBadge';
 import styles from './LifecycleRail.module.css';
+import { currentPlanGoals } from '../lib/planTruth';
 
 /**
  * Root lifecycle controls. Status, reason, activity, and legal actions all come
@@ -50,11 +51,11 @@ export function LifecycleRail() {
   const reason = plan?.status_reason.message;
   const gate = plan?.pending_gate;
   const block = plan?.block;
-  const failedTasks = plan?.goals.flatMap((goal) =>
+  const failedTasks = currentPlanGoals(plan).flatMap((goal) =>
     goal.tasks
       .filter((task) => task.status === "failed")
       .map((task) => ({ goal, task })),
-  ) ?? [];
+  );
   const blockCanRetry = !!block && (
     block.legal_resolutions.includes("retry_stage")
     || block.legal_resolutions.includes("wait_and_retry")

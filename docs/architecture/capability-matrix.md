@@ -5,9 +5,9 @@ system support, and where is each capability exposed?" — every domain capabili
 traced through its application entry point, its FastAPI route, its frontend
 consumer, and its tests, then classified and given a launch priority.
 
-Produced by roadmap **Phase 3**, audited against the code at commit `f4b966e`
-(2026-07-28). Every row was verified by reading the code, not inferred from
-docs.
+Produced by roadmap **Phase 3** and re-audited at the close of **Phase 5**
+(2026-08-01). Every row was verified from source and executable contracts, not
+inferred from prose.
 
 **How it stays honest.** `backend/tests/unit/test_capability_matrix.py` fails
 when the FastAPI app serves an operation this file does not list, or when this
@@ -68,12 +68,12 @@ Serves **J1**. All routes token-guarded.
 | Read default agent | `agent_repo` | `GET /api/agents/default` | `AgentsSection` | `test_api.py` | full | critical |
 | Set default agent | `agent_repo` | `POST /api/agents/{agent_id}/default` | `AgentsSection` | `test_api.py` | full | critical |
 | List providers | `provider_repo` | `GET /api/providers` | `ProvidersSection` | `test_api.py` | full | critical |
-| Add provider + key | `provider_repo`, `secret_store` | `POST /api/providers` | `ProvidersSection` | `test_api.py`, `test_secret_store.py` | ui-partial ([G7](#g7)) | critical |
-| Edit provider / rotate key | `provider_repo`, `secret_store` | `PUT /api/providers/{provider_id}` | `ProvidersSection` | `test_api.py` | ui-partial ([G7](#g7)) | critical |
+| Add provider + key | `provider_repo`, `secret_store` | `POST /api/providers` | `ProvidersSection` | `test_api.py`, `test_secret_store.py`, `api.phase5.test.ts` | full | critical |
+| Edit provider / rotate key | `provider_repo`, `secret_store` | `PUT /api/providers/{provider_id}` | `ProvidersSection` | `test_api.py`, `api.phase5.test.ts` | full | critical |
 | Delete provider (bind-guarded) | `provider_repo` | `DELETE /api/providers/{provider_id}` | `ProvidersSection` | `test_api.py` (409) | full | critical |
 | List models | `model_repo` | `GET /api/models` | `ProvidersSection` | `test_api.py` | full | critical |
-| Add model | `model_repo` | `POST /api/providers/{provider_id}/models` | `ProvidersSection` | `test_api.py` | ui-partial ([G7](#g7)) | critical |
-| Rename model / set capacity | `model_repo` | `PUT /api/models/{model_id}` | `ProvidersSection` | `test_api.py` | ui-partial ([G7](#g7)) | critical |
+| Add model | `model_repo` | `POST /api/providers/{provider_id}/models` | `ProvidersSection` | `test_api.py`, `api.phase5.test.ts` | full | critical |
+| Rename model / set capacity | `model_repo` | `PUT /api/models/{model_id}` | `ProvidersSection` | `test_api.py`, `api.phase5.test.ts` | full | critical |
 | Delete model (bind-guarded) | `model_repo` | `DELETE /api/models/{model_id}` | `ProvidersSection` | `test_api.py` (409) | full | critical |
 | List projects | `project_repo` | `GET /api/projects` | `ProjectsSection`, `Plans` | `test_api.py` | full | critical |
 | Create project (binding validated) | `project_repo`, `repository_binding` | `POST /api/projects` | `ProjectsSection`, `Plans` | `test_api.py`, `test_repository_binding.py` | full | critical |
@@ -93,11 +93,11 @@ Serves **J2**.
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
 | API liveness + version | — | `GET /health` | — | `test_api.py` | api-only | critical |
-| Whole-installation readiness | `routers/readiness.py` (composes the validators below) | `GET /api/readiness` | — | `test_readiness.py` | api-only | critical |
+| Whole-installation readiness | `routers/readiness.py` (composes the validators below) | `GET /api/readiness` | `ReadinessSection`, `Plans` | `test_readiness.py` | full | critical |
 | Reasoner wiring check | `reasoner/factory.validate_reasoner_config` | `GET /api/reasoner/status` | `ReasonerSection` | `test_api.py`, `test_reasoner_factory.py` | full | critical |
 | Runner mode, bindings, binary probes | `runtime/factory`, `dependency_checker` | `GET /api/runner/status` | `RunnerSection` | `test_api.py`, `test_agent_runner_factory.py` | full | critical |
-| Worker liveness (is anyone running?) | `WorkerRegistry` heartbeat | `GET /api/workers` | — | `test_workers_api.py`, `test_worker_registry.py`, `test_worker_pool.py` | api-only | critical |
-| Repository / workspace readiness | `repository_binding`, `ProjectWorkspaceResolver.repository_path_for` | `GET /api/projects/{project_id}/readiness` | — | `test_readiness.py`, `test_repository_binding.py` | api-only | critical |
+| Worker liveness (is anyone running?) | `WorkerRegistry` heartbeat | `GET /api/workers` | `ReadinessSection` (composed check) | `test_workers_api.py`, `test_worker_registry.py`, `test_worker_pool.py` | full | critical |
+| Repository / workspace readiness | `repository_binding`, `ProjectWorkspaceResolver.repository_path_for` | `GET /api/projects/{project_id}/readiness` | `ReadinessSection` | `test_readiness.py`, `test_repository_binding.py` | full | critical |
 
 ## 3. Plan lifecycle
 
@@ -107,9 +107,9 @@ Serves **J4**, **J8**.
 |---|---|---|---|---|---|---|
 | Open the project's plan with a brief | `create_plan.open_project_plan` | `POST /api/plans` | `Plans` composer | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |
 | List plans | plan repo (promoted columns) | `GET /api/plans` | `Plans` | `test_api.py` | full | critical |
-| Read the plan document | plan repo + execution ledger | `GET /api/plans/{plan_id}` | every view | `test_api.py` and most integration tests | ui-partial ([G2](#g2), [G3](#g3)) | critical |
-| Delete the plan and everything under it | `delete_plan.delete_plan` | `DELETE /api/plans/{plan_id}` | — | `test_delete_plan_leaves_nothing.py`, `test_delete_plan.py` | api-only ([G8](#g8)) | critical |
-| Bind a legacy unbound plan to a project | `bind_project.bind_legacy_project` | `POST /api/plans/{plan_id}/project-binding` | — | `test_api.py` | api-only | compat |
+| Read the plan document | plan repo + execution ledger | `GET /api/plans/{plan_id}` | every view; canonical truth in `Overview`/`LifecycleRail` | `test_api.py`, `Overview.phase5.test.tsx` and integration suites | full | critical |
+| Delete the plan and everything under it | `delete_plan.delete_plan` | `DELETE /api/plans/{plan_id}` | `Plans` | `test_delete_plan_leaves_nothing.py`, `test_delete_plan.py`, `api.phase5.test.ts` | full | critical |
+| Bind a legacy unbound plan to a project | `bind_project.bind_legacy_project` | `POST /api/plans/{plan_id}/project-binding` | `Overview` block resolution | `test_api.py`, `api.phase5.test.ts` | full | compat |
 | Open a plan without a project (pre-cyclic) | `create_plan.create_plan` | — | — | `test_full_cycle.py` (skipped) | legacy | compat |
 
 ## 4. Planning and gates
@@ -129,7 +129,7 @@ Serves **J5**.
 | Revise a cycle draft | `cyclic_planning.revise_cycle_draft` | `PUT /api/plans/{plan_id}/cycle-draft` | `queries` (`reviseCycleDraft`) | `test_api.py` | full | critical |
 | Cancel a cycle draft | `cyclic_planning.cancel_cycle_draft` | `DELETE /api/plans/{plan_id}/cycle-draft` | `queries` (`cancelCycleDraft`) | `test_api.py` | full | critical |
 | Approve the draft → activate the cycle | `cyclic_planning.activate_cycle` | `POST /api/plans/{plan_id}/cycle-draft/approve` | `GatePanel` | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |
-| Read recorded planning attempts | `planning_artifacts` store | `GET /api/plans/{plan_id}/planning-artifacts` | — | `test_api.py`, `test_planning_artifacts.py` | api-only | critical |
+| Read recorded planning attempts | `planning_artifacts` store | `GET /api/plans/{plan_id}/planning-artifacts` | `Overview` recovery history | `test_api.py`, `test_planning_artifacts.py` | full | critical |
 | Discard recorded planning attempts | `planning_artifacts` store | `DELETE /api/plans/{plan_id}/planning-artifacts` | — | `test_api.py` | api-only | post-launch |
 | JIT goal-contract enrichment | `PlanningHandler.enrich_goal_contract` | — (worker-driven) | — | `test_conversation_and_planning.py` | hidden by design | — |
 
@@ -141,12 +141,12 @@ Serves **J6**.
 |---|---|---|---|---|---|---|
 | Domain event stream | outbox relay → `SSEBroker` | `GET /api/events` | `queries` SSE bridge | `test_sse_stream.py`, `test_outbox_relay.py` | full | critical |
 | Attempt/run timeline | `execution_records` | `GET /api/plans/{plan_id}/attempts` | `ConsoleDock` | `test_api.py`, `test_execution_records.py` | full | critical |
-| One attempt's captured log | `process_supervisor.attempt_log_path` | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log` | — | `test_api.py` | api-only ([G5](#g5)) | critical |
-| Live attempt log (SSE tail) | `process_supervisor.follow_attempt_log` | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log/stream` | — | `test_sse_stream.py` | api-only ([G5](#g5)) | critical |
+| One attempt's captured log | `process_supervisor.attempt_log_path` | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log` | `ConsoleDock` → `AttemptLogViewer` | `test_api.py`, `api.phase5.test.ts` | full | critical |
+| Live attempt log (SSE tail) | `process_supervisor.follow_attempt_log` | `GET /api/plans/{plan_id}/attempts/{attempt_id}/log/stream` | `ConsoleDock` → `AttemptLogViewer` | `test_sse_stream.py`, `api.phase5.test.ts` | full | critical |
 | Fine-grained agent telemetry | `agent_events` store | `GET /api/plans/{plan_id}/agent-events` | `DetailPanel` | `test_api.py` | full | critical |
 | Token/run roll-up | `observations` | `GET /api/metrics` | `Activity` | `test_api.py`, `test_observation_repository.py` | full | post-launch |
 | Current work + TDD stage | `Plan.activity`, `tdd_stage` | in `GET /api/plans/{plan_id}` | `LifecycleRail` | `test_cyclic_project_plan.py` | full | critical |
-| Worker liveness for this plan | `worker_lease` projection | in `GET /api/plans/{plan_id}` | — | `test_worker_pool.py` | api-only ([G10](#g10)) | critical |
+| Worker liveness for this plan | `worker_lease` projection | in `GET /api/plans/{plan_id}` | `Overview` | `test_worker_pool.py` | full | critical |
 
 ## 6. Capacity and waiting
 
@@ -154,9 +154,9 @@ Serves **J6** — the "waiting, recovering automatically" half of Phase 5's rule
 
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
-| Provider circuit / backoff state | `provider_capacity`, `RuntimeCircuit` | `provider_waiting` in `GET /api/plans/{plan_id}` | — | `test_cyclic_worker.py`, `test_backoff_gate.py` | api-only ([G3](#g3)) | critical |
-| Planning backoff + retry-at | `PlanningOperation` | `planning_operation` in `GET /api/plans/{plan_id}` | `ConsoleDock` | `test_reasoner_backoff.py` | ui-partial | critical |
-| Per-provider/model in-flight ceiling | `AgentSpec`/provider rows | `POST`/`PUT /api/providers…`, `PUT /api/models/{model_id}` | — | `test_reference_repos.py` | ui-partial ([G7](#g7)) | post-launch |
+| Provider circuit / backoff state | `provider_capacity`, `RuntimeCircuit` | `provider_waiting` in `GET /api/plans/{plan_id}` | `Overview` | `test_cyclic_worker.py`, `test_backoff_gate.py`, `Overview.phase5.test.tsx` | full | critical |
+| Planning backoff + retry-at | `PlanningOperation` | `planning_operation` in `GET /api/plans/{plan_id}` | `Overview`, `ConsoleDock` | `test_reasoner_backoff.py`, `test_planning_artifacts.py` | full | critical |
+| Per-provider/model in-flight ceiling | `AgentSpec`/provider rows | `POST`/`PUT /api/providers…`, `PUT /api/models/{model_id}` | `ProvidersSection` | `test_reference_repos.py`, `api.phase5.test.ts` | full | post-launch |
 | Tier-ordered agent reselection | `ExecutionHandler`, `model_role` | — (automatic) | — | `test_goal_parallel_execution.py` | hidden by design | — |
 
 ## 7. Recovery and intervention
@@ -169,13 +169,13 @@ Serves **J9**.
 | Resume (manual pause only) | `pause_resume.resume_plan` | `POST /api/plans/{plan_id}/resume` | `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
 | Retry one named failed task | `pause_resume.retry_task` | `POST /api/plans/{plan_id}/retry` | `DetailPanel`, `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
 | Retry a blocked planning stage | `pause_resume.retry_planning_stage` | `POST /api/plans/{plan_id}/retry-stage` | `LifecycleRail` | `test_api.py`, `test_agent_binding_recovery.py` | full | critical |
-| Surgical structural edit | `apply_edit.apply_edit` | `POST /api/plans/{plan_id}/edits` | `DetailPanel` | `test_api.py`, `test_contract_editing.py` | ui-partial ([G4](#g4)) | critical |
+| Surgical structural edit | `apply_edit.apply_edit` | `POST /api/plans/{plan_id}/edits` | `DetailPanel`, including contract repair | `test_api.py`, `test_contract_editing.py`, `api.phase5.test.ts` | full | critical |
 | Holistic replan | `request_replan.request_replan` | `POST /api/plans/{plan_id}/replan` | `queries` (`replanMidRunning`) | `test_api.py`, `test_replan_loop.py` | full | critical |
 | Change the retry budget | `update_retry_policy.update_retry_policy` | `POST /api/plans/{plan_id}/retry-policy` | — | `test_retry_policy_update.py`, `test_api.py` | api-only | critical |
-| Per-goal blocks and their resolutions | `Plan.goal_blocks`, `block_policy` | `goal_blocks` in `GET /api/plans/{plan_id}` | — | `test_goal_blocks.py`, `test_block_policy.py` | api-only ([G2](#g2)) | critical |
+| Per-goal blocks and their resolutions | `Plan.goal_blocks`, `block_policy` | `goal_blocks` in `GET /api/plans/{plan_id}` | `Overview`, `AttentionItem` | `test_goal_blocks.py`, `test_block_policy.py`, `Overview.phase5.test.tsx` | full | critical |
 | Plan-wide block and its resolutions | `Plan.block`, `block_policy` | `block` in `GET /api/plans/{plan_id}` | `Overview`, `AttentionItem` | `test_block_report.py`, `test_block_policy.py` | full | critical |
 | Where each advertised action is served | `action_endpoints_for` | `action_endpoints` in `GET /api/plans/{plan_id}` | — | `test_legal_actions_contract.py` | api-only | critical |
-| "Is this block mine or the orchestrator's?" | `block_policy.requires_human` | `requires_human` on every block in `GET /api/plans/{plan_id}` | — | `test_block_report.py`, `test_block_policy.py` | api-only | critical |
+| "Is this block mine or the orchestrator's?" | `block_policy.requires_human` | `requires_human` on every block in `GET /api/plans/{plan_id}` | `Overview` attention/recovery queues | `test_block_report.py`, `test_block_policy.py`, `Overview.phase5.test.tsx` | full | critical |
 | Bounded automatic repair | `contract_repair`, `promotion_failures`, `agent_feedback` | — (automatic) | — | `test_execution_handler_unpromotable_goal.py` | hidden by design | — |
 | Skip / abandon a wedged task | `Plan.abandon_task` | — | — | `test_transitions.py` | hidden ([G12](#g12)) | post-launch |
 
@@ -185,13 +185,13 @@ Serves **J7**.
 
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
-| Frozen test bundle + accepted evidence | `Task.test_bundle`, `verification_evidence` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_tdd_execution.py` | api-only | critical |
-| Protected scope / foreign-check protection | `verification`, `test_identity` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_existing_check_protection.py` | api-only | critical |
-| Promoted git refs (cycle/goal branches) | `project_workspace`, `goal_promotion_repository` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_goal_promotion_repository.py`, `test_git_workspace.py` | api-only | critical |
+| Frozen test bundle + accepted evidence | `Task.test_bundle`, `verification_evidence` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_tdd_execution.py` | full | critical |
+| Protected scope / foreign-check protection | `verification`, `test_identity` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_existing_check_protection.py` | full | critical |
+| Promoted git refs (cycle/goal branches) | `project_workspace`, `goal_promotion_repository` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_goal_promotion_repository.py`, `test_git_workspace.py` | full | critical |
 | Record the output disposition | `cyclic_planning.record_output_disposition` | `POST /api/plans/{plan_id}/publication` | `GatePanel` | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |
-| Recorded disposition + output reference | `Cycle.output_disposition/_reference` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_api.py` | api-only | critical |
+| Recorded disposition + output reference | `Cycle.output_disposition/_reference` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_api.py` | full | critical |
 | Export all plan-run analytics and evidence | `backend/scripts/export_plan_runs.py` | — (whole-database CLI export; not the J7 cycle read) | — | `test_plan_run_export.py` | hidden | post-launch |
-| One evidence read model per cycle — accepted evidence, protected scope, promoted refs, disposition | `routers/evidence.py` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py` | api-only | critical |
+| One evidence read model per cycle — accepted evidence, protected scope, promoted refs, disposition | `routers/evidence.py` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py` | full | critical |
 | Authenticated PR / forge write | — | — | — | — | not implemented (deliberate) | post-launch |
 
 ## 9. Nine-phase compatibility surface
@@ -210,10 +210,9 @@ model is `status` + `activity` + `legal_actions` (see
 
 Compatibility **fields** on `GET /api/plans/{plan_id}`: `phase`, `legacy_phase`,
 `iteration`, and root-level `goals` (the pre-cyclic goal list; a cyclic plan's
-real work is `active_cycle.goals`). `legacy_phase` has no frontend consumer;
-`phase` and `iteration` are still read by `PlanCanvas`, `TopBar`, `GatePanel`,
-`PhaseTimeline` and `ChatPanel` — the contradiction recorded in
-[known-issues.md](known-issues.md) and owned by Phase 5.
+real work is `active_cycle.goals`). `GatePanel` and `PhaseTimeline` read these
+only when `legacy_phase` explicitly marks a compatibility row; cyclic screens
+use `status`, `activity`, `legal_actions`, and `active_cycle`.
 
 ---
 
@@ -242,76 +241,14 @@ applied at mount time now, proven over the whole OpenAPI inventory by
 which also found that a zero-attempt budget was accepted), and G11
 (`test_repository_binding.py` plus the runtime lock in
 `test_git_workspace.py::test_a_project_that_names_a_missing_repository_is_refused_by_the_resolver`).
-The numbering is left as-is: G2 still means what it meant in the Phase 3 audit.
+The numbering is left as-is for historical references.
 
-### G2 — Per-goal blocks are invisible in the UI {#g2}
-
-Domain un-freeze #14 made one goal's block stop only that goal. The API serves
-`goal_blocks` and the frontend read model declares it
-(`frontend/src/types/ui.ts:237`), but **no component reads it** — `Overview` and
-`AttentionItem` render only the plan-wide scalar `block`. An operator watching a
-partially-blocked plan sees "running" with no indication that a goal needs them,
-which is precisely the state un-freeze #14 created.
-
-**Owner: Phase 5.** **Test:** a plan with two goals, one blocked and no
-plan-wide block, renders one attention item per entry in `goal_blocks` and
-offers that block's advertised resolutions.
-
-### G3 — `provider_waiting` is served but absent from the frontend read model {#g3}
-
-`PlanDetailResponse.provider_waiting` (`routers/plans.py:188`) carries the
-capacity circuit's state. The hand-declared read model in
-`frontend/src/types/ui.ts` never declared it, so no component could render it
-without a type error. Phase 5's rule — distinguish "waiting, recovering
-automatically" from "needs you" — is unsatisfiable while the waiting half is
-undeclared. **The declaration is restored in this PR**; rendering it is Phase 5.
-
-**Owner: Phase 5.** **Test:** `test_plan_read_model_parity` (added here) keeps
-the two in sync; the rendering test is a plan with an open circuit showing a
-"waiting" affordance and no human-action prompt.
-
-### G4 — `update_task_contract` edits are API-only {#g4}
-
-`EditRequest` accepts eight edit types plus `update_task_contract`
-(`routers/plans.py:350`), the un-freeze #17 surgical repair of a frozen
-contract. The frontend's `EditBody` union (`lib/api.ts:243`) omits it, so the
-one manual move at the contract boundary — the thing `contract-repair-v1`
-exists to exercise — cannot be made from the UI.
-
-**Owner: Phase 5.** **Test:** the edit dialog submits an `update_task_contract`
-body for a frozen task and the plan reflects the new revision.
-
-### G5 — The attempt log has no UI consumer {#g5}
-
-Both the captured log and the live SSE tail are routed and tested, and neither
-appears in `lib/api.ts`. J6 ("why is this attempt failing?") therefore requires
-curl. The roadmap names this endpoint explicitly.
-
-**Owner: Phase 5.** **Test:** selecting a running attempt opens the stream and
-appends rendered lines; selecting a finished one renders the captured log.
-
-### G7 — The UI silently clears provider and model capacity overrides {#g7}
-
-`PUT /api/providers/{provider_id}` assigns `max_inflight` and `capacity_scope`
-unconditionally from the body (`routers/reference.py:222`), and
-`PUT /api/models/{model_id}` rebuilds the row from `{name, max_inflight}`
-(`:266`). The settings forms send neither field
-(`ProvidersSection.tsx:283`), so **renaming a provider or model resets its
-in-flight ceiling to NULL** — silently reverting an un-freeze #16 capacity
-decision made through the API. Recorded in [known-issues.md](known-issues.md).
-
-**Owner: Phase 5** (carry the fields in the form), with Phase 4 free to make the
-update partial instead. **Test:** set `max_inflight`, rename through the client
-payload the UI sends, and assert the ceiling survives.
-
-### G8 — Plan deletion has no UI {#g8}
-
-`DELETE /api/plans/{plan_id}` is the reset half of J8 (`reset.sh` calls it) and the
-only way to discard a plan's cycles, attempts, evidence, chat and telemetry. The
-UI cannot do it, so the plan list only grows.
-
-**Owner: Phase 5.** **Test:** deleting from the plan list removes the row and a
-busy plan surfaces the 409 `PLAN_BUSY` refusal as a message, not a crash.
+**Closed by Phase 5** (2026-08-01), and deleted from this list per the same repo
+rule — G2/G3 are locked by `Overview.phase5.test.tsx` and the backend parity,
+block-policy, and goal-block suites; G4/G7/G8 by `api.phase5.test.ts` plus their
+backend edit/reference/deletion suites; and G5 by the frontend stream-parser
+contract plus `test_api.py` and `test_sse_stream.py`. Their matrix rows now name
+the concrete frontend consumers and carry `full` status.
 
 ### G12 — A wedged task cannot be skipped {#g12}
 

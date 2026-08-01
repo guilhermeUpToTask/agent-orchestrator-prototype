@@ -1,14 +1,25 @@
 import React from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Hand, XCircle } from 'lucide-react';
-import { useAgents, usePlan } from '../lib/queries';
+import { Clock3, Hand, Pencil, RefreshCw, RotateCcw, XCircle } from 'lucide-react';
+import {
+  useAgents,
+  useBindProject,
+  usePlan,
+  usePlanningArtifacts,
+  useProjects,
+  useReplanMidRunning,
+  useRetryPlanningStage,
+  useRetryTask,
+} from '../lib/queries';
 import { usePlannerStore } from '../store/plannerStore';
 import { StatusBadge } from '../components/StatusBadge';
-import { AttentionItem, CountChip, ErrorState } from '../components/ui';
+import { AttentionItem, Button, CountChip, ErrorState, Select } from '../components/ui';
+import { CycleEvidenceSummary } from '../components/CycleEvidenceSummary';
 import { PLAN_STATUS } from '../styles/tokens';
-import type { Goal, Task } from '../types/ui';
+import type { Goal, Plan, PlanBlock, Task } from '../types/ui';
 import styles from './Overview.module.css';
 import { attemptLabel } from '../lib/taskLabels';
+import { absTime, useNow } from '../lib/time';
 
 /** The failure reason inline — never force a Goals navigation just to learn why. */
 function failureDetail(task: Task): string | null {
@@ -30,6 +41,11 @@ export function Overview() {
   const setGateOpen = usePlannerStore((s) => s.setGateOpen);
   const selectTask = usePlannerStore((s) => s.selectTask);
   const navigate = useNavigate();
+  const now = useNow();
+  const retryTask = useRetryTask(planId);
+  const retryPlanningStage = useRetryPlanningStage(planId);
+  const replan = useReplanMidRunning(planId);
+  const { data: planningArtifacts = [] } = usePlanningArtifacts(planId || null);
 
   if (error && !plan) {
     return (
@@ -56,10 +72,38 @@ export function Overview() {
     agents.find((a) => a.id === id)?.name ?? 'unassigned';
 
   const gate = plan.pending_gate?.continuation ?? null;
+  // Cyclic plans are authoritative through active_cycle. Root goals remain a
+  // compatibility surface for pre-cyclic rows only.
+  const currentGoals = plan.active_cycle?.goals ?? plan.goals;
 
-  const failedTasks = flatTasks(plan.goals).filter((t) => t.task.status === 'failed');
-  const runningTasks = flatTasks(plan.goals).filter((t) => t.task.status === 'running');
-  const attentionCount = (gate ? 1 : 0) + (plan.block ? 1 : 0) + failedTasks.length;
+  const goalBlocks = Object.entries(plan.goal_blocks).map(([goalId, block]) => ({
+    goalId,
+    goal: currentGoals.find((goal) => goal.id === goalId) ?? null,
+    block,
+  }));
+  const humanGoalBlocks = goalBlocks.filter(({ block }) => block.requires_human);
+  const automaticGoalBlocks = goalBlocks.filter(({ block }) => !block.requires_human);
+  const humanPlanBlock = plan.block?.requires_human ? plan.block : null;
+  const automaticPlanBlock = plan.block && !plan.block.requires_human ? plan.block : null;
+  const blockedTaskIds = new Set(
+    [plan.block?.task_id, ...goalBlocks.map(({ block }) => block.task_id)]
+      .filter((taskId): taskId is string => !!taskId),
+  );
+  const failedTasks = flatTasks(currentGoals).filter(
+    ({ task }) => task.status === 'failed' && !blockedTaskIds.has(task.id),
+  );
+  const runningTasks = flatTasks(currentGoals).filter((t) => t.task.status === 'running');
+  const providerNeedsAttention = !!plan.provider_waiting?.needs_attention
+    && ![humanPlanBlock, ...humanGoalBlocks.map(({ block }) => block)]
+      .some((block) => block?.kind === 'provider_capacity');
+  const attentionCount = (gate ? 1 : 0)
+    + (humanPlanBlock ? 1 : 0)
+    + humanGoalBlocks.length
+    + (providerNeedsAttention ? 1 : 0)
+    + failedTasks.length;
+  const automaticRecoveryCount = (plan.provider_waiting && !plan.provider_waiting.needs_attention ? 1 : 0)
+    + (automaticPlanBlock ? 1 : 0)
+    + automaticGoalBlocks.length;
 
   const base = `/plans/${encodeURIComponent(planId)}`;
 
@@ -78,6 +122,52 @@ export function Overview() {
         </p>
       </header>
 
+      {/* ── Current operation ───────────────────────────────────────────── */}
+      {(plan.planning_operation || plan.active_run || plan.worker_lease || plan.tdd_stage) && (
+        <section className={styles.section} aria-label="Current operation">
+          <h2 className={styles.sectionTitle + ' label'}>Current operation</h2>
+          <div className={styles.operationGrid}>
+            {plan.planning_operation && (
+              <div className={styles.operationCard}>
+                <span className="label">Planning · {humanize(plan.planning_operation.purpose)}</span>
+                <span className={styles.docText}>
+                  {plan.planning_operation.safe_message ?? plan.planning_progress ?? humanize(plan.planning_operation.status)}
+                </span>
+                {plan.planning_operation.retry_at && (
+                  <span className={styles.rowMeta}>retry at {absTime(plan.planning_operation.retry_at)}</span>
+                )}
+              </div>
+            )}
+            {plan.active_run && (
+              <div className={styles.operationCard}>
+                <span className="label">Execution attempt {plan.active_run.attempt_number}</span>
+                <span className={styles.docText}>
+                  task {plan.active_run.task_id} · run {plan.active_run.run_id}
+                </span>
+                <span className={styles.rowMeta}>started {absTime(plan.active_run.started_at)}</span>
+              </div>
+            )}
+            {plan.worker_lease && (
+              <div className={styles.operationCard}>
+                <span className="label">{humanize(plan.worker_lease.scope)} lease</span>
+                <span className={styles.docText}>
+                  {plan.worker_lease.expired
+                    ? 'Worker lease expired; this operation may be orphaned.'
+                    : `${plan.worker_lease.seconds_remaining}s remaining · ${plan.worker_lease.worker_id}`}
+                </span>
+                <span className={styles.rowMeta}>expires {absTime(plan.worker_lease.expires_at)}</span>
+              </div>
+            )}
+            {plan.tdd_stage && (
+              <div className={styles.operationCard}>
+                <span className="label">Verification stage</span>
+                <span className={styles.docText}>{humanize(plan.tdd_stage)}</span>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* ── Needs attention ──────────────────────────────────────────────── */}
       <section className={styles.section} aria-label="Needs attention">
         <h2 className={styles.sectionTitle + ' label'}>
@@ -92,12 +182,51 @@ export function Overview() {
           </p>
         ) : (
           <div className={styles.attentionList}>
-            {plan.block && (
+            {humanPlanBlock && (
               <AttentionItem
                 tone="fail"
                 icon={<XCircle size={16} aria-hidden />}
-                title={plan.block.explanation}
-                meta={humanize(plan.block.stage)}
+                title={humanPlanBlock.explanation}
+                meta={humanize(humanPlanBlock.stage)}
+                actions={(
+                  <BlockActions
+                    planId={planId}
+                    block={humanPlanBlock}
+                    onRetry={() => retryBlock(humanPlanBlock, retryTask.mutate, retryPlanningStage.mutate)}
+                    onEdit={() => openBlockedTask(humanPlanBlock, selectTask, navigate, base)}
+                    onReplan={() => replan.mutate()}
+                    pending={retryTask.isPending || retryPlanningStage.isPending || replan.isPending}
+                  />
+                )}
+              />
+            )}
+            {humanGoalBlocks.map(({ goalId, goal, block }) => (
+              <AttentionItem
+                key={block.id}
+                tone="gate"
+                icon={<Hand size={16} aria-hidden />}
+                title={block.explanation}
+                meta={goal?.name ?? goalId}
+                detail={humanize(block.stage)}
+                actions={(
+                  <BlockActions
+                    planId={planId}
+                    block={block}
+                    onRetry={() => retryBlock(block, retryTask.mutate, retryPlanningStage.mutate)}
+                    onEdit={() => openBlockedTask(block, selectTask, navigate, base)}
+                    onReplan={() => replan.mutate()}
+                    pending={retryTask.isPending || retryPlanningStage.isPending || replan.isPending}
+                  />
+                )}
+              />
+            ))}
+            {providerNeedsAttention && plan.provider_waiting && (
+              <AttentionItem
+                tone="fail"
+                icon={<XCircle size={16} aria-hidden />}
+                title={plan.provider_waiting.safe_message}
+                meta={providerLabel(plan.provider_waiting)}
+                detail="The automatic recovery window expired; operator action is required."
               />
             )}
             {gate && (
@@ -133,6 +262,70 @@ export function Overview() {
         )}
       </section>
 
+      {/* ── Automatic recovery ─────────────────────────────────────────── */}
+      {automaticRecoveryCount > 0 && (
+        <section className={styles.section} aria-label="Recovering automatically">
+          <h2 className={styles.sectionTitle + ' label'}>
+            Recovering automatically
+            <span className={styles.runCount}>{automaticRecoveryCount}</span>
+          </h2>
+          <div className={styles.attentionList}>
+            {plan.provider_waiting && !plan.provider_waiting.needs_attention && (
+              <AttentionItem
+                tone="run"
+                icon={<Clock3 size={16} aria-hidden />}
+                title={plan.provider_waiting.safe_message}
+                meta={providerLabel(plan.provider_waiting)}
+                detail={providerWaitDetail(plan.provider_waiting, now)}
+              />
+            )}
+            {automaticPlanBlock && (
+              <AttentionItem
+                tone="run"
+                icon={<RefreshCw size={16} aria-hidden />}
+                title={automaticPlanBlock.explanation}
+                meta={humanize(automaticPlanBlock.stage)}
+                detail="No operator action is required; the orchestrator owns this recovery loop."
+              />
+            )}
+            {automaticGoalBlocks.map(({ goalId, goal, block }) => (
+              <AttentionItem
+                key={block.id}
+                tone="run"
+                icon={<RefreshCw size={16} aria-hidden />}
+                title={block.explanation}
+                meta={goal?.name ?? goalId}
+                detail={`${humanize(block.stage)} · no operator action required`}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {planningArtifacts.length > 0 && (
+        <section className={styles.section} aria-label="Planning recovery history">
+          <h2 className={styles.sectionTitle + ' label'}>Planning recovery history</h2>
+          <div className={styles.docs}>
+            {planningArtifacts.slice(0, 6).map((artifact) => (
+              <div className={styles.recoveryRow} key={`${artifact.purpose}-${artifact.sequence}-${artifact.created_at}`}>
+                <CountChip tone={artifact.outcome === 'accepted' ? 'ok' : 'gate'}>
+                  {humanize(artifact.outcome)}
+                </CountChip>
+                <span className={styles.rowTitle}>
+                  {humanize(artifact.purpose)} · attempt {artifact.sequence}
+                </span>
+                <span className={styles.rowMeta}>
+                  {artifact.turns_used === null ? 'turn count unavailable' : `${artifact.turns_used} turns`}
+                </span>
+                {artifact.rejection_reasons.length > 0 && (
+                  <span className={styles.recoveryReason}>{artifact.rejection_reasons.join(' · ')}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* ── Running now ──────────────────────────────────────────────────── */}
       <section className={styles.section} aria-label="Running now">
         <h2 className={styles.sectionTitle + ' label'}>Running now</h2>
@@ -162,13 +355,13 @@ export function Overview() {
       {/* ── Roadmap summary ──────────────────────────────────────────────── */}
       <section className={styles.section} aria-label="Roadmap">
         <h2 className={styles.sectionTitle + ' label'}>Roadmap</h2>
-        {plan.goals.length === 0 ? (
+        {currentGoals.length === 0 ? (
           <p className={styles.empty}>
             No goals yet — agree the roadmap with the reasoner in the chat.
           </p>
         ) : (
           <ul className={styles.rows}>
-            {plan.goals
+            {currentGoals
               .slice()
               .sort((a, b) => a.position - b.position)
               .map((g) => {
@@ -228,6 +421,7 @@ export function Overview() {
                           </span>
                         </div>
                       ))}
+                      <CycleEvidenceSummary planId={planId} cycle={cycle} />
                     </div>
                   </details>
                 );
@@ -251,4 +445,118 @@ function humanize(value: string): string {
 
 function flatTasks(goals: Goal[]): { task: Task; goal: Goal }[] {
   return goals.flatMap((goal) => goal.tasks.map((task) => ({ task, goal })));
+}
+
+function BlockActions({
+  planId,
+  block,
+  onRetry,
+  onEdit,
+  onReplan,
+  pending,
+}: {
+  planId: string;
+  block: PlanBlock;
+  onRetry: () => void;
+  onEdit: () => void;
+  onReplan: () => void;
+  pending: boolean;
+}) {
+  const canRetry = block.legal_resolutions.includes('retry_stage')
+    || block.legal_resolutions.includes('wait_and_retry');
+  const canEdit = block.legal_resolutions.includes('edit_task') && !!block.task_id;
+  const canReplan = block.legal_resolutions.includes('start_replan');
+  const canBindProject = block.legal_resolutions.includes('bind_project');
+
+  if (!canRetry && !canEdit && !canReplan && !canBindProject) return null;
+
+  return (
+    <>
+      {canRetry && (
+        <Button size="sm" onClick={onRetry} disabled={pending}>
+          <RotateCcw size={12} aria-hidden />
+          {block.legal_resolutions.includes('wait_and_retry') ? 'Clear wait & retry' : 'Retry work'}
+        </Button>
+      )}
+      {canEdit && (
+        <Button size="sm" onClick={onEdit} disabled={pending}>
+          <Pencil size={12} aria-hidden /> Edit task
+        </Button>
+      )}
+      {canReplan && (
+        <Button size="sm" onClick={onReplan} disabled={pending}>
+          <RefreshCw size={12} aria-hidden /> Start replan
+        </Button>
+      )}
+      {canBindProject && <ProjectBindingAction planId={planId} pending={pending} />}
+    </>
+  );
+}
+
+function ProjectBindingAction({ planId, pending }: { planId: string; pending: boolean }) {
+  const { data: projects = [] } = useProjects();
+  const bindProject = useBindProject(planId);
+  const [projectId, setProjectId] = React.useState('');
+  const selected = projectId || projects[0]?.id || '';
+
+  if (projects.length === 0) {
+    return <Link className={styles.readinessCta} to="/settings/projects">Create a project</Link>;
+  }
+  return (
+    <span className={styles.bindingAction}>
+      <Select
+        value={selected}
+        onChange={(event) => setProjectId(event.target.value)}
+        options={projects.map((project) => ({ value: project.id, label: project.name }))}
+        aria-label="Project to bind"
+      />
+      <Button
+        size="sm"
+        onClick={() => bindProject.mutate(selected)}
+        pending={bindProject.isPending}
+        disabled={pending || !selected}
+      >
+        Bind project
+      </Button>
+    </span>
+  );
+}
+
+function retryBlock(
+  block: PlanBlock,
+  retryTask: (target: { goalId: string; taskId: string }) => void,
+  retryPlanningStage: () => void,
+) {
+  if (block.goal_id && block.task_id) {
+    retryTask({ goalId: block.goal_id, taskId: block.task_id });
+    return;
+  }
+  retryPlanningStage();
+}
+
+function openBlockedTask(
+  block: PlanBlock,
+  selectTask: (taskId: string | null) => void,
+  navigate: (to: string) => void,
+  base: string,
+) {
+  if (!block.task_id) return;
+  selectTask(block.task_id);
+  navigate(`${base}/goals`);
+}
+
+function providerLabel(waiting: NonNullable<Plan['provider_waiting']>): string {
+  const target = waiting.model_id
+    ? `${waiting.provider_id} / ${waiting.model_id}`
+    : waiting.provider_id;
+  return waiting.limit_scope ? `${target} · ${humanize(waiting.limit_scope)}` : target;
+}
+
+function providerWaitDetail(
+  waiting: NonNullable<Plan['provider_waiting']>,
+  now: number,
+): string {
+  const seconds = Math.max(0, Math.ceil((Date.parse(waiting.retry_at) - now) / 1_000));
+  const retry = seconds > 0 ? `retrying automatically in ${seconds}s` : 'automatic retry is due';
+  return `${retry} · waiting since ${absTime(waiting.since)} · ${waiting.failure_count} failure${waiting.failure_count === 1 ? '' : 's'}`;
 }

@@ -16,6 +16,7 @@ import {
   Dialog,
   Field,
   Input,
+  Select,
 } from '../../components/ui';
 import type { IaModel, ModelProvider } from '../../types/ui';
 import styles from './Settings.module.css';
@@ -107,6 +108,11 @@ function ProviderCard({
         <span className={styles.mono}>{provider.base_url || '—'}</span>
         <span className="label">api key</span>
         <span className={styles.mono}>{provider.api_key_ref} (encrypted)</span>
+        <span className="label">capacity</span>
+        <span className={styles.mono}>
+          {provider.max_inflight == null ? 'global default' : `${provider.max_inflight} in flight`}
+          {' · '}{provider.capacity_scope ?? 'per_model'}
+        </span>
       </div>
 
       <ModelList provider={provider} />
@@ -119,13 +125,19 @@ function ProviderCard({
 function ModelList({ provider }: { provider: ModelProvider }) {
   const createModel = useCreateModel();
   const [newName, setNewName] = useState('');
+  const [newMaxInflight, setNewMaxInflight] = useState('');
 
   const submitNew = () => {
     const name = newName.trim();
     if (!name) return;
     createModel.mutate(
-      { providerId: provider.id, name },
-      { onSuccess: () => setNewName('') },
+      { providerId: provider.id, name, maxInflight: nullablePositiveInt(newMaxInflight) },
+      {
+        onSuccess: () => {
+          setNewName('');
+          setNewMaxInflight('');
+        },
+      },
     );
   };
 
@@ -146,6 +158,14 @@ function ModelList({ provider }: { provider: ModelProvider }) {
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submitNew()}
         />
+        <Input
+          type="number"
+          min={1}
+          placeholder="Max in flight"
+          value={newMaxInflight}
+          aria-label={`Maximum in-flight requests for new ${provider.name} model`}
+          onChange={(event) => setNewMaxInflight(event.target.value)}
+        />
         <Button size="sm" pending={createModel.isPending} onClick={submitNew}>
           <Plus size={12} aria-hidden /> Add model
         </Button>
@@ -159,16 +179,22 @@ function ModelRow({ model }: { model: IaModel }) {
   const deleteModel = useDeleteModel();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(model.name);
+  const [maxInflight, setMaxInflight] = useState(
+    model.max_inflight == null ? '' : String(model.max_inflight),
+  );
 
   const submit = () => {
     const next = name.trim();
-    if (!next || next === model.name) {
+    const nextMaxInflight = nullablePositiveInt(maxInflight);
+    if (!next) return;
+    if (next === model.name && nextMaxInflight === (model.max_inflight ?? null)) {
       setEditing(false);
       setName(model.name);
+      setMaxInflight(model.max_inflight == null ? '' : String(model.max_inflight));
       return;
     }
     rename.mutate(
-      { modelId: model.id, name: next },
+      { modelId: model.id, name: next, maxInflight: nextMaxInflight },
       { onSuccess: () => setEditing(false) },
     );
   };
@@ -192,6 +218,14 @@ function ModelRow({ model }: { model: IaModel }) {
                 }
               }}
             />
+            <Input
+              type="number"
+              min={1}
+              value={maxInflight}
+              placeholder="Max in flight"
+              aria-label={`Maximum in-flight requests for ${model.name}`}
+              onChange={(event) => setMaxInflight(event.target.value)}
+            />
             <Button variant="icon" size="sm" aria-label="Save model name" onClick={submit}>
               <Check size={13} aria-hidden />
             </Button>
@@ -202,6 +236,7 @@ function ModelRow({ model }: { model: IaModel }) {
               onClick={() => {
                 setEditing(false);
                 setName(model.name);
+                setMaxInflight(model.max_inflight == null ? '' : String(model.max_inflight));
               }}
             >
               <X size={13} aria-hidden />
@@ -210,7 +245,9 @@ function ModelRow({ model }: { model: IaModel }) {
         ) : (
           <>
             <span className={styles.itemName}>{model.name}</span>
-            <span className={styles.itemMeta}>{model.id}</span>
+            <span className={styles.itemMeta}>
+              {model.id} · {model.max_inflight == null ? 'provider capacity default' : `${model.max_inflight} max in flight`}
+            </span>
           </>
         )}
       </div>
@@ -220,7 +257,11 @@ function ModelRow({ model }: { model: IaModel }) {
             variant="icon"
             size="sm"
             aria-label={`Rename ${model.name}`}
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              setName(model.name);
+              setMaxInflight(model.max_inflight == null ? '' : String(model.max_inflight));
+              setEditing(true);
+            }}
           >
             <Pencil size={13} aria-hidden />
           </Button>
@@ -253,6 +294,8 @@ function ProviderDialog({
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [maxInflight, setMaxInflight] = useState('');
+  const [capacityScope, setCapacityScope] = useState('');
 
   // Reset the form each time the dialog opens for a target.
   const [seededFor, setSeededFor] = useState<string | null>(null);
@@ -262,6 +305,8 @@ function ProviderDialog({
     setName(provider?.name ?? '');
     setBaseUrl(provider?.base_url ?? '');
     setApiKey('');
+    setMaxInflight(provider?.max_inflight == null ? '' : String(provider.max_inflight));
+    setCapacityScope(provider?.capacity_scope ?? '');
   }
   if (!open && seededFor !== null) setSeededFor(null);
 
@@ -273,7 +318,13 @@ function ProviderDialog({
     if (!canSubmit) return;
     if (provider === null) {
       create.mutate(
-        { name: name.trim(), base_url: baseUrl.trim(), api_key: apiKey },
+        {
+          name: name.trim(),
+          base_url: baseUrl.trim(),
+          api_key: apiKey,
+          max_inflight: nullablePositiveInt(maxInflight),
+          capacity_scope: capacityScope || null,
+        },
         { onSuccess: onClose },
       );
     } else {
@@ -284,6 +335,8 @@ function ProviderDialog({
             name: name.trim(),
             base_url: baseUrl.trim(),
             api_key: apiKey === '' ? null : apiKey,
+            max_inflight: nullablePositiveInt(maxInflight),
+            capacity_scope: capacityScope || null,
           },
         },
         { onSuccess: onClose },
@@ -320,6 +373,38 @@ function ProviderDialog({
             onChange={(e) => setBaseUrl(e.target.value)}
           />
         </Field>
+        <div className={styles.formGrid2}>
+          <Field
+            label="Max in flight"
+            htmlFor="provider-max-inflight"
+            hint="Blank uses the global execution default."
+          >
+            <Input
+              id="provider-max-inflight"
+              type="number"
+              min={1}
+              value={maxInflight}
+              placeholder="Global default"
+              onChange={(event) => setMaxInflight(event.target.value)}
+            />
+          </Field>
+          <Field
+            label="Capacity scope"
+            htmlFor="provider-capacity-scope"
+            hint="Whether concurrent limits are shared across models."
+          >
+            <Select
+              id="provider-capacity-scope"
+              value={capacityScope}
+              onChange={(event) => setCapacityScope(event.target.value)}
+              options={[
+                { value: '', label: 'Per model (default)' },
+                { value: 'per_model', label: 'Per model' },
+                { value: 'endpoint_wide', label: 'Endpoint wide' },
+              ]}
+            />
+          </Field>
+        </div>
         <Field
           label={provider === null ? 'API key' : 'Rotate API key'}
           htmlFor="provider-api-key"
@@ -348,4 +433,10 @@ function ProviderDialog({
       </div>
     </Dialog>
   );
+}
+
+function nullablePositiveInt(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }

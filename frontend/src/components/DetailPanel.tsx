@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { Pencil, RotateCcw, Trash2, Wrench, X } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { usePlannerStore } from '../store/plannerStore';
 import { useAgentEvents, useAgents, useApplyEdit, usePlan, useRetryTask } from '../lib/queries';
@@ -8,6 +8,8 @@ import { StatusBadge } from './StatusBadge';
 import { Button, CountChip, Field, Input, Select, TextArea } from './ui';
 import styles from './DetailPanel.module.css';
 import { attemptLabel, verificationLabel } from '../lib/taskLabels';
+import type { ContractCriterion, Task, VerificationStrategy } from '../types/ui';
+import { currentPlanGoals } from '../lib/planTruth';
 
 /**
  * The task inspector: everything the aggregate knows about one task —
@@ -30,15 +32,17 @@ export function DetailPanel() {
     error: eventsError,
   } = useAgentEvents(planId || null, selectedTaskId ?? undefined);
   const [editing, setEditing] = React.useState(false);
+  const [contractEditing, setContractEditing] = React.useState(false);
   const [name, setName] = React.useState('');
   const [description, setDescription] = React.useState('');
 
-  const goal = plan?.goals.find((g) => g.tasks.some((t) => t.id === selectedTaskId));
+  const goal = currentPlanGoals(plan).find((g) => g.tasks.some((t) => t.id === selectedTaskId));
   const task = goal?.tasks.find((t) => t.id === selectedTaskId);
 
   // reset the edit form whenever the selected task changes
   React.useEffect(() => {
     setEditing(false);
+    setContractEditing(false);
     setName(task?.name ?? '');
     setDescription(task?.description ?? '');
   }, [selectedTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,11 +56,17 @@ export function DetailPanel() {
   // Editable exactly where the backend allows: at the pre-execution gate, or
   // while the plan is paused; and only a pending task (or a failed one while
   // paused). Mirrors edit_service guards so we don't offer a 422.
-  const blockTargetsTask = plan?.block?.task_id === task.id
-    && plan.block.goal_id === goal.id;
-  const blockedEdit = !!blockTargetsTask
-    && !!plan?.block?.legal_resolutions.includes("edit_task");
-  const editContext = plan?.phase === "awaiting_review" || !!plan?.paused || blockedEdit;
+  const targetBlock = (
+    plan?.block?.task_id === task.id && plan.block.goal_id === goal.id
+      ? plan.block
+      : plan?.goal_blocks[goal.id]?.task_id === task.id
+        ? plan.goal_blocks[goal.id]
+        : null
+  );
+  const blockedEdit = !!targetBlock?.legal_resolutions.includes("edit_task");
+  const editContext = !!plan?.legal_actions.includes('edit_pending_work')
+    || !!plan?.paused
+    || blockedEdit;
   const taskMutable =
     task.status === "pending"
     || (task.status === "failed" && (!!plan?.paused || blockedEdit));
@@ -64,13 +74,14 @@ export function DetailPanel() {
   const canRetry = task.status === "failed" && (
     !!plan?.paused
     || (
-      !!blockTargetsTask
+      !!targetBlock
       && (
-        !!plan?.block?.legal_resolutions.includes("retry_stage")
-        || !!plan?.block?.legal_resolutions.includes("wait_and_retry")
+        !!targetBlock?.legal_resolutions.includes("retry_stage")
+        || !!targetBlock?.legal_resolutions.includes("wait_and_retry")
       )
     )
   );
+  const canRepairContract = blockedEdit && !!task.contract;
 
   const saveEdit = () => {
     if (name !== task.name || description !== task.description) {
@@ -120,11 +131,25 @@ export function DetailPanel() {
               // refetch since mount can't leave the form showing stale values
               setName(task.name);
               setDescription(task.description);
+              setContractEditing(false);
               setEditing(true);
             }}
             aria-label="Edit task"
           >
             <Pencil size={14} aria-hidden />
+          </Button>
+        )}
+        {canRepairContract && !contractEditing && (
+          <Button
+            variant="icon"
+            onClick={() => {
+              setEditing(false);
+              setContractEditing(true);
+            }}
+            aria-label="Repair task contract"
+            title="Repair the frozen execution contract"
+          >
+            <Wrench size={14} aria-hidden />
           </Button>
         )}
         {canEdit && (
@@ -171,6 +196,23 @@ export function DetailPanel() {
         </>
       )}
 
+      {contractEditing && task.contract && (
+        <ContractEditor
+          task={task}
+          pending={applyEdit.isPending}
+          onCancel={() => setContractEditing(false)}
+          onSave={(fields) => applyEdit.mutate(
+            {
+              type: 'update_task_contract',
+              goal_id: goal.id,
+              task_id: task.id,
+              ...fields,
+            },
+            { onSuccess: () => setContractEditing(false) },
+          )}
+        />
+      )}
+
       <Field label="Goal">
         <span className={styles.text}>{goal.name}</span>
       </Field>
@@ -178,6 +220,19 @@ export function DetailPanel() {
       {task.description && !editing && (
         <Field label="Description">
           <p className={styles.text}>{task.description}</p>
+        </Field>
+      )}
+
+      {task.contract && !contractEditing && (
+        <Field label="Execution contract">
+          <div className={styles.contractSummary}>
+            <span>{task.contract.objective}</span>
+            <span className={styles.monoText}>
+              {task.contract.acceptance_criteria.length} criteria ·{' '}
+              {task.contract.verification_strategy.replace(/_/g, ' ')} · revision{' '}
+              {task.contract.revision ?? task.revision ?? 1}
+            </span>
+          </div>
         </Field>
       )}
 
@@ -296,4 +351,114 @@ export function DetailPanel() {
       )}
     </aside>
   );
+}
+
+interface ContractFields {
+  objective: string;
+  acceptance_criteria: ContractCriterion[];
+  verification_strategy: VerificationStrategy;
+  allowed_scope: string[];
+  forbidden_scope: string[];
+  verification_commands: string[];
+  goal_criterion_ids: string[];
+  required_capabilities: string[];
+}
+
+function ContractEditor({
+  task,
+  pending,
+  onSave,
+  onCancel,
+}: {
+  task: Task;
+  pending: boolean;
+  onSave: (fields: ContractFields) => void;
+  onCancel: () => void;
+}) {
+  const contract = task.contract!;
+  const [objective, setObjective] = React.useState(contract.objective);
+  const [criteria, setCriteria] = React.useState(
+    contract.acceptance_criteria.map((criterion) => `${criterion.id} | ${criterion.description}`).join('\n'),
+  );
+  const [strategy, setStrategy] = React.useState<VerificationStrategy>(contract.verification_strategy);
+  const [allowedScope, setAllowedScope] = React.useState(contract.allowed_scope.join('\n'));
+  const [forbiddenScope, setForbiddenScope] = React.useState((contract.forbidden_scope ?? []).join('\n'));
+  const [commands, setCommands] = React.useState(contract.verification_commands.join('\n'));
+  const [goalCriterionIds, setGoalCriterionIds] = React.useState(contract.goal_criterion_ids.join('\n'));
+  const [capabilities, setCapabilities] = React.useState(
+    (contract.required_capabilities ?? task.required_capabilities).join('\n'),
+  );
+
+  const parsedCriteria = lines(criteria).map((line, index) => {
+    const separator = line.indexOf('|');
+    return separator < 0
+      ? { id: contract.acceptance_criteria[index]?.id ?? `criterion-${index + 1}`, description: line }
+      : { id: line.slice(0, separator).trim(), description: line.slice(separator + 1).trim() };
+  }).filter((criterion) => criterion.id && criterion.description);
+  const canSave = objective.trim() !== '' && parsedCriteria.length > 0 && lines(commands).length > 0;
+
+  return (
+    <div className={styles.contractEditor} aria-label="Repair execution contract">
+      <div className="label">Contract repair</div>
+      <p className={styles.muted}>
+        Saving creates a new contract revision. Attempt identity and observed evidence stay read-only.
+      </p>
+      <Field label="Objective">
+        <TextArea value={objective} onChange={(event) => setObjective(event.target.value)} rows={3} />
+      </Field>
+      <Field label="Acceptance criteria" hint="One per line: criterion-id | description">
+        <TextArea value={criteria} onChange={(event) => setCriteria(event.target.value)} rows={5} mono />
+      </Field>
+      <Field label="Verification strategy">
+        <Select
+          value={strategy}
+          onChange={(event) => setStrategy(event.target.value as VerificationStrategy)}
+          options={[
+            { value: 'tdd', label: 'Test-driven development' },
+            { value: 'characterization', label: 'Characterization' },
+            { value: 'executable_check', label: 'Executable check' },
+          ]}
+        />
+      </Field>
+      <Field label="Verification commands" hint="One exact command per line">
+        <TextArea value={commands} onChange={(event) => setCommands(event.target.value)} rows={3} mono />
+      </Field>
+      <Field label="Allowed scope" hint="One repository path per line">
+        <TextArea value={allowedScope} onChange={(event) => setAllowedScope(event.target.value)} rows={3} mono />
+      </Field>
+      <Field label="Forbidden scope" hint="One repository path per line">
+        <TextArea value={forbiddenScope} onChange={(event) => setForbiddenScope(event.target.value)} rows={3} mono />
+      </Field>
+      <Field label="Goal criterion IDs" hint="One criterion ID per line">
+        <TextArea value={goalCriterionIds} onChange={(event) => setGoalCriterionIds(event.target.value)} rows={2} mono />
+      </Field>
+      <Field label="Required capabilities" hint="One capability ID per line">
+        <TextArea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} rows={2} mono />
+      </Field>
+      <div className={styles.contractActions}>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={!canSave}
+          pending={pending}
+          onClick={() => onSave({
+            objective: objective.trim(),
+            acceptance_criteria: parsedCriteria,
+            verification_strategy: strategy,
+            verification_commands: lines(commands),
+            allowed_scope: lines(allowedScope),
+            forbidden_scope: lines(forbiddenScope),
+            goal_criterion_ids: lines(goalCriterionIds),
+            required_capabilities: lines(capabilities),
+          })}
+        >
+          Save contract revision
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function lines(value: string): string[] {
+  return value.split('\n').map((line) => line.trim()).filter(Boolean);
 }

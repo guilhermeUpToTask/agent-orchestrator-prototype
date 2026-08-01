@@ -67,6 +67,16 @@
   color: var(--gate-text);
 }
 
+.runCount {
+  min-width: 18px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--run-bg);
+  border: 1px solid color-mix(in srgb, var(--run) 40%, transparent);
+  color: var(--run-text);
+}
+
 .empty {
   font-size: var(--fs-body);
   color: var(--text-3);
@@ -80,6 +90,45 @@
 .attentionList {
   display: flex;
   flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.operationGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-2);
+}
+
+.operationCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+
+.recoveryRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+
+.recoveryReason {
+  grid-column: 2 / -1;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+
+.bindingAction {
+  display: inline-flex;
+  align-items: center;
   gap: var(--sp-2);
 }
 
@@ -191,6 +240,41 @@
   gap: 4px;
 }
 
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-0);
+}
+
+.evidenceHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.evidenceGoal,
+.evidenceItem,
+.evidenceScope,
+.outputDisposition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.evidenceGoal {
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border-1);
+}
+
+.evidenceItem code,
+.outputDisposition code {
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
 /* ── Inline field error text ───────────────────────────────────────────── */
 
 .errorBody { font-size: var(--fs-body); line-height: 1.55; color: var(--fail-text); }
@@ -201,6 +285,13 @@
 .planList {
   display: flex;
   flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.planRowShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: var(--sp-2);
 }
 
@@ -249,4 +340,27 @@
   font-size: var(--fs-micro);
   color: var(--text-3);
   white-space: nowrap;
+}
+
+.readinessBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+
+.readinessCta {
+  flex-shrink: 0;
+  color: var(--gate-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+@media (max-width: 760px) {
+  .planRow { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .planRow > .rowMeta,
+  .planActivity { display: none; }
+  .readinessBanner { align-items: flex-start; flex-direction: column; }
 }

@@ -22,6 +22,7 @@ import { GoalGroupNode } from './GoalGroupNode';
 import { PhaseTimeline } from './PhaseTimeline';
 import { buildFlowFromGoals, GOAL_COLORS } from '../lib/layout';
 import type { Plan, TaskNodeData } from '../types/ui';
+import { currentPlanGoals, isLegacyPlan } from '../lib/planTruth';
 
 const nodeTypes: NodeTypes = {
   taskNode: TaskNode as React.ComponentType<any>,
@@ -35,7 +36,7 @@ const KIND_COLOR = {
 // ─── Goal group legend ─────────────────────────────────────────────────────────
 
 function GoalLegend({ plan }: { plan: Plan | undefined }) {
-  const goals = plan?.goals ?? [];
+  const goals = currentPlanGoals(plan);
   if (goals.length === 0) return null;
   return (
     <div style={{
@@ -85,7 +86,8 @@ function BriefStrip({ plan }: { plan: Plan | undefined }) {
       backdropFilter: 'blur(8px)',
     }}>
       <div style={{ fontSize: 8, fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em', marginBottom: 3 }}>
-        BRIEF · v{plan.version} · iter {plan.iteration}
+        BRIEF · v{plan.version}
+        {plan.active_cycle ? ` · cycle ${plan.active_cycle.id}` : isLegacyPlan(plan) ? ` · iteration ${plan.iteration}` : ''}
       </div>
       <div style={{
         fontSize: 10, color: tokens.textSecond, lineHeight: 1.5,
@@ -113,7 +115,7 @@ export function PlanCanvas({ planId }: { planId: string }) {
   const { data: agents } = useAgents();
 
   const layout = useMemo(
-    () => buildFlowFromGoals(plan?.goals ?? [], agents ?? [], ui.layoutDirection),
+    () => buildFlowFromGoals(currentPlanGoals(plan), agents ?? [], ui.layoutDirection),
     [plan, agents, ui.layoutDirection],
   );
 
@@ -185,7 +187,7 @@ export function PlanCanvas({ planId }: { planId: string }) {
         </Panel>
 
         <Panel position="top-center">
-          {plan && <PhaseTimeline phase={plan.phase} iteration={plan.iteration} />}
+          {isLegacyPlan(plan) && <PhaseTimeline phase={plan!.phase} iteration={plan!.iteration} />}
         </Panel>
 
         <Panel position="bottom-right" style={{ right: ui.detailPanelOpen ? 336 : 20 }}>

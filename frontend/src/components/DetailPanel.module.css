@@ -128,3 +128,29 @@
   text-overflow: ellipsis;
   color: var(--text-2);
 }
+
+.contractSummary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.contractEditor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--gate) 35%, var(--border-0));
+  border-radius: var(--r-2);
+  background: var(--gate-bg);
+}
+
+.contractActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

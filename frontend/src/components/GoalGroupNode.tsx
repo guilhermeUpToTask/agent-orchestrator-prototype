@@ -59,7 +59,7 @@ export function GoalGroupNode({ data }: NodeProps) {
           padding: '10px 12px', fontSize: 9, fontFamily: tokens.fontMono,
           color: tokens.textMuted,
         }}>
-          no tasks yet — the enriching phase populates this goal
+          no tasks yet — goal enrichment will populate this group
         </div>
       )}
     </div>
