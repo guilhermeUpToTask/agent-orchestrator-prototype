@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
-import { BrainCircuit, Boxes, Bot, TerminalSquare, Wrench, FolderGit2, ListChecks } from 'lucide-react';
+import { BrainCircuit, Boxes, Bot, TerminalSquare, Wrench, FolderGit2, ListChecks, Rocket } from 'lucide-react';
+import { SetupSection } from './SetupSection';
 import { ReasonerSection } from './ReasonerSection';
 import { RunnerSection } from './RunnerSection';
 import { ProvidersSection } from './ProvidersSection';
@@ -11,6 +12,7 @@ import { ReadinessSection } from './ReadinessSection';
 import styles from './Settings.module.css';
 
 const SECTIONS = [
+  { path: 'setup', label: 'Get started', Icon: Rocket },
   { path: 'readiness', label: 'Readiness', Icon: ListChecks },
   { path: 'reasoner', label: 'Reasoner', Icon: BrainCircuit },
   { path: 'runner', label: 'Agent runtime', Icon: TerminalSquare },
@@ -46,6 +48,7 @@ export function SettingsLayout() {
       <div className={styles.content}>
         <Routes>
           <Route index element={<Navigate to="readiness" replace />} />
+          <Route path="setup" element={<SetupSection />} />
           <Route path="readiness" element={<ReadinessSection />} />
           <Route path="reasoner" element={<ReasonerSection />} />
           <Route path="runner" element={<RunnerSection />} />

@@ -125,8 +125,11 @@ export function PlansView() {
               {readiness.data.checks.filter((check) => check.status === 'fail').length} required
               readiness check(s) are failing. Configure the runtime before starting a cycle.
             </span>
-            <Link className={styles.readinessCta} to="/settings/readiness">
-              Open readiness checklist
+            {/* The guided path, not the raw checklist: the checklist names what
+                is wrong, the wizard knows what to do first. The checklist is
+                still one click further in, for operators who prefer it. */}
+            <Link className={styles.readinessCta} to="/settings/setup">
+              Get started
             </Link>
           </div>
         </Card>
