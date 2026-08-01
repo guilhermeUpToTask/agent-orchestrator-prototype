@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.contract_repair import propose_repair
-from src.domain.entities.execution_contracts import (
+from agent_orchestrator.app.contract_repair import propose_repair
+from agent_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     VerificationStrategy,
@@ -152,9 +152,9 @@ def test_queued_artifacts_flush_after_the_transaction_and_tolerate_a_failing_sto
     """
     from datetime import datetime, timezone
 
-    from src.app.handlers.execution_handler import ExecutionHandler
-    from src.app.ports import PlanningArtifact
-    from src.app.testing.fakes import (
+    from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
+    from agent_orchestrator.app.ports import PlanningArtifact
+    from agent_orchestrator.app.testing.fakes import (
         CollectingEventSink,
         DummyAgentRunner,
         FakeClock,

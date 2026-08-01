@@ -71,7 +71,7 @@ def served(tmp_path):
         [
             sys.executable,
             "-m",
-            "src.infra.cli.main",
+            "agent_orchestrator.infra.cli.main",
             "serve",
             "--port",
             str(port),

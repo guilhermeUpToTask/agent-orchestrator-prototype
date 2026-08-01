@@ -24,12 +24,12 @@ from pathlib import Path
 
 import pytest
 
-import src
-from src.infra.db.migration_config import alembic_config, migrations_dir
+import agent_orchestrator
+from agent_orchestrator.infra.db.migration_config import alembic_config, migrations_dir
 
 pytestmark = pytest.mark.integration
 
-PACKAGE_ROOT = Path(src.__file__).resolve().parent
+PACKAGE_ROOT = Path(agent_orchestrator.__file__).resolve().parent
 
 
 def test_the_migration_directory_lives_inside_the_package() -> None:
@@ -56,7 +56,7 @@ def test_the_resolver_does_not_depend_on_a_repository_marker() -> None:
 
 
 def migration_config_module():  # noqa: ANN201 - test helper
-    from src.infra.db import migration_config
+    from agent_orchestrator.infra.db import migration_config
 
     return migration_config
 

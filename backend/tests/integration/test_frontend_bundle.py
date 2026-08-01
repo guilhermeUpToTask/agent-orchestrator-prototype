@@ -22,11 +22,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api import dependencies
-from src.api import frontend as frontend_module
-from src.api.server import create_app
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
+from agent_orchestrator.api import dependencies
+from agent_orchestrator.api import frontend as frontend_module
+from agent_orchestrator.api.server import create_app
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -102,6 +102,6 @@ def test_the_api_starts_without_a_bundle(tmp_path, monkeypatch) -> None:
 def test_the_bundle_directory_is_inside_the_package() -> None:
     """Same property the migrations needed: an installed copy has no
     repository, so the path must be derived from the package."""
-    import src
+    import agent_orchestrator
 
-    assert frontend_module.bundle_dir().is_relative_to(Path(src.__file__).resolve().parent)
+    assert frontend_module.bundle_dir().is_relative_to(Path(agent_orchestrator.__file__).resolve().parent)

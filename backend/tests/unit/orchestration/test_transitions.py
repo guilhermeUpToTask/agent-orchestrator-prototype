@@ -3,11 +3,11 @@
 import pytest
 
 
-from src.domain.entities.task import Task
-from src.domain.entities.goal import Goal
-from src.domain.errors.tasks_errors import InvalidTransitionError
-from src.domain.value_objects.lifecycle import Status
-from src.domain.value_objects.tasks_vos import TaskResult
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 
 def mk_task(status=Status.PENDING):

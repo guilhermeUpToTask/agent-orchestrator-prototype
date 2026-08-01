@@ -11,24 +11,24 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from src.app.testing.fakes import (
+from agent_orchestrator.app.testing.fakes import (
     DummyAgentRunner,
     DummyBehavior,
     FakeClock,
     InMemoryAgentRepository,
 )
-from src.app.use_cases.run_worker import drive_plan
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.value_objects.lifecycle import Status
-from src.infra.db.agent_event_sink import SqliteAgentEventSink
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.reference_repos import SqliteProjectRepository
-from src.infra.db.unit_of_work import SqliteUnitOfWork
-from src.infra.git.workspace import GitBranchWorkspace
+from agent_orchestrator.app.use_cases.run_worker import drive_plan
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.infra.db.agent_event_sink import SqliteAgentEventSink
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.reference_repos import SqliteProjectRepository
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.infra.git.workspace import GitBranchWorkspace
 from tests.support import make_agent_spec
 
 pytestmark = pytest.mark.integration

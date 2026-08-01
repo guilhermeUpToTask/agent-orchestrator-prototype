@@ -10,14 +10,14 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
 
-from src.app.handlers.base import Signal
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.ports import ReasonerUnavailable
-from src.app.testing.fakes import InMemoryCapabilityRepository
+from agent_orchestrator.app.handlers.base import Signal
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.ports import ReasonerUnavailable
+from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
 
 
 def goal(gid: str, position: int, tasks: list[Task] | None = None) -> Goal:
@@ -148,7 +148,7 @@ def test_a_failed_enrichment_leaves_its_work_behind_for_the_retry(env_factory):
     Written outside the plan transaction on purpose (the ChatStore rule): a
     record kept so the retry can learn must not roll back with the rollback.
     """
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     class RejectsThenDies:
         async def converse(self, plan, history, message, mode):  # pragma: no cover
@@ -193,7 +193,7 @@ def test_a_session_that_produced_nothing_is_still_recorded(env_factory):
     reasons, and the replay's outcome filter keeps `abandoned` out of the prompt:
     there is nothing there to learn from, only evidence that this goal is hard.
     """
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     env.seed(enriching_plan())
@@ -214,7 +214,7 @@ def test_a_session_that_produced_nothing_is_still_recorded(env_factory):
 
 def test_a_budget_exhaustion_records_an_abandoned_attempt(env_factory):
     """With a fingerprint, an empty-handed failure IS recorded."""
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     class DiesOnBudget:
         async def converse(self, plan, history, message, mode):  # pragma: no cover
@@ -254,6 +254,6 @@ def test_a_permanent_planning_failure_still_fails_immediately(env_factory):
 
     asyncio.run(handler(FailingReasoner(transient=False), env).handle("p1", env.stored("p1"), env.uow))
 
-    from src.domain.entities.planning_artifacts import PlanStatus
+    from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
 
     assert env.stored("p1").status == PlanStatus.BLOCKED

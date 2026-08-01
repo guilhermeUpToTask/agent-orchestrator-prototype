@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from click.testing import CliRunner
 
-from src.infra.cli.main import cli
+from agent_orchestrator.infra.cli.main import cli
 
 
 def test_api_start_disables_the_uvicorn_access_log(monkeypatch):
@@ -27,7 +27,7 @@ def test_api_start_disables_the_uvicorn_access_log(monkeypatch):
     import uvicorn
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
-    monkeypatch.setattr("src.api.server.create_app", lambda: object())
+    monkeypatch.setattr("agent_orchestrator.api.server.create_app", lambda: object())
 
     result = CliRunner().invoke(cli, ["api", "start", "--port", "9999"])
 

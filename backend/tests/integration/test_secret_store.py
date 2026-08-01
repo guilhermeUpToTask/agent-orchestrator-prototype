@@ -7,11 +7,11 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.secret_ref import SecretRef
-from src.infra.db.secret_store import SqliteSecretStore, load_master_key
-from src.infra.db.tables import Base
-from src.infra.errors import InfrastructureError, SecretNotFoundError
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.infra.db.secret_store import SqliteSecretStore, load_master_key
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.errors import InfrastructureError, SecretNotFoundError
 
 pytestmark = pytest.mark.integration
 

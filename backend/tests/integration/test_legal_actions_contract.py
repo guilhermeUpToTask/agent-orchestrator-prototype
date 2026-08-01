@@ -22,11 +22,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from src.api import dependencies
-from src.api.server import create_app
-from src.domain.entities.project_definition import ProjectDefinition
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
+from agent_orchestrator.api import dependencies
+from agent_orchestrator.api.server import create_app
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 

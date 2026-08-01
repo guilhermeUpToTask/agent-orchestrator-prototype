@@ -5,24 +5,24 @@ from datetime import datetime, timezone
 import pytest
 
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
-from src.domain.entities.task import Task
-from src.domain.errors.agent_errors import AgentNotFoundError, UnknownCapabilityError
-from src.domain.errors.planning_errors import EmptyPlanError, InvalidEditError
-from src.domain.errors.tasks_errors import (
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.agent_errors import AgentNotFoundError, UnknownCapabilityError
+from agent_orchestrator.domain.errors.planning_errors import EmptyPlanError, InvalidEditError
+from agent_orchestrator.domain.errors.tasks_errors import (
     GoalAlreadyRunningError,
     InvalidTransitionError,
     StaleVersionError,
 )
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
-from src.app.use_cases.create_plan import create_plan
-from src.app.use_cases.apply_edit import (
+from agent_orchestrator.app.use_cases.create_plan import create_plan
+from agent_orchestrator.app.use_cases.apply_edit import (
     apply_edit,
     AddTask,
     RemoveTask,
@@ -33,8 +33,8 @@ from src.app.use_cases.apply_edit import (
     UpdateGoal,
     UpdateTask,
 )
-from src.app.use_cases.control import finish_review, resume_from_review
-from src.app.testing.fakes import (
+from agent_orchestrator.app.use_cases.control import finish_review, resume_from_review
+from agent_orchestrator.app.testing.fakes import (
     InMemoryAgentRepository,
     InMemoryCapabilityRepository,
     InMemoryOutbox,

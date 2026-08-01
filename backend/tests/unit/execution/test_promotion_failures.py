@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.promotion_failures import is_transient_merge_failure
+from agent_orchestrator.app.promotion_failures import is_transient_merge_failure
 
 CONFLICTS = [
     "CONFLICT (content): Merge conflict in src/app.py",

@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.app.testing.fakes import InMemoryAgentRepository
-from src.app.verification import sha256_file, validate_candidate
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.entities.execution_contracts import (
+from agent_orchestrator.app.testing.fakes import InMemoryAgentRepository
+from agent_orchestrator.app.verification import sha256_file, validate_candidate
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     GoalContract,
     TaskContract,
@@ -17,12 +17,12 @@ from src.domain.entities.execution_contracts import (
     TestBundleState as BundleState,
     VerificationStrategy,
 )
-from src.domain.entities.task import Task
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.errors.agent_errors import RoleUnsatisfiableError
-from src.domain.errors.base import DomainError
-from src.domain.services.agent_role_resolution import RunRole, resolve_role_agent
-from src.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
+from agent_orchestrator.domain.errors.base import DomainError
+from agent_orchestrator.domain.services.agent_role_resolution import RunRole, resolve_role_agent
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)

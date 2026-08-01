@@ -8,10 +8,10 @@ import json
 
 import pytest
 
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.reasoner.runtime.agent_loop import run_tool_session
-from src.infra.reasoner.runtime.errors import ReasonerError
-from src.infra.reasoner.runtime.tools import ToolSpec
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.reasoner.runtime.agent_loop import run_tool_session
+from agent_orchestrator.infra.reasoner.runtime.errors import ReasonerError
+from agent_orchestrator.infra.reasoner.runtime.tools import ToolSpec
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
 
 

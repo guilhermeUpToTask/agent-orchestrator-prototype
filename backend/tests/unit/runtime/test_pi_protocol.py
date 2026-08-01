@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from src.infra.runtime.pi_protocol import (
+from agent_orchestrator.infra.runtime.pi_protocol import (
     extract_final_text,
     extract_stream_error,
     parse_pi_events,
 )
-from src.infra.runtime.taxonomy import classify_failure
-from src.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.runtime.taxonomy import classify_failure
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 
 
 def _assistant_message_end(texts: list[str], usage: dict | None = None) -> str:

@@ -22,8 +22,8 @@ from typing import Callable, Protocol
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from src.app.ports import UnitOfWork
-from src.app.testing.fakes import (
+from agent_orchestrator.app.ports import UnitOfWork
+from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     DummyBehavior,
@@ -34,12 +34,12 @@ from src.app.testing.fakes import (
     InMemoryUnitOfWork,
     NoOpWorkspace,
 )
-from src.domain.aggregates.planner_orchestrator import Plan
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.policies.retry_policies import RetryPolicy
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 
 def make_agent_spec(agent_id: str = "a1") -> AgentSpec:

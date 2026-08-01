@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.infra.reasoner.runtime.tool_profiles import (
+from agent_orchestrator.infra.reasoner.runtime.tool_profiles import (
     REPOSITORY_READ_SCHEMAS,
     ArtifactCollector,
     ReaderSpec,
@@ -13,7 +13,7 @@ from src.infra.reasoner.runtime.tool_profiles import (
     build_tool_profile,
     simple_reader,
 )
-from src.infra.reasoner.runtime.tools import ToolCall, execute_tool_call
+from agent_orchestrator.infra.reasoner.runtime.tools import ToolCall, execute_tool_call
 
 
 # Repository sight is offered where the decision depends on what the code

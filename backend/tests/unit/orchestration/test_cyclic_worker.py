@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from src.app.handlers.base import Signal
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.base import Signal
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.testing.fakes import (
     FakeClock,
     InMemoryAgentRepository,
     InMemoryCapabilityRepository,
@@ -13,19 +13,19 @@ from src.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from src.app.use_cases.cyclic_planning import activate_cycle
-from src.domain.aggregates.planner_orchestrator import Plan
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     IntentProposal,
     PlanStatus,
     ProposalKind,
 )
-from src.domain.policies.retry_policies import RetryPolicy
-from src.infra.reasoner.stub_reasoner import StubReasoner
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
 

@@ -133,8 +133,8 @@ def replanned_client(tmp_path, monkeypatch):
     """
     import asyncio
 
-    from src.app.handlers.planning_handler import PlanningHandler
-    from src.app.use_cases.run_worker import drive_plan
+    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from agent_orchestrator.app.use_cases.run_worker import drive_plan
     from tests.integration.cyclic_walk import drive_cycle_to_publication
 
     walk = drive_cycle_to_publication(tmp_path, monkeypatch, publish=False)

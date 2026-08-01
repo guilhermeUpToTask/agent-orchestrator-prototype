@@ -7,8 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.infra.reasoner.runtime.llm_client import AssistantTurn
-from src.infra.reasoner.runtime.tools import ToolCall, ToolSpec
+from agent_orchestrator.infra.reasoner.runtime.llm_client import AssistantTurn
+from agent_orchestrator.infra.reasoner.runtime.tools import ToolCall, ToolSpec
 
 
 def text_turn(text: str, usage: dict[str, int] | None = None) -> AssistantTurn:

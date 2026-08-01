@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.verification import is_check_path
+from agent_orchestrator.app.verification import is_check_path
 
 # Aliased: pytest collects any imported name starting with `test_` as a test
 # case, and would report the function itself as an error for lacking a `path`
 # fixture.
-from src.app.verification import test_author_path_allowed as author_path_allowed
-from src.domain.entities.execution_contracts import VerificationStrategy
+from agent_orchestrator.app.verification import test_author_path_allowed as author_path_allowed
+from agent_orchestrator.domain.entities.execution_contracts import VerificationStrategy
 
 
 @pytest.mark.parametrize(

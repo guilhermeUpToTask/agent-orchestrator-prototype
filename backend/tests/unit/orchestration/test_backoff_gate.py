@@ -7,15 +7,15 @@ backoff-gate-survives-crash on real SQLite is part of the integration truth-test
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.domain.value_objects.lifecycle import Status
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.services.navigation import next_action, NOT_READY
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.services.navigation import next_action, NOT_READY
 
-from src.app.use_cases.advance_plan import advance_plan
-from src.app.testing.fakes import DummyBehavior
+from agent_orchestrator.app.use_cases.advance_plan import advance_plan
+from agent_orchestrator.app.testing.fakes import DummyBehavior
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

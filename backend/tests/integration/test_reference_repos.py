@@ -6,25 +6,25 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from src.app.testing.fakes import FakeClock
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.entities.goal import Goal
-from src.domain.entities.ia_model import IAModel
-from src.domain.entities.model_provider import ModelProvider
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.entities.task import Task
-from src.domain.errors.agent_errors import AgentNotFoundError, NoDefaultAgentError
-from src.domain.errors.config_errors import (
+from agent_orchestrator.app.testing.fakes import FakeClock
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.ia_model import IAModel
+from agent_orchestrator.domain.entities.model_provider import ModelProvider
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.agent_errors import AgentNotFoundError, NoDefaultAgentError
+from agent_orchestrator.domain.errors.config_errors import (
     CapabilityNotFoundError,
     EntityAlreadyExistsError,
     ModelProviderNotFoundError,
     ReferencedEntityInUseError,
 )
-from src.domain.policies.retry_policies import RetryPolicy
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.reference_repos import (
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.reference_repos import (
     SqliteAgentRepository,
     SqliteCapabilityRepository,
     SqliteConfigStore,
@@ -32,8 +32,8 @@ from src.infra.db.reference_repos import (
     SqliteModelRepository,
     SqliteProjectRepository,
 )
-from src.infra.db.tables import Base
-from src.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 pytestmark = pytest.mark.integration
 

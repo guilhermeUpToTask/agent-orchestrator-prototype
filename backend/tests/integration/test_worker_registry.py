@@ -12,9 +12,9 @@ import time
 
 import pytest
 
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.worker_registry import WorkerRegistry
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.worker_registry import WorkerRegistry
 
 pytestmark = pytest.mark.integration
 

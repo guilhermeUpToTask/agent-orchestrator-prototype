@@ -13,15 +13,15 @@ from uuid import uuid4
 
 import pytest
 
-from src.app.execution_records import (
+from agent_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
 )
-from src.app.runtime_failures import RuntimeFailure
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.db.attempt_feedback_repository import SqliteAttemptFeedbackRepository
+from agent_orchestrator.app.runtime_failures import RuntimeFailure
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.db.attempt_feedback_repository import SqliteAttemptFeedbackRepository
 
 pytestmark = pytest.mark.integration
 
@@ -67,14 +67,14 @@ def _record(container, number: int, *, kind: FailureKind, message: str) -> None:
 @pytest.fixture
 def container(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    from src.infra.container import AppContainer
-    from src.infra.db.tables import Base
+    from agent_orchestrator.infra.container import AppContainer
+    from agent_orchestrator.infra.db.tables import Base
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     # the project + plan rows the attempts hang off
-    from src.domain.aggregates.planner_orchestrator import Plan
-    from src.domain.entities.project_definition import ProjectDefinition
+    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
 
     container.project_repo.add(ProjectDefinition(id="p", name="p", repo_url=None))
     with container.new_unit_of_work() as uow:

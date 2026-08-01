@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from src.app import block_policy
-from src.app.block_policy import (
+from agent_orchestrator.app import block_policy
+from agent_orchestrator.app.block_policy import (
     EDIT_TASK,
     RETRY_STAGE,
     START_REPLAN,
@@ -28,7 +28,7 @@ from src.app.block_policy import (
     policy_for,
     resolutions_for,
 )
-from src.domain.entities.planning_artifacts import PlanBlock
+from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

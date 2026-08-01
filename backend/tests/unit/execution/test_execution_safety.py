@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.app.handlers.execution_handler import ExecutionHandler
-from src.app.ports import CommandExecution
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from agent_orchestrator.app.ports import CommandExecution
+from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     FakeClock,
     InMemoryAgentRepository,
@@ -15,11 +15,11 @@ from src.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from src.app.use_cases.cyclic_planning import propose_intent
-from src.app.verification import sha256_file
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.execution_contracts import (
+from agent_orchestrator.app.use_cases.cyclic_planning import propose_intent
+from agent_orchestrator.app.verification import sha256_file
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     TestBundle as AuthoritativeTestBundle,
@@ -27,18 +27,18 @@ from src.domain.entities.execution_contracts import (
     VerificationKind,
     VerificationStrategy,
 )
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     CycleStatus,
     PlanStatus,
     ProposalKind,
 )
-from src.domain.entities.task import Task
-from src.domain.errors.planning_errors import InvalidEditError
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.value_objects.lifecycle import Status
-from src.domain.value_objects.tasks_vos import TaskResult
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)

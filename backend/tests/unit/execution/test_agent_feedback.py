@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from src.app.agent_feedback import is_agent_actionable, split_reasons
+from agent_orchestrator.app.agent_feedback import is_agent_actionable, split_reasons
 
-_SRC = Path(__file__).resolve().parents[3] / "src"
+_SRC = Path(__file__).resolve().parents[3] / "agent_orchestrator"
 
 
 AGENT_REPAIRABLE = [
@@ -70,7 +70,7 @@ def test_every_whitelisted_prefix_is_still_emitted_somewhere_in_src() -> None:
     rejection message is reworded and this list is not, the agent silently stops
     being told about that failure — the exact regression this module prevents.
     """
-    from src.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
+    from agent_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
 
     haystack = "\n".join(
         path.read_text()
@@ -85,7 +85,7 @@ def test_every_whitelisted_prefix_is_still_emitted_somewhere_in_src() -> None:
 def test_the_whitelist_covers_every_candidate_rejection_the_handler_raises() -> None:
     """The other direction: a new candidate rejection added to the finalize path
     must be added here too, or the agent is never told about it."""
-    from src.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
+    from agent_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
 
     handler = (_SRC / "app" / "handlers" / "execution_handler.py").read_text()
     tree = ast.parse(handler)

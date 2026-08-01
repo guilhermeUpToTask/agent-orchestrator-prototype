@@ -10,14 +10,14 @@ import json
 import pytest
 from sqlalchemy import text
 
-from src.api.outbox_relay import relay_once
-from src.api.sse import SSEBroker
-from src.app.testing.fakes import FakeClock
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.events.outbox import PhaseAdvanced, TaskCompleted
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.api.outbox_relay import relay_once
+from agent_orchestrator.api.sse import SSEBroker
+from agent_orchestrator.app.testing.fakes import FakeClock
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.events.outbox import PhaseAdvanced, TaskCompleted
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 from tests.support import seed_plan_row
 
@@ -67,8 +67,8 @@ def test_relay_delivers_marks_and_makes_progress(sf):
 
 
 def test_relay_tails_agent_events_by_cursor(sf):
-    from src.domain.events.agent_events import AgentEvent
-    from src.infra.db.agent_event_sink import SqliteAgentEventSink
+    from agent_orchestrator.domain.events.agent_events import AgentEvent
+    from agent_orchestrator.infra.db.agent_event_sink import SqliteAgentEventSink
 
     sink = SqliteAgentEventSink(sf)
     for seq in range(3):
@@ -97,8 +97,8 @@ def test_relay_tails_agent_events_by_cursor(sf):
 
 
 def test_relay_forwards_plan_scoped_event_with_null_task_id(sf):
-    from src.domain.events.agent_events import AgentEvent
-    from src.infra.db.agent_event_sink import SqliteAgentEventSink
+    from agent_orchestrator.domain.events.agent_events import AgentEvent
+    from agent_orchestrator.infra.db.agent_event_sink import SqliteAgentEventSink
 
     sink = SqliteAgentEventSink(sf)
     asyncio.run(
@@ -153,10 +153,10 @@ def test_relay_end_to_end_through_http_mutation(tmp_path, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    from src.api import dependencies
-    from src.api.server import create_app
-    from src.api.sse import get_broker
-    from src.infra.container import AppContainer
+    from agent_orchestrator.api import dependencies
+    from agent_orchestrator.api.server import create_app
+    from agent_orchestrator.api.sse import get_broker
+    from agent_orchestrator.infra.container import AppContainer
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

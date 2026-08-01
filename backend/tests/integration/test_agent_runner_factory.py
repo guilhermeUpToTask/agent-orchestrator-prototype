@@ -8,20 +8,20 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from src.app.ports import TaskFailed
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.ia_model import IAModel
-from src.domain.entities.model_provider import ModelProvider
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.cli.main import cli
-from src.infra.container import AppContainer
-from src.infra.db.secret_ref import SecretRef
-from src.infra.db.tables import Base
-from src.infra.errors import InfrastructureError
-from src.infra.runtime.cli_runner import ClaudeCodeRunner, PiAgentRunner
-from src.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
-from src.infra.runtime.factory import (
+from agent_orchestrator.app.ports import TaskFailed
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.ia_model import IAModel
+from agent_orchestrator.domain.entities.model_provider import ModelProvider
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.errors import InfrastructureError
+from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, PiAgentRunner
+from agent_orchestrator.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
+from agent_orchestrator.infra.runtime.factory import (
     CatalogAgentRunner,
     build_agent_runner,
     validate_agent_binding,
@@ -244,7 +244,7 @@ def test_provider_and_model_bound_to_agent_are_delete_guarded(container, monkeyp
     container.agent_repo.add(
         spec_with(runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet")
     )
-    from src.domain.errors.config_errors import ReferencedEntityInUseError
+    from agent_orchestrator.domain.errors.config_errors import ReferencedEntityInUseError
 
     with pytest.raises(ReferencedEntityInUseError):
         container.model_repo.delete("anthropic:sonnet")

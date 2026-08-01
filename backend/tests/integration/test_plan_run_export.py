@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from src.infra.db.engine import build_engine
-from src.infra.db.tables import Base
+from agent_orchestrator.infra.db.engine import build_engine
+from agent_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 

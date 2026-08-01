@@ -7,13 +7,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.goal_lease_repository import SqliteGoalLeaseRepository
-from src.infra.db.tables import Base
-from src.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.goal_lease_repository import SqliteGoalLeaseRepository
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
-from src.app.testing.fakes import (
+from agent_orchestrator.app.testing.fakes import (
     FakeClock,
     InMemoryGoalLeaseRepository,
     InMemoryOutbox,
