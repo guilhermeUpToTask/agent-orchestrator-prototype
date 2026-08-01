@@ -84,6 +84,103 @@ def api_start(host: str, port: int) -> None:
     uvicorn.run(create_app(), host=host, port=port, access_log=False)
 
 
+@cli.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8000, show_default=True)
+@click.option("--worker-id", default="worker-1", show_default=True)
+@click.option("--poll-seconds", default=1.0, show_default=True)
+@click.option("--lease-seconds", default=300, show_default=True)
+@click.option("--max-concurrent-goals", default=4, show_default=True)
+@click.option("--no-worker", is_flag=True, help="API only; drive the worker yourself.")
+@click.option("--no-migrate", is_flag=True, help="Refuse to start if the schema is behind.")
+@catch_domain_errors
+def serve(
+    host: str,
+    port: int,
+    worker_id: str,
+    poll_seconds: float,
+    lease_seconds: int,
+    max_concurrent_goals: int,
+    no_worker: bool,
+    no_migrate: bool,
+) -> None:
+    """Migrate, then run the API (with the UI) and a worker together.
+
+    The one command a new install needs. Doing it in three — `db upgrade`,
+    `api start`, `worker start` — meant three shells sharing an environment,
+    and forgetting the third produced the hardest failure to diagnose there is:
+    a plan that is accepted and then never moves while every read still reports
+    healthy.
+
+    Migrating here is deliberate. The state directory belongs to the operator
+    running this command, the migration is idempotent, and a first run that
+    stops to tell you about a schema you have never seen is a worse
+    introduction than one that just prepares it. `--no-migrate` opts out for
+    anyone who wants the schema pinned.
+
+    The worker stays a SEPARATE PROCESS rather than a task inside the API. It
+    is the architecture (`docs/architecture/`), and it is also what lets a
+    crashed or wedged worker be seen and restarted without taking the control
+    plane down with it.
+    """
+    import subprocess
+    import sys
+
+    import uvicorn
+
+    from src.api.server import create_app
+    from src.infra.container import AppContainer
+
+    container = AppContainer.from_env()
+    if not no_migrate:
+        from alembic import command as alembic_command
+
+        from src.infra.db.engine import db_url_for_home
+        from src.infra.db.migration_config import alembic_config
+
+        alembic_command.upgrade(
+            alembic_config(db_url_for_home(container.orchestrator_home)), "head"
+        )
+    ok(f"state directory {container.orchestrator_home}")
+
+    child: subprocess.Popen[bytes] | None = None
+    if not no_worker:
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "src.infra.cli.main",
+                "worker",
+                "start",
+                "--worker-id",
+                worker_id,
+                "--poll-seconds",
+                str(poll_seconds),
+                "--lease-seconds",
+                str(lease_seconds),
+                "--max-concurrent-goals",
+                str(max_concurrent_goals),
+            ]
+        )
+        ok(f"worker {worker_id} started (pid {child.pid})")
+
+    ok(f"http://{host}:{port}")
+    try:
+        # access_log off for the same reason as `api start`: the structured
+        # middleware already records every request, path only.
+        uvicorn.run(create_app(), host=host, port=port, access_log=False)
+    finally:
+        if child is not None and child.poll() is None:
+            # The worker finishes its current atomic action before exiting, so
+            # give it room rather than killing work that is mid-flight.
+            child.terminate()
+            try:
+                child.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
+
+
 @cli.group()
 def worker() -> None:
     """The plan-driving worker."""
