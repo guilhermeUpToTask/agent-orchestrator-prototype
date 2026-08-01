@@ -9,8 +9,8 @@
 - **Run API**: `python -m agent_orchestrator.infra.cli.main api start --port 8000`
 - **Run Worker**: `python -m agent_orchestrator.infra.cli.main worker start` (dry-run by default — the config key `agent_runner.mode` selects the runtime, NOT an env var)
 - **CLI Entry Point**: `python -m agent_orchestrator.infra.cli.main` (or `orchestrate` if installed) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
-- **Format & Lint**: `ruff check src tests --fix`
-- **Type Check**: `mypy src` (zero errors, no excludes)
+- **Format & Lint**: `ruff check agent_orchestrator tests --fix`
+- **Type Check**: `mypy agent_orchestrator` (zero errors, no excludes)
 - **Test All**: `pytest`
 - **Test Unit (fast)**: `pytest -m "not integration"`
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
@@ -104,7 +104,7 @@ Do not use `print()` or the stdlib `logging` module.
 4. Always use `tmp_path` for file I/O and `monkeypatch` for env vars. No Redis anywhere (the claim path is the SQLite lease; Redis is roadmap Phase 3).
 
 ## 🧹 Code Style & Types
-- **Python**: `mypy src` must pass with zero errors and NO exclude list; `agent_orchestrator/domain` and `agent_orchestrator/app` are fully strict, `agent_orchestrator/infra`/`agent_orchestrator/api` carry the documented relaxations in `pyproject.toml` — tighten over time, never loosen. Use `from __future__ import annotations`. Pydantic `BaseModel` for DTOs/VOs/entities; `@dataclass(frozen=True)` for immutable structures where Pydantic isn't needed.
+- **Python**: `mypy agent_orchestrator` must pass with zero errors and NO exclude list; `agent_orchestrator/domain` and `agent_orchestrator/app` are fully strict, `agent_orchestrator/infra`/`agent_orchestrator/api` carry the documented relaxations in `pyproject.toml` — tighten over time, never loosen. Use `from __future__ import annotations`. Pydantic `BaseModel` for DTOs/VOs/entities; `@dataclass(frozen=True)` for immutable structures where Pydantic isn't needed.
 - **TypeScript**: strictly typed, no `any`.
 
 ## 📁 Repository Structure

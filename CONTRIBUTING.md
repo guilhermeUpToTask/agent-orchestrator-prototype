@@ -19,8 +19,8 @@ npm install
 ```bash
 # backend
 cd backend
-ruff check src tests --fix
-mypy src                                 # zero errors, no exclude list
+ruff check agent_orchestrator tests --fix
+mypy agent_orchestrator                                 # zero errors, no exclude list
 pytest -m "not integration"              # fast
 pytest -m integration                    # real SQLite, real git, TestClient
 

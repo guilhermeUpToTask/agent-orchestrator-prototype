@@ -71,7 +71,7 @@ artifacts = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src --cov-report=term-missing"
+addopts = "--cov=agent_orchestrator --cov-report=term-missing"
 markers = [
     "integration: exercises real adapters (SQLite, git, subprocess); deselect with -m 'not integration'",
     "llm: cost-gated real-provider smoke tests; run explicitly with -m llm and REASONER_SMOKE_* set",
@@ -87,7 +87,7 @@ strict = true
 
 # Honest per-layer typing: agent_orchestrator/domain and .../app are fully strict (the
 # layers that claim it); the adapter layers carry explicit relaxations
-# until they are brought up to strict. Ratchet rule: `mypy src` must stay
+# until they are brought up to strict. Ratchet rule: `mypy agent_orchestrator` must stay
 # at zero errors under this config — tighten flags here, never loosen.
 # TODO(type-health): remove these overrides module by module.
 [[tool.mypy.overrides]]

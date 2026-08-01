@@ -60,10 +60,10 @@ jobs:
         run: uv sync --all-extras --dev --locked
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run ruff check agent_orchestrator tests
 
       - name: Mypy typing ratchet
-        run: uv run mypy src
+        run: uv run mypy agent_orchestrator
 
       - name: Unit tests
         run: uv run pytest -q tests/unit
