@@ -269,6 +269,9 @@ export interface EditBody {
     required_capabilities?: string[];
   };
   ordered_task_ids?: string[];
+  // Shared by `edit_task_requirements` and `update_task_contract`. Its presence
+  // makes `apply_edit` re-run `match_agent`, so send it only when the
+  // capabilities actually changed — see `lib/contractEdit.ts`.
   required_capabilities?: string[];
   agent_id?: string;
   name?: string;

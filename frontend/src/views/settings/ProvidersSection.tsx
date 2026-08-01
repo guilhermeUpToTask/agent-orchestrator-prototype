@@ -295,7 +295,7 @@ function ProviderDialog({
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [maxInflight, setMaxInflight] = useState('');
-  const [capacityScope, setCapacityScope] = useState('');
+  const [capacityScope, setCapacityScope] = useState<CapacityScope>('');
 
   // Reset the form each time the dialog opens for a target.
   const [seededFor, setSeededFor] = useState<string | null>(null);
@@ -306,7 +306,7 @@ function ProviderDialog({
     setBaseUrl(provider?.base_url ?? '');
     setApiKey('');
     setMaxInflight(provider?.max_inflight == null ? '' : String(provider.max_inflight));
-    setCapacityScope(provider?.capacity_scope ?? '');
+    setCapacityScope(asCapacityScope(provider?.capacity_scope));
   }
   if (!open && seededFor !== null) setSeededFor(null);
 
@@ -396,7 +396,7 @@ function ProviderDialog({
             <Select
               id="provider-capacity-scope"
               value={capacityScope}
-              onChange={(event) => setCapacityScope(event.target.value)}
+              onChange={(event) => setCapacityScope(asCapacityScope(event.target.value))}
               options={[
                 { value: '', label: 'Per model (default)' },
                 { value: 'per_model', label: 'Per model' },
@@ -433,6 +433,16 @@ function ProviderDialog({
       </div>
     </Dialog>
   );
+}
+
+/** The scopes the scheduler understands, plus '' for "use the default".
+ *  A stored value outside this set is one `resolve_capacity_scope` already
+ *  degrades to `per_model`, so the form shows it as the default rather than
+ *  offering to save a value the API now refuses. */
+type CapacityScope = '' | 'per_model' | 'endpoint_wide';
+
+function asCapacityScope(raw: string | null | undefined): CapacityScope {
+  return raw === 'per_model' || raw === 'endpoint_wide' ? raw : '';
 }
 
 function nullablePositiveInt(value: string): number | null {

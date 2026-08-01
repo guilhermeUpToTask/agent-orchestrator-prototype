@@ -100,3 +100,56 @@ def test_an_update_is_validated_too(client, tmp_path):
     )
 
     assert response.status_code == 422
+
+
+# ── scp-style remotes ────────────────────────────────────────────────────────
+#
+# `git@github.com:acme/widgets.git` parses with an EMPTY scheme (`@` and `.` are
+# not legal scheme characters), so the most common GitHub remote form was
+# treated as a local filesystem path and refused with "repository path
+# .../git@github.com:acme/widgets.git does not exist" — a message that names
+# the wrong cause and sends the operator looking for a directory.
+#
+# The form is genuinely unsupported: `repository_path_for` makes the same
+# assumption and `_materialize_remote` skips a scheme-less URL, so it was never
+# clonable. Refusing it BY NAME is the honest fix.
+
+
+@pytest.mark.parametrize(
+    "repo_url",
+    ["git@github.com:acme/widgets.git", "git@gitlab.com:group/sub/proj.git"],
+)
+def test_an_scp_style_remote_is_refused_by_name(client, repo_url):
+    response = client.post("/api/projects", json={"name": "P", "repo_url": repo_url})
+
+    assert response.status_code == 422
+    message = response.json()["error"]["message"]
+    assert "scp-style" in message
+    assert "ssh://" in message and "https://" in message
+    # The old message blamed a filesystem path that was never the point.
+    assert "does not exist" not in message
+
+
+def test_the_ssh_form_of_the_same_remote_is_accepted(client, monkeypatch):
+    """The refusal has to name a way forward that actually works."""
+
+    def explode(*args, **kwargs):
+        raise AssertionError("write-time validation must not run git")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+
+    response = client.post(
+        "/api/projects",
+        json={"name": "P", "repo_url": "ssh://git@github.com/acme/widgets.git"},
+    )
+
+    assert response.status_code == 201
+
+
+def test_a_local_path_containing_an_at_sign_is_still_a_path(client, tmp_path):
+    """The scp check must not swallow a legitimate directory name."""
+    repo = _git_repo(tmp_path / "user@corp" / "repo")
+
+    response = client.post("/api/projects", json={"name": "P", "repo_url": str(repo)})
+
+    assert response.status_code == 201

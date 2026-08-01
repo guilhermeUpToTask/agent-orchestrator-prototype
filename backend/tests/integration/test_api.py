@@ -1346,3 +1346,70 @@ def _stored_retry_policy(plan_id: str):
     container = dependencies.get_container()
     with container.new_unit_of_work() as uow:
         return uow.plans.get(plan_id).retry_policy
+
+
+# ── capacity metadata bounds ─────────────────────────────────────────────────
+#
+# Phase 4's G6 found the same class one DTO over (`max_attempts: 0` accepted and
+# stored). A capacity value below 1 is not a limit an operator can have meant:
+# admission is `inflight >= cap`, so it refuses every attempt with nothing in
+# flight, and a declined admission opens no circuit and no block.
+
+
+def _provider_body(**overrides):
+    return {"name": "p", "base_url": "http://x", "api_key": "k", **overrides}
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_provider_create_refuses_a_non_positive_max_inflight(client, bad):
+    assert client.post("/api/providers", json=_provider_body(max_inflight=bad)).status_code == 422
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_provider_update_refuses_a_non_positive_max_inflight(client, bad):
+    provider = client.post("/api/providers", json=_provider_body()).json()
+    response = client.put(
+        f"/api/providers/{provider['id']}",
+        json={"name": "p", "base_url": "http://x", "max_inflight": bad},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_model_write_refuses_a_non_positive_max_inflight(client, bad):
+    provider = client.post("/api/providers", json=_provider_body()).json()
+    created = client.post(
+        f"/api/providers/{provider['id']}/models", json={"name": "m", "max_inflight": bad}
+    )
+    assert created.status_code == 422
+
+    model = client.post(f"/api/providers/{provider['id']}/models", json={"name": "m"}).json()
+    updated = client.put(f"/api/models/{model['id']}", json={"name": "m", "max_inflight": bad})
+    assert updated.status_code == 422
+
+
+def test_a_positive_capacity_still_round_trips(client):
+    """The bound must not cost the feature it guards."""
+    provider = client.post("/api/providers", json=_provider_body(max_inflight=4)).json()
+    assert provider["max_inflight"] == 4
+    model = client.post(
+        f"/api/providers/{provider['id']}/models", json={"name": "m", "max_inflight": 2}
+    ).json()
+    assert model["max_inflight"] == 2
+    assert client.put(
+        f"/api/models/{model['id']}", json={"name": "m", "max_inflight": 7}
+    ).status_code == 204
+    assert client.get("/api/models").json()[0]["max_inflight"] == 7
+
+
+def test_capacity_scope_refuses_a_value_the_scheduler_would_silently_ignore(client):
+    """`resolve_capacity_scope` degrades an unrecognized scope to `per_model` and
+    that tolerance is deliberate — a typo must not take execution down. The write
+    is where it can still be refused, so the operator is not left believing their
+    endpoint-wide provider is scheduled endpoint-wide."""
+    typo = client.post("/api/providers", json=_provider_body(capacity_scope="endpoint-wide"))
+    assert typo.status_code == 422
+
+    valid = client.post("/api/providers", json=_provider_body(capacity_scope="endpoint_wide"))
+    assert valid.status_code == 201
+    assert valid.json()["capacity_scope"] == "endpoint_wide"

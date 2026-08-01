@@ -63,6 +63,7 @@ from src.infra.policies.provider_capacity_factory import (
 )
 from src.infra.policies.retry_policy_factory import build_retry_policy
 from src.infra.reasoner.factory import build_reasoner
+from src.infra.reasoner.live_reasoner import LiveReasoner
 from src.infra.runtime.factory import build_agent_runner
 from src.infra.runtime.sandbox import NoSandbox
 from src.infra.runtime.verification_executor import LocalVerificationExecutor
@@ -228,10 +229,23 @@ class AppContainer:
     # --- Stage 6: the planning reasoner ---
     @cached_property
     def reasoner(self) -> Reasoner:
-        """Catalog-resolved: config key reasoner.mode selects stub (default,
-        no secrets needed) or llm (providers/models/secret-store resolution).
-        The secret store is passed as a thunk so stub mode never constructs it
-        (it fails closed on a missing ORCHESTRATOR_MASTER_KEY)."""
+        """A LIVE view of the configured reasoner: every call re-resolves it.
+
+        Catalog-resolved: config key reasoner.mode selects stub (default, no
+        secrets needed) or llm (providers/models/secret-store resolution).
+
+        The wrapper is what makes `reasoner.*` config actually configurable. The
+        worker builds its `PlanningHandler` once at boot and holds the instance
+        it was given, so resolving eagerly here — cached or not — pinned every
+        key to whatever the process started with, and a successful config write
+        did nothing until a restart. Resolving per call costs a config read and
+        a key decrypt against an LLM round trip. See `live_reasoner.py`.
+        """
+        return LiveReasoner(self._build_reasoner)
+
+    def _build_reasoner(self) -> Reasoner:
+        """The secret store is passed as a thunk so stub mode never constructs
+        it (it fails closed on a missing ORCHESTRATOR_MASTER_KEY)."""
         return build_reasoner(
             self.config_store,
             self.provider_repo,

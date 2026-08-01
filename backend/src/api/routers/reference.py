@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_container
 from src.domain.entities.agent_spec import AgentSpec
@@ -169,22 +170,35 @@ def set_default_agent(agent_id: str, container: AppContainer = Depends(get_conta
 # ---------------------------------------------------------------------------
 
 
+CapacityScopeLiteral = Literal["per_model", "endpoint_wide"]
+
+
 class ProviderCreateBody(BaseModel):
     name: str
     base_url: str
     api_key: str  # accepted ONCE, stored encrypted, never echoed
     # Capacity metadata (domain unfreeze #16). Both optional: unset falls back to
     # the global execution.provider_max_inflight / per_model defaults.
-    max_inflight: int | None = None
-    capacity_scope: str | None = None
+    #
+    # `ge=1` because admission is `inflight >= cap`: a stored 0 or negative
+    # refuses every attempt with nothing in flight, and a declined admission
+    # opens no circuit and no block, so the plan waits forever with nothing for
+    # an operator to look at. `resolve_max_inflight` ignores such a value on the
+    # read side too, for rows written before this bound.
+    max_inflight: int | None = Field(default=None, ge=1)
+    # A Literal, though `resolve_capacity_scope` tolerates anything: the tolerant
+    # READ is deliberate (a typo must not take execution down), but accepting the
+    # typo on WRITE leaves an operator believing their endpoint-wide provider is
+    # scheduled endpoint-wide when every read degrades it to per_model.
+    capacity_scope: CapacityScopeLiteral | None = None
 
 
 class ProviderUpdateBody(BaseModel):
     name: str
     base_url: str
     api_key: str | None = None  # present = rotate the stored secret
-    max_inflight: int | None = None
-    capacity_scope: str | None = None
+    max_inflight: int | None = Field(default=None, ge=1)  # see ProviderCreateBody
+    capacity_scope: CapacityScopeLiteral | None = None
 
 
 @router.get("/providers")
@@ -240,7 +254,8 @@ def delete_provider(provider_id: str, container: AppContainer = Depends(get_cont
 class ModelBody(BaseModel):
     name: str
     # Optional per-model override of the provider's in-flight cap (unfreeze #16).
-    max_inflight: int | None = None
+    # Bounded for the same reason as the provider's — see ProviderCreateBody.
+    max_inflight: int | None = Field(default=None, ge=1)
 
 
 @router.get("/models")

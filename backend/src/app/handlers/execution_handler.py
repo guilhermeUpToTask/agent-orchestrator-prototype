@@ -85,6 +85,7 @@ from src.app.provider_capacity import (
     circuit_model_id,
     circuit_ref,
     resolve_capacity_scope,
+    resolve_max_inflight,
 )
 from src.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
 from src.app.handlers.base import Signal
@@ -1552,10 +1553,10 @@ class ExecutionHandler:
             return self._capacity.max_inflight, CapacityScope.PER_MODEL
         scope = resolve_capacity_scope(provider.capacity_scope)
         model = provider.get_model(spec.model_id) if spec.model_id else None
-        cap = (
-            (model.max_inflight if model is not None and model.max_inflight else None)
-            or provider.max_inflight
-            or self._capacity.max_inflight
+        cap = resolve_max_inflight(
+            model_cap=model.max_inflight if model is not None else None,
+            provider_cap=provider.max_inflight,
+            default=self._capacity.max_inflight,
         )
         return cap, scope
 

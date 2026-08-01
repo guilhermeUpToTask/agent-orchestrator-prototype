@@ -12,6 +12,20 @@ reproduced against the real API or the real tail reader before being written
 down; each entry carries the reproduction so a fix can turn it straight into a
 regression test.
 
+**This file is the single home for deferred defects.** On 2026-08-01 the
+issue-shaped deferrals that had accumulated in `ROADMAP.md` — goal-promotion
+failure behaviour, the missing contract-boundary control point, boot-time-only
+reasoner config, `planning_artifacts` retention, and the P4.3 evidence-on-edit
+finding — were moved here with their mechanisms and their options intact. **One
+of them was stale on arrival:** the goal-promotion entry described code that had
+already changed, because it was copied from the roadmap rather than re-verified.
+It is corrected below, and re-reading the code before copying an entry is the
+lesson. `ROADMAP.md` keeps only the scheduling decision and a pointer,
+per its own rule that verified unresolved defects are not duplicated there.
+What did NOT move: work that is a missing *feature* rather than a defect
+(forge publication, `ProjectSpec`, sandboxing, an operator skip/abandon
+command) stays in Phase 8, where it is scheduled against preview evidence.
+
 ## Lifecycle compatibility
 
 - `PlanPhase`, the legacy conversation/control routes, and root `goals`
@@ -31,6 +45,52 @@ regression test.
   authenticated GitHub/forge publication port, and this refactor deliberately
   did not invent provider-specific push/PR behavior or perform an unauthorized
   external write.
+- **Goal promotion cannot recover from a cycle branch that MOVED.** *(Corrected
+  2026-08-01: an earlier revision of this entry said promotion blocks on the
+  first exception with no retry at all. That was carried over verbatim from the
+  Phase 2 roadmap deferral and was already out of date — it describes code that
+  has since changed. The retry exists.)*
+  What is actually true: an ENVIRONMENTAL merge failure — a stale worktree
+  registration, a held index lock — is classified by
+  `is_transient_merge_failure` (`app/promotion_failures.py`, fail-closed: an
+  unrecognized message is treated as permanent), the reservation is released,
+  and the merge is re-attempted up to `MAX_PROMOTION_RETRIES` (2), counted in
+  `planning_artifacts` so the loop is bounded
+  (`ExecutionHandler._retry_promotion`). A verified goal is no longer thrown
+  away because the repository was momentarily unusable.
+  What remains open is the case a retry cannot fix: the cycle branch moved
+  under the goal, so the same merge fails the same way every time and the block
+  is correct. The repair is to rebase the goal branch onto the moved cycle
+  branch and re-merge — deliberately **not** built, and Phase 8 work rather than
+  a patch, because promotion runs no verification of its own
+  (`_reserve_goal_promotion` only checks each task is DONE with accepted
+  evidence, produced per task, on the task branch, against an OLDER base).
+  Rebasing recombines verified code with code it was never tested against, so
+  the repair must also introduce a goal-level re-verification step that has
+  never existed. Skipping that would move unverified work upward, which is the
+  one invariant the whole system rests on.
+  Still the only block kind with **no observed run evidence**:
+  `fixtures/parallel-goals-v1` exists to provoke it (two independent goals, one
+  cycle branch, so the second merge runs against a base the first already moved)
+  and passes — under dry-run each task writes its own artifact, so two goals
+  never touch the same file. Provoking it needs Tier 1 with two goals over
+  overlapping scope, and that evidence is what should decide whether the rebase
+  is worth building.
+- **Accepted evidence is deleted on edit, never retained as superseded.**
+  `Task.semantic_edit` is the only path that bumps `Task.revision`, and it
+  clears `verification_evidence` outright. A task carrying accepted evidence is
+  also necessarily DONE (`accept_verification` and `complete_task` are atomic),
+  and `_assert_task_mutable` refuses an edit on a DONE task — so the edit
+  returns 409 and no revision bump ever occurs. `Plan.reopen_task` exists on the
+  aggregate but nothing in `src/app` calls it.
+  Consequence: the evidence read model's `superseded_evidence_count` and its
+  `task_revision == task.revision` filter are unreachable today. **Both are
+  kept deliberately** — insurance on the endpoint's central claim. If the
+  domain is ever changed to retain evidence across a revision bump, that filter
+  is what stops the endpoint serving stale evidence as accepted on day one. Do
+  not delete either as dead code without reading this entry. Whether superseded
+  evidence *should* be retained-and-marked rather than deleted is a
+  frozen-domain question needing a decision-log entry and an un-freeze.
 - Execution attempts have global UUIDs and monotonic absolute numbers, but the
   execution ledger does not yet promote `run_kind` as a dedicated SQL column.
   Role identity is present in the orchestration path and separate invocations,
@@ -40,87 +100,77 @@ regression test.
 
 Phase 4's G6 fixed exactly one instance of this class (`max_attempts: 0` was
 accepted and stored, so bounds moved onto the retry-policy DTO). The capacity
-and binding DTOs Phase 5 started writing to were never given the same
-treatment.
+DTOs Phase 5 started writing to were given the same treatment on 2026-08-01 —
+`max_inflight` is `Field(ge=1)` on all three bodies and `capacity_scope` is a
+`Literal`, locked by the `capacity`/`max_inflight` tests in
+`tests/integration/test_api.py`. The read side no longer trusts either door:
+`resolve_max_inflight` (`app/provider_capacity.py`) skips a non-positive
+candidate wherever it comes from — a row written before the bound, or
+`execution.provider_max_inflight`, whose stored `"0"` is a truthy STRING the
+factory's `or` never caught — so the worst an unusable value can now do is fall
+back to a working one
+(`tests/unit/test_provider_capacity.py`,
+`tests/unit/test_provider_capacity_factory.py`, and
+`test_an_unusable_stored_cap_does_not_wedge_the_plan` on both backends).
 
-- **`max_inflight` has no bounds on providers or models, and both out-of-range
-  values fail differently.** `ProviderCreateBody`/`ProviderUpdateBody`
-  (`routers/reference.py:172-188`) and `ModelCreateBody` (`:243`) declare
-  `max_inflight: int | None = None` with no `Field(ge=1)`. Reproduced
-  2026-08-01 against `TestClient`: `POST /api/providers` and
-  `POST /api/providers/{id}/models` return **201** for `0` and for negative
-  values, and echo them back.
-  - `0` is then **silently ignored**: `ExecutionHandler._provider_metadata`
-    (`execution_handler.py:1556-1558`) resolves the cap with an `or` chain, so
-    a falsy `0` falls through to the global `execution.provider_max_inflight`.
-    Measured effective cap with provider *and* model set to `0`: **8**. The
-    Settings screen renders the saved `0`, so the UI states a ceiling the
-    scheduler does not apply.
-  - A negative value **is** honoured, and wedges the plan: admission is
-    `if inflight >= cap` (`execution_handler.py:1642`), so `0 >= -1` declines
-    every attempt with nothing in flight. No circuit opens and no block opens —
-    the plan simply waits forever, which is the hardest failure mode to
-    diagnose from the outside.
+One entry from the same review remains recorded here rather than open:
 
-  Fix is `Field(ge=1)` on all three bodies plus a rejection test per body; the
-  `or` chain should become an explicit `is not None` check so a future stored
-  `0` cannot re-acquire the silent-fallback meaning.
-
-- **`capacity_scope` is an unvalidated free string.** The provider bodies
-  declare `capacity_scope: str | None = None`. `POST /api/providers` with
-  `"endpoint-wide"` (hyphen, not underscore) returns **201** and stores it
-  verbatim; `resolve_capacity_scope` (`app/provider_capacity.py:166`) then
-  degrades it to `PER_MODEL` at every read. The runtime tolerance is
-  deliberate and correct — a typo must not take execution down — but nothing
-  tells the operator their endpoint-wide provider is being scheduled per
-  model. The write is where the value can still be refused; a
-  `Literal["per_model", "endpoint_wide"]` on the DTO closes it without
-  touching the tolerant reader.
-
-- **An scp-style git remote cannot be bound, and the refusal blames a local
-  path.** `validate_repo_url` (`infra/git/repository_binding.py:30-36`) routes
-  on `urlparse().scheme`, and `git@github.com:acme/widgets.git` parses with an
-  EMPTY scheme (`@` and `.` are not legal scheme characters), so the most
-  common GitHub remote form is treated as a local filesystem path. Reproduced
-  2026-08-01: `POST /api/projects` with that `repo_url` returns **422
-  `PROJECT_BINDING_INVALID`**, `"repository path
-  /workspaces/agent-orchestrator/backend/git@github.com:acme/widgets.git does
-  not exist"`; the `https://` form of the same repository returns 201.
-  `ProjectWorkspaceResolver.repository_path_for` (`:113`) makes the same
-  assumption, so this is a genuine capability gap rather than validation
-  drift — scp-style URLs were never clonable — but G11 turned a late failure
-  into an early one that names the wrong cause. Either accept the form (detect
-  `user@host:path` before falling through to a path) or say so: "scp-style
-  remotes are not supported; use ssh:// or https://".
+- ~~**An scp-style git remote cannot be bound, and the refusal blames a local
+  path.**~~ **Refused by name since 2026-08-01.** `git@github.com:acme/widgets.git`
+  parses with an EMPTY scheme (`@` and `.` are not legal scheme characters), so
+  it fell through to the local-path branch and was rejected as a missing
+  directory — the wrong cause, for the most common remote form there is. The
+  form is genuinely unsupported rather than merely unvalidated:
+  `repository_path_for` makes the same scheme-based assumption and
+  `_materialize_remote` skips a scheme-less URL, so no clone was ever
+  attempted. Supporting it would mean changing the clone path and the
+  workspace resolver; naming it costs one regex. `validate_repo_url` now
+  refuses it with "scp-style git remotes are not supported … use the ssh://
+  form … or https://", and the check is anchored so a real directory called
+  `user@corp/repo` is still read as a path
+  (`tests/integration/test_repository_binding.py`).
 
 ## Contract repair from the UI
 
-- **`update_task_contract` from `DetailPanel` always re-authors the tests and
-  always rebinds the agent.** The Phase 5 `ContractEditor`
-  (`frontend/src/components/DetailPanel.tsx`) submits the complete contract on
-  every save. Two backend paths key off field *presence*, not field *change*:
-  - `edit_service.update_task_contract` calls `Task.semantic_edit` whenever
-    `acceptance_criteria` or `objective` is present, which bumps
-    `Task.revision` and invalidates revision-bound evidence and the test
-    bundle. Reproduced 2026-08-01: the exact editor payload for a
-    command-only fix leaves the task at **revision 2**, where
-    `test_update_task_contract_repairs_a_frozen_contract_over_http` proves the
-    equivalent command-only payload leaves it at **revision 1**. The cheap
-    `amend_contract` path un-freeze #17 was built for is unreachable from the
-    UI — "re-authoring a suite to fix a typo in a command" is exactly what it
-    was meant to prevent.
-  - `apply_edit` re-runs `match_agent` whenever `required_capabilities` is
-    present (`app/use_cases/apply_edit.py:219-224`), so every repair rebinds
-    the task's agent even when the capability list is unchanged. Reproduced
-    2026-08-01: the editor payload returns **422 `NO_DEFAULT_AGENT`** on an
-    install with no default agent, which only the rebind can raise; on a
-    seeded install it silently replaces a deliberate `rebind_task_agent`
-    choice.
+- ~~**`update_task_contract` from `DetailPanel` always re-authors the tests and
+  always rebinds the agent.**~~ **Fixed 2026-08-01.** The editor submitted the
+  complete contract on every save, and two backend paths key off field
+  *presence*, not field *change*: `objective`/`acceptance_criteria` send the
+  task through `Task.semantic_edit` (revision bump, revision-bound evidence and
+  test bundle invalidated), and `required_capabilities` makes `apply_edit`
+  re-run `match_agent`. So a one-command repair cost a re-authoring plus an
+  agent rebind — the exact price un-freeze #17 added `amend_contract` to avoid.
+  The editor now diffs against the contract as loaded and submits only the
+  changed fields (`frontend/src/lib/contractEdit.ts`, locked by
+  `contractEdit.test.ts`); a save with nothing changed submits nothing. The
+  backend is deliberately unchanged — presence-based routing is what lets an
+  API client ask for exactly one effect, and sending the delta is how a form
+  asks for exactly one effect.
 
-  The fix belongs in the editor: send only the fields whose value differs from
-  the loaded contract. No backend change is needed, and none should be made —
-  the presence-based routing is what lets an API client ask for exactly one
-  effect.
+## Configuration staleness
+
+- ~~**Every `reasoner.*` config key is boot-time only, and the write that has
+  no effect still reports success.**~~ **Fixed 2026-08-01.** `mode`,
+  `provider_id`, `model_id`, `temperature` and `max_turns` took effect only
+  after a worker restart: `PUT /api/config/orchestrator/reasoner.*` returned
+  success, `GET /api/reasoner/status` reported the new value (the API process
+  builds its own container), and the worker kept using what it booted with.
+  Found while building `planning-recovery-v1`, whose whole mechanism is
+  changing `reasoner.max_turns` mid-run — the change was accepted and silently
+  ignored.
+  `AppContainer.reasoner` now returns a `LiveReasoner`
+  (`infra/reasoner/live_reasoner.py`) that re-resolves the configured reasoner
+  on **every call**. Removing the `@cached_property` alone would NOT have fixed
+  it — the stale reference is the one `PlanningHandler` captured at worker boot,
+  not the one the property returns — which is why the fix lives at the call
+  site, behind the port, where no handler has to learn about it. Per call is
+  also the right granularity for safety: a planning call is a whole session, so
+  a change lands between sessions and never swaps a model out mid-conversation.
+  The cost is a config read and a key decrypt against an LLM round trip.
+  A side effect worth knowing: an invalid configuration now surfaces at the
+  planning call rather than at worker boot, so `_handle_reasoner_failure`
+  records it against the plan where an operator can see it, instead of it being
+  a startup traceback. Locked by `tests/unit/reasoner/test_live_reasoner.py`.
 
 ## Operational visibility
 
@@ -163,21 +213,16 @@ treatment.
   are the known multi-plan risks, both found by reading the claim path rather
   than by running it. Running many plans against one worker is not a near-term
   scenario, so these are recorded rather than engineered against.
-- **The attempt-log tail advertises a resume offset that can skip lines.**
-  `follow_attempt_log` reads all complete lines available in one poll and then
-  stamps EVERY resulting event with the batch-END offset
-  (`infra/runtime/process_supervisor.py:132-134` — `_events_from_lines`
-  receives the post-read `offset`, not a per-line one). The route serves that
-  value as the SSE `id:` (`routers/plans.py:1513`), and the Phase 5 client
-  records `id:` per frame and reconnects with `?offset=`
-  (`frontend/src/lib/api.ts::subscribeToAttemptLog`). Reproduced 2026-08-01:
-  three records written in one batch all carry offset `188` (the file size),
-  and resuming from the offset advertised alongside frame 1 replays nothing —
-  so a client that received only frame 1 before a network drop never sees
-  frames 2 and 3. The window is a disconnect *between frames of one read*, so
-  it is narrow, but the client's "neither duplicates nor drops output" is not
-  true today. Fixing it means `_events_from_lines` computing a per-line
-  cumulative offset; the client needs no change.
+- ~~**The attempt-log tail advertises a resume offset that can skip lines.**~~
+  **Fixed 2026-08-01.** `follow_attempt_log` read every complete line available
+  in one poll and stamped them all with the batch-END offset, which the route
+  serves as the SSE `id:` and the client records per frame — so a client that
+  received frame 1 and then dropped resumed past frames 2..n. Reproduced with
+  three records written in one batch, all carrying offset `188`. Each line now
+  carries the byte offset that FOLLOWS it, counted off the raw bytes rather than
+  decoded characters so non-ASCII output cannot desynchronize it
+  (`tests/unit/runtime/test_attempt_log_tail.py`). The client needed no change,
+  as the entry predicted.
 - SSE is bounded and non-durable for clients; reconnect relies on refetch.
   Relay and event-table retention remain operational work.
 - **A `request_concurrency` refusal still spends the per-task retry budget.**
@@ -189,6 +234,26 @@ treatment.
   nothing wrong with it. The per-scope backoff curve fixed how long each wait
   is, not whether the attempt is charged. Making it budget-neutral inside a
   wall-clock bound is a capacity-policy decision, not a patch.
+- **Nothing can hold a plan at the contract boundary.** A worker enriches a
+  goal and executes its first task under ONE claim, and the pause gate blocks
+  *claims* — so arming a pause before enrichment stops enrichment too, and
+  arming it afterwards is unwinnable: there is no window. A plan sitting at a
+  review gate is `waiting` and cannot be paused at all. Net effect: nothing
+  outside the process can hold a plan between "the contract is frozen" and "an
+  agent is running against it". Found while building a live fixture for
+  contract repair (un-freeze #17), which needs exactly that boundary; priced
+  concretely by `contract-repair-v1`, which must win a race for the window and
+  so is a paid Tier 1 test that succeeds about half the time instead of a free
+  deterministic one. The behaviour is arguably correct — the JIT loop exists to
+  avoid planning work nobody asked for — but a whole class of contract-level
+  operator scenario can then only be tested by stopping the worker, which is
+  outside an API-only walkthrough. Those scenarios are covered at the
+  orchestration level instead
+  (`tests/unit/orchestration/test_contract_editing.py` drives both handlers a
+  step at a time, on both backends). If it is picked up, the smallest useful
+  lever is a review-gate-like hold at the contract boundary, opt-in per plan so
+  the JIT loop stays the default — not a general "pause between units", which
+  would turn every unit boundary into a scheduling decision.
 - **Never write a `PlanningArtifact` from inside an open plan transaction.** The
   store keeps its own short transaction so records survive a rollback, which
   means a second SQLite connection; WAL allows one writer, so the plan
@@ -196,7 +261,7 @@ treatment.
   neither can proceed. `ExecutionHandler` queues and flushes after the
   transaction closes — new call sites must do the same.
 
-## Git/process cleanup
+## Retention and cleanup
 
 - Owned process groups are terminated and reaped on success, failure, timeout,
   discard, and stale results. Worker startup now prunes and audits worktrees, but
@@ -205,6 +270,24 @@ treatment.
 - Authoritative test checkpoint branch refs are retained after implementation
   forks from their immutable commit. They preserve auditability but need a
   retention policy for long-running repositories.
+- **`planning_artifacts` grows without bound, deliberately.** Migration 0014
+  keeps what a failed planning attempt produced so the retry starts better
+  informed, and nothing prunes it. That is an accepted deferral, not an
+  oversight: reads are already bounded — keyed by `(plan_id, purpose, goal_id)`
+  with `limit=5`, served by `ix_planning_artifacts_lookup` — so growth costs
+  storage, never read latency or correctness; a replan mints new goal ids
+  (`activate_cycle`), so a superseded cycle's rows become permanently
+  *unreachable* rather than wrong; and `ON DELETE CASCADE` from `plans` already
+  collects them when a plan is deleted. A long-lived plan through several
+  replans therefore accumulates rows nothing will ever read again.
+  What a retention sweep would have to decide: last N attempts per
+  `(plan, purpose, goal)` versus an age bound; whether `committed` outcomes are
+  worth keeping once the contract they produced is frozen; and whether pruning
+  belongs in the store's `append` (cheap, amortised) or a maintenance command
+  (visible, operator-triggered). **Do not add a background sweeper** — this
+  codebase has no scheduler, and inventing one for garbage collection is
+  exactly the coordination infrastructure the roadmap forbids without run
+  evidence.
 
 ## Operator walkthrough and documentation
 

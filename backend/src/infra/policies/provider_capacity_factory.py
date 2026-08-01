@@ -28,7 +28,7 @@ applies without an API restart.
 
 from __future__ import annotations
 
-from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
+from src.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy, resolve_max_inflight
 from src.infra.db.reference_repos import SqliteConfigStore
 
 _SCOPE = SqliteConfigStore.ORCHESTRATOR_SCOPE
@@ -46,9 +46,16 @@ def build_provider_capacity_policy(config_store: SqliteConfigStore) -> ProviderC
             config_store.get(_SCOPE, "execution.provider_daily_quota_ceiling_seconds")
             or _DEFAULTS.daily_quota_ceiling_seconds
         ),
-        max_inflight=int(
-            config_store.get(_SCOPE, "execution.provider_max_inflight")
-            or _DEFAULTS.max_inflight
+        # Routed through `resolve_max_inflight` rather than `or`: the store
+        # returns strings, and `"0"` is truthy, so the fallback below never fired
+        # for the one value that stops every attempt from starting.
+        max_inflight=resolve_max_inflight(
+            model_cap=None,
+            provider_cap=None,
+            default=int(
+                config_store.get(_SCOPE, "execution.provider_max_inflight")
+                or _DEFAULTS.max_inflight
+            ),
         ),
         probe_stale_after_seconds=float(
             config_store.get(_SCOPE, "execution.provider_probe_stale_after_seconds")

@@ -1142,3 +1142,56 @@ def test_daily_quota_waits_past_the_ordinary_ceiling(env_factory):
     assert drive() == "paused"
     block = env.stored("p1").goal_blocks.get("g1")
     assert block is not None and block.kind == "provider_capacity"
+
+
+class _OneProviderCatalog:
+    """The narrowest `ModelProviderRepository` the admission gate needs."""
+
+    def __init__(self, provider):
+        self._provider = provider
+
+    def get(self, provider_id: str):
+        return self._provider
+
+    def list(self):
+        return [self._provider]
+
+
+def test_an_unusable_stored_cap_does_not_wedge_the_plan(env_factory):
+    """A provider row with a non-positive `max_inflight` used to refuse every
+    attempt with NOTHING in flight — `0 >= -1` — and an admission decline opens
+    no circuit and no block, so the plan waited forever with nothing to look at.
+    Rows like this predate the API bound, so the resolver must ignore them."""
+    from src.domain.entities.ia_model import IAModel
+    from src.domain.entities.model_provider import ModelProvider
+
+    agent = make_agent_spec().model_copy(
+        update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}
+    )
+    env = env_factory({"g1t0": DummyBehavior(output="ok")}, agents=[agent])
+    env.seed(_two_goal_cycle(env))
+
+    catalog = _OneProviderCatalog(
+        ModelProvider(
+            id="openrouter",
+            name="openrouter",
+            base_url="http://x",
+            api_key_ref="secret://x",
+            max_inflight=-1,
+            models=[IAModel(id="nemotron", name="nemotron", provider_id="openrouter")],
+        )
+    )
+    handler = ExecutionHandler(
+        env.runner,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
+        capacity=ProviderCapacityPolicy(max_inflight=8),
+        providers=catalog,
+    )
+
+    assert (
+        asyncio.run(handler.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == "continue"
+    )
+    assert env.runner.calls == {"g1t0": 1}

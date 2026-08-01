@@ -570,105 +570,6 @@ reproduction
 Do not expand the domain or introduce coordination infrastructure without run
 evidence and a decision-log entry.
 
-### Deferred — goal-promotion auto-rebase, pending run evidence
-
-`goal_promotion_failure` is the only block kind with **no observed run
-evidence**. It opens on the FIRST exception from `merge_goal`, with no retry at
-all — including for a transient git or filesystem error — and advertises a single
-resolution, `start_replan`.
-
-The obvious repair is to rebase the goal branch onto the moved cycle branch and
-retry the merge. It is deliberately NOT built yet, for two reasons:
-
-- **The failure has not been reproduced.** `fixtures/parallel-goals-v1` exists to
-  provoke it: two independent goals, one cycle branch, so the second merge runs
-  against a base the first already moved. It passes — both goals DONE, both
-  merged, no block. Under dry-run each task writes its own artifact, so two goals
-  never touch the same file and cannot conflict; a genuine conflict needs Tier 1
-  with two goals over overlapping scope, which is the next evidence to collect.
-- **A rebase is not "retry the merge".** Goal→cycle promotion currently runs no
-  verification of its own: `_reserve_goal_promotion` checks each task is DONE
-  with accepted evidence, and that evidence was produced per task, on the task
-  branch, against an OLDER base. Rebasing recombines verified code with code it
-  was never tested against, so the repair must also introduce a goal-level
-  re-verification step that has never existed — the orchestrator re-running the
-  tasks' `verification_commands` on the rebased tree. Skipping that would move
-  unverified work upward and break the invariant the whole system rests on.
-
-The smaller, safer fix available today, if evidence never materialises: retry a
-merge that failed for a transient reason before blocking, and stop advertising
-`start_replan` as the only way out of a git error that a retry would clear.
-
-### Deferred — no operator control point at the contract boundary
-
-A worker enriches a goal and executes its first task under ONE claim, and the
-pause gate blocks *claims* — so arming a pause before enrichment stops enrichment
-too, and arming it after is unwinnable: there is no window. A plan sitting at a
-review gate is `waiting` and cannot be paused at all. Net effect: nothing outside
-the process can hold a plan between "the contract is frozen" and "an agent is
-running against it".
-
-Found while trying to build a live fixture for contract repair (un-freeze #17),
-which needs exactly that boundary. The behaviour is arguably correct — the JIT
-loop exists to avoid planning work nobody asked for — but it means a whole class
-of contract-level operator scenario can only be tested by stopping the worker,
-which is outside an API-only walkthrough. Those scenarios are covered at the
-orchestration level instead (`tests/unit/orchestration/test_contract_editing.py`
-drives both handlers a step at a time, on both backends).
-
-If it is ever picked up, the smallest useful lever is a review-gate-like hold at
-the contract boundary — opt-in per plan, so the JIT loop stays the default — not
-a general "pause between units", which would turn every unit boundary into a
-scheduling decision.
-
-### Deferred — reasoner config is boot-time only
-
-`AppContainer.reasoner` is a `@cached_property` and the worker resolves it once
-at startup, so every `reasoner.*` config key — `mode`, `provider_id`, `model_id`,
-`temperature`, `max_turns` — takes effect only after a worker restart. Writing
-one through `PUT /api/config/orchestrator/...` succeeds, `GET /api/reasoner/status`
-reports the new value (the API process builds its own), and the worker keeps
-using what it booted with. Found while building `planning-recovery-v1`, whose
-whole mechanism is changing `reasoner.max_turns` mid-run: the change was accepted
-and silently ignored.
-
-Caching is deliberate — rebuilding per tick would re-read the secret store and
-re-resolve the catalog on every poll — so this is a **staleness** decision, not a
-bug to patch blindly. Whoever picks it up chooses between: a cheap generation
-counter on the config table that the worker compares each tick and invalidates
-on change; scoping invalidation to the keys that are safe to swap mid-flight (a
-model swap between attempts is fine, a mode swap mid-session is not); or leaving
-it boot-time and making that explicit in `GET /api/reasoner/status` plus the
-config API response, so an operator is told a restart is required instead of
-watching a successful write do nothing. The last option is the smallest honest
-fix and probably the right first move.
-
-Same question applies to `agent_runner.*`, which resolves per task per run and
-is therefore probably already live — verify rather than assume.
-
-### Deferred — planning-artifact retention
-
-`planning_artifacts` (migration 0014) keeps what a failed planning attempt
-produced so the retry starts better informed. Nothing prunes it, and **that is a
-deliberate deferral, not an oversight**:
-
-- Reads are already bounded — keyed by `(plan_id, purpose, goal_id)` with
-  `limit=5` and served by `ix_planning_artifacts_lookup` — so growth costs
-  storage, never read latency or correctness.
-- A replan mints new goal ids (`activate_cycle`), so a superseded cycle's rows
-  become permanently unreachable rather than wrong. A long-lived plan through
-  several replans therefore accumulates rows nothing will ever read again.
-- `ON DELETE CASCADE` from `plans` already collects them when a plan is deleted.
-
-What a retention sweep would need to decide, whenever it is picked up: keep the
-last N attempts per `(plan, purpose, goal)` versus an age bound; whether
-`committed` outcomes are worth keeping at all once the contract they produced is
-frozen; and whether pruning belongs in the store's `append` (cheap, amortised) or
-in a maintenance command (visible, operator-triggered). Do not add a background
-sweeper for it — this codebase has no scheduler, and inventing one for garbage
-collection would be exactly the coordination infrastructure this phase says not
-to introduce without run evidence.
-
 ### Exit criteria — met 2026-07-28
 
 - ✅ **No launch-critical defect can hot-loop, corrupt state, promote unverified
@@ -691,29 +592,41 @@ to introduce without run evidence.
   Tier 0 ×3 and Tier 1 ×2 (17/17 including pytest green on a real checkout),
   parallel-goals-v1, and contract-repair-v1 all green.
 
-### Deferred out of Phase 2, with reasons
+### Deferred out of Phase 2 — every one recorded in known-issues
 
-Neither is a correctness hole; both are decisions rather than bugs, and holding
-the phase open for them would be holding it open for a preference.
+Five issues were found while stabilizing execution and deliberately not fixed
+in this phase. None was a correctness hole; each is a decision or a missing
+control, and holding the phase open for any of them would have been holding it
+open for a preference. All five are written up with their mechanism, their
+evidence, and the options for whoever picks them up, in
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md).
+**One (#4) has since been fixed; four remain open by choice:**
 
 1. **A `request_concurrency` refusal spends the per-task retry budget.**
-   *Revisit after launch — carried to Phase 8.*
-   `capacity_wait` is set only when a circuit opens and a concurrency refusal
-   deliberately opens none, so alone among capacity failures it does not bypass
-   the budget — a busy shared pool can block a goal that has nothing wrong with
-   it (observed: `execution_failure` after 7 attempts, the last
-   `rate_limit/request_concurrency`). Making it budget-neutral inside a
-   wall-clock bound is a capacity-policy change with its own failure modes: the
-   bound has to exist, or a permanently saturated provider never escalates. It
-   ends in a recoverable block that advertises `retry_stage`, so the operator
-   has a move. Recorded in known-issues.
-2. **No operator control point at the contract boundary.** Priced concretely by
-   contract-repair-v1: the fixture must win a race for the window, so it is a
-   paid Tier 1 test that succeeds about half the time instead of a free
-   deterministic one. Still a review-gate-like opt-in hold, still not worth a
-   general "pause between units".
+   *Revisit after launch — carried to Phase 8.* Alone among capacity failures
+   it does not bypass the budget, because a concurrency refusal deliberately
+   opens no circuit and so records no `opened_at` for a wall-clock bound to
+   measure. It ends in a recoverable block advertising `retry_stage`, so the
+   operator has a move.
+2. **Goal promotion cannot recover from a cycle branch that MOVED.** The
+   transient half is handled (classified fail-closed, reservation released,
+   bounded re-attempt); a moved base needs rebase plus goal-level
+   re-verification, which is Phase 8 work waiting on run evidence.
+3. **No operator control point at the contract boundary** — nothing outside the
+   process can hold a plan between "the contract is frozen" and "an agent is
+   running against it". Priced concretely by `contract-repair-v1`, which must
+   win a race for that window. Still a review-gate-like opt-in hold, still not
+   worth a general "pause between units".
+4. ~~**Reasoner config is boot-time only**~~ — **fixed 2026-08-01.**
+   `AppContainer.reasoner` returns a `LiveReasoner` that re-resolves on every
+   call, so a `reasoner.*` write lands on the next planning session instead of
+   the next worker restart. Uncaching alone would not have done it: the worker
+   captures the instance into `PlanningHandler` at boot.
+5. **`planning_artifacts` grows without bound.** Reads stay bounded and a plan
+   delete cascades, so this is storage cost only — and explicitly not a reason
+   to invent a background sweeper.
 
-Also standing, both recorded in known-issues and neither Phase 2 scope: no
+Also standing, both in known-issues and neither Phase 2 scope: no
 dead-letter/quarantine for a plan that fails forever (it now takes a fair share
 rather than starving others), and one-second claim-fairness granularity.
 
@@ -877,24 +790,16 @@ control-plane contracts are ready for Phase 5's frontend/operator work.
 
 #### Found during P4.3, deliberately deferred
 
-**Accepted evidence is deleted on edit, never retained as superseded.**
-`Task.semantic_edit` is the only path that bumps `Task.revision`, and it clears
-`verification_evidence` outright. A task carrying accepted evidence is also
-necessarily DONE (`accept_verification` and `complete_task` are atomic), and
-`_assert_task_mutable` refuses an edit on a DONE task — so the edit returns 409
-and no revision bump ever occurs. `Plan.reopen_task` exists on the aggregate but
-nothing in `src/app` calls it.
-
-Consequence: the evidence read model's `superseded_evidence_count` and its
-`task_revision == task.revision` filter are unreachable today. Both are kept
-deliberately, as insurance on the endpoint's central claim — if the domain is
-ever changed to retain evidence across a revision bump, the filter is what stops
-the endpoint serving stale evidence as accepted on day one. Do not delete them
-as dead code without reading this entry.
-
-Whether superseded evidence *should* be retained-and-marked rather than deleted
-is a frozen-domain question. It needs a decision-log entry and an un-freeze, so
-it is out of scope for Phase 4 and is recorded here rather than acted on.
+**Accepted evidence is deleted on edit, never retained as superseded** — so the
+evidence read model's `superseded_evidence_count` and its
+`task_revision == task.revision` filter are unreachable today, and are kept
+deliberately as insurance on the endpoint's central claim. Mechanism, the
+409 that makes it unreachable, and the warning not to delete either as dead
+code are in
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md).
+Whether superseded evidence *should* be retained-and-marked is a frozen-domain
+question needing a decision-log entry and an un-freeze, so it was out of scope
+for Phase 4.
 
 ## Phase 5 — frontend truth and operator UX ✅
 
@@ -953,34 +858,29 @@ planning artifacts, legal actions, evidence, and attempt-log SSE.
 ### Found during the Phase 4/5 code review (2026-08-01)
 
 Five defects were reproduced against the real API, the real capacity resolver,
-and the real log tail. None blocks the Phase 5 exit criteria — each is written
-up with its reproduction in
-[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md) — but
-all five are **first-run operator experience**, so they are scheduled here
-rather than left to preview evidence. Take them in Phase 6, before the install
-path is documented for anyone else:
+and the real log tail. None blocked the Phase 5 exit criteria, but all five were
+**first-run operator experience**, so they were fixed on `issues-known-defects`
+rather than left to preview evidence — each with a test that failed first, and
+each recorded in
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md)
+alongside the test that now locks it. **All five are closed:**
 
-1. **Capacity DTOs have no bounds** (`max_inflight`). `0` is accepted and then
-   silently ignored (the resolver's `or` chain falls through to the global
-   default) while the UI displays it; a negative value is honoured and declines
-   every attempt forever with no block and no circuit. Same class as Phase 4's
-   G6, one DTO over. Fix: `Field(ge=1)` on the three bodies, and an explicit
-   `is not None` in `_provider_metadata`.
-2. **`capacity_scope` is an unvalidated free string.** A typo is stored 201 and
-   degrades to `per_model` at every read. The tolerant reader is deliberate;
-   the tolerant *write* is not. Fix: `Literal` on the DTO.
-3. **scp-style git remotes (`git@github.com:org/repo.git`) cannot be bound**,
-   and the 422 blames a nonexistent local path. `urlparse` gives them an empty
-   scheme, so both `validate_repo_url` and `repository_path_for` treat them as
-   filesystem paths. Decide: support the form, or refuse it by name.
-4. **The contract editor over-sends.** Submitting the whole contract makes
-   every repair a semantic edit (revision bump, evidence and test bundle
-   invalidated) and an unconditional agent rebind, because both backend paths
-   key off field presence. Un-freeze #17's cheap `amend_contract` path is
-   unreachable from the UI. Fix in the editor: send only changed fields.
-5. **The attempt-log resume offset is per-batch, not per-line**, so a
-   disconnect between two frames of one read resumes past the frames the client
-   never received. Fix: per-line cumulative offsets in `_events_from_lines`.
+1. ~~**Capacity DTOs have no bounds**~~ — **fixed 2026-08-01.** `Field(ge=1)` on
+   all three bodies, `capacity_scope` narrowed to a `Literal`, and
+   `resolve_max_inflight` skips a non-positive candidate from any door
+   (including `execution.provider_max_inflight`, whose stored `"0"` is a truthy
+   string). Both failure modes locked on both backends.
+2. ~~**`capacity_scope` is an unvalidated free string**~~ — fixed with the above.
+3. ~~**scp-style git remotes cannot be bound**~~ — **fixed 2026-08-01.**
+   Refused by name, pointing at the ssh:// and https:// forms that work.
+   Supporting the form itself would mean changing the clone path and the
+   workspace resolver, which never handled it either.
+4. ~~**The contract editor over-sends**~~ — **fixed 2026-08-01.** The editor
+   diffs against the contract as loaded and submits only changed fields, so a
+   command-only repair no longer re-authors the tests or rebinds the agent.
+5. ~~**The attempt-log resume offset is per batch, not per line**~~ — **fixed
+   2026-08-01.** Each line now carries the byte offset that follows it; the
+   client needed no change.
 
 Reviewed and found sound, recorded so the next reviewer need not re-derive it:
 the token guard is applied once at mount and parametrized over the OpenAPI
@@ -989,6 +889,29 @@ serving, so no resolved block can reach a client; `requires_human` is projected
 onto per-goal blocks as well as the plan-wide scalar; and `goal_promotions`
 (0017) declares the plan cascade migration 0015 requires, with
 `test_delete_plan_leaves_nothing.py` covering it by name.
+
+### Post-review hardening ✅ (2026-08-01, `issues-known-defects`)
+
+Delivered after the review, before Phase 6 opens:
+
+- **All five review defects fixed**, each with a test that failed first.
+- **`reasoner.*` config is no longer boot-time only.** `AppContainer.reasoner`
+  returns a `LiveReasoner` that re-resolves per call, so a config write lands on
+  the next planning session rather than the next worker restart. Uncaching the
+  property alone would not have done it — the worker captures the instance into
+  `PlanningHandler` at boot, which is why the fix sits behind the port.
+- **`fixtures/first-cycle-v1`** — the onboarding walkthrough (see Phase 6's
+  foundation below), proven by two independent Tier 1 runs on free models:
+  11/11 expectations and 7/7 live guards each time, from different recovery
+  paths (rate-limit retries in one, a rejected candidate re-attempted in the
+  other).
+- **The deferred backlog moved out of this file** into known-issues, per this
+  roadmap's own rule that verified defects are not duplicated here. One entry
+  was stale on arrival and is corrected there: goal promotion already retries
+  environmental merge failures; only a MOVED cycle branch remains open.
+
+**Validated:** 718 unit + 525 integration tests, ruff and mypy clean, frontend
+type-check/build and 15 frontend tests green, migration head `0017`.
 
 ## Phase 6 — public-preview productization ⬜
 
@@ -1004,6 +927,13 @@ the first walkthrough, understand limits/costs, and share useful evidence.
 - ✅ Release automation attaches a Python wheel and frontend bundle.
 - ✅ The fixture seed is the sample repository; exporters create sanitized
   evidence bundles.
+- ✅ `fixtures/first-cycle-v1` is the onboarding walkthrough: **one command**
+  (`run-cycle.sh`) drives project → plan → both gates → execution →
+  publication → evidence, `preflight.sh` states what must be true before it can
+  start (migration head, a live worker, valid bindings, one tier not two), and
+  `guards.sh` re-checks the Phase 4/5 critical defects against a LIVE server
+  rather than a TestClient. Its judgement layer is locked by
+  `backend/tests/integration/test_first_cycle_fixture.py`.
 
 ### Deliverables
 
@@ -1061,15 +991,13 @@ Take these up only when preview evidence proves the need:
 - repository indexing, symbol graphs, and context packaging;
 - **capacity-budget policy: stop a `request_concurrency` refusal spending the
   per-task retry budget** (deferred out of Phase 2 on 2026-07-28, revisit after
-  launch). Every other capacity failure bypasses the budget because opening a
-  circuit records `opened_at` for the wall-clock ceiling to measure; a
-  concurrency refusal deliberately opens no circuit, so there is nowhere to
-  record when the waiting began and nothing for a bound to measure. Making it
-  budget-neutral without inventing that bound would let a permanently saturated
-  provider wait forever with nobody told. Current behaviour is wrong but safe
-  and visible: the budget runs out and a block opens advertising `retry_stage`.
-  Preview evidence should say whether real operators hit it often enough to
-  justify a per-task concurrency-wait deadline;
+  launch). A concurrency refusal deliberately opens no circuit, so there is no
+  `opened_at` for a wall-clock bound to measure and nowhere to record when the
+  waiting began; making it budget-neutral without inventing that bound would
+  let a permanently saturated provider wait forever with nobody told. Current
+  behaviour is wrong but safe and visible. Mechanism and run evidence in
+  known-issues; preview evidence should say whether real operators hit it often
+  enough to justify a per-task concurrency-wait deadline;
 - **an operator command to skip or abandon a wedged task** (Phase 3 audit, G12).
   `Plan.abandon_task` exists and is driven only by exhausted-retry paths; an
   operator facing a task that should not be attempted again has retry, edit, and
