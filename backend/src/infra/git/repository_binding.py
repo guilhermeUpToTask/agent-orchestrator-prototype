@@ -9,6 +9,7 @@ would cost a timeout and buy very little.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,22 @@ from urllib.parse import unquote, urlparse
 from src.infra.errors import ProjectBindingInvalidError
 
 BindingKind = Literal["local", "remote", "scratch"]
+
+# `git@github.com:acme/widgets.git` — the form every forge prints as "the SSH
+# URL". It has no URL scheme (`@` and `.` are not legal scheme characters), so
+# `urlparse` leaves `scheme` empty and it would otherwise fall through to the
+# local-path branch and be refused as a missing directory: a message naming the
+# wrong cause, for the most common remote form there is.
+#
+# It is genuinely unsupported rather than merely unvalidated —
+# `ProjectWorkspaceResolver.repository_path_for` makes the same scheme-based
+# assumption and `_materialize_remote` skips a scheme-less URL, so no clone was
+# ever attempted — so this refuses it by name and points at the two forms that
+# do work.
+#
+# Anchored to reject a leading `/`, and the host part excludes `/`, so a real
+# directory called `user@corp/repo` is still read as a path.
+_SCP_STYLE = re.compile(r"^[^/@]+@[^/:]+:")
 
 
 @dataclass(frozen=True)
@@ -52,6 +69,13 @@ def _default_branch(repo: Path) -> str | None:
 def validate_repo_url(repo_url: str | None) -> RepositoryBinding:
     if not repo_url or not repo_url.strip():
         return RepositoryBinding(kind="scratch", resolved_path=None, default_branch=None)
+
+    candidate = repo_url.strip()
+    if urlparse(candidate).scheme == "" and _SCP_STYLE.match(candidate):
+        raise ProjectBindingInvalidError(
+            f"scp-style git remotes are not supported ({candidate}); "
+            "use the ssh:// form (ssh://git@host/owner/repo.git) or https://"
+        )
 
     path = _local_path(repo_url)
     if path is None:

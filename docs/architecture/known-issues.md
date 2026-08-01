@@ -99,23 +99,22 @@ back to a working one
 `tests/unit/test_provider_capacity_factory.py`, and
 `test_an_unusable_stored_cap_does_not_wedge_the_plan` on both backends).
 
-What remains open in this section:
+One entry from the same review remains recorded here rather than open:
 
-- **An scp-style git remote cannot be bound, and the refusal blames a local
-  path.** `validate_repo_url` (`infra/git/repository_binding.py:30-36`) routes
-  on `urlparse().scheme`, and `git@github.com:acme/widgets.git` parses with an
-  EMPTY scheme (`@` and `.` are not legal scheme characters), so the most
-  common GitHub remote form is treated as a local filesystem path. Reproduced
-  2026-08-01: `POST /api/projects` with that `repo_url` returns **422
-  `PROJECT_BINDING_INVALID`**, `"repository path
-  /workspaces/agent-orchestrator/backend/git@github.com:acme/widgets.git does
-  not exist"`; the `https://` form of the same repository returns 201.
-  `ProjectWorkspaceResolver.repository_path_for` (`:113`) makes the same
-  assumption, so this is a genuine capability gap rather than validation
-  drift — scp-style URLs were never clonable — but G11 turned a late failure
-  into an early one that names the wrong cause. Either accept the form (detect
-  `user@host:path` before falling through to a path) or say so: "scp-style
-  remotes are not supported; use ssh:// or https://".
+- ~~**An scp-style git remote cannot be bound, and the refusal blames a local
+  path.**~~ **Refused by name since 2026-08-01.** `git@github.com:acme/widgets.git`
+  parses with an EMPTY scheme (`@` and `.` are not legal scheme characters), so
+  it fell through to the local-path branch and was rejected as a missing
+  directory — the wrong cause, for the most common remote form there is. The
+  form is genuinely unsupported rather than merely unvalidated:
+  `repository_path_for` makes the same scheme-based assumption and
+  `_materialize_remote` skips a scheme-less URL, so no clone was ever
+  attempted. Supporting it would mean changing the clone path and the
+  workspace resolver; naming it costs one regex. `validate_repo_url` now
+  refuses it with "scp-style git remotes are not supported … use the ssh://
+  form … or https://", and the check is anchored so a real directory called
+  `user@corp/repo` is still read as a path
+  (`tests/integration/test_repository_binding.py`).
 
 ## Contract repair from the UI
 
@@ -199,21 +198,16 @@ What remains open in this section:
   are the known multi-plan risks, both found by reading the claim path rather
   than by running it. Running many plans against one worker is not a near-term
   scenario, so these are recorded rather than engineered against.
-- **The attempt-log tail advertises a resume offset that can skip lines.**
-  `follow_attempt_log` reads all complete lines available in one poll and then
-  stamps EVERY resulting event with the batch-END offset
-  (`infra/runtime/process_supervisor.py:132-134` — `_events_from_lines`
-  receives the post-read `offset`, not a per-line one). The route serves that
-  value as the SSE `id:` (`routers/plans.py:1513`), and the Phase 5 client
-  records `id:` per frame and reconnects with `?offset=`
-  (`frontend/src/lib/api.ts::subscribeToAttemptLog`). Reproduced 2026-08-01:
-  three records written in one batch all carry offset `188` (the file size),
-  and resuming from the offset advertised alongside frame 1 replays nothing —
-  so a client that received only frame 1 before a network drop never sees
-  frames 2 and 3. The window is a disconnect *between frames of one read*, so
-  it is narrow, but the client's "neither duplicates nor drops output" is not
-  true today. Fixing it means `_events_from_lines` computing a per-line
-  cumulative offset; the client needs no change.
+- ~~**The attempt-log tail advertises a resume offset that can skip lines.**~~
+  **Fixed 2026-08-01.** `follow_attempt_log` read every complete line available
+  in one poll and stamped them all with the batch-END offset, which the route
+  serves as the SSE `id:` and the client records per frame — so a client that
+  received frame 1 and then dropped resumed past frames 2..n. Reproduced with
+  three records written in one batch, all carrying offset `188`. Each line now
+  carries the byte offset that FOLLOWS it, counted off the raw bytes rather than
+  decoded characters so non-ASCII output cannot desynchronize it
+  (`tests/unit/runtime/test_attempt_log_tail.py`). The client needed no change,
+  as the entry predicted.
 - SSE is bounded and non-durable for clients; reconnect relies on refetch.
   Relay and event-table retention remain operational work.
 - **A `request_concurrency` refusal still spends the per-task retry budget.**

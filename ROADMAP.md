@@ -854,12 +854,12 @@ planning artifacts, legal actions, evidence, and attempt-log SSE.
 ### Found during the Phase 4/5 code review (2026-08-01)
 
 Five defects were reproduced against the real API, the real capacity resolver,
-and the real log tail. None blocks the Phase 5 exit criteria, and each is
-written up with its reproduction in
-[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md) — but
-all five are **first-run operator experience**, so they are scheduled here
-rather than left to preview evidence. Take them in Phase 6, before the install
-path is documented for anyone else:
+and the real log tail. None blocked the Phase 5 exit criteria, but all five were
+**first-run operator experience**, so they were fixed on `issues-known-defects`
+rather than left to preview evidence — each with a test that failed first, and
+each recorded in
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md)
+alongside the test that now locks it. **All five are closed:**
 
 1. ~~**Capacity DTOs have no bounds**~~ — **fixed 2026-08-01.** `Field(ge=1)` on
    all three bodies, `capacity_scope` narrowed to a `Literal`, and
@@ -867,13 +867,16 @@ path is documented for anyone else:
    (including `execution.provider_max_inflight`, whose stored `"0"` is a truthy
    string). Both failure modes locked on both backends.
 2. ~~**`capacity_scope` is an unvalidated free string**~~ — fixed with the above.
-3. **scp-style git remotes cannot be bound**, and the 422 blames a nonexistent
-   local path. Decide: support the form, or refuse it by name.
+3. ~~**scp-style git remotes cannot be bound**~~ — **fixed 2026-08-01.**
+   Refused by name, pointing at the ssh:// and https:// forms that work.
+   Supporting the form itself would mean changing the clone path and the
+   workspace resolver, which never handled it either.
 4. ~~**The contract editor over-sends**~~ — **fixed 2026-08-01.** The editor
    diffs against the contract as loaded and submits only changed fields, so a
    command-only repair no longer re-authors the tests or rebinds the agent.
-5. **The attempt-log resume offset is per batch, not per line**, so a
-   disconnect between two frames of one read skips them.
+5. ~~**The attempt-log resume offset is per batch, not per line**~~ — **fixed
+   2026-08-01.** Each line now carries the byte offset that follows it; the
+   client needed no change.
 
 Reviewed and found sound, recorded so the next reviewer need not re-derive it:
 the token guard is applied once at mount and parametrized over the OpenAPI

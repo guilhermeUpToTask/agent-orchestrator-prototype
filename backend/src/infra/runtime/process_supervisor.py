@@ -61,9 +61,18 @@ def _log_size(path: Path) -> int:
         return 0
 
 
-def _read_complete_lines(path: Path, offset: int) -> tuple[list[str], int]:
+def _read_complete_lines(path: Path, offset: int) -> tuple[list[tuple[str, int]], int]:
     """Read whole newline-terminated lines from `offset`, leaving any trailing
-    partial line for the next poll. Returns (lines, new_offset)."""
+    partial line for the next poll.
+
+    Each line comes back paired with the byte offset that FOLLOWS it, because
+    that offset is served as the SSE `id:` and a client records it per frame:
+    stamping a whole poll's worth of lines with the batch-end offset meant a
+    client that received the first frame and then dropped resumed past the ones
+    it never saw. Counted in BYTES off the raw read — the offset is what the
+    reader seeks to, and counting decoded characters would drift on any
+    non-ASCII output. Returns (lines_with_offsets, new_offset).
+    """
     try:
         with path.open("rb") as handle:
             handle.seek(offset)
@@ -76,12 +85,21 @@ def _read_complete_lines(path: Path, offset: int) -> tuple[list[str], int]:
     if cut == -1:
         return [], offset  # no complete line yet
     complete = data[: cut + 1]
-    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
+    lines: list[tuple[str, int]] = []
+    position = offset
+    for raw_line in complete.splitlines(keepends=True):
+        # A newline never appears inside a multi-byte UTF-8 sequence, so a line
+        # boundary is always a safe place to decode.
+        position += len(raw_line)
+        lines.append((raw_line.decode("utf-8", errors="replace"), position))
+    return lines, offset + len(complete)
 
 
-def _events_from_lines(lines: list[str], offset: int, *, markers: bool) -> list[LogStreamEvent]:
+def _events_from_lines(
+    lines: list[tuple[str, int]], *, markers: bool
+) -> list[LogStreamEvent]:
     out: list[LogStreamEvent] = []
-    for raw in lines:
+    for raw, offset in lines:
         try:
             record = json.loads(raw)
         except ValueError:
@@ -130,7 +148,7 @@ async def follow_attempt_log(
             continue
         if size > offset:
             lines, offset = await asyncio.to_thread(_read_complete_lines, path, offset)
-            for event in _events_from_lines(lines, offset, markers=True):
+            for event in _events_from_lines(lines, markers=True):
                 yield event
             idle = 0.0
             continue
@@ -140,7 +158,7 @@ async def follow_attempt_log(
             size = await asyncio.to_thread(_log_size, path)
             if size > offset:
                 lines, offset = await asyncio.to_thread(_read_complete_lines, path, offset)
-                for event in _events_from_lines(lines, offset, markers=False):
+                for event in _events_from_lines(lines, markers=False):
                     yield event
             return
         await asyncio.sleep(poll_interval)
