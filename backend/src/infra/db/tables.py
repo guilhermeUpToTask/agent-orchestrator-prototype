@@ -561,3 +561,23 @@ class WorkerTable(Base):
     lease_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     max_concurrent_goals: Mapped[int] = mapped_column(Integer, nullable=False)
     inflight_goals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+# ---------------------------------------------------------------------------
+# Goal promotions — where a promoted goal's work actually landed
+# ---------------------------------------------------------------------------
+
+
+class GoalPromotionTable(Base):
+    __tablename__ = "goal_promotions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
+    cycle_id: Mapped[str] = mapped_column(String, nullable=False)
+    goal_id: Mapped[str] = mapped_column(String, nullable=False)
+    from_ref: Mapped[str] = mapped_column(String, nullable=False)
+    into_ref: Mapped[str] = mapped_column(String, nullable=False)
+    merge_sha: Mapped[str] = mapped_column(String, nullable=False)
+    promoted_at: Mapped[str] = mapped_column(String, nullable=False)

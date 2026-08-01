@@ -150,24 +150,19 @@ workspace's `AGENTS.md`, not in the runner.
 ```mermaid
 gitGraph
     commit id: "main"
-    branch plan/P1
-    commit id: "plan branch created"
-    branch task/T1/a1
+    branch cycle/C1
+    branch goal/G1
+    branch task/T1/R1
     commit id: "attempt 1 work"
-    checkout plan/P1
-    merge task/T1/a1 id: "--no-ff merge (success)"
-    branch task/T2/a1
-    commit id: "attempt fails" type: REVERSE
-    checkout plan/P1
-    branch task/T2/a2
-    commit id: "retry, clean start"
-    checkout plan/P1
-    merge task/T2/a2 id: "--no-ff merge"
+    checkout goal/G1
+    merge task/T1/R1 id: "verified task"
+    checkout cycle/C1
+    merge goal/G1 id: "completed goal"
 ```
 
-- `begin` → branch `task/<task_id>/a<attempt-number>` off `plan/<plan_id>` (created off the repository's detected default branch on first use) + a temp worktree. The number is monotonic across the task lifetime, unlike the resettable domain retry counter. `branch -f` makes begin idempotent against a crashed prior invocation of that number.
-- `commit` → commit the worktree, `--no-ff` merge into the plan branch via a throwaway merge worktree, clean up. The merge preserves the attempt in history.
-- `discard` → remove worktree + delete branch. **The rollback**: a failed attempt leaves zero trace; the retry begins clean from the plan branch — stateless task execution.
+- `begin` → on a cyclic plan, branch `task/<task_id>/<run_id>` off `goal/<goal_id>` (itself cut off `cycle/<cycle_id>`, which is cut off the repository's detected default branch); on a legacy plan, branch `task/<task_id>/a<attempt-number>` off `plan/<plan_id>`. Plus a temp worktree. The cyclic form keys on the globally unique run id so a retry never reuses a prior attempt's branch; the legacy attempt number is monotonic across the task lifetime, unlike the resettable domain retry counter. `branch -f` makes begin idempotent against a crashed prior invocation of that number. Names come from `src/app/branch_names.py`.
+- `commit` → commit the worktree, `--no-ff` merge into its immediate parent (`goal/<goal_id>` for a current cyclic plan, `plan/<plan_id>` for a legacy plan) via a throwaway merge worktree, then clean up. The merge preserves the attempt in history. A completed cyclic goal is promoted separately into `cycle/<cycle_id>` only after every task has accepted evidence.
+- `discard` → remove worktree + delete branch. **The rollback**: a failed attempt leaves zero trace; the retry begins clean from the same parent branch — stateless task execution.
 
 The repository's detected default branch is never touched by plan work.
 Project workspace cache entries include repository identity and detected branch,

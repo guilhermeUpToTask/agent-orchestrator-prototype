@@ -4964,6 +4964,89 @@
         }
       }
     },
+    "/api/plans/{plan_id}/cycles/{cycle_id}/evidence": {
+      "get": {
+        "tags": [
+          "evidence"
+        ],
+        "summary": "Get Cycle Evidence",
+        "operationId": "evidence-get_cycle_evidence",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleEvidenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
@@ -5934,6 +6017,56 @@
         ],
         "title": "CycleDraftRequest"
       },
+      "CycleEvidenceResponse": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "cycle_id": {
+            "type": "string",
+            "title": "Cycle Id"
+          },
+          "cycle_status": {
+            "type": "string",
+            "title": "Cycle Status"
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/GoalEvidenceResponse"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DispositionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unattributed_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unattributed Evidence Refs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id",
+          "cycle_id",
+          "cycle_status",
+          "goals",
+          "disposition",
+          "unattributed_evidence_refs"
+        ],
+        "title": "CycleEvidenceResponse"
+      },
       "CycleStatus": {
         "type": "string",
         "enum": [
@@ -5963,6 +6096,31 @@
           "agent_id"
         ],
         "title": "DefaultAgentResponse"
+      },
+      "DispositionResponse": {
+        "properties": {
+          "disposition": {
+            "type": "string",
+            "title": "Disposition"
+          },
+          "output_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "disposition",
+          "output_reference"
+        ],
+        "title": "DispositionResponse"
       },
       "EditRequest": {
         "properties": {
@@ -6180,6 +6338,65 @@
         ],
         "title": "EditRequest",
         "description": "One structural edit. `type` selects the operation; the other fields are\nper-type (validated in _to_edit so a bad combination 422s, not 500s)."
+      },
+      "EvidenceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "task_revision": {
+            "type": "integer",
+            "title": "Task Revision"
+          },
+          "verification_kind": {
+            "type": "string",
+            "title": "Verification Kind"
+          },
+          "exact_command": {
+            "type": "string",
+            "title": "Exact Command"
+          },
+          "exit_code": {
+            "type": "integer",
+            "title": "Exit Code"
+          },
+          "candidate_commit_sha": {
+            "type": "string",
+            "title": "Candidate Commit Sha"
+          },
+          "test_commit_sha": {
+            "type": "string",
+            "title": "Test Commit Sha"
+          },
+          "bounded_output_ref": {
+            "type": "string",
+            "title": "Bounded Output Ref"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "task_revision",
+          "verification_kind",
+          "exact_command",
+          "exit_code",
+          "candidate_commit_sha",
+          "test_commit_sha",
+          "bounded_output_ref",
+          "finished_at"
+        ],
+        "title": "EvidenceResponse"
       },
       "ExecutionAttemptResponse": {
         "properties": {
@@ -6559,6 +6776,43 @@
           "frozen_at"
         ],
         "title": "GoalContract"
+      },
+      "GoalEvidenceResponse": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "promotion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PromotionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskEvidenceResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "status",
+          "promotion",
+          "tasks"
+        ],
+        "title": "GoalEvidenceResponse"
       },
       "GoalOutline": {
         "properties": {
@@ -7860,6 +8114,35 @@
         ],
         "title": "ProjectReadinessResponse"
       },
+      "PromotionResponse": {
+        "properties": {
+          "from_ref": {
+            "type": "string",
+            "title": "From Ref"
+          },
+          "into_ref": {
+            "type": "string",
+            "title": "Into Ref"
+          },
+          "merge_sha": {
+            "type": "string",
+            "title": "Merge Sha"
+          },
+          "promoted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Promoted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_ref",
+          "into_ref",
+          "merge_sha",
+          "promoted_at"
+        ],
+        "title": "PromotionResponse"
+      },
       "ProposalKind": {
         "type": "string",
         "enum": [
@@ -7867,6 +8150,50 @@
           "replan"
         ],
         "title": "ProposalKind"
+      },
+      "ProtectedScopeResponse": {
+        "properties": {
+          "allowed_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Scope"
+          },
+          "forbidden_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Scope"
+          },
+          "protected_file_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Protected File Hashes"
+          },
+          "criterion_to_tests": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Criterion To Tests"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allowed_scope",
+          "forbidden_scope",
+          "protected_file_hashes",
+          "criterion_to_tests"
+        ],
+        "title": "ProtectedScopeResponse",
+        "description": "The two halves an operator previously joined by hand: what the task was\nallowed to touch, and what it was forbidden to weaken."
       },
       "ProviderCreateBody": {
         "properties": {
@@ -8917,6 +9244,69 @@
         ],
         "title": "TaskContract"
       },
+      "TaskEvidenceResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "protected_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProtectedScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "test_bundle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TestBundleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceResponse"
+            },
+            "type": "array",
+            "title": "Accepted Evidence"
+          },
+          "rejected_evidence_count": {
+            "type": "integer",
+            "title": "Rejected Evidence Count"
+          },
+          "superseded_evidence_count": {
+            "type": "integer",
+            "title": "Superseded Evidence Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "revision",
+          "status",
+          "protected_scope",
+          "test_bundle",
+          "accepted_evidence",
+          "rejected_evidence_count",
+          "superseded_evidence_count"
+        ],
+        "title": "TaskEvidenceResponse"
+      },
       "TaskExecutionTimelineResponse": {
         "properties": {
           "goal_id": {
@@ -9096,6 +9486,29 @@
           "frozen_at"
         ],
         "title": "TestBundle"
+      },
+      "TestBundleResponse": {
+        "properties": {
+          "test_commit_sha": {
+            "type": "string",
+            "title": "Test Commit Sha"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "verification_strategy": {
+            "type": "string",
+            "title": "Verification Strategy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "test_commit_sha",
+          "state",
+          "verification_strategy"
+        ],
+        "title": "TestBundleResponse"
       },
       "TestBundleState": {
         "type": "string",

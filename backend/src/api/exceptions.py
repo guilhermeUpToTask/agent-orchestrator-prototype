@@ -44,6 +44,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "CAPABILITY_NOT_FOUND": 404,
     "SECRET_NOT_FOUND": 404,
     "ATTEMPT_NOT_FOUND": 404,
+    "CYCLE_NOT_FOUND": 404,
     # 409 — conflict
     "STALE_VERSION": 409,
     "GOAL_ALREADY_RUNNING": 409,

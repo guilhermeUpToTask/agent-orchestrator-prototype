@@ -795,7 +795,7 @@ loops, nine-phase transitions for cyclic plans, and forge/PR writes.
   landed in Phases 4 and 5; none needed Phase 6, and the single deferral (G12)
   is owned by Phase 8 with the evidence that would promote it stated.
 
-## Phase 4 — API control-plane completion ⬜
+## Phase 4 — API control-plane completion ✅
 
 **External capability:** a technical operator can set up, drive, inspect,
 recover, and publish the happy path without database surgery.
@@ -850,6 +850,53 @@ boundaries, and the dependency rule.
 - OpenAPI describes the cyclic lifecycle and launch-critical models; generated
   frontend types are current.
 - Integration tests cover each new/corrected contract.
+
+### Delivery status (updated 2026-08-01)
+
+- **P4.1 — access and setup truth** (G1, G6, G11): ✅ merged, `fc54a41` (#63).
+- **P4.2 — operational truth** (G10, `requires_human`, `action_endpoints`,
+  domain un-freeze #19): ✅ merged, `52d5875` (#64).
+- **P4.3 — evidence truth** (G9): ✅ complete; the
+  `phase-4-3-evidence-truth` delivery closes Phase 4.
+  - Design: `docs/superpowers/specs/2026-07-28-phase-4-3-evidence-truth-design.md`
+  - Plan: `docs/superpowers/plans/2026-07-28-phase-4-3-evidence-truth.md`
+    (9 tasks; execution ledger at
+    `.superpowers/sdd/2026-07-28-phase-4-3-evidence-truth/progress.md`)
+  - **Complete:** branch-naming module (`src/app/branch_names.py`), migration
+    `0017_goal_promotions`, the transactional promotion ledger as a fifth
+    UnitOfWork repository, promotion recording in
+    `ExecutionHandler._promote_goal`, and
+    `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence`; edge-case contracts,
+    regenerated frontend types, the `happy-path-v2` consumer, and architecture
+    documentation are current.
+  - **Validated:** 685 non-integration tests passed (1 skipped), 496 integration
+    tests passed (6 skipped), ruff and mypy clean, migration head
+    `0017_goal_promotions`, frontend type-check/build green, and a live Tier 0
+    walkthrough passed all 16 fixture checks using the refs served by the API.
+
+Phase 4 is complete: P4.1–P4.3 close G1, G6, G9, G10 and G11, and the
+control-plane contracts are ready for Phase 5's frontend/operator work.
+
+#### Found during P4.3, deliberately deferred
+
+**Accepted evidence is deleted on edit, never retained as superseded.**
+`Task.semantic_edit` is the only path that bumps `Task.revision`, and it clears
+`verification_evidence` outright. A task carrying accepted evidence is also
+necessarily DONE (`accept_verification` and `complete_task` are atomic), and
+`_assert_task_mutable` refuses an edit on a DONE task — so the edit returns 409
+and no revision bump ever occurs. `Plan.reopen_task` exists on the aggregate but
+nothing in `src/app` calls it.
+
+Consequence: the evidence read model's `superseded_evidence_count` and its
+`task_revision == task.revision` filter are unreachable today. Both are kept
+deliberately, as insurance on the endpoint's central claim — if the domain is
+ever changed to retain evidence across a revision bump, the filter is what stops
+the endpoint serving stale evidence as accepted on day one. Do not delete them
+as dead code without reading this entry.
+
+Whether superseded evidence *should* be retained-and-marked rather than deleted
+is a frozen-domain question. It needs a decision-log entry and an un-freeze, so
+it is out of scope for Phase 4 and is recorded here rather than acted on.
 
 ## Phase 5 — frontend truth and operator UX ⬜
 

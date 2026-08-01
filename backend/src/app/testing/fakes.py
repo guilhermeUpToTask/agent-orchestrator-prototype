@@ -24,6 +24,7 @@ from src.domain.value_objects.tasks_vos import TaskResult
 
 from src.app.runtime_failures import LimitScope, RuntimeFailure
 from src.app.testing.execution_records import InMemoryExecutionRecordRepository
+from src.app.testing.promotion_records import InMemoryGoalPromotionRepository
 from src.app.ports import (
     AgentEventSink,
     ChatMessage,
@@ -285,23 +286,28 @@ class InMemoryUnitOfWork:
         outbox: InMemoryOutbox,
         executions: InMemoryExecutionRecordRepository | None = None,
         goal_leases: InMemoryGoalLeaseRepository | None = None,
+        promotions: InMemoryGoalPromotionRepository | None = None,
     ) -> None:
         self.plans = repo
         self.goal_leases = goal_leases or InMemoryGoalLeaseRepository()
         self.outbox = outbox
         self.executions = executions or InMemoryExecutionRecordRepository()
+        self.promotions = promotions or InMemoryGoalPromotionRepository()
 
     def __enter__(self) -> "InMemoryUnitOfWork":
         self.executions._begin()
+        self.promotions._begin()
         return self
 
     def __exit__(self, *exc: object) -> None:
         if exc[0] is None:
             self.executions._commit()
             self.outbox._commit()  # state + execution identity + events commit
+            self.promotions._commit()
         else:
             self.executions._rollback()
             self.outbox._rollback()  # rollback discards staged records/events
+            self.promotions._rollback()
 
 
 # ---- in-memory chat store (conversation history) ----

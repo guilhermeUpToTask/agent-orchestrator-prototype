@@ -185,12 +185,13 @@ Serves **J7**.
 
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
-| Frozen test bundle + accepted evidence | `Task.test_bundle`, `verification_evidence` | inside `active_cycle` of `GET /api/plans/{plan_id}` | — | `test_tdd_execution.py`, `test_pre_existing_check_execution.py` | api-only ([G9](#g9)) | critical |
-| Protected scope / foreign-check protection | `verification`, `test_identity` | inside the frozen `TaskContract` | — | `test_existing_check_protection.py`, `test_check_path_predicate.py` | api-only ([G9](#g9)) | critical |
-| Promoted git refs (cycle/goal branches) | `project_workspace` | — (convention `cycle/<id>`, not served) | — | `test_git_workspace.py`, `test_drive_plan_sqlite_git.py` | hidden ([G9](#g9)) | critical |
+| Frozen test bundle + accepted evidence | `Task.test_bundle`, `verification_evidence` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_tdd_execution.py` | api-only | critical |
+| Protected scope / foreign-check protection | `verification`, `test_identity` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_existing_check_protection.py` | api-only | critical |
+| Promoted git refs (cycle/goal branches) | `project_workspace`, `goal_promotion_repository` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_goal_promotion_repository.py`, `test_git_workspace.py` | api-only | critical |
 | Record the output disposition | `cyclic_planning.record_output_disposition` | `POST /api/plans/{plan_id}/publication` | `GatePanel` | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |
-| Recorded disposition + output reference | `Cycle.output_disposition/_reference` | inside `cycles` of `GET /api/plans/{plan_id}` | — | `test_api.py` | api-only ([G9](#g9)) | critical |
-| Export a run's evidence bundle | `backend/scripts/export_plan_runs.py` | — (CLI only) | — | `test_plan_run_export.py` | hidden ([G9](#g9)) | critical |
+| Recorded disposition + output reference | `Cycle.output_disposition/_reference` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py`, `test_api.py` | api-only | critical |
+| Export all plan-run analytics and evidence | `backend/scripts/export_plan_runs.py` | — (whole-database CLI export; not the J7 cycle read) | — | `test_plan_run_export.py` | hidden | post-launch |
+| One evidence read model per cycle — accepted evidence, protected scope, promoted refs, disposition | `routers/evidence.py` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | — | `test_cycle_evidence_api.py` | api-only | critical |
 | Authenticated PR / forge write | — | — | — | — | not implemented (deliberate) | post-launch |
 
 ## 9. Nine-phase compatibility surface
@@ -226,6 +227,13 @@ breaks or hides a step of a job an operator actually performs.
 `workers` check, locked by `test_workers_api.py`. The same branch served
 `requires_human` and `action_endpoints`, and its advertised-action contract test
 found the domain inconsistency recorded as un-freeze #19 (decision 60).
+
+**Closed by P4.3** (2026-07-31) — G9, by
+`GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence`, locked by
+`test_cycle_evidence_api.py`. The read model joins accepted revision-bound
+evidence, protected scope, recorded goal promotions, and disposition for any
+cycle without requiring the full plan document. The whole-database
+`export_plan_runs.py` analytics export remains a separate post-launch surface.
 
 **Closed by P4.1** (2026-07-28), and deleted from this list per the repo rule
 that a fixed defect is replaced by the test that locks it — G1 (the guard is
@@ -304,19 +312,6 @@ UI cannot do it, so the plan list only grows.
 
 **Owner: Phase 5.** **Test:** deleting from the plan list removes the row and a
 busy plan surfaces the 409 `PLAN_BUSY` refusal as a message, not a crash.
-
-### G9 — Evidence is reachable only by reading the whole plan document {#g9}
-
-Accepted evidence, frozen bundles and protected scope ride inside
-`active_cycle`; the recorded disposition rides inside `cycles`; promoted branch
-names are not served at all (`verify_run.py` reconstructs `cycle/<cycle_id>` by
-convention); and the evidence bundle export is a CLI script. J7 — "show me what
-was verified and where the code went" — has no first-class read surface, and
-Phase 4 lists exactly this set.
-
-**Owner: Phase 4.** **Test:** one evidence read model per cycle returning
-accepted evidence refs, protected paths, promoted refs and the disposition,
-asserted against a completed dry-run cycle.
 
 ### G12 — A wedged task cannot be skipped {#g12}
 

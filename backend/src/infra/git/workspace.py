@@ -38,6 +38,13 @@ from typing import Iterator
 
 import structlog
 
+from src.app.branch_names import (
+    cycle_branch,
+    goal_branch,
+    legacy_plan_branch,
+    legacy_task_branch,
+    task_branch,
+)
 from src.app.ports import TaskFailed, WorkspaceHandle
 from src.domain.value_objects.lifecycle import FailureKind
 
@@ -202,16 +209,18 @@ class GitBranchWorkspace:
     ) -> GitWorkspaceHandle:
         self._ensure_repo()
         if cycle_id is not None and goal_id is not None and run_id is not None:
-            cycle_branch = f"cycle/{cycle_id}"
-            plan_branch = f"goal/{goal_id}"
-            task_branch = f"task/{task_id}/{run_id}"
-            if not _git_ok(self._repo, "rev-parse", "--verify", cycle_branch):
-                _git(self._repo, "branch", cycle_branch, self._default_branch)
+            cycle_branch_name = cycle_branch(cycle_id)
+            # Named `plan_branch` for the shared code below, but on the cyclic
+            # ladder this rung IS the goal branch — there is no plan branch.
+            plan_branch = goal_branch(goal_id)
+            task_branch_name = task_branch(task_id, run_id)
+            if not _git_ok(self._repo, "rev-parse", "--verify", cycle_branch_name):
+                _git(self._repo, "branch", cycle_branch_name, self._default_branch)
             if not _git_ok(self._repo, "rev-parse", "--verify", plan_branch):
-                _git(self._repo, "branch", plan_branch, cycle_branch)
+                _git(self._repo, "branch", plan_branch, cycle_branch_name)
         else:
-            plan_branch = f"plan/{plan_id}"
-            task_branch = f"task/{task_id}/a{attempt}"
+            plan_branch = legacy_plan_branch(plan_id)
+            task_branch_name = legacy_task_branch(task_id, attempt)
             if not _git_ok(self._repo, "rev-parse", "--verify", plan_branch):
                 _git(self._repo, "branch", plan_branch, self._default_branch)
                 log.info("workspace.plan_branch_created", branch=plan_branch)
@@ -219,12 +228,12 @@ class GitBranchWorkspace:
         # -f: a stale branch from a crashed prior run of this attempt is reset,
         # so begin is idempotent (stateless task execution).
         task_base = _git(self._repo, "rev-parse", base_ref or plan_branch)
-        _git(self._repo, "branch", "-f", task_branch, task_base)
+        _git(self._repo, "branch", "-f", task_branch_name, task_base)
         worktree = tempfile.mkdtemp(prefix=f"task-{task_id}-a{attempt}-")
         # the empty mkdtemp dir must not exist for `worktree add`
         os.rmdir(worktree)
         try:
-            _git(self._repo, "worktree", "add", worktree, task_branch)
+            _git(self._repo, "worktree", "add", worktree, task_branch_name)
         except subprocess.CalledProcessError as exc:
             raise TaskFailed(
                 f"workspace begin failed: {exc.stderr}", FailureKind.TOOL_ERROR
@@ -239,7 +248,7 @@ class GitBranchWorkspace:
         return GitWorkspaceHandle(
             path=worktree,
             plan_branch=plan_branch,
-            task_branch=task_branch,
+            task_branch=task_branch_name,
             base_ref=task_base,
         )
 
@@ -279,11 +288,11 @@ class GitBranchWorkspace:
             os.close(fd)
 
     def _merge_goal_sync(self, cycle_id: str, goal_id: str) -> str:
-        cycle_branch = f"cycle/{cycle_id}"
-        goal_branch = f"goal/{goal_id}"
-        if not _git_ok(self._repo, "rev-parse", "--verify", goal_branch):
+        cycle_branch_name = cycle_branch(cycle_id)
+        goal_branch_name = goal_branch(goal_id)
+        if not _git_ok(self._repo, "rev-parse", "--verify", goal_branch_name):
             raise TaskFailed(
-                f"goal branch is missing: {goal_branch}",
+                f"goal branch is missing: {goal_branch_name}",
                 FailureKind.TOOL_ERROR,
             )
         with self._cycle_merge_lock(cycle_id):
@@ -293,23 +302,23 @@ class GitBranchWorkspace:
             # stale registration that wedges later merges ("already checked
             # out"). Prune once and retry once inside the held flock.
             try:
-                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch_name)
             except subprocess.CalledProcessError:
                 self._prune_sync()
                 log.info(
                     "workspace.merge_worktree_pruned",
                     cycle_id=cycle_id,
-                    cycle_branch=cycle_branch,
+                    cycle_branch=cycle_branch_name,
                 )
-                _git(self._repo, "worktree", "add", merge_wt, cycle_branch)
+                _git(self._repo, "worktree", "add", merge_wt, cycle_branch_name)
             try:
                 _git(
                     Path(merge_wt),
                     "merge",
                     "--no-ff",
-                    goal_branch,
+                    goal_branch_name,
                     "-m",
-                    f"merge: {goal_branch} into {cycle_branch}",
+                    f"merge: {goal_branch_name} into {cycle_branch_name}",
                 )
                 return _git(Path(merge_wt), "rev-parse", "HEAD")
             finally:

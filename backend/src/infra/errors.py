@@ -35,6 +35,20 @@ class AttemptNotFoundError(InfrastructureError):
         super().__init__(f"Attempt {attempt_id} not found.", context={"attempt_id": attempt_id})
 
 
+class CycleNotFoundError(InfrastructureError):
+    """No such cycle on this plan. Follows AttemptNotFoundError: a lookup miss
+    for a non-domain identifier still travels as a coded error, never a router
+    HTTPException — the status map in src/api/exceptions.py is the one table."""
+
+    code = "CYCLE_NOT_FOUND"
+
+    def __init__(self, plan_id: str, cycle_id: str) -> None:
+        super().__init__(
+            f"Cycle {cycle_id} not found on plan {plan_id}.",
+            context={"plan_id": plan_id, "cycle_id": cycle_id},
+        )
+
+
 class UnauthorizedError(BaseAppException):
     """Request lacked valid credentials (control-plane token)."""
 
