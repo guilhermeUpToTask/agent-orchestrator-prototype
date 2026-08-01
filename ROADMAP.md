@@ -900,6 +900,13 @@ the first walkthrough, understand limits/costs, and share useful evidence.
 - ✅ Release automation attaches a Python wheel and frontend bundle.
 - ✅ The fixture seed is the sample repository; exporters create sanitized
   evidence bundles.
+- ✅ `fixtures/first-cycle-v1` is the onboarding walkthrough: **one command**
+  (`run-cycle.sh`) drives project → plan → both gates → execution →
+  publication → evidence, `preflight.sh` states what must be true before it can
+  start (migration head, a live worker, valid bindings, one tier not two), and
+  `guards.sh` re-checks the Phase 4/5 critical defects against a LIVE server
+  rather than a TestClient. Its judgement layer is locked by
+  `backend/tests/integration/test_first_cycle_fixture.py`.
 
 ### Deliverables
 

@@ -142,6 +142,11 @@ agent-orchestrator/
 │   ├── legacy/             #   pre-refactor features kept for reintroduction analysis
 │   └── history/            #   archived plans/analyses/pre-refactor docs (immutable)
 ├── fixtures/               # operator walkthroughs (API-only: curl + jq, never the UI):
+│                           #   first-cycle-v1 (START HERE: one complete cycle in
+│                           #   ONE command — run-cycle.sh drives project→plan→
+│                           #   gates→execution→publication; preflight.sh checks
+│                           #   what must be true first; guards.sh re-checks the
+│                           #   Phase 4/5 critical defects against a LIVE server),
 │                           #   happy-path-v1 (locked, Tier 0 + Tier 1),
 │                           #   planning-recovery-v1 (a starved planning session
 │                           #   leaves evidence the retry uses), parallel-goals-v1
