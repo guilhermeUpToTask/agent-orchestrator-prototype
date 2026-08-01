@@ -11,6 +11,13 @@ Everything runs on your machine: state is a single SQLite file, credentials are 
 > Read [SECURITY.md](SECURITY.md) before pointing this at a repository you care
 > about, and see [docs/guides/](docs/guides/) to get started.
 
+![The console during execution: current operation, execution attempt, goal lease, verification stage](docs/images/plan-overview.png)
+
+*One goal running: the planning operation committed, attempt 1 in flight, the
+goal lease with 279 seconds left on `worker-1`, and the TDD stage on
+`test authoring`. Nothing is waiting on the operator, so **Needs attention** is
+empty — the queue that matters is the one that is usually empty.*
+
 ```mermaid
 flowchart LR
     subgraph you["You"]

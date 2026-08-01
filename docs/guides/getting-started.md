@@ -4,6 +4,40 @@ From nothing to a completed cycle. Tier 0 — free, deterministic, no API key.
 
 You need **Python 3.11+** and **Git**. Nothing else.
 
+## The five-minute demo
+
+If you would rather see it work before reading how it works, this is the whole
+thing, against a throwaway state directory and a disposable repository the
+fixture creates for you:
+
+```bash
+git clone https://github.com/guilhermeUpToTask/agent-orchestrator-prototype
+cd agent-orchestrator-prototype
+
+pipx install agent-orchestrator
+orchestrate config set reasoner.mode stub        # Tier 0: no API key, no network
+orchestrate config set agent_runner.mode dry-run
+orchestrate serve &                              # migrate + API + worker + console
+
+./fixtures/first-cycle-v1/scripts/preflight.sh   # what must be true before a run
+./fixtures/first-cycle-v1/scripts/materialize.sh # the disposable target repo
+./fixtures/first-cycle-v1/scripts/run-cycle.sh   # project → gates → execution → publication
+```
+
+`run-cycle.sh` prints the plan id and finishes by showing the accepted evidence.
+Check it rather than trusting it — `verify_run.py` re-derives the result from
+served facts and from git:
+
+```bash
+python3 fixtures/first-cycle-v1/scripts/verify_run.py \
+  --plan "$PLAN_ID" --repo ~/.orchestrator/first-cycle-v1/repo --tier 0
+```
+
+Ten checks, including the one that matters most: your default branch is
+byte-identical to where it started. Then open <http://127.0.0.1:8000> and look
+at the plan the terminal just drove — the console is a second client of the same
+API, not a separate story.
+
 ## 1. Install and start
 
 ```bash
@@ -48,10 +82,22 @@ the defaults. Three things remain:
 Every step is also reachable from its own settings section; the wizard just
 orders them and does the minimum write for each.
 
+**Settings → Launch readiness** is the same truth as a checklist, and it is the
+first place to look when something will not start:
+
+![The launch readiness checklist](../images/readiness.png)
+
 ## 3. Run a cycle
 
 From the **Plans** screen, *Open project plan*, pick your project, and describe
 what you want built. Keep the first one small — one goal, one or two tasks.
+
+![The plans screen](../images/plans-list.png)
+
+One project owns one long-lived plan, so re-opening a project returns the plan
+you already have and starts its next cycle on it. `Idle` means "no cycle in
+flight, ready for the next one" — it is not finished, because the root plan is
+never terminal.
 
 What happens next, and where you appear in it:
 
@@ -73,6 +119,19 @@ Watch progress on **Overview**: current operation, worker lease, attempts, and
 two separate queues — **Needs attention** (you) versus **Recovering
 automatically** (not you).
 
+![Overview during execution](../images/plan-overview.png)
+
+Read that top row left to right: the planning operation committed, execution
+attempt 1 is running with its run id, the goal lease has 279 seconds left and is
+held by `worker-1`, and the verification stage is *test authoring* — the agent is
+writing the failing test, not the implementation. The lease is the answer to
+"is this working or wedged": a live attempt renews it, a dead worker's does not.
+
+**Goals** draws the same run as the roadmap the reasoner drafted, with the agent
+each task is bound to and the capabilities it was chosen for:
+
+![The goals canvas mid-run](../images/goals-canvas.png)
+
 ## 4. Find the result
 
 Your default branch is untouched — that is a guarantee, not a coincidence. Work
@@ -91,7 +150,14 @@ record a reference to an operation *you* performed. It never pushes or merges on
 your behalf.
 
 The evidence behind the run — the exact command, its exit code, the candidate
-and test commits, the promotion SHAs — is on the cycle:
+and test commits, the promotion SHAs — is on the cycle. Expand the completed
+cycle under **Cycle history**:
+
+![Accepted verification evidence for a completed cycle](../images/cycle-evidence.png)
+
+That is the whole claim in one place: `python -m pytest -q tests/test_slug.py`
+exited 0 against candidate `4620490d`, and `goal/02f5bac7…` merged into
+`cycle/b3d23fb7…` at `cb7443af`. The same facts are one API read away —
 see [evidence.md](evidence.md).
 
 ## Prefer the terminal?
