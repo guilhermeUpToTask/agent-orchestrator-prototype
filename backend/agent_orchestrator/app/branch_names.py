@@ -7,7 +7,7 @@ the local variable holding the goal branch in `begin` is still named
 `plan_branch`. Recording promoted refs adds a fourth reader (the execution
 handler), so the convention gets one definition instead of a fourth copy.
 
-`src/app` is the only layer that can host it. The dependency rule is
+`agent_orchestrator/app` is the only layer that can host it. The dependency rule is
 `domain -> app -> infra & api`, so infra may import app but never the reverse,
 and the domain is frozen.
 """

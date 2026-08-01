@@ -228,7 +228,7 @@ evidence:
   `test author produced no executable checks` and
   `did not establish a passing characterization/check baseline`. The reasoner's
   contract was correct both times.
-- **A task's checks are identified by declaration** (`src/app/test_identity.py`),
+- **A task's checks are identified by declaration** (`agent_orchestrator/app/test_identity.py`),
   from the author's diff or a `verification_command` naming a concrete file —
   never a repository scan, which cannot tell task 3's checks from task 1's. When
   the contract names a check that is already present, no agent runs at all.
@@ -301,7 +301,7 @@ free endpoint that answered six concurrent probes instantly between them. The ru
 completed green, so this cost wall-clock rather than correctness — but it backed
 off hardest exactly when a short retry would most likely succeed.
 
-Fixed by a per-scope curve in `src/app/provider_capacity.py`
+Fixed by a per-scope curve in `agent_orchestrator/app/provider_capacity.py`
 (`capacity_backoff_seconds`): a positively identified `request_concurrency`
 refusal waits the plan's ordinary configured curve, unscaled, and every other
 scope — including an unclassified one, which degrades to patience for the same
@@ -773,7 +773,7 @@ boundaries, and the dependency rule.
   - Plan: `docs/superpowers/plans/2026-07-28-phase-4-3-evidence-truth.md`
     (9 tasks; execution ledger at
     `.superpowers/sdd/2026-07-28-phase-4-3-evidence-truth/progress.md`)
-  - **Complete:** branch-naming module (`src/app/branch_names.py`), migration
+  - **Complete:** branch-naming module (`agent_orchestrator/app/branch_names.py`), migration
     `0017_goal_promotions`, the transactional promotion ledger as a fifth
     UnitOfWork repository, promotion recording in
     `ExecutionHandler._promote_goal`, and
@@ -973,10 +973,10 @@ justifies.
 - ✅ **Migrations ship inside the package.** `db_upgrade` resolved them from
   `Path(__file__).parents[3]` — the repo root in a checkout, `site-packages`
   when installed, where the only `alembic` is the LIBRARY. An installed copy
-  could not create its schema at all. Moved to `src/infra/db/migrations/`, one
+  could not create its schema at all. Moved to `agent_orchestrator/infra/db/migrations/`, one
   resolver (`migration_config.py`) derived from its own module location.
 - ✅ **The UI ships inside the wheel** and is served by the API
-  (`src/api/frontend.py`), so there is no second artifact and no CORS story on
+  (`agent_orchestrator/api/frontend.py`), so there is no second artifact and no CORS story on
   the first-run path. The SPA fallback explicitly refuses `api/`, `health`,
   `docs`, `redoc`, `openapi.json` — registering it last is necessary but not
   sufficient, and a test caught it answering unknown API paths with HTML.
@@ -1005,7 +1005,7 @@ justifies.
 1. **The top-level package is literally `src`.** A distribution shipping a
    top-level `src` collides with any other package doing the same. Scope
    measured: **273 touch points** (220 Python files, 53 in shell/md/yml/toml),
-   plus the `src.infra.cli.main` entry point and every `python -m` invocation in
+   plus the `agent_orchestrator.infra.cli.main` entry point and every `python -m` invocation in
    docs and scripts. It blocks no exit criterion and we publish to GitHub
    Releases rather than PyPI today, so it was deliberately NOT bundled with the
    packaging work. Do it as its own change, mechanically, with the full suite as
@@ -1020,9 +1020,9 @@ justifies.
    pre-cyclic detail (see the "Operator walkthrough and documentation" entry in
    known-issues), and `README.md`'s mermaid diagram has not been re-checked
    against the cyclic ladder.
-5. **CI does not run the new layers** — `npm run test:e2e` needs a running
-   stack, and the packaging tests are integration-marked. Decide whether the
-   browser smoke belongs in CI or stays a local/release gate.
+5. **CI runs the frontend tests now** (they never had); the Playwright browser
+   smoke still does not — it needs a running stack and a ~150 MB browser
+   download. Decide whether it belongs in CI or stays a local/release gate.
 
 ## Phase 7 — small peer preview ⬜
 

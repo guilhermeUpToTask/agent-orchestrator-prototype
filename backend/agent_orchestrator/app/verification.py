@@ -176,7 +176,7 @@ def test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
 # cannot tell task 3's checks from task 1's, so on a multi-task goal it happily
 # freezes another task's failing test as this task's evidence. WHICH tests prove
 # a task is done is intent, not a property of the tree, so it has to be declared
-# — see `src/app/test_identity.py`.
+# — see `agent_orchestrator/app/test_identity.py`.
 
 
 def check_protected(root: Path, protected: Mapping[str, str]) -> list[str]:

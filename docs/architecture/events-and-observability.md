@@ -2,7 +2,7 @@
 
 *Two event streams, one operational execution ledger, and one delivery path; what an operator can see, and how secrets stay out of all of it.*
 
-Code anchors: `backend/src/domain/events/` (domain event types), `backend/src/app/execution_records.py` (operational lifecycle), `backend/src/app/observations.py` (typed evidence), `backend/src/infra/db/execution_record_repository.py` + `observation_repository.py` (persistence), `backend/src/infra/db/outbox.py` + `agent_event_sink.py` (event writers), `backend/src/api/outbox_relay.py` (delivery), and `backend/src/api/logging/` (logs).
+Code anchors: `backend/agent_orchestrator/domain/events/` (domain event types), `backend/agent_orchestrator/app/execution_records.py` (operational lifecycle), `backend/agent_orchestrator/app/observations.py` (typed evidence), `backend/agent_orchestrator/infra/db/execution_record_repository.py` + `observation_repository.py` (persistence), `backend/agent_orchestrator/infra/db/outbox.py` + `agent_event_sink.py` (event writers), `backend/agent_orchestrator/api/outbox_relay.py` (delivery), and `backend/agent_orchestrator/api/logging/` (logs).
 
 ## The two streams
 

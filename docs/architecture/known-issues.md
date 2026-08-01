@@ -82,7 +82,7 @@ command) stays in Phase 8, where it is scheduled against preview evidence.
   also necessarily DONE (`accept_verification` and `complete_task` are atomic),
   and `_assert_task_mutable` refuses an edit on a DONE task — so the edit
   returns 409 and no revision bump ever occurs. `Plan.reopen_task` exists on the
-  aggregate but nothing in `src/app` calls it.
+  aggregate but nothing in `agent_orchestrator/app` calls it.
   Consequence: the evidence read model's `superseded_evidence_count` and its
   `task_revision == task.revision` filter are unreachable today. **Both are
   kept deliberately** — insurance on the endpoint's central claim. If the

@@ -5,7 +5,7 @@ Adapters behind the ports the application exercises, plus the **composition root
 Two rules apply everywhere in this layer:
 
 1. **The environment is read only in `container.py`.** Adapters receive paths/keys/factories as constructor arguments; if you find `os.environ` deeper than the composition root, that's a bug.
-2. **Adapter semantics must match the in-memory fakes** (`src/app/testing/fakes.py`) — detached aggregates, the CAS shape, lease expiry. The dual-backend truth suite (`tests/support.py`) enforces this; when you change an adapter contract, change the fake in the same PR.
+2. **Adapter semantics must match the in-memory fakes** (`agent_orchestrator/app/testing/fakes.py`) — detached aggregates, the CAS shape, lease expiry. The dual-backend truth suite (`tests/support.py`) enforces this; when you change an adapter contract, change the fake in the same PR.
 
 ## Folder map
 

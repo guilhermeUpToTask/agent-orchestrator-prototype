@@ -1,6 +1,6 @@
 """Where the migrations are, in one place.
 
-The migration directory ships INSIDE the package (`src/infra/db/migrations/`)
+The migration directory ships INSIDE the package (`agent_orchestrator/infra/db/migrations/`)
 rather than beside it at the repository root, because an installed copy has no
 repository. Resolving it from `Path(__file__).parents[3]` worked in every test
 and every developer checkout and failed the moment the wheel was installed:

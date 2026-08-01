@@ -20,7 +20,7 @@ When `agent_runner.mode = real`, the orchestrator runs the CLI you bound the
 agent to (`pi`, `claude`, …) as a subprocess with your environment, your
 filesystem permissions, your git identity and your credentials. Those CLIs run a
 model's output. There is **no container, no seccomp filter, no syscall
-restriction, and no filesystem jail**. `src/infra/runtime/sandbox.py` supplies
+restriction, and no filesystem jail**. `agent_orchestrator/infra/runtime/sandbox.py` supplies
 `NoSandbox`, which passes the command through unchanged; its `probe()` reports
 that plainly rather than claiming a healthy sandbox, and it is the deliberate
 permanent fallback for hosts with no OS-level confinement — not a stub awaiting
@@ -51,7 +51,7 @@ to rebuild.** A disposable clone or a VM is the right posture for the preview.
 - set -> every request must present `Authorization: Bearer <token>` or
   `X-API-Token`.
 
-The guard is applied once at mount (`src/api/server.py`) and a test parametrizes
+The guard is applied once at mount (`agent_orchestrator/api/server.py`) and a test parametrizes
 it over the whole OpenAPI inventory, so a route added later is covered before it
 is written.
 

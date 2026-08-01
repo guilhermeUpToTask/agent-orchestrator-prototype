@@ -1,7 +1,7 @@
 """Serving the packaged UI from the API that owns its types.
 
 Phase 6 ships ONE artifact. The built frontend lives inside the package at
-`src/api/static/`, populated at build time from `frontend/dist` (see
+`agent_orchestrator/api/static/`, populated at build time from `frontend/dist` (see
 `scripts/build_frontend.sh`), so `pip install` gives an operator the CLI, the
 API, the worker and the UI together — and the bundle can never disagree with
 the API version it was generated against, because they are the same install.

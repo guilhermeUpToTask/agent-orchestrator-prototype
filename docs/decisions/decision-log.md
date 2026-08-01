@@ -180,7 +180,7 @@ and never revisited, so a plan stuck on a persistent transient failure (a
 rate-limited provider observed during a live walkthrough, `provider_capacity`
 blocks recurring for ~38 minutes across repeated manual `wait_and_retry`
 resolutions) had no way to widen its backoff budget short of a replan — the
-new `execution.retry_*` config keys (`src/infra/policies/retry_policy_factory.py`)
+new `execution.retry_*` config keys (`agent_orchestrator/infra/policies/retry_policy_factory.py`)
 only seed a plan's policy AT CREATION and are deliberately never consulted
 again for an existing plan (config is a live global; a plan's policy is
 persisted, per-plan state — conflating the two would let a global config edit
@@ -371,7 +371,7 @@ about the previous attempt, so a retry re-ran an identical prompt against an
 identical contract on a clean worktree and reproduced an identical failure at
 full provider cost. That is why `VERIFICATION_ERROR` being terminal was *correct*
 until the feedback loop existed, and why the loop shipped first
-(`src/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
+(`agent_orchestrator/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
 `## Constraints`).
 
 The retryable set is now narrower than the kind: only class **A** — the

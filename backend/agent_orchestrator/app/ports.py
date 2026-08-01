@@ -162,7 +162,7 @@ class PriorAttemptFeedback(Protocol):
     written, it was simply never read back.
 
     Implementations return only agent-repairable rejections (see
-    `src/app/agent_feedback.py`): a provider rate limit or a promotion race says
+    `agent_orchestrator/app/agent_feedback.py`): a provider rate limit or a promotion race says
     nothing an agent could act on.
     """
 

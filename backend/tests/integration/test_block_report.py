@@ -201,7 +201,7 @@ def test_rejects_unmigrated_database_with_actionable_error(tmp_path: Path) -> No
 
 # ---- `requires_human` served on every block (P4.2 Task 4) ----
 #
-# `src/app/block_policy.py` is the single source of the "is this my problem, or
+# `agent_orchestrator/app/block_policy.py` is the single source of the "is this my problem, or
 # does the orchestrator recover on its own?" verdict. Nothing served it before
 # this projection -- these tests iterate the policy table itself (never a
 # hard-coded kind list), so a newly added kind cannot ship unserved.

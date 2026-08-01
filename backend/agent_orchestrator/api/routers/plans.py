@@ -174,7 +174,7 @@ class ProviderWaitingResponse(BaseModel):
 class BlockResponse(BaseModel):
     """The domain `PlanBlock` plus the one fact only `block_policy` knows.
 
-    `requires_human` is a pure function of `kind` (`src/app/block_policy.py`),
+    `requires_human` is a pure function of `kind` (`agent_orchestrator/app/block_policy.py`),
     so it is projected here rather than persisted: a policy change must not
     leave stale copies in old rows, and adding a field to the FROZEN
     `PlanBlock` would need a domain un-freeze for a value the block can

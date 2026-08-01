@@ -7,7 +7,7 @@ only obvious next step returning 422. Five live runs hit exactly that: an
 `plan is not blocked on a retryable planning stage`.
 
 These tests pin the whole surface: every kind constructed anywhere in the
-backend is declared in `src/app/block_policy.py`, every call site draws from that
+backend is declared in `agent_orchestrator/app/block_policy.py`, every call site draws from that
 table, and every advertised resolution is reachable.
 """
 

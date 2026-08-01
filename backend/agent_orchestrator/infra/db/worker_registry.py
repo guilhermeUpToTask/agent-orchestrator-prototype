@@ -2,7 +2,7 @@
 src/infra/db/worker_registry.py — WorkerRegistry, the `workers` table adapter.
 
 A worker's liveness beat is BEST-EFFORT telemetry, exactly like
-`SqliteAgentEventSink` (`src/infra/db/agent_event_sink.py`): written on its own
+`SqliteAgentEventSink` (`agent_orchestrator/infra/db/agent_event_sink.py`): written on its own
 connection, via `run_in_session` (which already carries the lock-retry
 policy), moved off the event loop with `asyncio.to_thread`, and never allowed
 to propagate — a telemetry hiccup must not kill a worker that is otherwise

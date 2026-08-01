@@ -238,7 +238,7 @@ SUBMIT_GOAL_CONTRACT_SCHEMA: dict[str, Any] = {
                         "items": {"type": "string"},
                         "description": (
                             "Repository-relative PATH prefixes this task may change, "
-                            "e.g. 'src/happy_path/greeter.py' or 'backend/src/api/'. "
+                            "e.g. 'src/happy_path/greeter.py' or 'backend/agent_orchestrator/api/'. "
                             "Every file the agent writes must sit under one of them, "
                             "so anything outside is rejected as out of scope. These "
                             "are paths in the repository — NOT capability ids, NOT "
@@ -383,7 +383,7 @@ def _validate_scope_paths(
             errors.append(
                 f"{path}.{field}: {sorted(offenders)} are capability ids, not paths. "
                 "This field lists repository-relative PATH prefixes the task may "
-                "change (e.g. 'src/happy_path/greeter.py', 'backend/src/api/'); "
+                "change (e.g. 'src/happy_path/greeter.py', 'backend/agent_orchestrator/api/'); "
                 "capability ids belong in required_capabilities. If a directory of "
                 "that exact name really exists, write it with a trailing '/'."
             )

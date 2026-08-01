@@ -2,20 +2,20 @@
 
 ## Agent runtime
 
-- Port: `backend/src/domain/ports/agent_port.py`
-- Implementations: `backend/src/infra/runtime/cli_runner.py`
-- Selection/bindings: `backend/src/infra/runtime/factory.py`
-- Failure mapping: `backend/src/infra/runtime/taxonomy.py`
-- Binary/config probes: `backend/src/infra/runtime/dependency_checker.py`
-- Composition: `backend/src/infra/container.py`
+- Port: `backend/agent_orchestrator/domain/ports/agent_port.py`
+- Implementations: `backend/agent_orchestrator/infra/runtime/cli_runner.py`
+- Selection/bindings: `backend/agent_orchestrator/infra/runtime/factory.py`
+- Failure mapping: `backend/agent_orchestrator/infra/runtime/taxonomy.py`
+- Binary/config probes: `backend/agent_orchestrator/infra/runtime/dependency_checker.py`
+- Composition: `backend/agent_orchestrator/infra/container.py`
 - Tests: runner taxonomy, agent-runner factory, full SQLite/git drive
 
 ## Reasoner
 
-- Port: `backend/src/domain/ports/reasoner_port.py` with exactly `converse` and `enrich_goal`
+- Port: `backend/agent_orchestrator/domain/ports/reasoner_port.py` with exactly `converse` and `enrich_goal`
 - Implementations: stub and `OpenAIReasoner`
-- Tool loop/client/prompts: `backend/src/infra/reasoner/runtime/`
-- Catalog config: `backend/src/infra/reasoner/factory.py`
+- Tool loop/client/prompts: `backend/agent_orchestrator/infra/reasoner/runtime/`
+- Catalog config: `backend/agent_orchestrator/infra/reasoner/factory.py`
 - Tests: `tests/unit/reasoner/`, factory integration, scripted LLM full cycle
 
 ## Shared rules

@@ -2,7 +2,7 @@
 /api/reasoner — reasoner configuration status.
 
 `GET /reasoner/status` re-runs the catalog-wiring validation from
-`src/infra/reasoner/factory.py` against the STORED config and always returns
+`agent_orchestrator/infra/reasoner/factory.py` against the STORED config and always returns
 200: an invalid config is the query's answer, not an error. It never touches
 the secret store (stub/dry-run works without a master key) — secret
 existence/decryption is still only checked when the reasoner is built at

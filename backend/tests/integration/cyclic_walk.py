@@ -89,7 +89,7 @@ def drive_cycle_to_publication(
     """Drive intent -> draft -> cycle -> enrichment -> execution -> publication."""
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
     # Left unset: the control plane stays open in local/test dev
-    # (`src/api/security.py`), so the returned client needs no token.
+    # (`agent_orchestrator/api/security.py`), so the returned client needs no token.
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

@@ -8,7 +8,7 @@ reviewable — most of them exist because breaking them already cost someone a d
 ```bash
 cd backend
 uv pip install -e .[dev]                 # or: pip install -e .[dev]
-python -m src.infra.cli.main db upgrade
+python -m agent_orchestrator.infra.cli.main db upgrade
 
 cd ../frontend
 npm install
@@ -40,7 +40,7 @@ yours by accident.
 not been shown to test anything. Bug fixes get a regression test that reproduces
 the bug before the fix exists.
 
-**The domain is frozen.** `backend/src/domain/` does not change without a
+**The domain is frozen.** `backend/agent_orchestrator/domain/` does not change without a
 deliberate un-freeze recorded in
 [`docs/decisions/decision-log.md`](docs/decisions/decision-log.md). There are
 nineteen so far, each with a reason. If your change seems to need a twentieth,
@@ -51,7 +51,7 @@ imports nothing from the other layers; `app` talks to ports, never adapters.
 
 **One error map.** Domain errors subclass `DomainError` with a stable `code`;
 the API maps codes to HTTP statuses in exactly one table
-(`src/api/exceptions.py`). Do not scatter try/except returning responses in
+(`agent_orchestrator/api/exceptions.py`). Do not scatter try/except returning responses in
 routers.
 
 **State and its events share one transaction.** A state change and its

@@ -20,13 +20,13 @@ class Rule:
 
 
 RULES = (
-    Rule(("backend/src/domain/",), "domain", ("frozen domain", "aggregate authority", "phase machine"), (), ("backend/tests/unit/orchestration",), ("docs/decisions/decision-log.md",)),
-    Rule(("backend/src/app/",), "application", ("CAS", "transactional outbox", "side-effect boundary"), (), ("backend/tests/unit/orchestration",)),
-    Rule(("backend/src/infra/db/",), "database adapter", ("fake/SQLite parity", "transactionality"), (), ("backend/tests/integration/test_reference_repos.py", "backend/tests/unit/orchestration")),
+    Rule(("backend/agent_orchestrator/domain/",), "domain", ("frozen domain", "aggregate authority", "phase machine"), (), ("backend/tests/unit/orchestration",), ("docs/decisions/decision-log.md",)),
+    Rule(("backend/agent_orchestrator/app/",), "application", ("CAS", "transactional outbox", "side-effect boundary"), (), ("backend/tests/unit/orchestration",)),
+    Rule(("backend/agent_orchestrator/infra/db/",), "database adapter", ("fake/SQLite parity", "transactionality"), (), ("backend/tests/integration/test_reference_repos.py", "backend/tests/unit/orchestration")),
     Rule(("backend/alembic/",), "migration", ("upgrade compatibility", "data preservation"), (), ("backend/tests/integration/test_migrations.py",)),
-    Rule(("backend/src/api/",), "API", ("central error mapping", "outbox-to-SSE path"), ("frontend/openapi.json", "frontend/src/types/generated/"), ("backend/tests/integration/test_api.py",), ("docs/architecture/",)),
-    Rule(("backend/src/infra/runtime/",), "agent runtime", ("shared failure taxonomy", "catalog bindings", "secret boundary"), (), ("backend/tests/integration/test_runner_taxonomy.py", "backend/tests/integration/test_agent_runner_factory.py")),
-    Rule(("backend/src/infra/reasoner/",), "reasoner", ("two-method port", "provider self-correction", "telemetry"), (), ("backend/tests/unit/reasoner", "backend/tests/integration/test_full_cycle_llm.py")),
+    Rule(("backend/agent_orchestrator/api/",), "API", ("central error mapping", "outbox-to-SSE path"), ("frontend/openapi.json", "frontend/src/types/generated/"), ("backend/tests/integration/test_api.py",), ("docs/architecture/",)),
+    Rule(("backend/agent_orchestrator/infra/runtime/",), "agent runtime", ("shared failure taxonomy", "catalog bindings", "secret boundary"), (), ("backend/tests/integration/test_runner_taxonomy.py", "backend/tests/integration/test_agent_runner_factory.py")),
+    Rule(("backend/agent_orchestrator/infra/reasoner/",), "reasoner", ("two-method port", "provider self-correction", "telemetry"), (), ("backend/tests/unit/reasoner", "backend/tests/integration/test_full_cycle_llm.py")),
     Rule(("frontend/",), "frontend", ("generated/handwritten type split", "SSE dedup"), (), ("cd frontend && npm run build",)),
     Rule(("docs/", "README.md", "CLAUDE.md", "ROADMAP.md"), "documentation", ("current vs planned vs history",), (), (), ()),
     Rule((".github/", "release-please-config.json"), "delivery", ("required check names", "minimal permissions"), (), ("workflow validation",)),

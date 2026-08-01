@@ -42,7 +42,7 @@ Read in this order the first time:
 | [capability-matrix.md](architecture/capability-matrix.md) | **What is supported and where it is exposed**: every capability traced domain → use case → route → frontend → tests, with launch priority and the verified gaps |
 | [known-issues.md](architecture/known-issues.md) | **Verified defects and fragile spots**, with `file:line` evidence — read before operating or reviewing |
 
-The backend's **frozen port contracts** (exact SQL shapes, method signatures, API→use-case map) live next to the code: [`backend/docs/INTEGRATION_GUIDE.md`](../backend/docs/INTEGRATION_GUIDE.md). Per-layer and per-package READMEs live inside `backend/src/` — they are the closest documentation to each line of code.
+The backend's **frozen port contracts** (exact SQL shapes, method signatures, API→use-case map) live next to the code: [`backend/docs/INTEGRATION_GUIDE.md`](../backend/docs/INTEGRATION_GUIDE.md). Per-layer and per-package READMEs live inside `backend/agent_orchestrator/` — they are the closest documentation to each line of code.
 
 ## Development and delivery
 
@@ -72,6 +72,6 @@ The backend's **frozen port contracts** (exact SQL shapes, method signatures, AP
 ## Keeping docs honest
 
 - A doc that contradicts the code is a bug in the doc — fix it in the same PR that changes the behavior.
-- `architecture/` files cite real paths (`backend/src/...`); when you rename code, grep the docs.
+- `architecture/` files cite real paths (`backend/agent_orchestrator/...`); when you rename code, grep the docs.
 - Unimplemented ideas do not belong in `architecture/` — they go to [`ROADMAP.md`](../ROADMAP.md).
 - Superseded plans move to `history/planning/`, never deleted.

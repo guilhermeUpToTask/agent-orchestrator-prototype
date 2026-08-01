@@ -217,7 +217,7 @@ def test_edited_task_no_longer_serves_its_prior_evidence_as_accepted(
     (`ExecutionHandler` calls `task.accept_verification` immediately
     followed by `plan.complete_task`), and there is no wired use case that
     reopens a DONE task for editing (`Plan.reopen_task` exists on the
-    aggregate but nothing in `src/app` calls it) -- nor can the plan pause
+    aggregate but nothing in `agent_orchestrator/app` calls it) -- nor can the plan pause
     its way out of a completion-review WAITING status. So a task that has
     ever served accepted evidence can never be edited again through the real
     API: `edit_task` refuses it outright, which is the fully honest way the

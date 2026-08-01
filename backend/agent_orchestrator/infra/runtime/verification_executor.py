@@ -35,7 +35,7 @@ class LocalVerificationExecutor:
 
     @staticmethod
     def _is_byproduct(path: str) -> bool:
-        # One definition, shared with the check snapshot in `src/app/verification.py`
+        # One definition, shared with the check snapshot in `agent_orchestrator/app/verification.py`
         # — two copies drifted apart is how a `.pyc` became a protected check.
         return is_byproduct_path(path)
 

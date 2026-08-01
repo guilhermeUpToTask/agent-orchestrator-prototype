@@ -121,19 +121,19 @@ Requires Python 3.11+ and Node 18+.
 # 1. Backend install + database
 cd backend
 uv pip install -e .[dev]                       # or: pip install -e .[dev]
-python -m src.infra.cli.main db upgrade        # DB under ORCHESTRATOR_HOME (default ~/.orchestrator)
-python -m src.infra.cli.main seed demo --stub  # capabilities, default agent, stub reasoner config
+python -m agent_orchestrator.infra.cli.main db upgrade        # DB under ORCHESTRATOR_HOME (default ~/.orchestrator)
+python -m agent_orchestrator.infra.cli.main seed demo --stub  # capabilities, default agent, stub reasoner config
 
 # 2. Two processes (separate terminals)
-python -m src.infra.cli.main api start --port 8000
-python -m src.infra.cli.main worker start
+python -m agent_orchestrator.infra.cli.main api start --port 8000
+python -m agent_orchestrator.infra.cli.main worker start
 
 # 3. Frontend (Vite dev server, hot reload — the packaged UI is served by the API)
 cd ../frontend
 npm install && npm run dev                     # http://localhost:5173
 ```
 
-> **After every pull, re-run `python -m src.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
+> **After every pull, re-run `python -m agent_orchestrator.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
 
 Create/open a project plan in the UI, submit a brief, then drive the stub reasoner's deterministic discovery grammar:
 
@@ -153,7 +153,7 @@ Two independent switches, both stored in SQLite config (not env vars):
 ```bash
 export ORCHESTRATOR_MASTER_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 export OPENROUTER_API_KEY=sk-...
-python -m src.infra.cli.main seed demo --provider openrouter \
+python -m agent_orchestrator.infra.cli.main seed demo --provider openrouter \
     --model anthropic/claude-sonnet-4-5 --api-key-env OPENROUTER_API_KEY
 ```
 
@@ -162,7 +162,7 @@ python -m src.infra.cli.main seed demo --provider openrouter \
 **2. Real task execution** (the agent runner):
 
 ```bash
-python -m src.infra.cli.main config set agent_runner.mode real
+python -m agent_orchestrator.infra.cli.main config set agent_runner.mode real
 export PROJECT_REPO_DIR=/path/to/the/repo/agents/should/work/on
 ```
 
@@ -198,7 +198,7 @@ agent-orchestrator/
 
 ## CLI reference
 
-Entry point: `python -m src.infra.cli.main` (or `orchestrate` once installed). All commands run from `backend/`.
+Entry point: `python -m agent_orchestrator.infra.cli.main` (or `orchestrate` once installed). All commands run from `backend/`.
 
 | Command | Purpose |
 |---|---|
@@ -267,7 +267,7 @@ accordingly.
 
 ## Configuration
 
-**Environment variables** — read *only* in the composition root (`backend/src/infra/container.py`) and the API server:
+**Environment variables** — read *only* in the composition root (`backend/agent_orchestrator/infra/container.py`) and the API server:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -290,7 +290,7 @@ accordingly.
 
 ## HTTP API
 
-Thin routers map 1:1 onto use cases; domain errors bubble to one code→status table (`backend/src/api/exceptions.py`). Highlights (full mapping in [`backend/docs/INTEGRATION_GUIDE.md`](backend/docs/INTEGRATION_GUIDE.md)):
+Thin routers map 1:1 onto use cases; domain errors bubble to one code→status table (`backend/agent_orchestrator/api/exceptions.py`). Highlights (full mapping in [`backend/docs/INTEGRATION_GUIDE.md`](backend/docs/INTEGRATION_GUIDE.md)):
 
 | Route | Purpose |
 |---|---|

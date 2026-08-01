@@ -1,7 +1,7 @@
 """A query-string token is only dangerous where it is written down.
 
 `/api/events` accepts `?token=` because EventSource cannot send headers
-(`src/api/security.py`). uvicorn's access logger would then print
+(`agent_orchestrator/api/security.py`). uvicorn's access logger would then print
 `GET /api/events?token=… HTTP/1.1` on every connect and reconnect.
 
 `RequestLoggingMiddleware` already records each request structurally with a

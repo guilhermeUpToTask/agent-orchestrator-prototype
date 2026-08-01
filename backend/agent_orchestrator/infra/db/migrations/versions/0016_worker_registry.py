@@ -17,7 +17,7 @@ default — `workers` opts OUT because it was never plan-scoped to begin with.
 
 Rows are UPSERTED by `worker_id`, never appended: the heartbeat that keeps this
 table current runs every 5 seconds for the life of the process (see
-`WorkerRegistry.beat` / `src/infra/db/worker_registry.py`), so an append-only
+`WorkerRegistry.beat` / `agent_orchestrator/infra/db/worker_registry.py`), so an append-only
 table would grow without bound. A restarted worker reusing the same
 `worker_id` overwrites its own row in place, so the table's size tracks the
 size of the fleet, not its uptime. `worker_id` is therefore the primary key,

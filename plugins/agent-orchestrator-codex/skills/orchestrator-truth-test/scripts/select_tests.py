@@ -7,15 +7,15 @@ import subprocess
 
 
 RULES = (
-    (("backend/src/domain/", "backend/src/app/"), "cd backend && pytest -q tests/unit/orchestration"),
-    (("backend/src/infra/db/",), "cd backend && pytest -q tests/integration/test_reference_repos.py"),
-    (("backend/alembic/", "backend/src/infra/db/tables.py"), "cd backend && pytest -q tests/integration/test_migrations.py"),
-    (("backend/src/api/",), "cd backend && pytest -q tests/integration/test_api.py"),
-    (("backend/src/infra/git/",), "cd backend && pytest -q tests/integration/test_git_workspace.py tests/integration/test_drive_plan_sqlite_git.py"),
-    (("backend/src/infra/runtime/",), "cd backend && pytest -q tests/integration/test_runner_taxonomy.py tests/integration/test_agent_runner_factory.py"),
-    (("backend/src/infra/reasoner/",), "cd backend && pytest -q tests/unit/reasoner tests/integration/test_full_cycle_llm.py"),
-    (("frontend/", "backend/src/api/"), "cd frontend && npm run build"),
-    (("frontend/", "backend/src/api/"), "cd frontend && npm run generate:api"),
+    (("backend/agent_orchestrator/domain/", "backend/agent_orchestrator/app/"), "cd backend && pytest -q tests/unit/orchestration"),
+    (("backend/agent_orchestrator/infra/db/",), "cd backend && pytest -q tests/integration/test_reference_repos.py"),
+    (("backend/alembic/", "backend/agent_orchestrator/infra/db/tables.py"), "cd backend && pytest -q tests/integration/test_migrations.py"),
+    (("backend/agent_orchestrator/api/",), "cd backend && pytest -q tests/integration/test_api.py"),
+    (("backend/agent_orchestrator/infra/git/",), "cd backend && pytest -q tests/integration/test_git_workspace.py tests/integration/test_drive_plan_sqlite_git.py"),
+    (("backend/agent_orchestrator/infra/runtime/",), "cd backend && pytest -q tests/integration/test_runner_taxonomy.py tests/integration/test_agent_runner_factory.py"),
+    (("backend/agent_orchestrator/infra/reasoner/",), "cd backend && pytest -q tests/unit/reasoner tests/integration/test_full_cycle_llm.py"),
+    (("frontend/", "backend/agent_orchestrator/api/"), "cd frontend && npm run build"),
+    (("frontend/", "backend/agent_orchestrator/api/"), "cd frontend && npm run generate:api"),
 )
 
 

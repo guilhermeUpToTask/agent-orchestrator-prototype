@@ -10,7 +10,7 @@ repository scan that discovers "the checks that already exist". One was written
 while chasing a Tier 1 block and it is the wrong idea — a scan cannot tell task
 3's checks from task 1's, so on a multi-task goal it freezes another task's
 failing test as this task's evidence. Which tests prove a task is done is intent,
-and intent has to be declared (`src/app/test_identity.py`).
+and intent has to be declared (`agent_orchestrator/app/test_identity.py`).
 """
 
 from __future__ import annotations

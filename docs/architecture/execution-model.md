@@ -2,7 +2,7 @@
 
 *How tasks actually run, and why a crash at any instruction leaves the system resumable.*
 
-Code anchors: `backend/src/app/use_cases/run_worker.py` (the loop), `backend/src/infra/db/plan_repository.py` (the lease SQL), `backend/src/app/execution_records.py` + `backend/src/infra/db/execution_record_repository.py` (stable run/attempt identity), `backend/src/app/handlers/execution_handler.py` (the two-transaction choreography), `backend/src/domain/services/navigation.py` (the scan), `backend/src/infra/git/workspace.py` (the rollback), `backend/src/infra/runtime/` (the runners).
+Code anchors: `backend/agent_orchestrator/app/use_cases/run_worker.py` (the loop), `backend/agent_orchestrator/infra/db/plan_repository.py` (the lease SQL), `backend/agent_orchestrator/app/execution_records.py` + `backend/agent_orchestrator/infra/db/execution_record_repository.py` (stable run/attempt identity), `backend/agent_orchestrator/app/handlers/execution_handler.py` (the two-transaction choreography), `backend/agent_orchestrator/domain/services/navigation.py` (the scan), `backend/agent_orchestrator/infra/git/workspace.py` (the rollback), `backend/agent_orchestrator/infra/runtime/` (the runners).
 
 ## The worker loop
 
@@ -118,7 +118,7 @@ While paused, goals/tasks are editable (`apply_edit` passes `plan.paused` to the
 
 `RetryPolicy` defaults to three attempts with exponential jittered backoff from 30s, capped at 15 minutes. Provider `Retry-After` is a floor; daily-quota evidence receives a long window. A persistent runtime/provider/model circuit prevents fresh invocations during the window and opens a provider-capacity block after the threshold. The wait is a persisted timestamp, never a sleep.
 
-**The curve depends on what was refused.** `kind_backoff_scale` grants `rate_limit` a patient 4x curve (base delay *and* ceiling), which is right for an account allowance that refills on the provider's clock and backwards for a `request_concurrency` refusal — one momentarily full pool, while every other in-flight request succeeded. `capacity_backoff_seconds` (`src/app/provider_capacity.py`) applies the scope-aware lookup: a positively identified concurrency refusal waits the plan's ordinary configured curve unscaled, every other scope keeps 4.0, and an unclassified message keeps patience for the same reason it keeps the narrower circuit key. The domain `RetryPolicy` stays free of `LimitScope`; the app layer that classifies the failure hands it a scope-adjusted copy of its own configuration.
+**The curve depends on what was refused.** `kind_backoff_scale` grants `rate_limit` a patient 4x curve (base delay *and* ceiling), which is right for an account allowance that refills on the provider's clock and backwards for a `request_concurrency` refusal — one momentarily full pool, while every other in-flight request succeeded. `capacity_backoff_seconds` (`agent_orchestrator/app/provider_capacity.py`) applies the scope-aware lookup: a positively identified concurrency refusal waits the plan's ordinary configured curve unscaled, every other scope keeps 4.0, and an unclassified message keeps patience for the same reason it keeps the narrower circuit key. The domain `RetryPolicy` stays free of `LimitScope`; the app layer that classifies the failure hands it a scope-adjusted copy of its own configuration.
 
 ## Agent runners — catalog-resolved, per run
 
@@ -160,7 +160,7 @@ gitGraph
     merge goal/G1 id: "completed goal"
 ```
 
-- `begin` → on a cyclic plan, branch `task/<task_id>/<run_id>` off `goal/<goal_id>` (itself cut off `cycle/<cycle_id>`, which is cut off the repository's detected default branch); on a legacy plan, branch `task/<task_id>/a<attempt-number>` off `plan/<plan_id>`. Plus a temp worktree. The cyclic form keys on the globally unique run id so a retry never reuses a prior attempt's branch; the legacy attempt number is monotonic across the task lifetime, unlike the resettable domain retry counter. `branch -f` makes begin idempotent against a crashed prior invocation of that number. Names come from `src/app/branch_names.py`.
+- `begin` → on a cyclic plan, branch `task/<task_id>/<run_id>` off `goal/<goal_id>` (itself cut off `cycle/<cycle_id>`, which is cut off the repository's detected default branch); on a legacy plan, branch `task/<task_id>/a<attempt-number>` off `plan/<plan_id>`. Plus a temp worktree. The cyclic form keys on the globally unique run id so a retry never reuses a prior attempt's branch; the legacy attempt number is monotonic across the task lifetime, unlike the resettable domain retry counter. `branch -f` makes begin idempotent against a crashed prior invocation of that number. Names come from `agent_orchestrator/app/branch_names.py`.
 - `commit` → commit the worktree, `--no-ff` merge into its immediate parent (`goal/<goal_id>` for a current cyclic plan, `plan/<plan_id>` for a legacy plan) via a throwaway merge worktree, then clean up. The merge preserves the attempt in history. A completed cyclic goal is promoted separately into `cycle/<cycle_id>` only after every task has accepted evidence.
 - `discard` → remove worktree + delete branch. **The rollback**: a failed attempt leaves zero trace; the retry begins clean from the same parent branch — stateless task execution.
 

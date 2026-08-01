@@ -2,7 +2,7 @@
 /api/runner — agent-runner configuration status.
 
 `GET /runner/status` re-runs the non-raising checks from
-`src/infra/runtime/factory.py` against the STORED config and agent registry,
+`agent_orchestrator/infra/runtime/factory.py` against the STORED config and agent registry,
 plus the binary probes from `dependency_checker.py`, and always returns 200:
 an invalid config is the query's answer, not an error. It never touches the
 secret store (dry-run works without a master key) — secret existence/
