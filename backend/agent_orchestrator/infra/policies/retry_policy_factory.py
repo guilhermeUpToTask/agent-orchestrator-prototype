@@ -1,5 +1,5 @@
 """
-src/infra/policies/retry_policy_factory.py — build the plan-level RetryPolicy
+agent_orchestrator/infra/policies/retry_policy_factory.py — build the plan-level RetryPolicy
 from the config store.
 
 Config keys (scope 'orchestrator'), all optional — an unset key keeps the
@@ -24,7 +24,7 @@ raising this key always raises the rate-limit budget with it.
 Called fresh at plan-creation time (never cached) so `orchestrate config set`
 takes effect on the next created plan without an API restart — mirrors
 reasoner.mode/agent_runner.mode's read-from-config-store pattern
-(src/infra/reasoner/factory.py, src/infra/runtime/factory.py), but unlike
+(agent_orchestrator/infra/reasoner/factory.py, agent_orchestrator/infra/runtime/factory.py), but unlike
 those two mode switches this has no invalid state to fail fast on: every key
 is a plain int/float with a safe fallback.
 """

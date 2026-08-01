@@ -1,5 +1,5 @@
 """
-src/infra/db/engine.py — SQLite engine + session factory.
+agent_orchestrator/infra/db/engine.py — SQLite engine + session factory.
 
 This is the single place SQLite operational policy is applied. Every connection
 gets the PRAGMAs the persist-first guarantee depends on:

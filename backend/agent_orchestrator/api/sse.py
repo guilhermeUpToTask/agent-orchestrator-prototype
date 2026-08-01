@@ -1,5 +1,5 @@
 """
-src/api/sse.py — Server-Sent Events broker with per-client fan-out.
+agent_orchestrator/api/sse.py — Server-Sent Events broker with per-client fan-out.
 
 Every connected SSE client gets its own queue, registered by the /events
 route and unregistered on disconnect — two browser tabs both receive every

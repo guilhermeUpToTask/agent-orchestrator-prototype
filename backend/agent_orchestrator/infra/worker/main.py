@@ -1,5 +1,5 @@
 """
-src/infra/worker/main.py — the worker entrypoint (the orchestration cadence).
+agent_orchestrator/infra/worker/main.py — the worker entrypoint (the orchestration cadence).
 
 Wraps the transport-agnostic worker_tick with the real sleep/claim rhythm:
 tick; if no progress was made, sleep poll_seconds and tick again. That sleep is

@@ -1,5 +1,5 @@
 """
-src/api/server.py — FastAPI application factory (the thin API).
+agent_orchestrator/api/server.py — FastAPI application factory (the thin API).
 
 Responsibilities — zero business logic:
   1. Create the FastAPI app with OpenAPI metadata.

@@ -2,9 +2,9 @@
 the OS level, if a real adapter is configured. Deliberately NOT a domain
 concept — the frozen domain never sees this type, and even ExecutionHandler
 never touches it directly; only the infra CLI runner
-(src/infra/runtime/cli_runner.py) consumes it, wrapping the exact command it
+(agent_orchestrator/infra/runtime/cli_runner.py) consumes it, wrapping the exact command it
 was already going to run. Adapters live in infra: `NoSandbox`
-(src/infra/runtime/sandbox.py) is today's behavior and the PERMANENT
+(agent_orchestrator/infra/runtime/sandbox.py) is today's behavior and the PERMANENT
 fallback, not a placeholder — an environment without working confinement
 must keep running real-mode tasks, loudly reporting sandbox=disabled rather
 than silently degrading or refusing to run. A real adapter (e.g.

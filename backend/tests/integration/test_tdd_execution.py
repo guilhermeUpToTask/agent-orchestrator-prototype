@@ -410,7 +410,7 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
 
     # Un-freeze #17: a rejected CANDIDATE is not terminal on the first failure.
     # Agent output is a sample; the retry now carries the orchestrator's own
-    # rejection in its prompt (src/app/agent_feedback.py), so it is not a rerun.
+    # rejection in its prompt (agent_orchestrator/app/agent_feedback.py), so it is not a rerun.
     first = asyncio.run(handler.handle(plan.id, plan, uow))
 
     assert first.value in {"continue", "paused"}

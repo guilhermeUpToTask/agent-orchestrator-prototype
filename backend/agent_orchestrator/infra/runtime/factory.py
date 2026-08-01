@@ -1,6 +1,6 @@
 """
-src/infra/runtime/factory.py — build the AgentRunner from the agent registry
-and the providers catalog (mirrors src/infra/reasoner/factory.py).
+agent_orchestrator/infra/runtime/factory.py — build the AgentRunner from the agent registry
+and the providers catalog (mirrors agent_orchestrator/infra/reasoner/factory.py).
 
 Two global modes, selected by the config key `agent_runner.mode`
 (scope 'orchestrator'):

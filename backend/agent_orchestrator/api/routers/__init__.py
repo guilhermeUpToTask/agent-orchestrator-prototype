@@ -1,1 +1,1 @@
-"""src/api/routers/ — thin routers: route -> use case, nothing else."""
+"""agent_orchestrator/api/routers/ — thin routers: route -> use case, nothing else."""

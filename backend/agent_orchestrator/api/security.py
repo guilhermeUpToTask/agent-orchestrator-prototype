@@ -1,5 +1,5 @@
 """
-src/api/security.py — control-plane authentication.
+agent_orchestrator/api/security.py — control-plane authentication.
 
 Prototype-grade single shared token, structured so real auth (per-user tokens,
 OAuth) can replace it without touching routers. When ``ORCHESTRATOR_API_TOKEN``

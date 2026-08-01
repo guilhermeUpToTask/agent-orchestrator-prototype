@@ -12,18 +12,18 @@ Two long-running processes share one SQLite file. The **API process** hosts thin
 flowchart TB
     subgraph apiproc["API process — orchestrate api start"]
         direction TB
-        routers["FastAPI routers<br/><i>src/api/routers/</i><br/>plans · reference · config · reasoner · runner · events"]
-        usecases1["Use cases<br/><i>src/app/use_cases/</i><br/>create · conversation · control · apply_edit · request_replan"]
-        broker["SSEBroker<br/><i>src/api/sse.py</i><br/>per-client queues"]
-        relaythread["Outbox relay thread<br/><i>src/api/outbox_relay.py</i><br/>poll 0.5s → publish → mark delivered"]
+        routers["FastAPI routers<br/><i>agent_orchestrator/api/routers/</i><br/>plans · reference · config · reasoner · runner · events"]
+        usecases1["Use cases<br/><i>agent_orchestrator/app/use_cases/</i><br/>create · conversation · control · apply_edit · request_replan"]
+        broker["SSEBroker<br/><i>agent_orchestrator/api/sse.py</i><br/>per-client queues"]
+        relaythread["Outbox relay thread<br/><i>agent_orchestrator/api/outbox_relay.py</i><br/>poll 0.5s → publish → mark delivered"]
         routers --> usecases1
     end
 
     subgraph workerproc["Worker process — orchestrate worker start"]
         direction TB
-        tick["startup reconcile + workspace prune/audit<br/>run_worker_forever<br/><i>src/infra/worker/main.py</i>"]
-        dispatch["PlanDispatcher<br/><i>src/app/use_cases/advance_plan.py</i>"]
-        handlers["ExecutionHandler · PlanningHandler · GateHandler<br/><i>src/app/handlers/</i>"]
+        tick["startup reconcile + workspace prune/audit<br/>run_worker_forever<br/><i>agent_orchestrator/infra/worker/main.py</i>"]
+        dispatch["PlanDispatcher<br/><i>agent_orchestrator/app/use_cases/advance_plan.py</i>"]
+        handlers["ExecutionHandler · PlanningHandler · GateHandler<br/><i>agent_orchestrator/app/handlers/</i>"]
         adapters["Reasoner (stub/LLM) · AgentRunner (dry-run/CLI) · GitBranchWorkspace"]
         tick --> dispatch --> handlers --> adapters
     end
@@ -31,7 +31,7 @@ flowchart TB
     db[("SQLite — WAL, synchronous=FULL<br/><i>~/.orchestrator/orchestrator.db</i><br/>plans + lease · execution/planning operations · circuits ·<br/>outbox · agent_events · chat · catalogs · config · secrets")]
 
     browser["Browser<br/>React dashboard"]
-    repo[("Project git repo<br/><i>PROJECT_REPO_DIR</i>")]
+    repo[("Project git repo<br/><i>ProjectDefinition.repo_url</i>")]
     llm["LLM provider<br/>(reasoner, llm mode)"]
     clis["Agent CLIs<br/>pi / claude / gemini<br/>(real mode)"]
 
@@ -56,9 +56,9 @@ Why this shape:
 
 ```mermaid
 flowchart LR
-    api["src/api<br/>HTTP edge"] --> app
-    infra["src/infra<br/>adapters + composition root"] --> app
-    app["src/app<br/>use cases · handlers · worker loop"] --> domain["src/domain<br/>FROZEN core"]
+    api["agent_orchestrator/api<br/>HTTP edge"] --> app
+    infra["agent_orchestrator/infra<br/>adapters + composition root"] --> app
+    app["agent_orchestrator/app<br/>use cases · handlers · worker loop"] --> domain["agent_orchestrator/domain<br/>FROZEN core"]
     infra -. implements ports of .-> domain
 ```
 
@@ -95,7 +95,7 @@ aggregate plus the planning/execution artifact models and decision 43.
 
 Two tiers, deliberately split:
 
-- **Environment** (read only in the container): *where things are* — `ORCHESTRATOR_HOME`, `PROJECT_REPO_DIR`, `ORCHESTRATOR_MASTER_KEY`, `ORCHESTRATOR_API_TOKEN`. Nothing behavioral.
+- **Environment** (read only in the container): *where things are* — `ORCHESTRATOR_HOME`, `ORCHESTRATOR_MASTER_KEY`, `ORCHESTRATOR_API_TOKEN`. Nothing behavioral. There is no repository variable: which repository a plan works on is a property of its `ProjectDefinition`, validated when written.
 - **SQLite `config` table** (two-tier: scope `orchestrator` | project id): *how things behave* — `reasoner.mode`, `agent_runner.mode`, timeouts, provider/model bindings. Editable at runtime via CLI/API; resolution happens **per run**, so key rotation and agent edits apply without restarts.
 
 The old `AGENT_MODE` environment variable is gone on purpose — runtime selection is data, not deployment configuration.

@@ -1,5 +1,5 @@
 """
-src/infra/db/_session.py — shared transactional runner with lock-retry.
+agent_orchestrator/infra/db/_session.py — shared transactional runner with lock-retry.
 
 Single place the SQLite write policy lives: open a session, run the unit of
 work, commit (durable under synchronous=FULL), and retry the transient

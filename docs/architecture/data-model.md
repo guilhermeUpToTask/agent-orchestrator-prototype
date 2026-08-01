@@ -267,8 +267,17 @@ Each secret row stores `ciphertext` + `wrapped_key`: the value is encrypted with
 ```text
 ~/.orchestrator/            (ORCHESTRATOR_HOME)
 ├── orchestrator.db         everything above (+ -wal/-shm)
-└── workspace-repo/         default PROJECT_REPO_DIR if unset —
-                            plan/<id> branches + task worktrees
+├── projects/<project id>/
+│   └── repo/               ONLY for a project created with no `repo_url` —
+│                           a scratch repository the orchestrator seeds and
+│                           tells the plan about. A project that names a
+│                           repository is worked on WHERE IT LIVES; nothing
+│                           under this directory is a copy of it.
+│                           Branches: cycle/<id> → goal/<id> → task/<id>/<run id>,
+│                           plus one worktree per running attempt.
+└── runtime-logs/
+    └── <attempt id>.jsonl  captured agent output, tailed live by
+                            GET /api/plans/{id}/attempts/{id}/log
 ```
 
 One file to back up; delete the directory for a factory reset. Migrations: `python -m agent_orchestrator.infra.cli.main db upgrade`.

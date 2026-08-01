@@ -1,5 +1,5 @@
 """
-src/infra/reasoner/factory.py — build the Reasoner from the providers catalog.
+agent_orchestrator/infra/reasoner/factory.py — build the Reasoner from the providers catalog.
 
 Two modes, selected by the config key `reasoner.mode` (scope 'orchestrator'):
 

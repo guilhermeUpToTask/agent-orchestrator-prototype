@@ -1,5 +1,5 @@
 """
-src/infra/cli/error_handler.py — centralised CLI error handling.
+agent_orchestrator/infra/cli/error_handler.py — centralised CLI error handling.
 
 Policy:
   - user-facing errors -> stderr with a ✗ prefix, exit(1)

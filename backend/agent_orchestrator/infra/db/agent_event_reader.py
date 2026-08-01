@@ -1,5 +1,5 @@
 """
-src/infra/db/agent_event_reader.py — the read side of the agent_events stream.
+agent_orchestrator/infra/db/agent_event_reader.py — the read side of the agent_events stream.
 
 The sink is write-only (best-effort, own connection). This reader serves the two
 historical views the live SSE feed can't: per-plan / per-task event history

@@ -1,5 +1,5 @@
 """
-src/api/outbox_relay.py — delivers outbox rows to their consumers (roadmap 4.4).
+agent_orchestrator/api/outbox_relay.py — delivers outbox rows to their consumers (roadmap 4.4).
 
 Without this, events are written but never seen: the transactional outbox only
 guarantees events exist atomically with state — something must ship them. The

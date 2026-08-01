@@ -1,5 +1,5 @@
 """
-src/infra/db/outbox.py — SqliteOutbox (the Outbox port).
+agent_orchestrator/infra/db/outbox.py — SqliteOutbox (the Outbox port).
 
 add() INSERTs on the UnitOfWork's live session: the open transaction IS the
 staging area (no in-memory buffer needed) — commit persists state + events

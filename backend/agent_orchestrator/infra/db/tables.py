@@ -1,5 +1,5 @@
 """
-src/infra/db/tables.py — SQLAlchemy table definitions for the orchestrator DB.
+agent_orchestrator/infra/db/tables.py — SQLAlchemy table definitions for the orchestrator DB.
 
 Schema decision (integration Stage 3): the Plan aggregate is stored as ONE JSON
 document (``plans.data``) with promoted scalar columns only for what SQL must

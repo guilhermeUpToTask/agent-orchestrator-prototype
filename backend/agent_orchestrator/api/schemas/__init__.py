@@ -1,1 +1,1 @@
-"""src/api/schemas/ — Pydantic V2 API DTOs (Request + Response)."""
+"""agent_orchestrator/api/schemas/ — Pydantic V2 API DTOs (Request + Response)."""

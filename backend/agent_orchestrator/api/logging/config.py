@@ -1,5 +1,5 @@
 """
-src/api/logging/config.py — structured logging + mandatory secret masking.
+agent_orchestrator/api/logging/config.py — structured logging + mandatory secret masking.
 
 Single logger configuration for the API process. Two cross-cutting guarantees:
 

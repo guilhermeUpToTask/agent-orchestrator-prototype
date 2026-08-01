@@ -1,5 +1,5 @@
 """
-src/infra/db/attempt_feedback_repository.py — the PriorAttemptFeedback port.
+agent_orchestrator/infra/db/attempt_feedback_repository.py — the PriorAttemptFeedback port.
 
 Reads the previous attempt's rejection so the next attempt's prompt can state
 it. Its own short read transaction, never the plan UnitOfWork: the agent runner

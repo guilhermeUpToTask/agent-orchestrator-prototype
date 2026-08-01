@@ -1,5 +1,5 @@
 """
-src/infra/git/workspace.py — Workspace adapters (the async Workspace port).
+agent_orchestrator/infra/git/workspace.py — Workspace adapters (the async Workspace port).
 
 GitBranchWorkspace is THE ROLLBACK MECHANISM (roadmap 2.7): every attempt runs
 in its own git worktree on its own task branch —

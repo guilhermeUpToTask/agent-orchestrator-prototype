@@ -148,7 +148,7 @@ def test_role_resolution_never_falls_back_without_role_capability() -> None:
     single `_STATUS_BY_CODE` table could not reach it: `POST /retry-stage` on an
     `agent_capability` block -- the block's OWN advertised legal resolution --
     returned an opaque `500 INTERNAL_ERROR` instead of telling the operator
-    which capabilities no agent covers. src/api/exceptions.py states the rule
+    which capabilities no agent covers. agent_orchestrator/api/exceptions.py states the rule
     outright: "an unmapped builtin error is a bug and should surface as the
     enveloped 500."
     """
@@ -202,7 +202,7 @@ def test_repository_root_scope_accepts_normal_relative_paths(tmp_path) -> None:
     frozen = bundle("tests/test_behavior.py", sha256_file(protected))
     contract = task_contract(allowed_scope=["."], forbidden_scope=[".git/"])
 
-    accepted = validate_candidate(tmp_path, contract, frozen, ["src/app.py"])
+    accepted = validate_candidate(tmp_path, contract, frozen, ["agent_orchestrator/app.py"])
     rejected = validate_candidate(tmp_path, contract, frozen, [".git/config"])
 
     assert accepted.accepted

@@ -1,5 +1,5 @@
 """
-src/infra/reasoner/stub_reasoner.py — deterministic Reasoner (no LLM).
+agent_orchestrator/infra/reasoner/stub_reasoner.py — deterministic Reasoner (no LLM).
 
 Drives the whole 9-phase machine end-to-end for tests, dry-run demos and the
 pre-made-plan flows. The REAL reasoner (OpenAI-compatible) replaces this behind

@@ -1,5 +1,5 @@
 """
-src/api/exceptions.py — the ONE error -> HTTP mapping layer (roadmap 4.1).
+agent_orchestrator/api/exceptions.py — the ONE error -> HTTP mapping layer (roadmap 4.1).
 
 Routers stay free of try/except: they call use cases and let typed errors
 bubble here. Every DomainError carries a stable `code`; the table below maps

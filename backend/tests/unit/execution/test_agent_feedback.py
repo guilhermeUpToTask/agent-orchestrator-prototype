@@ -25,7 +25,7 @@ AGENT_REPAIRABLE = [
     "test bypass marker present: tests/test_behavior.py",
     "verification configuration changed: pyproject.toml",
     "test author produced no executable checks",
-    "test author modified production paths: ['src/app.py']",
+    "test author modified production paths: ['agent_orchestrator/app.py']",
     "test bundle did not establish a meaningful RED result",
     "authoritative verification command failed",
     "verification command changed the validated candidate: path outside allowed scope: x",

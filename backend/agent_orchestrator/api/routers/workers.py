@@ -1,5 +1,5 @@
 """
-src/api/routers/workers.py — GET /api/workers: is anything going to pick up work?
+agent_orchestrator/api/routers/workers.py — GET /api/workers: is anything going to pick up work?
 
 `GET /api/readiness` answers whether this machine *can* run a plan. It cannot
 answer whether anything *will*: plan claims and goal leases prove a worker is
@@ -22,7 +22,7 @@ from agent_orchestrator.infra.container import AppContainer
 
 router = APIRouter(tags=["workers"])
 
-# Three missed beats (see `_HEARTBEAT_SECONDS` in src/infra/worker/main.py):
+# Three missed beats (see `_HEARTBEAT_SECONDS` in agent_orchestrator/infra/worker/main.py):
 # long enough to absorb a slow tick or a lock retry, short enough that a crashed
 # worker is visible inside an operator's attention span.
 STALE_AFTER_SECONDS = 15.0

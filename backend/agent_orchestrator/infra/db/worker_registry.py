@@ -1,5 +1,5 @@
 """
-src/infra/db/worker_registry.py — WorkerRegistry, the `workers` table adapter.
+agent_orchestrator/infra/db/worker_registry.py — WorkerRegistry, the `workers` table adapter.
 
 A worker's liveness beat is BEST-EFFORT telemetry, exactly like
 `SqliteAgentEventSink` (`agent_orchestrator/infra/db/agent_event_sink.py`): written on its own

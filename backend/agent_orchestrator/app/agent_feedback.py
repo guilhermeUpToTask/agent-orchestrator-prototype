@@ -33,7 +33,7 @@ from __future__ import annotations
 # Prefixes of the rejections a task attempt produces about the agent's own
 # candidate. Each is emitted at exactly one site; see the tests for the map.
 _AGENT_ACTIONABLE_PREFIXES: tuple[str, ...] = (
-    # src/app/verification.py -> validate_candidate reasons
+    # agent_orchestrator/app/verification.py -> validate_candidate reasons
     "path outside allowed scope",
     "forbidden path changed",
     "protected test changed",

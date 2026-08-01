@@ -1,5 +1,5 @@
 """
-src/api/dependencies.py — the API's dependency surface over AppContainer.
+agent_orchestrator/api/dependencies.py — the API's dependency surface over AppContainer.
 
 One process-wide container (set explicitly in tests via set_container, built
 from the environment otherwise). Endpoints that mutate plan state take a FRESH

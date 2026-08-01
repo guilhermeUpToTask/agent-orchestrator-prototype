@@ -1,5 +1,5 @@
 """
-src/infra/runtime/cli_runner.py — CLI agent runners (the async AgentRunner port).
+agent_orchestrator/infra/runtime/cli_runner.py — CLI agent runners (the async AgentRunner port).
 
 A runner executes ONE task as a one-shot CLI subprocess in the workspace
 directory and returns a TaskResult (or raises TaskFailed carrying a typed

@@ -18,10 +18,11 @@ flowchart LR
         gates["✋ Gates<br/>(approve / finish / replan)"]
     end
 
-    subgraph api["API process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate api start"]
+    subgraph api["API process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate serve"]
         rest["FastAPI<br/>thin routers → use cases"]
         relay["Outbox relay thread"]
         sse["SSE broker<br/>GET /api/events"]
+        static["Packaged React UI<br/>served same-origin"]
     end
 
     subgraph state["SQLite&nbsp;&nbsp;·&nbsp;&nbsp;~/.orchestrator/orchestrator.db"]
@@ -30,14 +31,14 @@ flowchart LR
         catalog[("agents · capabilities<br/>providers · models<br/>config · secrets")]
     end
 
-    subgraph worker["Worker process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate worker start"]
-        loop["Claim-and-drive loop<br/>(per-plan lease)"]
+    subgraph worker["Worker process&nbsp;&nbsp;·&nbsp;&nbsp;supervised by serve"]
+        loop["Claim-and-drive loop<br/>(plan lease + per-goal leases)"]
         reasoner["Reasoner<br/>(stub | LLM)"]
         runner["Agent runners<br/>(dry-run | pi | claude | gemini)"]
     end
 
-    git[("Project repo<br/>plan/&lt;id&gt; branches<br/>task worktrees")]
-    ui["React dashboard<br/>frontend/"]
+    git[("Project repo&nbsp;&nbsp;·&nbsp;&nbsp;ProjectDefinition.repo_url<br/>cycle/&lt;id&gt; → goal/&lt;id&gt; → task/&lt;id&gt;/&lt;run&gt;<br/>one worktree per attempt")]
+    ui["Browser"]
 
     chat --> rest
     gates --> rest
@@ -50,6 +51,7 @@ flowchart LR
     loop --> outbox
     rest --> outbox
     outbox --> relay --> sse --> ui
+    static --> ui
     ui --> rest
 ```
 
@@ -163,8 +165,19 @@ python -m agent_orchestrator.infra.cli.main seed demo --provider openrouter \
 
 ```bash
 python -m agent_orchestrator.infra.cli.main config set agent_runner.mode real
-export PROJECT_REPO_DIR=/path/to/the/repo/agents/should/work/on
 ```
+
+The repository agents work on is **not** an environment variable — it is the
+project's, set when you create it and validated on write:
+
+```bash
+curl -sS -X POST localhost:8000/api/projects -H 'content-type: application/json' \
+  -d '{"name":"my-project","repo_url":"/path/to/the/repo/agents/should/work/on"}'
+```
+
+A project created without `repo_url` is given a scratch repository under
+`~/.orchestrator/projects/<id>/repo` and works there — which looks exactly like
+success until you check the tree nobody looked at.
 
 In `real` mode each task resolves **per run** through the agent registry: the bound `AgentSpec.runtime_type` (`pi` default | `claude` | `gemini` | `dry-run`) picks the CLI runtime, and its `provider_id`/`model_id` catalog rows supply the decrypted key and model string. Edit agents or rotate keys at runtime — no restart needed. `GET /api/runner/status` reports mode, per-agent binding validity, and binary probes; the worker warns at boot about missing CLIs.
 

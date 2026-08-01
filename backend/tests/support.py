@@ -196,7 +196,7 @@ def build_promotion_env(backend: str, tmp_path: Path) -> PromotionEnv:
     # The FK to `plans` is enforced, so the row this test writes needs a parent.
     # `plans` has several NOT NULL columns with no server-side default
     # (phase, iteration, data, created_at, updated_at) — see PlanTable in
-    # src/infra/db/tables.py — so a raw INSERT must supply all of them.
+    # agent_orchestrator/infra/db/tables.py — so a raw INSERT must supply all of them.
     with engine.begin() as connection:
         connection.execute(_BARE_PLAN_SQL, {"id": "p1", "now": "2026-07-28T00:00:00+00:00"})
     return PromotionEnv(uow=SqliteUnitOfWork(make_session_factory(engine), FakeClock()))

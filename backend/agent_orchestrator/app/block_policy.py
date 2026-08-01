@@ -129,7 +129,7 @@ def policy_for(kind: str) -> BlockPolicy:
         return _BY_KIND[kind]
     except KeyError:
         raise ValueError(
-            f"unknown block kind {kind!r}; add it to src/app/block_policy.py "
+            f"unknown block kind {kind!r}; add it to agent_orchestrator/app/block_policy.py "
             "so its resolutions and human-intervention verdict are declared once"
         ) from None
 

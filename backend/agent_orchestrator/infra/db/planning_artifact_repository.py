@@ -1,5 +1,5 @@
 """
-src/infra/db/planning_artifact_repository.py — the PlanningArtifactStore port.
+agent_orchestrator/infra/db/planning_artifact_repository.py — the PlanningArtifactStore port.
 
 Each write is its own short transaction (`run_in_session`), never part of the
 plan UnitOfWork. That is the `ChatStore` rule, for the same reason: an artifact

@@ -45,7 +45,7 @@ class RetryPolicy(BaseModel):
     # will fail identically on every retry, so it is terminal immediately.
     # VERIFICATION_ERROR was here until un-freeze #17: it made ONE bad agent
     # output block the goal, and the next attempt was never told what went wrong
-    # anyway. The prompt feedback (src/app/agent_feedback.py) is what makes the
+    # anyway. The prompt feedback (agent_orchestrator/app/agent_feedback.py) is what makes the
     # retry mean something; a Class C orchestration race stays terminal through
     # `RuntimeFailure.retryable=False`, which vetoes independently of this set.
     non_retryable_kinds: frozenset[FailureKind] = frozenset(

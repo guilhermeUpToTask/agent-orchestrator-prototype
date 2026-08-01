@@ -1,5 +1,5 @@
 """
-src/infra/runtime/taxonomy.py — subprocess outcome -> the SHARED FAILURE TAXONOMY.
+agent_orchestrator/infra/runtime/taxonomy.py — subprocess outcome -> the SHARED FAILURE TAXONOMY.
 
 One constant classification used by the real CLI runners; the dummy runner emits
 the same FailureKind values directly — so dummy-driven tests exercise exactly

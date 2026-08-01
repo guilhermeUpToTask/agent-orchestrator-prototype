@@ -1,5 +1,5 @@
 """
-src/infra/db/chat_repository.py — SqliteChatRepository (the ChatStore port).
+agent_orchestrator/infra/db/chat_repository.py — SqliteChatRepository (the ChatStore port).
 
 Conversation history for DISCOVERY/REPLANNING. Each append is its own short
 transaction (run_in_session), never part of the plan UnitOfWork: chat is

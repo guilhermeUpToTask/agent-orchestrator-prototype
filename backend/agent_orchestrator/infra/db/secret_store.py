@@ -1,5 +1,5 @@
 """
-src/infra/db/secret_store.py — the SQLite secret store (envelope encryption).
+agent_orchestrator/infra/db/secret_store.py — the SQLite secret store (envelope encryption).
 
 Envelope encryption: each secret gets its own random Fernet *data key*; the
 plaintext is encrypted with the data key, and the data key is wrapped

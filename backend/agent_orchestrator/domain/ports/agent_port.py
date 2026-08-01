@@ -1,7 +1,7 @@
 """The agent-execution port: run ONE task, return a result.
 
 Failures are signaled with the application-layer `TaskFailed` exception
-(src/app/ports.py) carrying a `FailureKind` from the shared taxonomy; the
+(agent_orchestrator/app/ports.py) carrying a `FailureKind` from the shared taxonomy; the
 domain RetryPolicy classifies it retryable vs terminal.
 """
 

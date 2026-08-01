@@ -2,10 +2,10 @@
 
 The five execution/side-channel contracts (Clock, AgentEventSink,
 WorkspaceHandle/Workspace, AgentRunner, Reasoner) are DOMAIN ports —
-they live in src/domain/ports/ and are re-exported here so use cases,
+they live in agent_orchestrator/domain/ports/ and are re-exported here so use cases,
 adapters, and tests keep one import path. What remains defined here is
 app-specific: the TaskFailed signal, the transaction machinery
-(Outbox, UnitOfWork), and Sandbox (src/app/sandbox_port.py) — deliberately
+(Outbox, UnitOfWork), and Sandbox (agent_orchestrator/app/sandbox_port.py) — deliberately
 an APP port, not a domain one, per ROADMAP item 33: task-attempt OS
 confinement is an infra/execution concern the frozen domain must never know
 about.

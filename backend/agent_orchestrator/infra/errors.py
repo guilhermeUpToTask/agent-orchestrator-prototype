@@ -38,7 +38,7 @@ class AttemptNotFoundError(InfrastructureError):
 class CycleNotFoundError(InfrastructureError):
     """No such cycle on this plan. Follows AttemptNotFoundError: a lookup miss
     for a non-domain identifier still travels as a coded error, never a router
-    HTTPException — the status map in src/api/exceptions.py is the one table."""
+    HTTPException — the status map in agent_orchestrator/api/exceptions.py is the one table."""
 
     code = "CYCLE_NOT_FOUND"
 

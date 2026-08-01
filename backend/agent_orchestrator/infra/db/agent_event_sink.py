@@ -1,5 +1,5 @@
 """
-src/infra/db/agent_event_sink.py — SqliteAgentEventSink (the AgentEventSink port).
+agent_orchestrator/infra/db/agent_event_sink.py — SqliteAgentEventSink (the AgentEventSink port).
 
 Fine-grained agent runtime events are BEST-EFFORT telemetry: written on their
 own connection, never inside the plan UnitOfWork transaction — a telemetry

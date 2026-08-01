@@ -1,12 +1,12 @@
 """
-src/infra/runtime/dummy_runner.py — the agent_runner.mode=dry-run runtime.
+agent_orchestrator/infra/runtime/dummy_runner.py — the agent_runner.mode=dry-run runtime.
 
 DryRunAgentRunner adds deterministic workspace artifacts to the scriptable
 DummyAgentRunner. It implements the same AgentRunner port and raises TaskFailed
 with the same shared FailureKind taxonomy as real CLI runners, so dry-run flows
 exercise both verification and retry/terminal paths.
 
-The implementation lives in src/app/testing/fakes.py (the application layer may
+The implementation lives in agent_orchestrator/app/testing/fakes.py (the application layer may
 not import infra, so the sharing points this way); this module is the infra
 name the container wires.
 """

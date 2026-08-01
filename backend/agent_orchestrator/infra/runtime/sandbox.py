@@ -4,7 +4,7 @@ Not a placeholder to delete once a real adapter (e.g. BubblewrapSandbox, item
 34) exists: an environment without working OS-level confinement must keep
 running real-mode tasks rather than silently degrading or refusing to run,
 and `probe()` says so plainly rather than reporting a healthy sandbox.
-CliAgentRunner (src/infra/runtime/cli_runner.py) consumes whichever adapter
+CliAgentRunner (agent_orchestrator/infra/runtime/cli_runner.py) consumes whichever adapter
 it is given identically — it never branches on which one is active.
 """
 

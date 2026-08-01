@@ -12,11 +12,11 @@ Neither the REASONER nor the AGENT RUNNER is env-selected — both resolve from
 SQLite:
   reasoner       config key reasoner.mode (stub|llm) + the providers catalog +
                  the envelope-encrypted secret store
-                 (src/infra/reasoner/factory.py).
+                 (agent_orchestrator/infra/reasoner/factory.py).
   agent_runner   config key agent_runner.mode (dry-run|real); in real mode
                  each task resolves through the AGENT REGISTRY — the bound
                  AgentSpec's runtime_type + provider/model catalog rows
-                 (src/infra/runtime/factory.py).
+                 (agent_orchestrator/infra/runtime/factory.py).
 
 Environment is read ONLY here (the composition root) — never deep in the code.
 """

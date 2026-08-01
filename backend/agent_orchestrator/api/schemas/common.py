@@ -1,4 +1,4 @@
-"""src/api/schemas/common.py — Shared primitive DTOs."""
+"""agent_orchestrator/api/schemas/common.py — Shared primitive DTOs."""
 
 from __future__ import annotations
 

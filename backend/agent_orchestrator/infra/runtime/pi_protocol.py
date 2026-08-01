@@ -1,5 +1,5 @@
 """
-src/infra/runtime/pi_protocol.py — the pi stdio contract, isolated (roadmap 2.4).
+agent_orchestrator/infra/runtime/pi_protocol.py — the pi stdio contract, isolated (roadmap 2.4).
 
 PiAgentRunner runs pi in `--mode json`, whose stdout is an NDJSON stream of
 session events (message deltas, tool executions, usage). Only an allowlisted

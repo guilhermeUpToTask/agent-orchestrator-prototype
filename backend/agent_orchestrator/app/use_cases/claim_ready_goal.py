@@ -1,7 +1,7 @@
 """claim_ready_goal — the goal-level claim scan (ADR-001, domain unfreeze #13;
 symmetric-leases redesign, domain unfreeze #14).
 
-`GoalLeaseRepository.claim_one_ready_goal` (src/domain/repositories/goal_lease_repo.py)
+`GoalLeaseRepository.claim_one_ready_goal` (agent_orchestrator/domain/repositories/goal_lease_repo.py)
 is a pure claim primitive over ONE already-identified `(plan_id, goal_id)`
 pair — it does no scanning. "Which goal is ready" is derived from the Plan
 aggregate's JSON document (`navigation.ready_goal_ids`), not a SQL column, so

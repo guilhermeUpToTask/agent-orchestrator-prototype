@@ -1,12 +1,12 @@
 """
-src/infra/db/reference_repos.py — SQLite reference-data repositories.
+agent_orchestrator/infra/db/reference_repos.py — SQLite reference-data repositories.
 
 Implements the domain repository ports for the user-managed catalogs (agents,
 capabilities, providers, models, projects) plus the two-tier config store.
 Each operation runs in its own short transaction (run_in_session) — reference
 CRUD is not part of the plan UnitOfWork.
 
-Integrity rules (see src/domain/errors/README.md):
+Integrity rules (see agent_orchestrator/domain/errors/README.md):
 - delete-guard      -> ReferencedEntityInUseError while something active refers
                        to the entity.
 - cascade-down /    -> deleting a provider cascades to its models (FK CASCADE),

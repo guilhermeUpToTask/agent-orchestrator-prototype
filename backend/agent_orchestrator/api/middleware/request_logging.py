@@ -1,5 +1,5 @@
 """
-src/api/middleware/request_logging.py — correlation id + request lifecycle logs.
+agent_orchestrator/api/middleware/request_logging.py — correlation id + request lifecycle logs.
 
 A correlation id (``request_id``) is generated per request (or taken from an
 inbound ``X-Request-ID``), stored in a contextvar so handlers, loggers, and the

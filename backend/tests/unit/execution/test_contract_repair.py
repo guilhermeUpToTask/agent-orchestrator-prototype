@@ -117,7 +117,7 @@ def test_an_executable_check_contract_also_gets_somewhere_to_author():
 def test_a_repository_with_no_tests_cannot_supply_a_test_path():
     broken = contract(allowed_scope=["src/happy_path/greeter.py"])
 
-    assert propose_repair(broken, ["test author modified production paths"], ["src/app.py"]) is None
+    assert propose_repair(broken, ["test author modified production paths"], ["agent_orchestrator/app.py"]) is None
 
 
 @pytest.mark.parametrize(

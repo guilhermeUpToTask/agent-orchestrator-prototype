@@ -1,5 +1,5 @@
 """
-src/infra/reasoner/openai_reasoner.py — the real Reasoner (OpenAI-compatible).
+agent_orchestrator/infra/reasoner/openai_reasoner.py — the real Reasoner (OpenAI-compatible).
 
 Implements the purpose-specific domain port on the runtime package's agent loop:
 

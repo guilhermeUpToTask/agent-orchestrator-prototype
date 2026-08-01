@@ -1,5 +1,5 @@
 """
-src/infra/runtime/dependency_checker.py — probes the external tools the real
+agent_orchestrator/infra/runtime/dependency_checker.py — probes the external tools the real
 agent runtimes need (ported from the pre-refactor checker, minus Redis — the
 claim path is the SQLite lease now).
 

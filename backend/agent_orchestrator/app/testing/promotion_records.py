@@ -9,7 +9,7 @@ insertion-order fake would pass tests a SQLite-backed run fails.
 
 Reads are the one deliberate asymmetry, matching
 `InMemoryExecutionRecordRepository.list_runs`/`list_attempts`
-(src/app/testing/execution_records.py): `list_for_cycle` serves committed data
+(agent_orchestrator/app/testing/execution_records.py): `list_for_cycle` serves committed data
 outside a transaction rather than raising. `SqliteGoalPromotionRepository`
 raises unconditionally when unbound because it has no committed store to fall
 back to without a live session; production code always reads through a bound
