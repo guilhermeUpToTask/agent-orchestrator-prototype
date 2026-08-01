@@ -1,7 +1,7 @@
 """Coarse domain events — state transitions. Written to the outbox in the SAME
 transaction as the state change (transactional outbox), so state and event can
-never diverge. A relay (deferred) ships them to Redis later; consumers dedup on
-event_id."""
+never diverge. The API's outbox relay delivers them to the SSE stream
+at-least-once; consumers dedup on event_id."""
 
 from __future__ import annotations
 

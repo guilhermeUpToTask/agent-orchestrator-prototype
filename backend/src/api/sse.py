@@ -6,7 +6,7 @@ route and unregistered on disconnect — two browser tabs both receive every
 event instead of stealing from a shared queue.
 
 publish() is thread-safe: API routers run in the threadpool (sync handlers)
-and the Redis event bridge runs on its own thread, so off-loop callers are
+and the outbox relay runs on its own thread, so off-loop callers are
 the norm. The broker captures the event loop at lifespan startup and routes
 off-loop publishes through loop.call_soon_threadsafe.
 

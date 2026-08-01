@@ -42,19 +42,17 @@ def db() -> None:
 @catch_domain_errors
 def db_upgrade() -> None:
     """Apply migrations up to head for the ORCHESTRATOR_HOME database."""
-    from pathlib import Path
-
     from alembic import command
-    from alembic.config import Config
 
     from src.infra.container import AppContainer
     from src.infra.db.engine import db_url_for_home
+    from src.infra.db.migration_config import alembic_config
 
     container = AppContainer.from_env()
-    backend_root = Path(__file__).resolve().parents[3]
-    cfg = Config(str(backend_root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(backend_root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", db_url_for_home(container.orchestrator_home))
+    # Resolved from the PACKAGE, not the repository: an installed copy has no
+    # repository, and the old repo-relative lookup handed alembic its own
+    # library directory (see migration_config.py).
+    cfg = alembic_config(db_url_for_home(container.orchestrator_home))
     command.upgrade(cfg, "head")
     ok(f"database migrated to head under {container.orchestrator_home}")
 

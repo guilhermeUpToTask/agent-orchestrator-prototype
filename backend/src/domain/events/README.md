@@ -5,7 +5,8 @@ Two tiers, on purpose.
 ## Coarse events (`outbox.py`) — transactional
 State transitions (`TaskStarted`, `TaskCompleted`, `PlanFailed`, …). Written to the outbox
 in the **same transaction** as the state change (transactional outbox), so state and event
-can never diverge. A relay (deferred) ships them to Redis later.
+can never diverge. The API's outbox relay delivers them to the SSE stream
+(`GET /api/events`) at-least-once; consumers dedup on `event_id`.
 
 ## Fine events (`agent_events.py`) — best-effort
 Tool calls, steps, tokens streamed mid-run by the agent runner. **Not** transactional with
@@ -23,9 +24,9 @@ state; tagged by `attempt` so a re-run after a crash is distinguishable in the l
 An at-least-once relay can deliver the same event twice, so each consumer records processed
 `event_id`s and skips repeats (effectively-once). Example:
 
-> `TaskCompleted(event_id=X)` is written in the same DB txn as `task → DONE`. The relay ships
-> `X` to Redis but crashes before marking it sent. On restart it re-ships `X`. The consumer
-> sees `X` already processed and ignores it — no double side-effect.
+> `TaskCompleted(event_id=X)` is written in the same DB txn as `task → DONE`. The relay
+> publishes `X` to the SSE broker but crashes before marking it sent. On restart it re-ships
+> `X`. The consumer sees `X` already processed and ignores it — no double side-effect.
 
 ## Conventions
 - Events carry **no default log message**: they're pure typed data. Human-readable messages
