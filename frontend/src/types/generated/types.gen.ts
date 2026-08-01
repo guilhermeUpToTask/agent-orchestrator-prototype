@@ -1687,7 +1687,7 @@ export type ProviderCreateBody = {
     /**
      * Capacity Scope
      */
-    capacity_scope?: string | null;
+    capacity_scope?: 'per_model' | 'endpoint_wide' | null;
 };
 
 /**
@@ -1713,7 +1713,7 @@ export type ProviderUpdateBody = {
     /**
      * Capacity Scope
      */
-    capacity_scope?: string | null;
+    capacity_scope?: 'per_model' | 'endpoint_wide' | null;
 };
 
 /**

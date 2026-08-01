@@ -10,6 +10,11 @@ import styles from './DetailPanel.module.css';
 import { attemptLabel, verificationLabel } from '../lib/taskLabels';
 import type { ContractCriterion, Task, VerificationStrategy } from '../types/ui';
 import { currentPlanGoals } from '../lib/planTruth';
+import {
+  changedContractFields,
+  contractFormBaseline,
+  type ContractFormValues,
+} from '../lib/contractEdit';
 
 /**
  * The task inspector: everything the aggregate knows about one task —
@@ -201,15 +206,23 @@ export function DetailPanel() {
           task={task}
           pending={applyEdit.isPending}
           onCancel={() => setContractEditing(false)}
-          onSave={(fields) => applyEdit.mutate(
-            {
-              type: 'update_task_contract',
-              goal_id: goal.id,
-              task_id: task.id,
-              ...fields,
-            },
-            { onSuccess: () => setContractEditing(false) },
-          )}
+          onSave={(fields) => {
+            // A save with nothing changed is not a revision. Submitting it
+            // anyway would spend a mutable-task window on a no-op.
+            if (Object.keys(fields).length === 0) {
+              setContractEditing(false);
+              return;
+            }
+            applyEdit.mutate(
+              {
+                type: 'update_task_contract',
+                goal_id: goal.id,
+                task_id: task.id,
+                ...fields,
+              },
+              { onSuccess: () => setContractEditing(false) },
+            );
+          }}
         />
       )}
 
@@ -353,17 +366,6 @@ export function DetailPanel() {
   );
 }
 
-interface ContractFields {
-  objective: string;
-  acceptance_criteria: ContractCriterion[];
-  verification_strategy: VerificationStrategy;
-  allowed_scope: string[];
-  forbidden_scope: string[];
-  verification_commands: string[];
-  goal_criterion_ids: string[];
-  required_capabilities: string[];
-}
-
 function ContractEditor({
   task,
   pending,
@@ -372,7 +374,7 @@ function ContractEditor({
 }: {
   task: Task;
   pending: boolean;
-  onSave: (fields: ContractFields) => void;
+  onSave: (fields: Partial<ContractFormValues>) => void;
   onCancel: () => void;
 }) {
   const contract = task.contract!;
@@ -388,6 +390,10 @@ function ContractEditor({
   const [capabilities, setCapabilities] = React.useState(
     (contract.required_capabilities ?? task.required_capabilities).join('\n'),
   );
+
+  // The contract as loaded, normalized the way the form parses its text areas:
+  // the baseline every save diffs against, so an untouched field never travels.
+  const loaded = contractFormBaseline(contract, task.required_capabilities);
 
   const parsedCriteria = lines(criteria).map((line, index) => {
     const separator = line.indexOf('|');
@@ -441,7 +447,7 @@ function ContractEditor({
           variant="primary"
           disabled={!canSave}
           pending={pending}
-          onClick={() => onSave({
+          onClick={() => onSave(changedContractFields(loaded, {
             objective: objective.trim(),
             acceptance_criteria: parsedCriteria,
             verification_strategy: strategy,
@@ -450,7 +456,7 @@ function ContractEditor({
             forbidden_scope: lines(forbiddenScope),
             goal_criterion_ids: lines(goalCriterionIds),
             required_capabilities: lines(capabilities),
-          })}
+          }))}
         >
           Save contract revision
         </Button>

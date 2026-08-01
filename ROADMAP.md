@@ -861,17 +861,17 @@ all five are **first-run operator experience**, so they are scheduled here
 rather than left to preview evidence. Take them in Phase 6, before the install
 path is documented for anyone else:
 
-1. **Capacity DTOs have no bounds** (`max_inflight`): `0` is accepted and then
-   silently ignored while the UI displays it; a negative value is honoured and
-   declines every attempt forever, with no block and no circuit. Same class as
-   Phase 4's G6, one DTO over.
-2. **`capacity_scope` is an unvalidated free string** — a typo stores 201 and
-   degrades to `per_model` at every read.
+1. ~~**Capacity DTOs have no bounds**~~ — **fixed 2026-08-01.** `Field(ge=1)` on
+   all three bodies, `capacity_scope` narrowed to a `Literal`, and
+   `resolve_max_inflight` skips a non-positive candidate from any door
+   (including `execution.provider_max_inflight`, whose stored `"0"` is a truthy
+   string). Both failure modes locked on both backends.
+2. ~~**`capacity_scope` is an unvalidated free string**~~ — fixed with the above.
 3. **scp-style git remotes cannot be bound**, and the 422 blames a nonexistent
    local path. Decide: support the form, or refuse it by name.
-4. **The contract editor over-sends**, making every repair a semantic edit and
-   an unconditional agent rebind. Un-freeze #17's cheap `amend_contract` path
-   is unreachable from the UI.
+4. ~~**The contract editor over-sends**~~ — **fixed 2026-08-01.** The editor
+   diffs against the contract as loaded and submits only changed fields, so a
+   command-only repair no longer re-authors the tests or rebinds the agent.
 5. **The attempt-log resume offset is per batch, not per line**, so a
    disconnect between two frames of one read skips them.
 

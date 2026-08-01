@@ -7224,7 +7224,8 @@
           "max_inflight": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -8212,7 +8213,8 @@
           "max_inflight": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -8223,7 +8225,11 @@
           "capacity_scope": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "per_model",
+                  "endpoint_wide"
+                ]
               },
               {
                 "type": "null"
@@ -8264,7 +8270,8 @@
           "max_inflight": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -8275,7 +8282,11 @@
           "capacity_scope": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "per_model",
+                  "endpoint_wide"
+                ]
               },
               {
                 "type": "null"

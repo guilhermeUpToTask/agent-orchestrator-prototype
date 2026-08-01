@@ -163,6 +163,28 @@ class RoutingPolicy:
         return self.tier_rank(model_role) <= self.tier_rank(self.downgrade_floor_role)
 
 
+def resolve_max_inflight(
+    *, model_cap: int | None, provider_cap: int | None, default: int
+) -> int:
+    """The in-flight ceiling for one routed model: model row, else provider row,
+    else the operator's global default.
+
+    A NON-POSITIVE candidate is skipped rather than honoured. Admission is
+    `inflight >= cap` (`ExecutionHandler`), so a stored `0` or `-1` declines
+    every attempt with nothing in flight — and because a declined admission
+    opens no circuit and no block, the plan waits forever with nothing for an
+    operator to look at. The API now refuses such a value on write, but rows
+    written before that bound still exist, and
+    `execution.provider_max_inflight` arrives as a STRING whose `"0"` is truthy,
+    so neither door can be trusted to have filtered it. Skipping it here means
+    the worst an unusable value can do is fall back to a working one.
+    """
+    for candidate in (model_cap, provider_cap, default):
+        if candidate is not None and candidate > 0:
+            return candidate
+    return ProviderCapacityPolicy().max_inflight
+
+
 def resolve_capacity_scope(raw: str | None) -> CapacityScope:
     """A provider row's declared scope, tolerating unset and unrecognized values.
 

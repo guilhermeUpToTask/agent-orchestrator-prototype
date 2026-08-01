@@ -11,6 +11,7 @@ from src.app.provider_capacity import (
     circuit_model_id,
     circuit_ref,
     parse_circuit_ref,
+    resolve_max_inflight,
 )
 from src.app.runtime_failures import LimitScope
 from src.domain.policies.retry_policies import RetryPolicy
@@ -198,3 +199,46 @@ def test_a_non_capacity_failure_is_unaffected_by_the_scope_lookup():
     assert capacity_backoff_seconds(
         _CURVE, 3, kind=FailureKind.TOOL_ERROR, limit_scope=None
     ) == _CURVE.backoff_for(3, kind=FailureKind.TOOL_ERROR)
+
+
+# ── effective in-flight cap ───────────────────────────────────────────────────
+#
+# A non-positive override is not a limit an operator can have meant: `0` would
+# refuse every attempt and a negative one refuses them harder, and neither opens
+# a circuit or a block, so the plan waits forever with nothing to look at. The
+# API refuses such a value on write; these rows can still exist from before that
+# bound, so the resolver must not honour them either.
+
+
+def test_a_model_override_wins_over_the_provider_and_the_default():
+    assert resolve_max_inflight(model_cap=2, provider_cap=5, default=8) == 2
+
+
+def test_a_provider_override_wins_over_the_default():
+    assert resolve_max_inflight(model_cap=None, provider_cap=5, default=8) == 5
+
+
+def test_the_default_applies_when_neither_row_declares_one():
+    assert resolve_max_inflight(model_cap=None, provider_cap=None, default=8) == 8
+
+
+@pytest.mark.parametrize("bad", [0, -1, -8])
+def test_a_non_positive_model_override_falls_through_to_the_provider(bad):
+    assert resolve_max_inflight(model_cap=bad, provider_cap=5, default=8) == 5
+
+
+@pytest.mark.parametrize("bad", [0, -1, -8])
+def test_a_non_positive_provider_override_falls_through_to_the_default(bad):
+    """The wedge this exists to prevent: admission is `inflight >= cap`, so a
+    stored `-1` declined every attempt with nothing in flight."""
+    assert resolve_max_inflight(model_cap=None, provider_cap=bad, default=8) == 8
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_a_non_positive_default_falls_back_to_the_policy_default(bad):
+    """Reached through `execution.provider_max_inflight`, whose stored value is a
+    STRING — so the factory's `or` never saw a falsy `0` and passed it straight
+    through."""
+    assert resolve_max_inflight(model_cap=None, provider_cap=None, default=bad) == (
+        ProviderCapacityPolicy().max_inflight
+    )
