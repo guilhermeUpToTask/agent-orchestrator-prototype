@@ -12,6 +12,17 @@ reproduced against the real API or the real tail reader before being written
 down; each entry carries the reproduction so a fix can turn it straight into a
 regression test.
 
+**This file is the single home for deferred defects.** On 2026-08-01 the
+issue-shaped deferrals that had accumulated in `ROADMAP.md` — goal-promotion
+first-failure behaviour, the missing contract-boundary control point,
+boot-time-only reasoner config, `planning_artifacts` retention, and the P4.3
+evidence-on-edit finding — were moved here with their mechanisms and their
+options intact. `ROADMAP.md` keeps only the scheduling decision and a pointer,
+per its own rule that verified unresolved defects are not duplicated there.
+What did NOT move: work that is a missing *feature* rather than a defect
+(forge publication, `ProjectSpec`, sandboxing, an operator skip/abandon
+command) stays in Phase 8, where it is scheduled against preview evidence.
+
 ## Lifecycle compatibility
 
 - `PlanPhase`, the legacy conversation/control routes, and root `goals`
@@ -31,6 +42,41 @@ regression test.
   authenticated GitHub/forge publication port, and this refactor deliberately
   did not invent provider-specific push/PR behavior or perform an unauthorized
   external write.
+- **Goal promotion fails closed on the first exception, including a transient
+  one.** `goal_promotion_failure` opens on the FIRST exception out of
+  `merge_goal` — a transient git or filesystem error included — with no retry,
+  and advertises exactly one resolution, `start_replan`: the whole-cycle hammer
+  for what may be a momentary lock. It is the only block kind with **no
+  observed run evidence**; `fixtures/parallel-goals-v1` exists to provoke it
+  (two independent goals, one cycle branch, so the second merge runs against a
+  base the first already moved) and passes — under dry-run each task writes its
+  own artifact, so two goals never touch the same file. A genuine conflict
+  needs Tier 1 with two goals over overlapping scope.
+  The smallest honest fix is to retry a merge that failed for a transient
+  reason before blocking, and to stop advertising `start_replan` as the only
+  way out of a git error a retry would clear. The *full* repair — rebase the
+  goal branch onto the moved cycle branch and re-merge — is deliberately not
+  built, and is Phase 8 work rather than a patch: promotion runs no
+  verification of its own (`_reserve_goal_promotion` only checks each task is
+  DONE with accepted evidence, produced per task, on the task branch, against
+  an OLDER base), so rebasing recombines verified code with code it was never
+  tested against and would need a goal-level re-verification step that has
+  never existed. Skipping that would move unverified work upward.
+- **Accepted evidence is deleted on edit, never retained as superseded.**
+  `Task.semantic_edit` is the only path that bumps `Task.revision`, and it
+  clears `verification_evidence` outright. A task carrying accepted evidence is
+  also necessarily DONE (`accept_verification` and `complete_task` are atomic),
+  and `_assert_task_mutable` refuses an edit on a DONE task — so the edit
+  returns 409 and no revision bump ever occurs. `Plan.reopen_task` exists on the
+  aggregate but nothing in `src/app` calls it.
+  Consequence: the evidence read model's `superseded_evidence_count` and its
+  `task_revision == task.revision` filter are unreachable today. **Both are
+  kept deliberately** — insurance on the endpoint's central claim. If the
+  domain is ever changed to retain evidence across a revision bump, that filter
+  is what stops the endpoint serving stale evidence as accepted on day one. Do
+  not delete either as dead code without reading this entry. Whether superseded
+  evidence *should* be retained-and-marked rather than deleted is a
+  frozen-domain question needing a decision-log entry and an un-freeze.
 - Execution attempts have global UUIDs and monotonic absolute numbers, but the
   execution ledger does not yet promote `run_kind` as a dedicated SQL column.
   Role identity is present in the orchestration path and separate invocations,
@@ -122,6 +168,30 @@ treatment.
   the presence-based routing is what lets an API client ask for exactly one
   effect.
 
+## Configuration staleness
+
+- **Every `reasoner.*` config key is boot-time only, and the write that has no
+  effect still reports success.** `AppContainer.reasoner` is a
+  `@cached_property` and the worker resolves it once at startup, so `mode`,
+  `provider_id`, `model_id`, `temperature` and `max_turns` take effect only
+  after a worker restart. `PUT /api/config/orchestrator/...` returns success,
+  `GET /api/reasoner/status` reports the new value (the API process builds its
+  own container), and the worker keeps using what it booted with. Found while
+  building `planning-recovery-v1`, whose whole mechanism is changing
+  `reasoner.max_turns` mid-run: the change was accepted and silently ignored.
+  The caching is deliberate — rebuilding per tick would re-read the secret
+  store and re-resolve the catalog on every poll — so this is a **staleness
+  decision, not a bug to patch blindly**. The options, smallest last: a
+  generation counter on the config table the worker compares each tick and
+  invalidates on change; invalidation scoped to the keys that are safe to swap
+  mid-flight (a model swap between attempts is fine, a mode swap mid-session is
+  not); or leave it boot-time and say so in `GET /api/reasoner/status` and the
+  config write response, so an operator is told a restart is required instead
+  of watching a successful write do nothing. The last is the smallest honest
+  fix and probably the right first move.
+  The same question applies to `agent_runner.*`, which resolves per task per
+  run and is therefore probably already live — verify rather than assume.
+
 ## Operational visibility
 
 - A dead worker's orphan is no longer indistinguishable from live work: plan
@@ -189,6 +259,26 @@ treatment.
   nothing wrong with it. The per-scope backoff curve fixed how long each wait
   is, not whether the attempt is charged. Making it budget-neutral inside a
   wall-clock bound is a capacity-policy decision, not a patch.
+- **Nothing can hold a plan at the contract boundary.** A worker enriches a
+  goal and executes its first task under ONE claim, and the pause gate blocks
+  *claims* — so arming a pause before enrichment stops enrichment too, and
+  arming it afterwards is unwinnable: there is no window. A plan sitting at a
+  review gate is `waiting` and cannot be paused at all. Net effect: nothing
+  outside the process can hold a plan between "the contract is frozen" and "an
+  agent is running against it". Found while building a live fixture for
+  contract repair (un-freeze #17), which needs exactly that boundary; priced
+  concretely by `contract-repair-v1`, which must win a race for the window and
+  so is a paid Tier 1 test that succeeds about half the time instead of a free
+  deterministic one. The behaviour is arguably correct — the JIT loop exists to
+  avoid planning work nobody asked for — but a whole class of contract-level
+  operator scenario can then only be tested by stopping the worker, which is
+  outside an API-only walkthrough. Those scenarios are covered at the
+  orchestration level instead
+  (`tests/unit/orchestration/test_contract_editing.py` drives both handlers a
+  step at a time, on both backends). If it is picked up, the smallest useful
+  lever is a review-gate-like hold at the contract boundary, opt-in per plan so
+  the JIT loop stays the default — not a general "pause between units", which
+  would turn every unit boundary into a scheduling decision.
 - **Never write a `PlanningArtifact` from inside an open plan transaction.** The
   store keeps its own short transaction so records survive a rollback, which
   means a second SQLite connection; WAL allows one writer, so the plan
@@ -196,7 +286,7 @@ treatment.
   neither can proceed. `ExecutionHandler` queues and flushes after the
   transaction closes — new call sites must do the same.
 
-## Git/process cleanup
+## Retention and cleanup
 
 - Owned process groups are terminated and reaped on success, failure, timeout,
   discard, and stale results. Worker startup now prunes and audits worktrees, but
@@ -205,6 +295,24 @@ treatment.
 - Authoritative test checkpoint branch refs are retained after implementation
   forks from their immutable commit. They preserve auditability but need a
   retention policy for long-running repositories.
+- **`planning_artifacts` grows without bound, deliberately.** Migration 0014
+  keeps what a failed planning attempt produced so the retry starts better
+  informed, and nothing prunes it. That is an accepted deferral, not an
+  oversight: reads are already bounded — keyed by `(plan_id, purpose, goal_id)`
+  with `limit=5`, served by `ix_planning_artifacts_lookup` — so growth costs
+  storage, never read latency or correctness; a replan mints new goal ids
+  (`activate_cycle`), so a superseded cycle's rows become permanently
+  *unreachable* rather than wrong; and `ON DELETE CASCADE` from `plans` already
+  collects them when a plan is deleted. A long-lived plan through several
+  replans therefore accumulates rows nothing will ever read again.
+  What a retention sweep would have to decide: last N attempts per
+  `(plan, purpose, goal)` versus an age bound; whether `committed` outcomes are
+  worth keeping once the contract they produced is frozen; and whether pruning
+  belongs in the store's `append` (cheap, amortised) or a maintenance command
+  (visible, operator-triggered). **Do not add a background sweeper** — this
+  codebase has no scheduler, and inventing one for garbage collection is
+  exactly the coordination infrastructure the roadmap forbids without run
+  evidence.
 
 ## Operator walkthrough and documentation
 
