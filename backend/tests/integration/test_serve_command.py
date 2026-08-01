@@ -57,6 +57,26 @@ def _wait_for(url: str, deadline_seconds: float = 45.0):
     raise AssertionError(f"{url} never answered: {last}")
 
 
+def _children_of(pid: int) -> list[int]:
+    listing = subprocess.run(
+        ["ps", "-o", "pid=", "--ppid", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return [int(line) for line in listing.stdout.split() if line.strip()]
+
+
+def _is_running(pid: int) -> bool:
+    """Alive and not a zombie. A reaped-but-unwaited child still answers to
+    signal 0, so `os.kill(pid, 0)` alone would call a corpse a leak."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
 @pytest.fixture
 def served(tmp_path):
     """The real `orchestrate serve`, on a free port, in its own process group."""
@@ -131,3 +151,31 @@ def test_it_migrates_the_state_directory_it_was_given(served) -> None:
 
     assert (home / "orchestrator.db").is_file()
     assert _get(f"http://127.0.0.1:{port}/api/plans") == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_sigterm_to_serve_takes_the_worker_with_it(served) -> None:
+    """SIGTERM to `serve` alone — the shape every process manager uses, and the
+    one no other test covers because they all tear down by process GROUP.
+
+    uvicorn captures SIGTERM, drains, restores the previous handler and then
+    re-raises the signal, so the process dies *inside* `uvicorn.run()` and the
+    `finally` that reaps the worker never executes. The API stops, the worker
+    lives on against the same state directory: it keeps claiming plans, keeps
+    spending provider tokens, and the next `serve` puts a second worker beside
+    it. Nothing on the control plane can report it, because the control plane
+    is the half that exited.
+    """
+    process, port, _home = served
+    _wait_for(f"http://127.0.0.1:{port}/health")
+    workers = _children_of(process.pid)
+    assert workers, "serve started no worker subprocess to begin with"
+
+    process.terminate()  # the supervisor only — NOT os.killpg
+    process.wait(timeout=45)
+
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline and any(_is_running(pid) for pid in workers):
+        time.sleep(0.5)
+    leaked = [pid for pid in workers if _is_running(pid)]
+    assert not leaked, f"worker survived its supervisor: {leaked}"

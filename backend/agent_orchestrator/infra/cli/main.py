@@ -1,5 +1,5 @@
 """
-src/infra/cli/main.py — the orchestrate CLI (fundamental commands only,
+agent_orchestrator/infra/cli/main.py — the orchestrate CLI (fundamental commands only,
 roadmap 4.2).
 
     orchestrate db upgrade                  run migrations to head
@@ -80,7 +80,7 @@ def api_start(host: str, port: int) -> None:
     # No uvicorn access log: RequestLoggingMiddleware already records every
     # request structurally (path only — never the query string), and /api/events
     # carries the API token in its query string because EventSource cannot send
-    # headers. See src/api/security.py::require_api_token_or_query.
+    # headers. See agent_orchestrator/api/security.py::require_api_token_or_query.
     uvicorn.run(create_app(), host=host, port=port, access_log=False)
 
 
@@ -123,6 +123,7 @@ def serve(
     crashed or wedged worker be seen and restarted without taking the control
     plane down with it.
     """
+    import signal
     import subprocess
     import sys
 
@@ -164,21 +165,43 @@ def serve(
         )
         ok(f"worker {worker_id} started (pid {child.pid})")
 
+    def stop_worker() -> None:
+        if child is None or child.poll() is not None:
+            return
+        child.terminate()
+        try:
+            child.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=10)
+
+    def stop_worker_then_die(signum: int, _frame: object) -> None:
+        # uvicorn captures SIGINT/SIGTERM itself: it drains, restores whatever
+        # handler was installed before it ran, and then RE-RAISES the signal.
+        # So this runs after the API is fully down -- and it is the only place
+        # the worker can still be reaped, because that re-raise kills this
+        # process from inside `uvicorn.run()` and the `finally` below never
+        # executes. Without it, `kill <pid>` (systemd, a supervisor, any
+        # process manager) stops the API and leaves the worker running against
+        # the same state directory, where the next `serve` puts a second one
+        # beside it. Ctrl-C hides the bug: the terminal signals the whole
+        # process group, so the worker gets its own SIGINT.
+        stop_worker()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    for stop_signal in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(stop_signal, stop_worker_then_die)
+
     ok(f"http://{host}:{port}")
     try:
         # access_log off for the same reason as `api start`: the structured
         # middleware already records every request, path only.
         uvicorn.run(create_app(), host=host, port=port, access_log=False)
     finally:
-        if child is not None and child.poll() is None:
-            # The worker finishes its current atomic action before exiting, so
-            # give it room rather than killing work that is mid-flight.
-            child.terminate()
-            try:
-                child.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=10)
+        # Reached when uvicorn returns without a signal (a bind failure, an
+        # unhandled startup error). The signal path above cannot get here.
+        stop_worker()
 
 
 @cli.group()
