@@ -30,6 +30,7 @@ from fastapi.routing import APIRoute
 
 from src.api.dependencies import get_container, set_container
 from src.api.exceptions import register_exception_handlers
+from src.api.frontend import bundle_dir, mount_frontend
 from src.api.logging.config import configure_logging
 from src.api.middleware.request_logging import RequestLoggingMiddleware
 from src.api.outbox_relay import run_outbox_relay
@@ -165,5 +166,11 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     )
     def health() -> HealthResponse:
         return HealthResponse(status="ok", version=_API_VERSION)
+
+    # LAST, deliberately: the SPA fallback answers any unmatched path, so every
+    # API route and /health must already be registered or the fallback would
+    # swallow them. Absent in a source checkout that has not built the UI.
+    if mount_frontend(app):
+        log.info("api.frontend_mounted", path=str(bundle_dir()))
 
     return app

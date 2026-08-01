@@ -47,6 +47,10 @@ artifacts = [
     "src/infra/db/migrations/env.py",
     "src/infra/db/migrations/script.py.mako",
     "src/infra/db/migrations/versions/*.py",
+    # The built UI, staged by scripts/build_frontend.sh. Git-ignored and absent
+    # in a source checkout: the API serves it only when present, so a wheel
+    # built without it is a working backend, not a broken install.
+    "src/api/static/**/*",
 ]
 
 [tool.pytest.ini_options]
