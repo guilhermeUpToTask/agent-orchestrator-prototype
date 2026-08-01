@@ -109,6 +109,12 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      # These existed but had never run in CI: the Phase 5 API-contract tests,
+      # the plan-truth derivations and the settings interaction tests all
+      # verified locally and nowhere else.
+      - name: Frontend tests
+        run: npm run test
+
       - name: Regenerate API types
         run: |
           export PATH="${{ github.workspace }}/backend/.venv/bin:$PATH"
