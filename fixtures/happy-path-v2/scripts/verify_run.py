@@ -14,9 +14,10 @@ Exit 0 when every check for the requested tier passes, 1 when any fails, 2 on a
 collection error (unreachable API, missing repo) — a failed check and a broken
 harness are different findings and must not share an exit code.
 
-Reads only: ``GET /api/plans/{id}`` and ``git``. Nothing here mutates a plan, a
-branch, or the database. ``--json`` emits the machine-readable result for a run
-directory; the default output is the operator checklist.
+Reads only: ``GET /api/plans/{id}``,
+``GET /api/plans/{id}/cycles/{cycle_id}/evidence``, and ``git``. Nothing here
+mutates a plan, a branch, or the database. ``--json`` emits the machine-readable
+result for a run directory; the default output is the operator checklist.
 
 The judgement layer (``evaluate_plan`` / ``evaluate_git``) is pure over plain
 dicts, so ``backend/tests/integration/test_happy_path_fixture.py`` exercises the
@@ -334,20 +335,34 @@ def evaluate_git(facts: GitFacts) -> list[Check]:
 # --------------------------------------------------------------------------
 
 
-def fetch_plan(base_url: str, plan_id: str, token: str | None) -> dict[str, Any]:
-    request = urllib.request.Request(f"{base_url.rstrip('/')}/api/plans/{plan_id}")
+def _fetch_object(base_url: str, path: str, token: str | None) -> dict[str, Any]:
+    request = urllib.request.Request(f"{base_url.rstrip('/')}{path}")
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.loads(response.read().decode())
     except urllib.error.HTTPError as exc:  # noqa: PERF203 - one call, one message
-        raise CollectionError(f"GET /api/plans/{plan_id} returned HTTP {exc.code}") from exc
+        raise CollectionError(f"GET {path} returned HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise CollectionError(f"cannot reach the API at {base_url}: {exc}") from exc
     if not isinstance(payload, dict):
-        raise CollectionError("plan detail response was not an object")
+        raise CollectionError(f"GET {path} response was not an object")
     return payload
+
+
+def fetch_plan(base_url: str, plan_id: str, token: str | None) -> dict[str, Any]:
+    return _fetch_object(base_url, f"/api/plans/{plan_id}", token)
+
+
+def fetch_cycle_evidence(
+    base_url: str, plan_id: str, cycle_id: str, token: str | None
+) -> dict[str, Any]:
+    return _fetch_object(
+        base_url,
+        f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence",
+        token,
+    )
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -375,7 +390,7 @@ def _git_ok(repo: Path, *args: str) -> bool:
     )
 
 
-def collect_git_facts(repo: Path, cycle_id: str, goal_ids: list[str]) -> GitFacts:
+def collect_git_facts(repo: Path, evidence: dict[str, Any]) -> GitFacts:
     if not (repo / ".git").exists():
         raise CollectionError(f"not a git repository: {repo}")
 
@@ -386,9 +401,39 @@ def collect_git_facts(repo: Path, cycle_id: str, goal_ids: list[str]) -> GitFact
     except CollectionError:
         orchestrator_repo = None
 
+    promotions = [
+        goal["promotion"]
+        for goal in evidence.get("goals", [])
+        if goal.get("promotion") is not None
+    ]
+    if not promotions:
+        raise CollectionError("a completed cycle did not report any promoted goal refs")
+
+    into_refs = {promotion["into_ref"] for promotion in promotions}
+    if len(into_refs) != 1:
+        raise CollectionError(
+            f"one cycle reported inconsistent promotion targets: {sorted(into_refs)}"
+        )
+
+    # Verify the refs the API CLAIMS, not ones reconstructed from a naming
+    # convention. A reconstruction can only confirm the convention agrees with
+    # itself.
+    cycle_branch = into_refs.pop()
+    goal_branches: dict[str, bool] = {}
+    unmerged: list[str] = []
+    for promotion in promotions:
+        from_ref = promotion["from_ref"]
+        into_ref = promotion["into_ref"]
+        merge_sha = promotion["merge_sha"]
+        _git(repo, "rev-parse", "--verify", from_ref)
+        _git(repo, "rev-parse", "--verify", into_ref)
+        _git(repo, "cat-file", "-e", merge_sha)
+        goal_branches[from_ref] = True
+        if not _git_ok(repo, "merge-base", "--is-ancestor", from_ref, into_ref):
+            unmerged.append(from_ref)
+
     default_branch = os.environ.get("HAPPY_PATH_DEFAULT_BRANCH", "main")
-    cycle_branch = f"cycle/{cycle_id}"
-    cycle_exists = _git_ok(repo, "rev-parse", "--verify", "--quiet", cycle_branch)
+    cycle_exists = True
     seed_exists = _git_ok(repo, "rev-parse", "--verify", "--quiet", SEED_TAG)
 
     diff_paths: list[str] = []
@@ -397,20 +442,6 @@ def collect_git_facts(repo: Path, cycle_id: str, goal_ids: list[str]) -> GitFact
         default_sha = _git(repo, "rev-parse", default_branch)
         raw = _git(repo, "diff", "--name-only", SEED_TAG, default_branch)
         diff_paths = [line for line in raw.splitlines() if line]
-
-    goal_branches: dict[str, bool] = {}
-    unmerged: list[str] = []
-    for goal_id in goal_ids:
-        branch = f"goal/{goal_id}"
-        exists = _git_ok(repo, "rev-parse", "--verify", "--quiet", branch)
-        goal_branches[branch] = exists
-        if not exists:
-            # A goal branch is deleted after promotion in some flows; absence is
-            # only a finding when the cycle branch does not contain its work, and
-            # we cannot tell that without the ref. Report it, do not guess.
-            unmerged.append(f"{branch} (branch missing)")
-        elif cycle_exists and not _git_ok(repo, "merge-base", "--is-ancestor", branch, cycle_branch):
-            unmerged.append(branch)
 
     descends = bool(
         cycle_exists
@@ -514,14 +545,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        plan = fetch_plan(args.api, args.plan_id, os.environ.get("ORCHESTRATOR_API_TOKEN"))
+        token = os.environ.get("ORCHESTRATOR_API_TOKEN")
+        plan = fetch_plan(args.api, args.plan_id, token)
         checks = evaluate_plan(plan, args.cycle_id)
 
         cycle = _terminal_cycle(plan, args.cycle_id)
         if cycle is not None and not args.skip_git:
             repo = Path(args.repo).expanduser()
-            goal_ids = [g["id"] for g in (cycle.get("goals") or [])]
-            facts = collect_git_facts(repo, cycle["id"], goal_ids)
+            evidence = fetch_cycle_evidence(args.api, args.plan_id, cycle["id"], token)
+            facts = collect_git_facts(repo, evidence)
             checks.extend(evaluate_git(facts))
             if args.tier == 1 and facts.cycle_branch_exists:
                 checks.append(

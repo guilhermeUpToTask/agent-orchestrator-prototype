@@ -542,6 +542,33 @@ export type CycleDraftRequest = {
 };
 
 /**
+ * CycleEvidenceResponse
+ */
+export type CycleEvidenceResponse = {
+    /**
+     * Plan Id
+     */
+    plan_id: string;
+    /**
+     * Cycle Id
+     */
+    cycle_id: string;
+    /**
+     * Cycle Status
+     */
+    cycle_status: string;
+    /**
+     * Goals
+     */
+    goals: Array<GoalEvidenceResponse>;
+    disposition: DispositionResponse | null;
+    /**
+     * Unattributed Evidence Refs
+     */
+    unattributed_evidence_refs: Array<string>;
+};
+
+/**
  * CycleStatus
  */
 export type CycleStatus = 'active' | 'completed' | 'superseded' | 'cancelled';
@@ -554,6 +581,20 @@ export type DefaultAgentResponse = {
      * Agent Id
      */
     agent_id: string | null;
+};
+
+/**
+ * DispositionResponse
+ */
+export type DispositionResponse = {
+    /**
+     * Disposition
+     */
+    disposition: string;
+    /**
+     * Output Reference
+     */
+    output_reference: string | null;
 };
 
 /**
@@ -625,6 +666,52 @@ export type EditRequest = {
      * Goal Criterion Ids
      */
     goal_criterion_ids?: Array<string> | null;
+};
+
+/**
+ * EvidenceResponse
+ */
+export type EvidenceResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Task Revision
+     */
+    task_revision: number;
+    /**
+     * Verification Kind
+     */
+    verification_kind: string;
+    /**
+     * Exact Command
+     */
+    exact_command: string;
+    /**
+     * Exit Code
+     */
+    exit_code: number;
+    /**
+     * Candidate Commit Sha
+     */
+    candidate_commit_sha: string;
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * Bounded Output Ref
+     */
+    bounded_output_ref: string;
+    /**
+     * Finished At
+     */
+    finished_at: string;
 };
 
 /**
@@ -823,6 +910,25 @@ export type GoalContract = {
      * Frozen At
      */
     frozen_at: string;
+};
+
+/**
+ * GoalEvidenceResponse
+ */
+export type GoalEvidenceResponse = {
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Status
+     */
+    status: string;
+    promotion: PromotionResponse | null;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskEvidenceResponse>;
 };
 
 /**
@@ -1503,9 +1609,60 @@ export type ProjectReadinessResponse = {
 };
 
 /**
+ * PromotionResponse
+ */
+export type PromotionResponse = {
+    /**
+     * From Ref
+     */
+    from_ref: string;
+    /**
+     * Into Ref
+     */
+    into_ref: string;
+    /**
+     * Merge Sha
+     */
+    merge_sha: string;
+    /**
+     * Promoted At
+     */
+    promoted_at: string;
+};
+
+/**
  * ProposalKind
  */
 export type ProposalKind = 'initial' | 'replan';
+
+/**
+ * ProtectedScopeResponse
+ *
+ * The two halves an operator previously joined by hand: what the task was
+ * allowed to touch, and what it was forbidden to weaken.
+ */
+export type ProtectedScopeResponse = {
+    /**
+     * Allowed Scope
+     */
+    allowed_scope: Array<string>;
+    /**
+     * Forbidden Scope
+     */
+    forbidden_scope: Array<string>;
+    /**
+     * Protected File Hashes
+     */
+    protected_file_hashes: {
+        [key: string]: string;
+    };
+    /**
+     * Criterion To Tests
+     */
+    criterion_to_tests: {
+        [key: string]: Array<string>;
+    };
+};
 
 /**
  * ProviderCreateBody
@@ -2125,6 +2282,38 @@ export type TaskContract = {
 };
 
 /**
+ * TaskEvidenceResponse
+ */
+export type TaskEvidenceResponse = {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Status
+     */
+    status: string;
+    protected_scope: ProtectedScopeResponse | null;
+    test_bundle: TestBundleResponse | null;
+    /**
+     * Accepted Evidence
+     */
+    accepted_evidence: Array<EvidenceResponse>;
+    /**
+     * Rejected Evidence Count
+     */
+    rejected_evidence_count: number;
+    /**
+     * Superseded Evidence Count
+     */
+    superseded_evidence_count: number;
+};
+
+/**
  * TaskExecutionTimelineResponse
  */
 export type TaskExecutionTimelineResponse = {
@@ -2233,6 +2422,24 @@ export type TestBundle = {
      * Invalidation Reason
      */
     invalidation_reason?: string | null;
+};
+
+/**
+ * TestBundleResponse
+ */
+export type TestBundleResponse = {
+    /**
+     * Test Commit Sha
+     */
+    test_commit_sha: string;
+    /**
+     * State
+     */
+    state: string;
+    /**
+     * Verification Strategy
+     */
+    verification_strategy: string;
 };
 
 /**
@@ -5099,6 +5306,50 @@ export type WorkersListWorkersResponses = {
 };
 
 export type WorkersListWorkersResponse = WorkersListWorkersResponses[keyof WorkersListWorkersResponses];
+
+export type EvidenceGetCycleEvidenceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Cycle Id
+         */
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycles/{cycle_id}/evidence';
+};
+
+export type EvidenceGetCycleEvidenceErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EvidenceGetCycleEvidenceError = EvidenceGetCycleEvidenceErrors[keyof EvidenceGetCycleEvidenceErrors];
+
+export type EvidenceGetCycleEvidenceResponses = {
+    /**
+     * Successful Response
+     */
+    200: CycleEvidenceResponse;
+};
+
+export type EvidenceGetCycleEvidenceResponse = EvidenceGetCycleEvidenceResponses[keyof EvidenceGetCycleEvidenceResponses];
 
 export type EventsStreamEventsData = {
     body?: never;

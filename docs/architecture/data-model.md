@@ -2,7 +2,7 @@
 
 *One SQLite file holds everything. The plan is a document; the catalogs are relational; secrets are envelope-encrypted.*
 
-Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0010_operational_recovery`).
+Code anchors: `backend/src/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `goal_promotion_repository.py` (promoted git refs), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/alembic/versions/` (the migration chain, currently through `0017_goal_promotions`).
 
 ## Schema at a glance
 
@@ -72,6 +72,16 @@ erDiagram
         text safe_message
         text stdout_tail
         text stderr_tail
+    }
+    goal_promotions {
+        string id PK
+        string plan_id FK
+        string cycle_id
+        string goal_id
+        string from_ref "stored, never reconstructed"
+        string into_ref "stored, never reconstructed"
+        string merge_sha
+        string promoted_at
     }
     planning_operations {
         string id PK
@@ -187,6 +197,7 @@ erDiagram
     plans ||--o{ plan_requests : "idempotency"
     plans ||--o{ execution_runs : "operational lifecycle"
     plans ||--o{ execution_attempts : "correlation"
+    plans ||--o{ goal_promotions : "successful goal-to-cycle merges"
     execution_runs ||--o{ execution_attempts : "invocations"
     plans ||--o{ planning_operations : "operational ledger"
     plans ||--o{ plan_chat_messages : "conversation"
@@ -200,6 +211,8 @@ erDiagram
 The `Plan` aggregate — goals, tasks, results, retry policy, everything — is stored as **one JSON document** in `plans.data`. Scalar columns are promoted *only* for what SQL must predicate on: the claim query (`status`, `pause_requested`, `lease_expires_at` — index `ix_plans_claim`), the version CAS, and cheap listings (`updated_at`, `iteration`). `plans.project_id` is a nullable FK to `projects.id`, guarded by the partial unique index `uq_plans_project_id` (`WHERE project_id IS NOT NULL`) — a project binds to **at most one** plan at a time. `plans.status` is a coarser, worker-claim-oriented projection distinct from the nine-phase `phase` enum; `paused`/`pause_requested`/`retry_not_before` project the domain pause gate and planning backoff gate so they survive crashes. There is no ORM mapping of the domain; repositories do JSON in / JSON out via `PlanFactory.reconstruct`.
 
 `execution_runs` and `execution_attempts` are deliberately outside that document. They are operational application records, not aggregates: a logical run spans automatic retries, while every actual invocation gets a UUID attempt plus a task-lifetime monotonic number. A human retry starts a new run without reusing the workspace attempt number. `execution_attempts` also carries the runtime-resolution snapshot for the invocation (`runtime`, `provider_id`, `model_id`, `timeout_seconds`, `last_liveness_at`) and the taxonomy/evidence captured on completion (`failure_kind`, `provider_code`, `retryable`, `retry_at`, `limit_scope`, `exit_code`, `safe_message`, `stdout_tail`, `stderr_tail`).
+
+`goal_promotions` records one row per successful goal→cycle promotion. It stores the `from_ref` and `into_ref` the workspace adapter actually merged, plus the merge SHA and timestamp, rather than reconstructing branch names later. The row is written inside the same plan-finalize transaction that completes the goal, and `plan_id` uses `ON DELETE CASCADE`. Migration `0017_goal_promotions` deliberately performs no backfill: older cycles retain their untyped `Cycle.evidence_refs` and the cycle evidence API reports those as `unattributed_evidence_refs` instead of guessing goal attribution.
 
 `planning_operations` is the equivalent operational ledger for the DISCOVERY/REPLANNING/ENRICHING side: one row per reasoner-driven operation (`purpose`, optional `target_goal_id`), tracking liveness (`last_liveness_at`), request/turn counters, the runtime/provider/model it ran on, and failure/backoff evidence (`failure_kind`, `retry_at`, `safe_message`) — mirrors the execution-attempt shape for planning work.
 
@@ -225,7 +238,7 @@ Separate from this document-level CAS: `IntentProposal.revision` (exact match on
 
 ## Transactions — the UnitOfWork
 
-`SqliteUnitOfWork` is **re-enterable by design**: each `with uow:` opens a *fresh* Session + transaction and commits/rolls back on exit. One drive pass enters it many times sequentially (dispatcher read, txn1, finalize txn). Plan state, execution run/attempt boundaries, and outbox rows commit **atomically** in the same open transaction. A rollback discards all three. One UoW instance per worker/request; it is not thread-safe.
+`SqliteUnitOfWork` is **re-enterable by design**: each `with uow:` opens a *fresh* Session + transaction and commits/rolls back on exit. One drive pass enters it many times sequentially (dispatcher read, txn1, finalize txn). Plan state, execution run/attempt boundaries, goal-promotion rows, and outbox rows commit **atomically** in the same open transaction. A rollback discards all four. One UoW instance per worker/request; it is not thread-safe.
 
 Chat (`plan_chat_messages`) and operational observations deliberately do **not** use the plan UoW — each uses its own short transaction, so display/diagnostic evidence and plan truth can never roll each other back. The typed observation repository is append-only and rejects an observation ID reused for different evidence; identical replays are idempotent.
 
