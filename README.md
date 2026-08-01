@@ -2,9 +2,14 @@
 
 **A local-first orchestrator that turns a project brief into an executed plan, with a human approving every consequential step.**
 
-You describe what you want in a chat. A planning LLM (the *reasoner*) negotiates a roadmap of goals with you, breaks each goal into executable tasks just-in-time, and binds each task to a coding agent (Claude Code, Gemini CLI, or `pi`). A worker process executes tasks one at a time, each in an isolated git worktree that merges into a per-plan branch only on success. You gate the plan before execution starts and after it finishes — and you can re-plan conversationally at any point without losing history.
+You describe what you want in a chat. A planning LLM (the *reasoner*) negotiates an intent with you, drafts a roadmap of goals, freezes each goal's tasks just-in-time, and binds each task to a coding agent (Claude Code or `pi`). A worker executes each task in its own git worktree on a `task/<id>/<run>` branch; work is promoted to `goal/<id>`, then to `cycle/<id>`, and **only independently verified work moves up a level** — your default branch is never written by plan work. You approve three things: the intent, the cycle draft, and the publication disposition at the end. You can re-plan conversationally at any point without losing history.
 
 Everything runs on your machine: state is a single SQLite file, credentials are envelope-encrypted, and the default mode (`dry-run` + stub reasoner) exercises the entire system without any API key.
+
+> **Agent runtimes execute unsandboxed, as your user.** The worktree ladder and
+> independent verification limit blast radius; they are not a security boundary.
+> Read [SECURITY.md](SECURITY.md) before pointing this at a repository you care
+> about, and see [docs/guides/](docs/guides/) to get started.
 
 ```mermaid
 flowchart LR

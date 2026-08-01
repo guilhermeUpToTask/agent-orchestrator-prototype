@@ -959,6 +959,71 @@ the first walkthrough, understand limits/costs, and share useful evidence.
 - Packaged frontend/backend agree on API version/types.
 - Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.
 
+### Delivery status (updated 2026-08-01, `phase-6-public-preview`)
+
+**Install path chosen: a single `uvx`/`pipx` wheel.** Docker was rejected because
+the orchestrator runs agent CLIs against the user's own repository with their
+git identity and credentials — bind-mounting a repo, translating paths and
+reproducing auth inside an image is friction the local-first model does not
+need. A packaged desktop app is a larger build surface than any preview evidence
+justifies.
+
+**Done, each proved on a clean venv rather than argued:**
+
+- ✅ **Migrations ship inside the package.** `db_upgrade` resolved them from
+  `Path(__file__).parents[3]` — the repo root in a checkout, `site-packages`
+  when installed, where the only `alembic` is the LIBRARY. An installed copy
+  could not create its schema at all. Moved to `src/infra/db/migrations/`, one
+  resolver (`migration_config.py`) derived from its own module location.
+- ✅ **The UI ships inside the wheel** and is served by the API
+  (`src/api/frontend.py`), so there is no second artifact and no CORS story on
+  the first-run path. The SPA fallback explicitly refuses `api/`, `health`,
+  `docs`, `redoc`, `openapi.json` — registering it last is necessary but not
+  sufficient, and a test caught it answering unknown API paths with HTML.
+- ✅ **`orchestrate serve`** — migrate, API, worker, UI, one command. The worker
+  stays a separate process; it terminates gracefully with 30s for the current
+  atomic action.
+- ✅ **Guided first run** — `/settings/setup` sequences setup in dependency
+  order from live catalog state (so it is re-entrant), and Tier 0 never asks for
+  an API key.
+- ✅ **The release actually ships it.** The workflow built the wheel BEFORE the
+  frontend, so every release would have published a backend with no console. Now
+  ordered correctly, with a verification step that opens the wheel and refuses
+  a release missing the migrations or the UI — demonstrated firing.
+- ✅ **Apache-2.0**, PyPI metadata, `SECURITY.md` (written from the code and
+  corrected against it), `CONTRIBUTING.md`.
+- ✅ **Guides** — `docs/guides/`: getting-started, tier-1, evidence,
+  troubleshooting (real failure signatures only).
+- ✅ **Test layers the UI never had**: jsdom + Testing Library interaction tests,
+  and a light Playwright suite against the packaged bundle. It found a real
+  defect on its first run — the packaged UI called a hardcoded
+  `http://localhost:8000` regardless of the port `serve` was given, so the
+  console loaded and nothing in it worked. Now same-origin.
+
+**Not done — resume here:**
+
+1. **The top-level package is literally `src`.** A distribution shipping a
+   top-level `src` collides with any other package doing the same. Scope
+   measured: **273 touch points** (220 Python files, 53 in shell/md/yml/toml),
+   plus the `src.infra.cli.main` entry point and every `python -m` invocation in
+   docs and scripts. It blocks no exit criterion and we publish to GitHub
+   Releases rather than PyPI today, so it was deliberately NOT bundled with the
+   packaging work. Do it as its own change, mechanically, with the full suite as
+   the safety net — and before any PyPI publish.
+2. **Closing evidence**: re-run `fixtures/first-cycle-v1` end to end from the
+   INSTALLED wheel (not a source checkout), Tier 0 and Tier 1, as the exit
+   criterion's proof.
+3. **A short reproducible demo and representative screenshots for the docs.**
+   `npm run test:e2e` writes screenshots to `frontend/e2e/screenshots/` (git-
+   ignored); the docs currently have none embedded.
+4. **Remaining doc reconciliation**: `docs/architecture/*` still describes some
+   pre-cyclic detail (see the "Operator walkthrough and documentation" entry in
+   known-issues), and `README.md`'s mermaid diagram has not been re-checked
+   against the cyclic ladder.
+5. **CI does not run the new layers** — `npm run test:e2e` needs a running
+   stack, and the packaging tests are integration-marked. Decide whether the
+   browser smoke belongs in CI or stays a local/release gate.
+
 ## Phase 7 — small peer preview ⬜
 
 **External capability:** a narrow group can use the orchestrator on disposable
