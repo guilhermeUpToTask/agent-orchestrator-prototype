@@ -765,19 +765,17 @@ plan:
   28 of 64 operations — the whole plan lifecycle and the event stream are
   unauthenticated even when `ORCHESTRATOR_API_TOKEN` is set, contradicting
   `security.py`'s own docstring.
-- Six went to **Phase 5**. Two are capabilities the backend finished and nothing
-  renders: per-goal blocks (un-freeze #14) and `provider_waiting` — so the
-  partially-blocked plan and the "waiting, recovering automatically" state that
-  Phase 5 exists to distinguish are both currently invisible.
+- Six went to **Phase 5**. At audit time, two were backend capabilities nothing
+  rendered: per-goal blocks (un-freeze #14) and `provider_waiting`. Phase 5 has
+  since closed all six and the matrix was re-audited on 2026-08-01.
 - One (skip/abandon a wedged task) went to **Phase 8**: retry, edit and replan
   have covered every case the walkthroughs produced so far.
 
-Two defects surfaced and are recorded in
-[known issues](docs/architecture/known-issues.md): the settings forms silently
-clear provider/model capacity overrides on every save, and
-`POST /api/plans/{plan_id}/retry-policy` is the one route with no test that
-exercises it. One drift was fixed in place — the hand-declared frontend read
-model never declared `provider_waiting` or `legacy_phase`, now locked by
+Two defects surfaced: the settings forms silently cleared provider/model
+capacity overrides on every save (closed by Phase 5), and
+`POST /api/plans/{plan_id}/retry-policy` had no route test (closed by Phase 4).
+One drift was fixed in place — the hand-declared frontend read model omitted
+`provider_waiting` and `legacy_phase`, now locked by
 `backend/tests/unit/test_plan_read_model_parity.py`.
 
 No endpoint was proposed for symmetry. Four candidates were explicitly recorded
@@ -898,89 +896,99 @@ Whether superseded evidence *should* be retained-and-marked rather than deleted
 is a frozen-domain question. It needs a decision-log entry and an un-freeze, so
 it is out of scope for Phase 4 and is recorded here rather than acted on.
 
-## Phase 5 — frontend truth and operator UX ⬜
+## Phase 5 — frontend truth and operator UX ✅
 
 **External capability:** a new operator can understand the system, take only
 legal actions, recover, and find the verified result.
 
-The React shell, composer, settings CRUD, gates, status surface, attempt history,
-and SSE bridge are foundations.
+**Delivered 2026-08-01 on `phase-5-frontend-truth`.** The existing design
+system was retained; the work changes authority, coverage, and operator copy
+rather than visual language.
 
-The audit assigned six gaps here. Two are backend capabilities that shipped and
-nothing renders, so the feature is currently invisible rather than merely
-awkward — they belong to item 1 below:
+- **Status truth:** `Overview` renders canonical status/activity, planning
+  operations and retry artifacts, active run, worker lease, TDD stage,
+  plan/per-goal blocks, provider backoff, gates, and separate **Needs attention**
+  versus **Recovering automatically** queues. This closes G2 and G3 without
+  turning capacity recovery into a human block.
+- **Control truth:** block controls come from advertised `legal_resolutions`,
+  root controls come from `legal_actions`, project-binding recovery is usable,
+  and `DetailPanel` can submit a complete `update_task_contract` revision. Chat,
+  current goals, navigation, and editing no longer derive cyclic authority from
+  the compatibility phase. This closes G4.
+- **Execution visibility:** `ConsoleDock` opens bounded captured logs for settled
+  attempts and an authenticated fetch-SSE tail for live attempts, including byte
+  offset resume, rotation/truncation, reconnect state, and terminal end. This
+  closes G5.
+- **First-mile setup:** Settings opens on one installation readiness checklist,
+  links failed checks to their configuration surface, and includes per-project
+  repository readiness. The Plans screen warns when setup is not launch-ready;
+  provider/model capacity fields survive create/edit, and plan deletion states
+  its cascade and busy-lease refusal. This closes G7 and G8.
+- **Last-mile delivery:** preserved cycle history loads accepted command/commit
+  evidence, protected scope, rejected/superseded counts, promotion refs and SHA,
+  unattributed references, output disposition/reference, and accurate manual PR
+  instructions when no forge write was recorded.
+- **Legacy isolation:** cyclic canvases, chat, agents, details, status badges, and
+  plan lists use `status`, `activity`, `active_cycle`, and advertised actions.
+  The nine-phase timeline and review controls remain only for rows carrying an
+  explicit `legacy_phase`.
 
-- **G2 — per-goal blocks.** `goal_blocks` is served and declared in the read
-  model, and no component reads it; `Overview`/`AttentionItem` render only the
-  plan-wide scalar. A partially-blocked plan therefore looks like a healthy
-  running one, which is exactly the state un-freeze #14 created.
-- **G3 — `provider_waiting`.** Served since the capacity work; the hand-declared
-  read model never carried it (fixed and locked by
-  `backend/tests/unit/test_plan_read_model_parity.py`), so "waiting, recovering
-  automatically" has never been renderable.
-
-The other four attach to items 2, 3 and 4:
-
-- **G4 — `update_task_contract` edits** are accepted by `POST …/edits` and
-  missing from the frontend's edit union, so the one manual move at the contract
-  boundary (what `contract-repair-v1` exists to exercise) needs curl.
-- **G5 — the attempt log and its live SSE tail** have no UI consumer at all.
-- **G7 — the settings forms silently clear provider/model capacity overrides**
-  on every save (`max_inflight`, `capacity_scope`); a rename reverts an
-  un-freeze #16 decision. Phase 4 may instead make the update partial.
-- **G8 — plan deletion has no UI**, so the reset half of J8 is curl-only and the
-  plan list only ever grows.
-
-Improve them in this order:
-
-1. **Status truth**
-   - Render root status, activity, planning operation, current work/TDD stage,
-     gates, plan/per-goal blocks, active run, provider waiting, retry/backoff,
-     and legal actions from backend truth.
-   - Do not turn capacity waiting into a human block or hide independent blocks.
-   - Distinguish **"waiting, recovering automatically"** from **"needs you"**.
-     `src/app/block_policy.py` already records `requires_human` per block kind
-     and is the single source for what a block may advertise; the API does not
-     serve it yet, so the frontend cannot tell an operator whether a block is
-     their problem or the orchestrator's. Serve it alongside `legal_actions`,
-     and surface the automatic loops (contract repair, promotion retry, planning
-     replay) as progress rather than a silent spinner — they are recorded at
-     `GET /api/plans/{id}/planning-artifacts`.
-
-2. **Control truth**
-   - Ensure every visible action is legal and functional.
-   - Stop using legacy `phase` to control cyclic chat, editing, navigation, or
-     recovery; isolate compatibility rendering to legacy plans.
-
-3. **Execution visibility**
-   - Consume per-attempt log SSE, including rotation, offset resume, and end.
-   - Show running command/stage, attempt, retry reason, wait, verification
-     progress, and bounded persisted history.
-
-4. **First-mile setup**
-   - Guide project/repository binding, provider/model creation, reasoner
-     selection, agent/runtime binding, coverage, dependency probes, and secrets.
-   - Present one readiness checklist and clear first-plan launch path.
-
-5. **Last-mile delivery**
-   - Show accepted evidence, promoted branch/output reference, and disposition
-     consequences.
-   - Give accurate manual PR instructions; add a thin helper only if evidenced.
-
-6. **Legacy cleanup**
-   - Remove/isolate nine-phase timelines, labels, toasts, and phase-derived
-     controls for cyclic plans.
-   - Use backend `legal_actions`, not reconstructed React transition rules.
-
-Use Playwright selectively for stable setup, gate, recovery, and publication
-contracts. Do not block on a visual redesign or full real-agent browser E2E.
+**Validated:** generated OpenAPI types reproduce cleanly; frontend type-check
+and production build pass; 8 frontend contract/rendering tests pass; 116 focused
+backend unit tests pass; and 127 focused backend integration tests pass with 2
+expected skips. Those suites cover capacity preservation, contract repair,
+per-goal versus automatic waiting, deletion/binding endpoints, readiness,
+planning artifacts, legal actions, evidence, and attempt-log SSE.
 
 ### Exit criteria
 
-- A first-time operator completes Tier 0 in the UI without undocumented setup.
-- Tier 1 waits, retries, evidence, and output are clear without terminal logs.
-- Critical actions have stable automated contracts.
-- No cyclic screen presents the nine-phase machine as authoritative.
+- ✅ Tier 0 setup, project creation, discovery, gates, and reset have documented
+  UI paths backed by the readiness checks.
+- ✅ Tier 1 waits, retries, live/captured logs, evidence, promotion, and output
+  disposition are visible without terminal-log access.
+- ✅ Critical frontend payloads and state separation have stable automated
+  contracts in `frontend/src/**/*.test.{ts,tsx}` alongside backend route tests.
+- ✅ No cyclic screen presents the nine-phase machine as authoritative.
+
+### Found during the Phase 4/5 code review (2026-08-01)
+
+Five defects were reproduced against the real API, the real capacity resolver,
+and the real log tail. None blocks the Phase 5 exit criteria — each is written
+up with its reproduction in
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md) — but
+all five are **first-run operator experience**, so they are scheduled here
+rather than left to preview evidence. Take them in Phase 6, before the install
+path is documented for anyone else:
+
+1. **Capacity DTOs have no bounds** (`max_inflight`). `0` is accepted and then
+   silently ignored (the resolver's `or` chain falls through to the global
+   default) while the UI displays it; a negative value is honoured and declines
+   every attempt forever with no block and no circuit. Same class as Phase 4's
+   G6, one DTO over. Fix: `Field(ge=1)` on the three bodies, and an explicit
+   `is not None` in `_provider_metadata`.
+2. **`capacity_scope` is an unvalidated free string.** A typo is stored 201 and
+   degrades to `per_model` at every read. The tolerant reader is deliberate;
+   the tolerant *write* is not. Fix: `Literal` on the DTO.
+3. **scp-style git remotes (`git@github.com:org/repo.git`) cannot be bound**,
+   and the 422 blames a nonexistent local path. `urlparse` gives them an empty
+   scheme, so both `validate_repo_url` and `repository_path_for` treat them as
+   filesystem paths. Decide: support the form, or refuse it by name.
+4. **The contract editor over-sends.** Submitting the whole contract makes
+   every repair a semantic edit (revision bump, evidence and test bundle
+   invalidated) and an unconditional agent rebind, because both backend paths
+   key off field presence. Un-freeze #17's cheap `amend_contract` path is
+   unreachable from the UI. Fix in the editor: send only changed fields.
+5. **The attempt-log resume offset is per-batch, not per-line**, so a
+   disconnect between two frames of one read resumes past the frames the client
+   never received. Fix: per-line cumulative offsets in `_events_from_lines`.
+
+Reviewed and found sound, recorded so the next reviewer need not re-derive it:
+the token guard is applied once at mount and parametrized over the OpenAPI
+inventory; `block` and `goal_blocks` are both filtered on `.active` before
+serving, so no resolved block can reach a client; `requires_human` is projected
+onto per-goal blocks as well as the plan-wide scalar; and `goal_promotions`
+(0017) declares the plan cascade migration 0015 requires, with
+`test_delete_plan_leaves_nothing.py` covering it by name.
 
 ## Phase 6 — public-preview productization ⬜
 
