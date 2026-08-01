@@ -66,8 +66,8 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
     id: 'agent',
     title: tier1 ? 'Create an agent bound to that model' : 'Create an agent',
     why: tier1
-      ? 'An unbound agent fails its first attempt with AUTH_ERROR — a terminal failure met mid-run instead of at setup.'
-      : 'Tasks bind to an agent. Dry-run needs no provider, but it still needs someone to bind to.',
+      ? 'Unbound, its first attempt fails with a terminal AUTH_ERROR — mid-run, not here.'
+      : 'Tasks bind to an agent. Dry-run needs no provider, but it needs someone to bind to.',
     // Tier 1 needs the binding, not merely a row.
     done: tier1 ? facts.boundAgents > 0 : facts.agents > 0,
     section: '/settings/agents',
@@ -76,7 +76,7 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
   steps.push({
     id: 'default_agent',
     title: 'Set the default agent',
-    why: 'The fallback for any task no capability covers. Without it, editing a task’s capabilities fails with NO_DEFAULT_AGENT.',
+    why: 'The fallback when no capability matches. Without it, edits fail NO_DEFAULT_AGENT.',
     done: facts.hasDefaultAgent,
     section: '/settings/agents',
   });
@@ -108,7 +108,7 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
   steps.push({
     id: 'project',
     title: 'Create a project',
-    why: 'A plan reaches a repository through its project. Without a repo_url it gets a scratch repo instead of yours.',
+    why: 'A plan reaches your repository through its project — no repo_url, no repository.',
     done: facts.projects > 0,
     section: '/settings/projects',
   });

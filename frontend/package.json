@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "preview": "vite preview",
-    "generate:api": "python ../backend/scripts/export_openapi.py openapi.json && openapi-ts"
+    "generate:api": "python ../backend/scripts/export_openapi.py openapi.json && openapi-ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
@@ -27,10 +28,14 @@
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.98.2",
+    "@playwright/test": "^1.62.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/dagre": "^0.7.52",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^30.0.1",
     "typescript": "^5.4.5",
     "vite": "^5.3.1",
     "vitest": "^2.1.9"
