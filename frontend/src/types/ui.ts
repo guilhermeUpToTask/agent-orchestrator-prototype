@@ -10,6 +10,8 @@ import type {
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  ContractCriterion,
+  CycleEvidenceResponse,
   DefaultAgentResponse,
   FailureKind,
   IaModel,
@@ -18,11 +20,16 @@ import type {
   ProjectDefinition,
   ProviderCreateBody,
   ProviderUpdateBody,
+  ProjectReadinessResponse,
+  ReadinessResponse,
   ReasonerStatusResponse,
   RetryPolicy,
   RunnerAgentStatus,
   RunnerBinaryStatus,
   RunnerStatusResponse,
+  TaskContract,
+  TestBundle,
+  VerificationStrategy,
 } from "./generated";
 
 export type {
@@ -30,6 +37,8 @@ export type {
   AgentSpec,
   Capability,
   ChatMessageResponse,
+  ContractCriterion,
+  CycleEvidenceResponse,
   DefaultAgentResponse,
   FailureKind,
   IaModel,
@@ -38,11 +47,16 @@ export type {
   ProjectDefinition,
   ProviderCreateBody,
   ProviderUpdateBody,
+  ProjectReadinessResponse,
+  ReadinessResponse,
   ReasonerStatusResponse,
   RetryPolicy,
   RunnerAgentStatus,
   RunnerBinaryStatus,
   RunnerStatusResponse,
+  TaskContract,
+  TestBundle,
+  VerificationStrategy,
 };
 
 // ─── Legacy phase compatibility + canonical root status ─────────────────────
@@ -93,6 +107,8 @@ export interface Task {
   retry_cycle?: number;
   cycle_attempt?: number;
   revision?: number;
+  contract?: TaskContract | null;
+  test_bundle?: TestBundle | null;
   role_agent_ids?: Record<string, string>;
   verification_evidence?: VerificationEvidence[];
 }

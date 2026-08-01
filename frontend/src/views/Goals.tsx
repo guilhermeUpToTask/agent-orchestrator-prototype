@@ -4,6 +4,7 @@ import { PlanCanvas } from '../components/PlanCanvas';
 import { DetailPanel } from '../components/DetailPanel';
 import { usePlan } from '../lib/queries';
 import styles from './Goals.module.css';
+import { currentPlanGoals } from '../lib/planTruth';
 
 /**
  * The roadmap canvas: goal groups containing task nodes, laid out in
@@ -34,7 +35,7 @@ export function GoalsView() {
     );
   }
 
-  if (!plan || plan.goals.length === 0) {
+  if (!plan || currentPlanGoals(plan).length === 0) {
     return (
       <div className={styles.page}>
         <p className={styles.empty}>

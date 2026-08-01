@@ -29,14 +29,16 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 export interface TextAreaProps
   extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   invalid?: boolean;
+  /** Monospace value — commands, paths, ids, and structured line lists. */
+  mono?: boolean;
 }
 
 export const TextArea = React.forwardRef<HTMLTextAreaElement, TextAreaProps>(
-  function TextArea({ invalid, className, ...rest }, ref) {
+  function TextArea({ invalid, mono, className, ...rest }, ref) {
     return (
       <textarea
         ref={ref}
-        className={[styles.field, styles.textarea, invalid ? styles.invalid : '', className]
+        className={[styles.field, styles.textarea, mono ? styles.mono : '', invalid ? styles.invalid : '', className]
           .filter(Boolean)
           .join(' ')}
         {...rest}

@@ -278,6 +278,28 @@
   flex-direction: column;
   gap: var(--sp-3);
 }
+
+.readinessList {
+  display: flex;
+  flex-direction: column;
+}
+
+.readinessRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+.readinessRow + .readinessRow { border-top: 1px solid var(--border-0); }
+.readinessMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.readiness_ok { color: var(--ok); }
+.readiness_warn { color: var(--gate); }
+.readiness_fail { color: var(--fail); }
+.readinessLink {
+  color: var(--run-text);
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+}
 .fieldset legend { padding: 0 var(--sp-1); }
 
 /* inline add/edit row (models) */

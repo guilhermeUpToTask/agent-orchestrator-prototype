@@ -6,6 +6,7 @@ import { useNow } from '../lib/time';
 import type { ExecutionAttemptRow } from '../lib/api';
 import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
+import { AttemptLogViewer } from './AttemptLogViewer';
 
 function duration(start: string, end: string | null, now: number): string {
   const milliseconds = Math.max(0, Date.parse(end ?? new Date(now).toISOString()) - Date.parse(start));
@@ -41,6 +42,7 @@ export function ConsoleDock() {
   const now = useNow();
   const [taskOnly, setTaskOnly] = React.useState(false);
   const [failedOnly, setFailedOnly] = React.useState(false);
+  const [selectedAttempt, setSelectedAttempt] = React.useState<ExecutionAttemptRow | null>(null);
 
   const tasks = useMemo(() => {
     const rows = timeline?.tasks ?? [];
@@ -95,7 +97,7 @@ export function ConsoleDock() {
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
-      height: consoleOpen ? 260 : 30,
+      height: consoleOpen ? (selectedAttempt ? 430 : 280) : 30,
       transition: 'height 0.15s ease',
     }}>
       <button
@@ -186,6 +188,21 @@ export function ConsoleDock() {
                             {' · '}recovery: switch provider/model, edit the task, or pause
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAttempt(attempt)}
+                          style={{
+                            marginLeft: 8,
+                            color: tokens.accent,
+                            background: 'transparent',
+                            border: 'none',
+                            font: 'inherit',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          view raw log
+                        </button>
                         {(attempt.stdout_tail || attempt.stderr_tail) && (
                           <div style={{ color: tokens.textDim, whiteSpace: 'pre-wrap', paddingLeft: 'var(--sp-2)' }}>
                             {(attempt.stderr_tail || attempt.stdout_tail).slice(-500)}
@@ -215,6 +232,15 @@ export function ConsoleDock() {
               {failedOnly && <AlertTriangle size={11} aria-hidden />}
               {failedOnly ? 'No failed attempts.' : 'No planning or agent attempts yet.'}
             </div>
+          )}
+
+          {selectedAttempt && (
+            <AttemptLogViewer
+              planId={planId}
+              attemptId={selectedAttempt.id}
+              status={selectedAttempt.status}
+              onClose={() => setSelectedAttempt(null)}
+            />
           )}
         </div>
       )}

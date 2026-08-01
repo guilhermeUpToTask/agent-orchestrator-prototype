@@ -24,6 +24,7 @@ import {
   activateCycle,
   approveIntentGate,
   approvePlan,
+  bindProject,
   cancelCycleDraft,
   cancelIntent,
   createAgent,
@@ -37,14 +38,20 @@ import {
   deleteModel,
   deleteProject,
   deleteProvider,
+  deletePlan,
   fetchAgentEvents,
+  fetchAttemptLog,
   fetchAttemptTimeline,
   fetchChat,
+  fetchCycleEvidence,
   fetchMetrics,
   fetchPlan,
+  fetchPlanningArtifacts,
   finishReview,
   getConfigScope,
   getDefaultAgent,
+  getProjectReadiness,
+  getReadiness,
   getReasonerStatus,
   getRunnerStatus,
   listAgents,
@@ -55,7 +62,6 @@ import {
   listProviders,
   pausePlan,
   proposeIntent,
-  renameModel,
   recordOutputDisposition,
   reopenReview,
   replanFromReview,
@@ -72,6 +78,7 @@ import {
   subscribeToEvents,
   updateAgent,
   updateCapability,
+  updateModel,
   updateProject,
   updateProvider,
   type CycleDraftBody,
@@ -119,6 +126,13 @@ export const keys = {
   agentEvents: (planId: string, taskId?: string) =>
     ["agent-events", planId, taskId ?? "*"] as const,
   attemptTimeline: (planId: string) => ["attempt-timeline", planId] as const,
+  attemptLog: (planId: string, attemptId: string) =>
+    ["attempt-log", planId, attemptId] as const,
+  planningArtifacts: (planId: string) => ["planning-artifacts", planId] as const,
+  cycleEvidence: (planId: string, cycleId: string) =>
+    ["cycle-evidence", planId, cycleId] as const,
+  readiness: ["readiness"] as const,
+  projectReadiness: (projectId: string) => ["project-readiness", projectId] as const,
   metrics: (planId?: string) => ["metrics", planId ?? "*"] as const,
 };
 
@@ -159,6 +173,42 @@ export function useAttemptTimeline(planId: string | null) {
     queryKey: keys.attemptTimeline(planId ?? ""),
     queryFn: () => fetchAttemptTimeline(planId as string),
     enabled: !!planId,
+  });
+}
+
+export function useAttemptLog(planId: string | null, attemptId: string | null) {
+  return useQuery({
+    queryKey: keys.attemptLog(planId ?? "", attemptId ?? ""),
+    queryFn: () => fetchAttemptLog(planId as string, attemptId as string),
+    enabled: !!planId && !!attemptId,
+  });
+}
+
+export function usePlanningArtifacts(planId: string | null) {
+  return useQuery({
+    queryKey: keys.planningArtifacts(planId ?? ""),
+    queryFn: () => fetchPlanningArtifacts(planId as string),
+    enabled: !!planId,
+  });
+}
+
+export function useCycleEvidence(planId: string | null, cycleId: string | null) {
+  return useQuery({
+    queryKey: keys.cycleEvidence(planId ?? "", cycleId ?? ""),
+    queryFn: () => fetchCycleEvidence(planId as string, cycleId as string),
+    enabled: !!planId && !!cycleId,
+  });
+}
+
+export function useReadiness() {
+  return useQuery({ queryKey: keys.readiness, queryFn: getReadiness, refetchInterval: 15_000 });
+}
+
+export function useProjectReadiness(projectId: string | null) {
+  return useQuery({
+    queryKey: keys.projectReadiness(projectId ?? ""),
+    queryFn: () => getProjectReadiness(projectId as string),
+    enabled: !!projectId,
   });
 }
 
@@ -225,9 +275,35 @@ export function useCreatePlan() {
   });
 }
 
+export function useDeletePlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (planId: string) => deletePlan(planId),
+    onSuccess: (_result, planId) => {
+      qc.removeQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+      toast.success("Plan deleted");
+    },
+    onError: (err) => toast.error("Delete plan failed", errorDetail(err)),
+  });
+}
+
+export function useBindProject(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (projectId: string) => bindProject(planId, projectId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.plan(planId) });
+      qc.invalidateQueries({ queryKey: keys.plans });
+      toast.success("Project bound");
+    },
+    onError: (err) => toast.error("Project binding failed", errorDetail(err)),
+  });
+}
+
 /**
- * One conversation turn, routed by the plan's phase (DISCOVERY vs
- * REPLANNING — the only two chat-driven phases). The reply lands in the
+ * One conversation turn, routed by canonical plan activity (initial vs replan
+ * discovery). The reply lands in the
  * chat cache; a committed turn also advances the phase, so the plan cache
  * refetches.
  */
@@ -236,10 +312,12 @@ export function useSendMessage(planId: string) {
   return useMutation({
     mutationFn: async (message: string): Promise<MessageResponse> => {
       const plan = qc.getQueryData<Plan>(keys.plan(planId));
-      const send =
-        plan?.phase === "replanning"
-          ? sendReplanningMessage
-          : sendDiscoveryMessage;
+      const send = plan?.activity === "replan_discovery"
+        ? sendReplanningMessage
+        : plan?.activity === "intent_discovery"
+          ? sendDiscoveryMessage
+          : null;
+      if (!send) throw new Error(`Chat is not available during ${plan?.activity ?? "unknown activity"}`);
       return send(planId, message);
     },
     onSuccess: (result) => {
@@ -247,7 +325,7 @@ export function useSendMessage(planId: string) {
       if (result.committed) {
         qc.invalidateQueries({ queryKey: keys.plan(planId) });
         qc.invalidateQueries({ queryKey: keys.plans });
-        toast.success("Roadmap committed", `Plan moved to ${result.phase}`);
+        toast.success("Intent ready for review");
       }
     },
     onError: (err) => {
@@ -474,19 +552,25 @@ export const useDeleteProvider = () =>
 // Models
 export const useCreateModel = () =>
   useRefMutation(
-    ({ providerId, name }: { providerId: string; name: string }) =>
-      createModel(providerId, name),
+    ({ providerId, name, maxInflight = null }: {
+      providerId: string;
+      name: string;
+      maxInflight?: number | null;
+    }) => createModel(providerId, name, maxInflight),
     "Add model",
     [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
     "Model added",
   );
 export const useRenameModel = () =>
   useRefMutation(
-    ({ modelId, name }: { modelId: string; name: string }) =>
-      renameModel(modelId, name),
-    "Rename model",
+    ({ modelId, name, maxInflight }: {
+      modelId: string;
+      name: string;
+      maxInflight: number | null;
+    }) => updateModel(modelId, name, maxInflight),
+    "Update model",
     [keys.models, keys.providers, keys.reasonerStatus, keys.runnerStatus],
-    "Model renamed",
+    "Model saved",
   );
 export const useDeleteModel = () =>
   useRefMutation(

@@ -10,6 +10,7 @@ export function AttentionItem({
   meta,
   badge,
   detail,
+  actions,
   onClick,
 }: {
   tone: StatusKind;
@@ -19,6 +20,8 @@ export function AttentionItem({
   badge?: React.ReactNode;
   /** Optional full-width line below the title row — e.g. a failure reason. */
   detail?: React.ReactNode;
+  /** Optional full-width action row. Keep controls out of the title button. */
+  actions?: React.ReactNode;
   onClick?: () => void;
 }) {
   const v = KIND_VARS[tone];
@@ -52,6 +55,7 @@ export function AttentionItem({
           {detail}
         </span>
       )}
+      {actions && <span className={styles.actions}>{actions}</span>}
     </Tag>
   );
 }

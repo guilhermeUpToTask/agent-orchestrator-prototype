@@ -89,7 +89,7 @@ export function TopBar() {
             <span className={styles.planName} title={plan.brief}>
               {plan.brief.split('\n')[0].slice(0, 80) || plan.id}
             </span>
-            <StatusBadge domain="phase" value={plan.phase} />
+            <StatusBadge domain="plan" value={plan.status} />
           </>
         ) : planId ? (
           <span className="skeleton" style={{ width: 220, height: 16 }} />
