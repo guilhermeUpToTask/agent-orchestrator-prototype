@@ -913,7 +913,7 @@ Delivered after the review, before Phase 6 opens:
 **Validated:** 718 unit + 525 integration tests, ruff and mypy clean, frontend
 type-check/build and 15 frontend tests green, migration head `0017`.
 
-## Phase 6 — public-preview productization ⬜
+## Phase 6 — public-preview productization ✅
 
 **External capability:** an external developer can install the preview, complete
 the first walkthrough, understand limits/costs, and share useful evidence.
@@ -952,12 +952,26 @@ the first walkthrough, understand limits/costs, and share useful evidence.
 - Validate versioning, changelog, license/contribution/security files, and
   artifact installation on a clean machine.
 
-### Exit criteria
+### Exit criteria — met 2026-08-02
 
-- A technical user goes from install to green Tier 0 using public docs only.
-- Tier 1 requires explicit model/runtime/cost choices and a readiness result.
-- Packaged frontend/backend agree on API version/types.
-- Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.
+- ✅ **A technical user goes from install to green Tier 0 using public docs
+  only.** Verified by doing it: wheel → clean venv → `orchestrate serve` →
+  `first-cycle-v1` → 10/10, following the published commands rather than
+  repository knowledge. The one thing that would have broken it — `serve`
+  leaking its worker on a restart — was found on this path and fixed.
+- ✅ **Tier 1 requires explicit model/runtime/cost choices and a readiness
+  result.** Tier is data, not an environment variable; `preflight.sh` prints the
+  resolved reasoner and runner, fails a mixed pair on purpose, and fails a
+  missing CLI only when an agent is bound to it.
+- ✅ **Packaged frontend/backend agree on API version/types.** CI regenerates
+  the types and fails on drift; the wheel carries the bundle that was built from
+  those types, and the browser smoke now proves the packaged bundle boots and
+  reaches its own API same-origin.
+- ✅ **Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.**
+  `SECURITY.md` states the unsandboxed runtime plainly, publication records a
+  disposition rather than performing a forge write, and the reconciliation above
+  removed the remaining places where the docs described a system that no longer
+  exists.
 
 ### Delivery status (updated 2026-08-01, `phase-6-public-preview`)
 
@@ -1000,8 +1014,8 @@ justifies.
   `http://localhost:8000` regardless of the port `serve` was given, so the
   console loaded and nothing in it worked. Now same-origin.
 
-**Branch state at handoff:** `phase-6-public-preview`, 13 commits, pushed,
-worktree clean, **no PR opened**. `main` is at the Phase 5 merge (`8e675f5`).
+**Branch state:** `phase-6-public-preview`, worktree clean, **no PR opened** —
+that call is the maintainer's. `main` is at the Phase 5 merge (`8e675f5`).
 
 - ✅ **The distribution package is `agent_orchestrator`.** Renamed from a
   top-level `src`, which would have collided in site-packages with any other
@@ -1014,29 +1028,69 @@ worktree clean, **no PR opened**. `main` is at the Phase 5 merge (`8e675f5`).
   typechecked, built and verified generated types, so every Phase 5 API-contract
   test ran on a laptop and nowhere else.
 
-**Not done — resume here:**
+**Closed 2026-08-02 — the four items the previous session left open:**
 
-1. **Closing evidence.** Run `fixtures/first-cycle-v1` end to end from the
-   INSTALLED wheel rather than a source checkout — Tier 0, then Tier 1 — as the
-   exit criterion's proof. Everything it needs exists; nobody has done the run
-   from the artifact a user would get.
-2. **A short reproducible demo and representative screenshots for the docs.**
-   `npm run test:e2e` writes screenshots to `frontend/e2e/screenshots/`
-   (git-ignored); no doc embeds one yet.
-3. **Remaining architecture-doc reconciliation.** `docs/architecture/*` still
-   carries some pre-cyclic detail (see known-issues, "Operator walkthrough and
-   documentation"), and `README.md`'s mermaid diagram has not been re-checked
-   against the cyclic ladder — its prose has.
-4. **The Playwright-in-CI decision.** The browser smoke needs a running stack
-   and a ~150 MB browser download. It caught a real packaging defect on its
-   first run, so the value is demonstrated; the cost is a CI job. Decide, rather
-   than leaving it implicitly local.
+1. ✅ **Closing evidence, from the artifact a user installs.** The wheel was
+   built, installed into a clean venv outside the checkout, and driven with
+   `orchestrate serve` against the real state directory. **Tier 0: 10/10
+   expectations, all guards green. Tier 1: 11/11 expectations, 7/7 guards**
+   (`plan a603d457`, reasoner `nvidia/nemotron-3-ultra-550b-a55b:free`, `pi`
+   runtime on the same free model, $0). The Tier 1 run was clean end to end:
+   two runs — test authoring then implementation — one attempt each, no
+   capacity events, no retries, `main` byte-identical to the seed tag, the
+   accepted evidence naming `python -m pytest -q tests/test_slug.py` exit 0
+   against candidate `4620490d`, and `goal/02f5bac7…` promoted into
+   `cycle/b3d23fb7…` at `cb7443af`. Intent to publication took about three
+   minutes. A **second** Tier 1 run from the same installed wheel
+   (`plan 4929491b`, driven to produce the documentation screenshots) also
+   passed 11/11 — so the closing evidence is two consecutive green Tier 1 runs
+   from the artifact, not one.
+2. ✅ **Screenshots and a five-minute demo.** `docs/images/` (committed) holds
+   the console during a live run — goal lease, TDD stage, bound agent, accepted
+   evidence — regenerated by `frontend/e2e/docs-screenshots.spec.ts` rather than
+   cropped by hand. The demo is the fixture, stated first in the getting-started
+   guide, and it ends on a checker rather than on trust.
+3. ✅ **Architecture-doc reconciliation.** Fixed rather than restated: 60 module
+   docstrings still named themselves `src/…` after the rename, `overview.md` drew
+   the layers the same way, `PROJECT_REPO_DIR` appeared as the repository source
+   in two architecture docs *and as the README's setup instruction* (nothing
+   reads it — that is the binding trap documented as advice),
+   `execution-model.md` still called execution "sequential per plan" and
+   described startup reconciliation as the pre-Phase-2 defect, the state-directory
+   layout named a `workspace-repo/` that no longer exists, and the README diagram
+   still drew `plan/<id>` branches. What remains is named in known-issues: the
+   per-layer READMEs and `INTEGRATION_GUIDE.md` have not been re-read end to end.
+4. ✅ **Playwright runs in CI.** The value was demonstrated rather than assumed,
+   and the suite now starts its own stack (`orchestrate serve --no-worker` on a
+   wiped state directory) instead of requiring a server on port 8210 that
+   nothing documented and nothing started. Twelve seconds, one cached Chromium
+   download, inside the Frontend job that already installs both toolchains.
+
+**Two defects found in the course of it, both fixed:**
+
+- **`orchestrate serve` leaked its worker on SIGTERM.** uvicorn captures the
+  signal, drains, restores the previous handler and re-raises it, so the process
+  died inside `uvicorn.run()` and the `finally` that reaps the child never ran.
+  `kill <pid>` — systemd, any process manager — stopped the API and left the
+  worker claiming plans and spending tokens against the same state directory,
+  with no control plane left to report it. Ctrl-C hid it: the terminal signals
+  the whole process group. Every existing `serve` test tore down by process
+  group, which is exactly why nothing caught it; the regression test signals the
+  supervisor alone. Fixed by installing the reaper as a signal handler before
+  uvicorn runs, and verified live from the installed wheel.
+- **CI was red on this branch before anything was changed.** The package rename
+  left `ruff check src tests` and `mypy src` aimed at a directory that no longer
+  exists (exit 1 and exit 2), and `--cov=src` made the coverage report silently
+  empty rather than failing. The Makefile, CONTRIBUTING, CLAUDE.md and git-flow
+  all still told a contributor to run the broken commands.
 
 **Environment notes for whoever picks this up:**
 
-- `~/.orchestrator` holds two completed Tier 1 cycles from this phase's runs and
-  was migrated `0015 → 0017`. A pre-migration backup sits in the session
-  scratchpad; the fixture's own state is disposable.
+- `~/.orchestrator` holds this phase's completed cycles (five by the end of the
+  closing-evidence session) and was migrated `0015 → 0017`. It sits at **Tier 1
+  by default**: a Tier 0 run means flipping BOTH `reasoner.mode` and
+  `agent_runner.mode`, and flipping them back — nothing restores them for you,
+  and `seed demo` would overwrite the free-model bindings outright.
 - `frontend/` gained dev dependencies (`@testing-library/react`,
   `@testing-library/user-event`, `jsdom`, `@playwright/test`) and vitest now runs
   in the `jsdom` environment. Playwright's chromium and its OS libraries were
