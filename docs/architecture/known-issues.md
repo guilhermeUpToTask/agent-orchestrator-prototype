@@ -14,10 +14,13 @@ regression test.
 
 **This file is the single home for deferred defects.** On 2026-08-01 the
 issue-shaped deferrals that had accumulated in `ROADMAP.md` — goal-promotion
-first-failure behaviour, the missing contract-boundary control point,
-boot-time-only reasoner config, `planning_artifacts` retention, and the P4.3
-evidence-on-edit finding — were moved here with their mechanisms and their
-options intact. `ROADMAP.md` keeps only the scheduling decision and a pointer,
+failure behaviour, the missing contract-boundary control point, boot-time-only
+reasoner config, `planning_artifacts` retention, and the P4.3 evidence-on-edit
+finding — were moved here with their mechanisms and their options intact. **One
+of them was stale on arrival:** the goal-promotion entry described code that had
+already changed, because it was copied from the roadmap rather than re-verified.
+It is corrected below, and re-reading the code before copying an entry is the
+lesson. `ROADMAP.md` keeps only the scheduling decision and a pointer,
 per its own rule that verified unresolved defects are not duplicated there.
 What did NOT move: work that is a missing *feature* rather than a defect
 (forge publication, `ProjectSpec`, sandboxing, an operator skip/abandon
@@ -42,26 +45,37 @@ command) stays in Phase 8, where it is scheduled against preview evidence.
   authenticated GitHub/forge publication port, and this refactor deliberately
   did not invent provider-specific push/PR behavior or perform an unauthorized
   external write.
-- **Goal promotion fails closed on the first exception, including a transient
-  one.** `goal_promotion_failure` opens on the FIRST exception out of
-  `merge_goal` — a transient git or filesystem error included — with no retry,
-  and advertises exactly one resolution, `start_replan`: the whole-cycle hammer
-  for what may be a momentary lock. It is the only block kind with **no
-  observed run evidence**; `fixtures/parallel-goals-v1` exists to provoke it
-  (two independent goals, one cycle branch, so the second merge runs against a
-  base the first already moved) and passes — under dry-run each task writes its
-  own artifact, so two goals never touch the same file. A genuine conflict
-  needs Tier 1 with two goals over overlapping scope.
-  The smallest honest fix is to retry a merge that failed for a transient
-  reason before blocking, and to stop advertising `start_replan` as the only
-  way out of a git error a retry would clear. The *full* repair — rebase the
-  goal branch onto the moved cycle branch and re-merge — is deliberately not
-  built, and is Phase 8 work rather than a patch: promotion runs no
-  verification of its own (`_reserve_goal_promotion` only checks each task is
-  DONE with accepted evidence, produced per task, on the task branch, against
-  an OLDER base), so rebasing recombines verified code with code it was never
-  tested against and would need a goal-level re-verification step that has
-  never existed. Skipping that would move unverified work upward.
+- **Goal promotion cannot recover from a cycle branch that MOVED.** *(Corrected
+  2026-08-01: an earlier revision of this entry said promotion blocks on the
+  first exception with no retry at all. That was carried over verbatim from the
+  Phase 2 roadmap deferral and was already out of date — it describes code that
+  has since changed. The retry exists.)*
+  What is actually true: an ENVIRONMENTAL merge failure — a stale worktree
+  registration, a held index lock — is classified by
+  `is_transient_merge_failure` (`app/promotion_failures.py`, fail-closed: an
+  unrecognized message is treated as permanent), the reservation is released,
+  and the merge is re-attempted up to `MAX_PROMOTION_RETRIES` (2), counted in
+  `planning_artifacts` so the loop is bounded
+  (`ExecutionHandler._retry_promotion`). A verified goal is no longer thrown
+  away because the repository was momentarily unusable.
+  What remains open is the case a retry cannot fix: the cycle branch moved
+  under the goal, so the same merge fails the same way every time and the block
+  is correct. The repair is to rebase the goal branch onto the moved cycle
+  branch and re-merge — deliberately **not** built, and Phase 8 work rather than
+  a patch, because promotion runs no verification of its own
+  (`_reserve_goal_promotion` only checks each task is DONE with accepted
+  evidence, produced per task, on the task branch, against an OLDER base).
+  Rebasing recombines verified code with code it was never tested against, so
+  the repair must also introduce a goal-level re-verification step that has
+  never existed. Skipping that would move unverified work upward, which is the
+  one invariant the whole system rests on.
+  Still the only block kind with **no observed run evidence**:
+  `fixtures/parallel-goals-v1` exists to provoke it (two independent goals, one
+  cycle branch, so the second merge runs against a base the first already moved)
+  and passes — under dry-run each task writes its own artifact, so two goals
+  never touch the same file. Provoking it needs Tier 1 with two goals over
+  overlapping scope, and that evidence is what should decide whether the rebase
+  is worth building.
 - **Accepted evidence is deleted on edit, never retained as superseded.**
   `Task.semantic_edit` is the only path that bumps `Task.revision`, and it
   clears `verification_evidence` outright. A task carrying accepted evidence is
@@ -135,27 +149,28 @@ One entry from the same review remains recorded here rather than open:
 
 ## Configuration staleness
 
-- **Every `reasoner.*` config key is boot-time only, and the write that has no
-  effect still reports success.** `AppContainer.reasoner` is a
-  `@cached_property` and the worker resolves it once at startup, so `mode`,
-  `provider_id`, `model_id`, `temperature` and `max_turns` take effect only
-  after a worker restart. `PUT /api/config/orchestrator/...` returns success,
-  `GET /api/reasoner/status` reports the new value (the API process builds its
-  own container), and the worker keeps using what it booted with. Found while
-  building `planning-recovery-v1`, whose whole mechanism is changing
-  `reasoner.max_turns` mid-run: the change was accepted and silently ignored.
-  The caching is deliberate — rebuilding per tick would re-read the secret
-  store and re-resolve the catalog on every poll — so this is a **staleness
-  decision, not a bug to patch blindly**. The options, smallest last: a
-  generation counter on the config table the worker compares each tick and
-  invalidates on change; invalidation scoped to the keys that are safe to swap
-  mid-flight (a model swap between attempts is fine, a mode swap mid-session is
-  not); or leave it boot-time and say so in `GET /api/reasoner/status` and the
-  config write response, so an operator is told a restart is required instead
-  of watching a successful write do nothing. The last is the smallest honest
-  fix and probably the right first move.
-  The same question applies to `agent_runner.*`, which resolves per task per
-  run and is therefore probably already live — verify rather than assume.
+- ~~**Every `reasoner.*` config key is boot-time only, and the write that has
+  no effect still reports success.**~~ **Fixed 2026-08-01.** `mode`,
+  `provider_id`, `model_id`, `temperature` and `max_turns` took effect only
+  after a worker restart: `PUT /api/config/orchestrator/reasoner.*` returned
+  success, `GET /api/reasoner/status` reported the new value (the API process
+  builds its own container), and the worker kept using what it booted with.
+  Found while building `planning-recovery-v1`, whose whole mechanism is
+  changing `reasoner.max_turns` mid-run — the change was accepted and silently
+  ignored.
+  `AppContainer.reasoner` now returns a `LiveReasoner`
+  (`infra/reasoner/live_reasoner.py`) that re-resolves the configured reasoner
+  on **every call**. Removing the `@cached_property` alone would NOT have fixed
+  it — the stale reference is the one `PlanningHandler` captured at worker boot,
+  not the one the property returns — which is why the fix lives at the call
+  site, behind the port, where no handler has to learn about it. Per call is
+  also the right granularity for safety: a planning call is a whole session, so
+  a change lands between sessions and never swaps a model out mid-conversation.
+  The cost is a config read and a key decrypt against an LLM round trip.
+  A side effect worth knowing: an invalid configuration now surfaces at the
+  planning call rather than at worker boot, so `_handle_reasoner_failure`
+  records it against the plan where an operator can see it, instead of it being
+  a startup traceback. Locked by `tests/unit/reasoner/test_live_reasoner.py`.
 
 ## Operational visibility
 

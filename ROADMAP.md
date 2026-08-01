@@ -607,17 +607,20 @@ evidence, and the options for whoever picks them up, in
    opens no circuit and so records no `opened_at` for a wall-clock bound to
    measure. It ends in a recoverable block advertising `retry_stage`, so the
    operator has a move.
-2. **Goal promotion fails closed on the first exception**, transient git errors
-   included, and advertises only `start_replan`. The full repair (rebase and
-   re-merge) needs a goal-level re-verification step that has never existed, so
-   it is Phase 8 work; retrying a transient merge failure is not.
+2. **Goal promotion cannot recover from a cycle branch that MOVED.** The
+   transient half is handled (classified fail-closed, reservation released,
+   bounded re-attempt); a moved base needs rebase plus goal-level
+   re-verification, which is Phase 8 work waiting on run evidence.
 3. **No operator control point at the contract boundary** — nothing outside the
    process can hold a plan between "the contract is frozen" and "an agent is
    running against it". Priced concretely by `contract-repair-v1`, which must
    win a race for that window. Still a review-gate-like opt-in hold, still not
    worth a general "pause between units".
-4. **Reasoner config is boot-time only**, and the write that has no effect
-   still reports success. A staleness decision, not a blind patch.
+4. ~~**Reasoner config is boot-time only**~~ — **fixed 2026-08-01.**
+   `AppContainer.reasoner` returns a `LiveReasoner` that re-resolves on every
+   call, so a `reasoner.*` write lands on the next planning session instead of
+   the next worker restart. Uncaching alone would not have done it: the worker
+   captures the instance into `PlanningHandler` at boot.
 5. **`planning_artifacts` grows without bound.** Reads stay bounded and a plan
    delete cascades, so this is storage cost only — and explicitly not a reason
    to invent a background sweeper.
