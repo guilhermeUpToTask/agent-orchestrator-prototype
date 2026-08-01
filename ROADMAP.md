@@ -595,11 +595,12 @@ evidence and a decision-log entry.
 ### Deferred out of Phase 2 — every one recorded in known-issues
 
 Five issues were found while stabilizing execution and deliberately not fixed
-in this phase. None is a correctness hole; each is a decision or a missing
-control, and holding the phase open for any of them would be holding it open
-for a preference. All five are now written up with their mechanism, their
+in this phase. None was a correctness hole; each is a decision or a missing
+control, and holding the phase open for any of them would have been holding it
+open for a preference. All five are written up with their mechanism, their
 evidence, and the options for whoever picks them up, in
-[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md):
+[`docs/architecture/known-issues.md`](docs/architecture/known-issues.md).
+**One (#4) has since been fixed; four remain open by choice:**
 
 1. **A `request_concurrency` refusal spends the per-task retry budget.**
    *Revisit after launch — carried to Phase 8.* Alone among capacity failures
@@ -888,6 +889,29 @@ serving, so no resolved block can reach a client; `requires_human` is projected
 onto per-goal blocks as well as the plan-wide scalar; and `goal_promotions`
 (0017) declares the plan cascade migration 0015 requires, with
 `test_delete_plan_leaves_nothing.py` covering it by name.
+
+### Post-review hardening ✅ (2026-08-01, `issues-known-defects`)
+
+Delivered after the review, before Phase 6 opens:
+
+- **All five review defects fixed**, each with a test that failed first.
+- **`reasoner.*` config is no longer boot-time only.** `AppContainer.reasoner`
+  returns a `LiveReasoner` that re-resolves per call, so a config write lands on
+  the next planning session rather than the next worker restart. Uncaching the
+  property alone would not have done it — the worker captures the instance into
+  `PlanningHandler` at boot, which is why the fix sits behind the port.
+- **`fixtures/first-cycle-v1`** — the onboarding walkthrough (see Phase 6's
+  foundation below), proven by two independent Tier 1 runs on free models:
+  11/11 expectations and 7/7 live guards each time, from different recovery
+  paths (rate-limit retries in one, a rejected candidate re-attempted in the
+  other).
+- **The deferred backlog moved out of this file** into known-issues, per this
+  roadmap's own rule that verified defects are not duplicated here. One entry
+  was stale on arrival and is corrected there: goal promotion already retries
+  environmental merge failures; only a MOVED cycle branch remains open.
+
+**Validated:** 718 unit + 525 integration tests, ruff and mypy clean, frontend
+type-check/build and 15 frontend tests green, migration head `0017`.
 
 ## Phase 6 — public-preview productization ⬜
 
