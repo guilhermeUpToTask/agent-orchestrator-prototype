@@ -5,6 +5,51 @@ export type ClientOptions = {
 };
 
 /**
+ * AcceptanceRunResponse
+ *
+ * One advisory acceptance-run verdict (P8.2).
+ *
+ * ADVISORY, and the field name says so rather than leaving a client to infer
+ * it. Verification proves a command exited as expected against a commit; this
+ * is the only thing in the document that speaks to whether the APPLICATION
+ * runs. It never gated the publication it appears beside.
+ */
+export type AcceptanceRunResponse = {
+    /**
+     * Trigger
+     */
+    trigger: string;
+    /**
+     * Goal Id
+     */
+    goal_id: string | null;
+    /**
+     * Ref
+     */
+    ref: string;
+    /**
+     * Outcome
+     */
+    outcome: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Detail
+     */
+    detail: string;
+    /**
+     * Duration Seconds
+     */
+    duration_seconds: number;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
  * ActiveRunResponse
  */
 export type ActiveRunResponse = {
@@ -585,6 +630,10 @@ export type CycleEvidenceResponse = {
      * Unattributed Evidence Refs
      */
     unattributed_evidence_refs: Array<string>;
+    /**
+     * Acceptance Runs
+     */
+    acceptance_runs: Array<AcceptanceRunResponse>;
 };
 
 /**

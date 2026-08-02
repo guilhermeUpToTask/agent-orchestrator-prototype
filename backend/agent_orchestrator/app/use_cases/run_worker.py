@@ -21,12 +21,15 @@ actual sleep/claim cadence; tests drive it directly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 
 from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
 from agent_orchestrator.domain.repositories.model_provider_repo import ModelProviderRepository
 from agent_orchestrator.app.handlers.base import PhaseHandler
 from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.ports import (
     PlanningArtifactStore,
     RepositoryReader,
@@ -84,6 +87,8 @@ async def drive_plan(
     lease_seconds: int = 60,
     heartbeat_interval_seconds: float | None = None,
     verifier: VerificationExecutor | None = None,
+    environment: ProjectEnvironment | None = None,
+    environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
 ) -> tuple[str, int]:
     """Advance one plan until it stops making progress. Returns (terminal signal,
     units advanced) — the signal is 'paused' | 'not_ready' | 'done' | 'failed';
@@ -112,6 +117,8 @@ async def drive_plan(
                 clock,
                 planning_handler,
                 verifier,
+                environment=environment,
+                environment_context=environment_context,
             ),
         )
         uow.plans.heartbeat(plan_id, worker_id)
@@ -190,6 +197,8 @@ async def drive_goal(
     routing: RoutingPolicy | None = None,
     repository_reader: RepositoryReader | None = None,
     planning_artifacts: PlanningArtifactStore | None = None,
+    environment: ProjectEnvironment | None = None,
+    environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
 ) -> tuple[str, int]:
     """Goal-level analog of `drive_plan` (ADR-001, domain unfreeze #13 /
     Phase 3c): advance ONE goal (within an active cycle) until it stops
@@ -208,6 +217,8 @@ async def drive_goal(
         routing,
         repository_reader=repository_reader,
         planning_artifacts=planning_artifacts,
+        environment=environment,
+        environment_context=environment_context,
     )
     signal = "continue"
     heartbeat_interval_seconds = (

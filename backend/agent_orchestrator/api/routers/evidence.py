@@ -117,6 +117,25 @@ class DeliveryResponse(BaseModel):
     in_operator_checkout: bool
 
 
+class AcceptanceRunResponse(BaseModel):
+    """One advisory acceptance-run verdict (P8.2).
+
+    ADVISORY, and the field name says so rather than leaving a client to infer
+    it. Verification proves a command exited as expected against a commit; this
+    is the only thing in the document that speaks to whether the APPLICATION
+    runs. It never gated the publication it appears beside.
+    """
+
+    trigger: str  # goal_merge | pre_publication
+    goal_id: str | None  # None for pre_publication: it observes the whole cycle
+    ref: str
+    outcome: str  # passed | failed | errored
+    summary: str
+    detail: str
+    duration_seconds: float
+    created_at: str
+
+
 class CycleEvidenceResponse(BaseModel):
     plan_id: str
     cycle_id: str
@@ -125,6 +144,10 @@ class CycleEvidenceResponse(BaseModel):
     disposition: DispositionResponse | None
     delivery: DeliveryResponse | None
     unattributed_evidence_refs: list[str]
+    # Empty when no project environment is configured — the default, supported
+    # state. An empty list means "nobody asked", never "it passed": `skipped`
+    # verdicts are deliberately not recorded, so absence cannot read as a pass.
+    acceptance_runs: list[AcceptanceRunResponse]
 
 
 def _task_evidence(task: Task) -> TaskEvidenceResponse:
@@ -243,6 +266,7 @@ def get_cycle_evidence(
     with uow:
         plan = uow.plans.get(plan_id)
         promotions = uow.promotions.list_for_cycle(plan_id, cycle_id)
+        acceptance = uow.acceptance_runs.list_for_cycle(plan_id, cycle_id)
 
     # Scoped to THIS plan's cycles, so a cycle id belonging to another plan is
     # refused rather than served empty.
@@ -257,6 +281,19 @@ def get_cycle_evidence(
         plan_id=plan_id,
         cycle_id=cycle_id,
         cycle_status=cycle.status.value,
+        acceptance_runs=[
+            AcceptanceRunResponse(
+                trigger=run.trigger,
+                goal_id=run.goal_id,
+                ref=run.ref,
+                outcome=run.outcome,
+                summary=run.summary,
+                detail=run.detail,
+                duration_seconds=run.duration_seconds,
+                created_at=run.created_at.isoformat(),
+            )
+            for run in acceptance
+        ],
         goals=[
             GoalEvidenceResponse(
                 goal_id=goal.id,

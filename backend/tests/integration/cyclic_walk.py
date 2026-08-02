@@ -85,6 +85,7 @@ def drive_cycle_to_publication(
     disposition: str = "merge",
     output_reference: str | None = "cycle/merged",
     publish: bool = True,
+    environment: object | None = None,
 ) -> CompletedCycle:
     """Drive intent -> draft -> cycle -> enrichment -> execution -> publication."""
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
@@ -151,6 +152,8 @@ def drive_cycle_to_publication(
             "worker-1",
             planning_handler=planning,
             verifier=container.verification_executor,
+            environment=environment,
+            environment_context=container.environment_context,
         )
 
     architecture_signal, _ = asyncio.run(drive())
@@ -196,6 +199,8 @@ def drive_cycle_to_publication(
             container.clock,
             "worker-1",
             verifier=container.verification_executor,
+            environment=environment,
+            environment_context=container.environment_context,
         )
 
     goal_signal, goal_progressed = asyncio.run(drive_goal_())

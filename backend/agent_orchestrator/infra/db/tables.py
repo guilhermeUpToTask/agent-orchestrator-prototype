@@ -581,3 +581,28 @@ class GoalPromotionTable(Base):
     into_ref: Mapped[str] = mapped_column(String, nullable=False)
     merge_sha: Mapped[str] = mapped_column(String, nullable=False)
     promoted_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AcceptanceRunTable(Base):
+    """One advisory acceptance-run verdict (migration 0018).
+
+    Not domain state: the verdict never gates publication, so it is an
+    operational ledger like GoalPromotionTable rather than something the Plan
+    aggregate carries — which is why the acceptance run needed no un-freeze.
+    """
+
+    __tablename__ = "acceptance_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
+    cycle_id: Mapped[str] = mapped_column(String, nullable=False)
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger: Mapped[str] = mapped_column(String, nullable=False)
+    ref: Mapped[str] = mapped_column(String, nullable=False)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[str] = mapped_column(String, nullable=False)
+    detail: Mapped[str] = mapped_column(String, nullable=False, default="")
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)

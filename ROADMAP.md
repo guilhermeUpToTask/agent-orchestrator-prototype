@@ -1299,6 +1299,32 @@ that nobody can tell from the evidence document.
     repository and a human's token, so it is a manual check rather than a suite
     someone could tick off.
 
+- **P8.2 — the cycle acceptance run (port + machinery):** ✅ delivered on
+  `phase-8-2-acceptance-run`. `ProjectEnvironment`
+  (`app/environment_port.py`) fills the `cycle_verification` slot
+  `planner_orchestrator.py:932` has named since ADR-003 with no behaviour
+  behind it. It fires at both designed trigger points — each goal merge (early
+  signal) and before the publication gate — records an advisory verdict in
+  `acceptance_runs` (migration 0018), and serves it on the cycle evidence
+  endpoint.
+  - **Advisory is enforced, not asserted.** Tests drive a real cyclic walk and
+    prove a `failed` verdict stops neither goal promotion nor the publication
+    gate, an adapter that *raises* is swallowed, and a `skipped` verdict records
+    nothing — so an empty list reads as "nobody asked" and can never be mistaken
+    for a pass.
+  - **No domain un-freeze.** The verdict is an operational ledger beside
+    `goal_promotions`, not plan state, and the environment spec lives in the
+    project-scoped config store. Resolving the repository path goes through an
+    injected callable rather than a new method on the FROZEN `Workspace` port.
+  - **`NoEnvironment` is the only adapter so far**, and is the permanent
+    fallback — most projects the orchestrator gets pointed at are libraries and
+    CLIs whose tests genuinely are the contract.
+  - **`DockerEnvironment` is next (P8.3)** and deliberately not in this branch:
+    no Docker daemon exists in the development container, so the adapter cannot
+    be validated here. Shipping an unexercised container adapter behind a green
+    suite would be the kind of evidence-free claim this roadmap exists to
+    prevent.
+
 ### Exit criteria
 
 - A realistic multi-goal project completes on Tier 1 with evidence that survives

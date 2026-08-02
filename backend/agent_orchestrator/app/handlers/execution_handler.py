@@ -66,7 +66,13 @@ from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 from agent_orchestrator.app.block_policy import resolutions_for
+from agent_orchestrator.app.acceptance_records import AcceptanceRun
 from agent_orchestrator.app.branch_names import cycle_branch, goal_branch
+from agent_orchestrator.app.environment_port import (
+    AcceptanceTrigger,
+    EnvironmentSpec,
+    ProjectEnvironment,
+)
 from agent_orchestrator.app.promotion_records import GoalPromotion
 from agent_orchestrator.app.execution_records import (
     ExecutionAttempt,
@@ -200,6 +206,12 @@ class ExecutionHandler:
         routing: RoutingPolicy | None = None,
         repository_reader: RepositoryReader | None = None,
         planning_artifacts: PlanningArtifactStore | None = None,
+        environment: ProjectEnvironment | None = None,
+        # (repository path, how to boot it) for one plan. A callable rather than
+        # a Workspace method: `Workspace` is a FROZEN domain port, and resolving
+        # a project's checkout is a composition-root job the container already
+        # does for readiness and publication.
+        environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
     ) -> None:
         self._runner = runner
         self._agents = agents
@@ -226,6 +238,12 @@ class ExecutionHandler:
         # waiting for the plan connection. `busy_timeout` and the `run_in_session`
         # retry budget cannot break it, because the caller IS the holder.
         self._pending_artifacts: list[PlanningArtifact] = []
+        # The cycle acceptance run (P8.2). Optional: without an adapter the
+        # orchestrator behaves exactly as it did, which is why NoEnvironment is
+        # the permanent fallback rather than a placeholder. The verdict is
+        # ADVISORY — it is recorded beside the cycle and gates nothing.
+        self._environment = environment
+        self._environment_context = environment_context
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -240,6 +258,8 @@ class ExecutionHandler:
         # ---- txn1: pick the unit, mark RUNNING, persist + outbox atomically ----
         goal_promotion: tuple[str, str, str] | None = None
         unit: _Unit | None = None
+        review_signal: Signal | None = None
+        completion_cycle_id: str | None = None
         with uow:
             plan = uow.plans.get(plan_id)
             if (
@@ -267,45 +287,63 @@ class ExecutionHandler:
                     # (advance_plan.py) is what checks "every goal terminal"
                     # and calls handle(goal_id=None) for that.
                     return Signal.PAUSED
-                return self._enter_review(plan_id, plan, uow)
-            if action == NOT_READY:
+                review_signal = self._enter_review(plan_id, plan, uow)
+                # A cyclic completion gate just opened. The acceptance run
+                # boots an application, which is a side effect and must not
+                # happen inside this transaction (invariant #5) — so the
+                # cycle is remembered and verified just past the block.
+                completion_cycle_id = (
+                    plan.active_cycle.id if plan.active_cycle is not None else None
+                )
+            elif action == NOT_READY:
                 return Signal.NOT_READY
-
-            goal, second = action
-            if second is None:  # goal's tasks all terminal, none failed -> close it
-                if plan.active_cycle is None:
-                    return self._complete_legacy_goal(plan_id, plan, goal, uow)
-                try:
-                    goal_promotion = self._reserve_goal_promotion(plan, goal, uow)
-                except TaskFailed as failure:
-                    # Navigation selected this goal to close, but a task is not
-                    # DONE-with-accepted-evidence (e.g. a legacy/replan artifact).
-                    # Open a recoverable block — never let this escape to the
-                    # worker loop, which re-runs the reservation and hot-loops the
-                    # same TaskFailed every tick.
-                    return self._block_on_unpromotable_goal(plan_id, plan, goal, failure, uow)
             else:
-                if second == "GOAL_FAILED":
-                    return self._pause_on_failed_goal(plan_id, plan, goal, uow)
-                if second == "DEPENDENCY_BLOCKED":
-                    return Signal.NOT_READY
+                goal, second = action
+                if second is None:  # goal's tasks all terminal, none failed -> close it
+                    if plan.active_cycle is None:
+                        return self._complete_legacy_goal(plan_id, plan, goal, uow)
+                    try:
+                        goal_promotion = self._reserve_goal_promotion(plan, goal, uow)
+                    except TaskFailed as failure:
+                        # Navigation selected this goal to close, but a task is not
+                        # DONE-with-accepted-evidence (e.g. a legacy/replan artifact).
+                        # Open a recoverable block — never let this escape to the
+                        # worker loop, which re-runs the reservation and hot-loops the
+                        # same TaskFailed every tick.
+                        return self._block_on_unpromotable_goal(plan_id, plan, goal, failure, uow)
+                else:
+                    if second == "GOAL_FAILED":
+                        return self._pause_on_failed_goal(plan_id, plan, goal, uow)
+                    if second == "DEPENDENCY_BLOCKED":
+                        return Signal.NOT_READY
 
-                task = second
-                # check-before-act: result already exists -> finalize without re-running.
-                if task.result is not None:
-                    return self._finalize_existing(plan_id, plan, goal, task, uow)
+                    task = second
+                    # check-before-act: result already exists -> finalize without re-running.
+                    if task.result is not None:
+                        return self._finalize_existing(plan_id, plan, goal, task, uow)
 
-                spec = self._select_spec(plan, task, uow)
-                # Admission BEFORE the circuit check: if the pool is already full
-                # there is nothing to probe, and claiming the half-open probe only
-                # to be refused would burn the window for everyone.
-                admission_signal = self._admission_signal(spec, uow)
-                if admission_signal is not None:
-                    return admission_signal
-                circuit_signal = self._runtime_circuit_signal(plan_id, plan, goal, task, spec, uow)
-                if circuit_signal is not None:
-                    return circuit_signal
-                unit = self._start_unit(plan_id, plan, goal, task, uow, spec)
+                    spec = self._select_spec(plan, task, uow)
+                    # Admission BEFORE the circuit check: if the pool is already full
+                    # there is nothing to probe, and claiming the half-open probe only
+                    # to be refused would burn the window for everyone.
+                    admission_signal = self._admission_signal(spec, uow)
+                    if admission_signal is not None:
+                        return admission_signal
+                    circuit_signal = self._runtime_circuit_signal(plan_id, plan, goal, task, spec, uow)
+                    if circuit_signal is not None:
+                        return circuit_signal
+                    unit = self._start_unit(plan_id, plan, goal, task, uow, spec)
+
+        if review_signal is not None:
+            # The publication gate is already open; this only adds the advisory
+            # verdict an operator will read before deciding. Gating the gate on
+            # it would make a flaky acceptance run able to withhold publication,
+            # which the design explicitly rejects.
+            if completion_cycle_id is not None:
+                self._run_acceptance(
+                    plan_id, completion_cycle_id, None, "pre_publication", uow
+                )
+            return review_signal
 
         if goal_promotion is not None:
             return await self._promote_goal(plan_id, goal_promotion, uow)
@@ -1298,6 +1336,68 @@ class ExecutionHandler:
         uow.plans.save(plan)
         return reservation, cycle.id, goal.id
 
+    def _run_acceptance(
+        self,
+        plan_id: str,
+        cycle_id: str,
+        goal_id: str | None,
+        trigger: AcceptanceTrigger,
+        uow: UnitOfWork,
+    ) -> None:
+        """Boot the assembled tree and record what happened. ADVISORY ONLY.
+
+        Called at the two points where the cycle branch has just changed
+        meaning: after a goal merges (early signal, so a broken application is
+        found at goal 2 rather than at publication) and before the publication
+        gate opens (the verdict an operator actually decides on).
+
+        Every failure mode here is swallowed on purpose. An acceptance run
+        observes; it must never be able to fail a promotion that passed
+        verification, or stop a publication gate from opening. `verify()` is
+        already contracted not to raise — this is the belt to that adapter's
+        braces, because a third-party adapter is exactly the thing that will.
+        """
+        if self._environment is None or self._environment_context is None:
+            return
+        ref = cycle_branch(cycle_id)
+        try:
+            repo, spec = self._environment_context(plan_id)
+            verdict = self._environment.verify(repo, ref, spec)
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            log.warning("acceptance.adapter_raised", plan_id=plan_id, error=str(exc))
+            return
+        if not verdict.is_signal:
+            # Nothing configured. Recording a row per goal merge saying "nobody
+            # asked" is noise, not evidence.
+            return
+        try:
+            with uow:
+                uow.acceptance_runs.add(
+                    AcceptanceRun(
+                        id=new_id(),
+                        plan_id=plan_id,
+                        cycle_id=cycle_id,
+                        goal_id=goal_id,
+                        trigger=trigger,
+                        ref=ref,
+                        outcome=verdict.outcome,
+                        summary=verdict.summary,
+                        detail=verdict.detail,
+                        duration_seconds=verdict.duration_seconds,
+                        created_at=self._clock.now(),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            log.warning("acceptance.record_failed", plan_id=plan_id, error=str(exc))
+            return
+        log.info(
+            "acceptance.recorded",
+            plan_id=plan_id,
+            cycle_id=cycle_id,
+            trigger=trigger,
+            outcome=verdict.outcome,
+        )
+
     async def _promote_goal(
         self,
         plan_id: str,
@@ -1390,6 +1490,10 @@ class ExecutionHandler:
             plan.bump_version()
             uow.outbox.add(GoalCompleted(plan_id=plan_id, goal_id=goal_id))
             uow.plans.save(plan)
+        # AFTER the transaction closes: booting an application is a side effect,
+        # and invariant #5 keeps those out of transactions. Advisory, so a
+        # verdict of any kind leaves the promotion above untouched.
+        self._run_acceptance(plan_id, cycle_id, goal_id, "goal_merge", uow)
         return Signal.CONTINUE
 
     def _pause_on_failed_goal(

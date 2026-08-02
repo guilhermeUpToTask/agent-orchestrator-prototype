@@ -16,6 +16,9 @@ loop and existing tests call it unchanged; it builds the dispatcher and delegate
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Callable
+
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.services.navigation import ready_goal_ids
@@ -25,6 +28,7 @@ from agent_orchestrator.domain.repositories.model_provider_repo import ModelProv
 from agent_orchestrator.app.handlers.base import PhaseHandler, Signal
 from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 from agent_orchestrator.app.handlers.gate_handler import GateHandler
+from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.ports import (
     PlanningArtifactStore,
     RepositoryReader,
@@ -65,6 +69,8 @@ class PlanDispatcher:
         providers: ModelProviderRepository | None = None,
         repository_reader: RepositoryReader | None = None,
         planning_artifacts: PlanningArtifactStore | None = None,
+        environment: ProjectEnvironment | None = None,
+        environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
     ) -> None:
         self._execution = ExecutionHandler(
             runner,
@@ -77,6 +83,8 @@ class PlanDispatcher:
             providers,
             repository_reader=repository_reader,
             planning_artifacts=planning_artifacts,
+            environment=environment,
+            environment_context=environment_context,
         )
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)
@@ -173,6 +181,8 @@ async def advance_plan(
     clock: Clock,
     planning_handler: PhaseHandler | None = None,
     verifier: VerificationExecutor | None = None,
+    environment: ProjectEnvironment | None = None,
+    environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
 ) -> str:
     """Backwards-compatible entry point. Builds a dispatcher and delegates. Returns
     the Signal's string value (so existing callers comparing to "continue"/"done"/
@@ -186,6 +196,8 @@ async def advance_plan(
         clock,
         planning_handler,
         verifier,
+        environment=environment,
+        environment_context=environment_context,
     )
     signal = await dispatcher.advance(plan_id, uow)
     return signal.value
