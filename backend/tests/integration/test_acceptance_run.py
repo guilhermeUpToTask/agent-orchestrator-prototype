@@ -267,3 +267,90 @@ def test_the_pre_publication_run_happens_once_per_cycle(tmp_path, monkeypatch):
     pre_publication = [r for r in _runs(walk) if r.trigger == "pre_publication"]
 
     assert len(pre_publication) == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression: an adapter that records NOTHING must not loop the tick.
+#
+# The first version of the pre-gate ordering returned CONTINUE and let the next
+# tick open the publication gate, keyed on "is there a pre_publication ledger
+# row". A `skipped` or raising adapter records no row, so that guard never
+# became true and the tick re-ran the acceptance forever. Acceptance and
+# gate-opening therefore happen in the SAME tick.
+#
+# The tests above catch this only by side effect (the walk stops settling), so
+# it is stated here explicitly — a ledger-only guard reads like an obvious
+# simplification to anyone who has not hit this.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["skipped", "raises"])
+def test_an_adapter_that_records_nothing_still_settles_the_gate_once(
+    tmp_path, monkeypatch, mode
+):
+    environment = RecordingEnvironment(mode)
+
+    walk = _walk(tmp_path, monkeypatch, environment)
+
+    with walk.container.new_unit_of_work() as uow:
+        plan = uow.plans.get(walk.plan_id)
+    assert plan.review_gate is not None, (
+        f"a {mode!r} adapter records no ledger row; the gate must still open"
+    )
+    assert plan.review_gate.subject_type.value == "cycle_completion"
+    assert plan.review_gate.unresolved
+    assert _runs(walk) == []  # nothing recorded, by design
+
+
+@pytest.mark.parametrize("mode", ["skipped", "raises", "passed"])
+def test_the_acceptance_run_is_attempted_a_bounded_number_of_times(
+    tmp_path, monkeypatch, mode
+):
+    """The loop this locks was unbounded: `verify()` was called on every tick
+    forever. Bounding it by a small constant rather than an exact count keeps
+    the test honest about goal-merge triggers varying with decomposition."""
+    environment = RecordingEnvironment(mode)
+
+    _walk(tmp_path, monkeypatch, environment)
+
+    assert len(environment.calls) <= 8, (
+        f"verify() was called {len(environment.calls)} times for a single cycle; "
+        "the tick is re-running the acceptance instead of settling"
+    )
+
+
+def test_a_further_tick_does_not_reopen_or_re_run_anything(tmp_path, monkeypatch):
+    """Once the gate is open the plan is parked. A later tick must not run the
+    acceptance again — which is what the same-tick ordering guarantees, and
+    what a ledger-only guard would get wrong for a non-recording adapter."""
+    import asyncio
+
+    from agent_orchestrator.app.use_cases.run_worker import drive_plan
+
+    environment = RecordingEnvironment("skipped")
+    walk = _walk(tmp_path, monkeypatch, environment)
+    calls_after_walk = len(environment.calls)
+
+    async def tick():
+        return await drive_plan(
+            walk.plan_id,
+            walk.container.new_unit_of_work(),
+            walk.container.agent_runner,
+            walk.container.agent_repo,
+            walk.container.workspace,
+            walk.container.agent_event_sink,
+            walk.container.clock,
+            "worker-2",
+            verifier=walk.container.verification_executor,
+            environment=environment,
+            environment_context=walk.container.environment_context,
+        )
+
+    signal, progressed = asyncio.run(tick())
+
+    assert len(environment.calls) == calls_after_walk, (
+        "a tick against a plan already parked at its publication gate re-ran "
+        "the acceptance"
+    )
+    assert progressed == 0
+    assert signal in {"paused", "not_ready"}

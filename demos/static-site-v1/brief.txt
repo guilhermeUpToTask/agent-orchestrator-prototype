@@ -1,0 +1,37 @@
+Build `sitegen`, a small static site generator, in `src/sitegen/`.
+
+It reads markdown files from a content directory and writes an HTML site:
+
+    sitegen build content/ --out out/
+
+Each input file has a front-matter header delimited by `---` lines, containing
+`title` and `layout`, followed by a markdown body. See `content/index.md` and
+`content/about.md` — those two files are the input the finished tool must
+handle, and `out/index.html` must be openable in a browser and readable.
+
+What it has to do:
+
+1. Parse the front-matter header into key/value pairs and return the remaining
+   body separately. A file with no header is still valid and has no keys.
+2. Render a useful subset of markdown to HTML: ATX headings (`#` through
+   `###`), paragraphs, unordered lists, `*emphasis*`, `**strong**`, `` `inline
+   code` ``, and `[text](target)` links.
+3. Wrap the rendered body in a page layout carrying the front-matter `title`
+   in both `<title>` and a visible heading, so the output is a complete HTML
+   document rather than a fragment.
+4. Provide the `sitegen build <content-dir> --out <dir>` command, writing one
+   `.html` file per `.md` input, and rewriting links between pages so
+   `about.md` becomes `about.html`.
+
+Constraints:
+
+- Pure standard library. Do not add any third-party dependency, and do not use
+  an existing markdown library — writing the renderer IS the work.
+- Do not add HTTP serving, a database, or packaging extras.
+- Keep everything under `src/sitegen/` and `tests/`.
+- The repository has no tests yet. Each task must write its own tests under
+  `tests/` first, then make them pass.
+- Verification is `python -m pytest -q` against the test file the task creates
+  — name that file in the verification command so it checks that task and
+  nothing else.
+- Escape HTML special characters in text content so the output is valid.

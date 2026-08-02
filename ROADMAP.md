@@ -1220,8 +1220,38 @@ item in the phase that cannot be validated where the work happens:
    hunk-level accept/reject: half-accepting a candidate invalidates the
    revision-bound evidence that makes it trustworthy. A garbage-collected SHA
    degrades ONE unit with a stated reason rather than failing the document.
-4. ⬜ **P8.4 — the showcase fixture.** Its project shape is still an open
-   decision and must be made before it is started, not during it.
+4. 🚧 **P8.4 — the showcase, and it is a DEMO rather than a fixture.** Decided
+   2026-08-02. The roadmap already said this artifact "cannot be locked in CI
+   the way Tier 0 fixtures are", so filing it under `fixtures/` beside six
+   deterministic, checkable, partly CI-locked walkthroughs was a category
+   error: someone would try to make it repeatable and conclude something was
+   broken. `demos/` states the split, and `demos/README.md` is the contract —
+   fixtures catch regressions, demos show what the system produces; a red
+   fixture run is a bug, a red demo run is evidence and gets published rather
+   than retried.
+   - **Shape: `static-site-v1`**, a files-in/files-out generator (markdown +
+     front-matter → a browsable HTML site). Chosen against the obvious
+     full-stack web app *because* P8.5 is blocked: a web app's goals would end
+     as "tests passed, nobody can tell whether it runs", showcasing the exact
+     gap this phase exists to close. A generator has no such gap — the demo
+     ends with a file you open in a browser, so **a human confirms the product
+     works with no container and no trust in the evidence document**, and only
+     then reads the evidence for *why*.
+   - **Assertions are structural only** (every goal promoted, every served SHA
+     resolves, default branch byte-identical to the seed tag, nothing merged
+     without accepted evidence, disposition recorded, root back to idle), plus
+     an out-of-repo acceptance check on the produced HTML. Nothing asserts a
+     goal count: a real reasoner decomposes differently every run, so a pinned
+     count would fail a working system.
+   - **The run is never in CI; the harness is.** `test_static_site_demo.py`
+     locks the three properties that make the demo mean anything — the seed
+     does not contain the answer, the brief is postable verbatim, and the
+     acceptance check *cannot pass against the seed*. It found a real defect on
+     its first run: an unset `SITEGEN_REPO` made `Path("")`, which is `.` and
+     always exists, so the skip guard never fired and a forgetful operator got
+     eleven errors instead of a clear skip.
+   - **Remaining: run it.** Tier 1, real models, captured — and whatever it
+     finds gets published.
 5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that
    can run containers. The port it plugs into already exists and is exercised,
    so this is an adapter and its tests, not a redesign.
