@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from agent_orchestrator.app.execution_records import ExecutionRecordRepository
+from agent_orchestrator.app.acceptance_records import AcceptanceRun, AcceptanceRunRepository
 from agent_orchestrator.app.promotion_records import GoalPromotion, GoalPromotionRepository
 from agent_orchestrator.app.runtime_failures import RuntimeFailure
 from agent_orchestrator.app.sandbox_port import Sandbox, SandboxPolicy, SandboxProbeResult
@@ -50,6 +51,8 @@ __all__ = [
     "GoalLeaseRepository",
     "GoalPromotion",
     "GoalPromotionRepository",
+    "AcceptanceRun",
+    "AcceptanceRunRepository",
     "Outbox",
     "PlanningArtifact",
     "PlanningArtifactStore",
@@ -367,6 +370,11 @@ class UnitOfWork(Protocol):
     def goal_leases(self) -> GoalLeaseRepository: ...
     @property
     def promotions(self) -> GoalPromotionRepository: ...
+
+    @property
+    def acceptance_runs(self) -> AcceptanceRunRepository:
+        """The advisory cycle-acceptance ledger (P8.2)."""
+        ...
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...

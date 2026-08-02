@@ -5531,6 +5531,62 @@
   },
   "components": {
     "schemas": {
+      "AcceptanceRunResponse": {
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "title": "Trigger"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger",
+          "goal_id",
+          "ref",
+          "outcome",
+          "summary",
+          "detail",
+          "duration_seconds",
+          "created_at"
+        ],
+        "title": "AcceptanceRunResponse",
+        "description": "One advisory acceptance-run verdict (P8.2).\n\nADVISORY, and the field name says so rather than leaving a client to infer\nit. Verification proves a command exited as expected against a commit; this\nis the only thing in the document that speaks to whether the APPLICATION\nruns. It never gated the publication it appears beside."
+      },
       "ActiveRunResponse": {
         "properties": {
           "run_id": {
@@ -6475,6 +6531,13 @@
             },
             "type": "array",
             "title": "Unattributed Evidence Refs"
+          },
+          "acceptance_runs": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptanceRunResponse"
+            },
+            "type": "array",
+            "title": "Acceptance Runs"
           }
         },
         "type": "object",
@@ -6485,7 +6548,8 @@
           "goals",
           "disposition",
           "delivery",
-          "unattributed_evidence_refs"
+          "unattributed_evidence_refs",
+          "acceptance_runs"
         ],
         "title": "CycleEvidenceResponse"
       },

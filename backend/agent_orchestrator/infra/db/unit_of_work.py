@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from agent_orchestrator.app.ports import Clock
 from agent_orchestrator.infra.db.execution_record_repository import SqliteExecutionRecordRepository
 from agent_orchestrator.infra.db.goal_lease_repository import SqliteGoalLeaseRepository
+from agent_orchestrator.infra.db.acceptance_run_repository import SqliteAcceptanceRunRepository
 from agent_orchestrator.infra.db.goal_promotion_repository import SqliteGoalPromotionRepository
 from agent_orchestrator.infra.db.outbox import SqliteOutbox
 from agent_orchestrator.infra.db.plan_repository import SqlitePlanRepository
@@ -32,6 +33,7 @@ class SqliteUnitOfWork:
         self.executions = SqliteExecutionRecordRepository()
         self.outbox = SqliteOutbox()
         self.promotions = SqliteGoalPromotionRepository()
+        self.acceptance_runs = SqliteAcceptanceRunRepository()
 
     def __enter__(self) -> "SqliteUnitOfWork":
         if self._session is not None:
@@ -41,6 +43,7 @@ class SqliteUnitOfWork:
         self.executions.bind(self._session)
         self.outbox.bind(self._session)
         self.promotions.bind(self._session)
+        self.acceptance_runs.bind(self._session)
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -57,4 +60,5 @@ class SqliteUnitOfWork:
             self.executions.unbind()
             self.outbox.unbind()
             self.promotions.unbind()
+            self.acceptance_runs.unbind()
             self._session = None

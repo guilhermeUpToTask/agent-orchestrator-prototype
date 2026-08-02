@@ -65,8 +65,11 @@ from agent_orchestrator.infra.policies.retry_policy_factory import build_retry_p
 from agent_orchestrator.infra.reasoner.factory import build_reasoner
 from agent_orchestrator.infra.reasoner.live_reasoner import LiveReasoner
 from agent_orchestrator.infra.runtime.factory import build_agent_runner
+from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.forge_port import ForgePort
 from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.infra.environment.no_environment import NoEnvironment
+from agent_orchestrator.infra.environment.spec import read_environment_spec
 from agent_orchestrator.infra.forge.binding import read_binding
 from agent_orchestrator.infra.forge.github import GitHubForge
 from agent_orchestrator.infra.forge.no_forge import NoForge
@@ -195,6 +198,37 @@ class AppContainer:
         fallback — a real adapter (e.g. BubblewrapSandbox, item 34) is a
         drop-in swap here, not a change to any caller."""
         return NoSandbox()
+
+    @cached_property
+    def environment(self) -> ProjectEnvironment:
+        """The cycle acceptance run (P8.2). `NoEnvironment` is today's behaviour
+        and the PERMANENT fallback, like `NoSandbox` and `NoForge` — most
+        projects are libraries and CLIs whose tests genuinely are the contract,
+        and for those an acceptance run has nothing to add. A `DockerEnvironment`
+        plugs in here without any caller changing."""
+        return NoEnvironment()
+
+    def environment_context(self, plan_id: str) -> tuple[Path, EnvironmentSpec | None]:
+        """Where a plan's repository is, and how the operator says to boot it.
+
+        A container method rather than a `Workspace` port method, because
+        `Workspace` is a FROZEN domain port and resolving a project's checkout
+        is a composition-root job this container already does for readiness and
+        for publication.
+
+        The spec comes from the project-scoped config store — the same door the
+        forge binding uses, and for the same reason: no domain entity changes.
+        `None` means the operator has configured nothing, which `NoEnvironment`
+        reports as `skipped` rather than as a pass.
+        """
+        with self.new_unit_of_work() as uow:
+            plan = uow.plans.get(plan_id)
+        project_id = plan.project_id
+        if project_id is None:
+            return Path("."), None
+        project = self.project_repo.get(project_id)
+        repo = self.workspace_resolver.repository_path_for(project)
+        return repo, read_environment_spec(self.config_store, project_id)
 
     def forge_for(self, project_id: str) -> ForgePort:
         """The forge bound to this project, or the permanent no-forge fallback.

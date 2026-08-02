@@ -555,3 +555,51 @@ Locked by `tests/integration/test_publish_cycle.py`, including the retry.
 The token is verified at save time against the exact repository — one call
 confirming it exists, is reachable, and can push — so a read-only credential
 fails at setup rather than at a publication gate at the end of a cycle.
+
+**Decision 62 (2026-08-02) — the cycle acceptance run is an application port
+and an advisory ledger, NOT domain state. No unfreeze.** `ProjectEnvironment`
+(`app/environment_port.py`, beside `sandbox_port.py`) boots a cycle's assembled
+tree and runs the operator's scenario against it; the verdict lands in
+`acceptance_runs` (migration 0018) and is served on the cycle evidence
+endpoint.
+
+**Why no domain change was needed**, checked at the three points where one
+would have been forced:
+
+- *Does the gate need to display it?* No — the read model joins the ledger.
+- *Does the verdict gate anything?* No, and deliberately. A flaky acceptance run
+  that could withhold publication costs more trust than it earns, and
+  `start_replan` is already the "fix it instead" path — so no new
+  `OutputDisposition` value. **This is the load-bearing reason.** A verdict that
+  blocked would have to be domain state; an advisory one need not be.
+- *Does `cycle_verification` need a stored value?* No — `Plan.activity` already
+  DERIVES it from "all goals terminal and no gate open".
+
+**The ordering is what makes the port sufficient, and the first attempt got it
+wrong.** `Plan.activity` checks `review_gate` before falling through to
+`cycle_verification`, so running the acceptance after the gate opened reported
+`review:cycle_completion` for the whole run and left `cycle_verification`
+naming an empty slot — the very slot the feature claimed to fill. It also left
+the gate open for the minutes a container boot takes, so a disposition could be
+recorded against a verdict that did not exist yet. Running it in the window
+BEFORE the gate opens fixes both, and that window is exactly where the existing
+derivation already emits `cycle_verification`. **Do not move this back.** Locked
+by `test_the_gate_is_not_open_while_the_acceptance_run_executes` and
+`test_the_pre_publication_run_fills_the_cycle_verification_slot`.
+
+Acceptance and gate-opening happen in the SAME tick. Keying "already done" on a
+ledger row alone re-triggers forever, because a `skipped` or raising adapter
+records no row — caught by the tests on the first attempt.
+
+Two further placements avoid the domain: the environment spec lives in the
+project-scoped config store (as the forge binding does, decision 61), and the
+repository path is resolved through an injected callable rather than a new
+method on the FROZEN `Workspace` port — mypy caught that reach.
+
+The `DockerEnvironment` adapter is deliberately absent: the development
+environment cannot run nested containers (13 masked `/proc` submounts against a
+missing `CAP_SYS_ADMIN`), and shipping an unexercised container adapter behind a
+green suite is the evidence-free claim this roadmap exists to prevent. The
+adapter must also take its container binary from configuration rather than
+hardcoding `docker` — rootless podman reached the kernel wall and is
+CLI-compatible.

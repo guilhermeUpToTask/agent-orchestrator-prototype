@@ -1197,15 +1197,63 @@ The trigger changed: these were deferred pending preview evidence, and the
 preview now comes after them, so the ones that gate a credible demonstration
 are scoped here and the rest stay deferred.
 
-**Ready to start 2026-08-02**, with Phase 7 merged. Suggested order, cheapest
-proof first: the **repository-choice wizard** (no new ports, and it removes the
-one setup step most likely to strand a Phase 9 invitee), then the
-**`ProjectEnvironment` port with a `NoEnvironment` adapter only** — the seam and
-its config, provably inert, before Docker enters the picture — then the
-**`DockerEnvironment` adapter and the acceptance run** at the two trigger
-points, then the **showcase fixture** on top of a system that can finally check
-itself, and the **per-goal review surface** last, since it is the only one that
-is pure addition and blocks nothing.
+**Order revised 2026-08-02** after the development environment turned out not to
+be able to run containers at all (see *Containerization is unavailable* below).
+`DockerEnvironment` moves from third to **last**, because it is now the only
+item in the phase that cannot be validated where the work happens:
+
+1. ✅ **P8.1 — the repository-choice wizard** (plus authenticated forge
+   publication, promoted into it).
+2. ✅ **P8.2 — the `ProjectEnvironment` port and the acceptance-run machinery**,
+   with `NoEnvironment` as the only adapter: the seam, its config, its ledger
+   and both trigger points, provably inert.
+3. ⬜ **P8.3 — the per-goal review surface.** Promoted from last to next: it is
+   pure addition, blocks nothing, and needs no container runtime.
+4. ⬜ **P8.4 — the showcase fixture.** Its project shape is still an open
+   decision and must be made before it is started, not during it.
+5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that
+   can run containers. The port it plugs into already exists and is exercised,
+   so this is an adapter and its tests, not a redesign.
+
+### Containerization is unavailable in the development environment ⏸
+
+Established empirically on 2026-08-02, not assumed. The orchestrator's own
+development container cannot run nested containers, and five of the six
+blockers were worked around before one proved final:
+
+| Blocker | Outcome |
+|---|---|
+| No `/var/run/docker.sock` | no Docker-outside-of-Docker |
+| No `CAP_SYS_ADMIN` (stock Docker capability set) | no `dockerd`, so no classic DinD |
+| No `/dev/fuse`, so fuse-overlayfs fails | worked around with the `vfs` storage driver |
+| `/sys/fs/cgroup` read-only | worked around with `--cgroups=disabled` |
+| Single-uid userns vs image files owned by gid 65534 | worked around with `ignore_chown_errors` |
+| **13 masked `/proc` submounts** (`/proc/kcore`, `/proc/keys`, …) | **final** |
+
+The last one is a kernel rule, not a configuration gap: an unprivileged user
+namespace may not mount a fresh `procfs` unless it can see a *fully visible*
+proc instance, and the standard container hardening masks 13 entries with
+tmpfs. Unmasking them needs the `CAP_SYS_ADMIN` that is absent. Rootless podman
+gets as far as pulling images and creating storage, then dies on `mount proc`.
+
+**Two design consequences, both worth keeping:**
+
+- **The adapter must not hardcode `docker`.** Podman handled everything up to
+  the kernel wall and is CLI-compatible; developers running podman, colima or
+  rancher would be stranded for no reason. The container binary is
+  configuration.
+- **"The binary exists but containers do not work here" is a real state**, and
+  this environment is a specimen of it. The adapter must return `errored` with
+  an actionable message rather than hang — which `ProjectEnvironment` already
+  contracts for (`verify()` must not raise) and the handler already swallows.
+
+What P8.5 can still be given without a daemon is a full adapter tested against
+a **scripted fake container CLI**, the pattern the runner taxonomy already uses
+(`test_runner_taxonomy.py`): command construction, output parsing, timeouts,
+teardown-on-failure, and the not-installed and daemon-down paths. What that
+cannot cover — *does a real container actually boot* — stays one manual run on
+a Docker-capable host, and must be recorded as such rather than implied by a
+green suite.
 
 The showcase project's shape is an open decision and should be made before the
 fixture is started, not during it. A full-stack web application is the obvious
@@ -1229,7 +1277,10 @@ that nobody can tell from the evidence document.
 ### Deliverables
 
 - **The cycle acceptance run** (`ProjectEnvironment` port + adapters), specified
-  in the deferred list below. This is the one that closes the gap above.
+  in the deferred list below. This is the one that closes the gap above. The
+  port, the ledger and both trigger points shipped in **P8.2**; the
+  `DockerEnvironment` adapter is **P8.5**, pending a container-capable
+  environment.
 - **A showcase fixture** — one realistic, multi-goal project driven end to end
   on Tier 1, with captured evidence, as the artifact an invitation points at.
   Deliberately NOT a fixture that exercises every capability: several paths
@@ -1298,6 +1349,44 @@ that nobody can tell from the evidence document.
   - **Not built, deliberately:** the opt-in real-GitHub smoke test needs a live
     repository and a human's token, so it is a manual check rather than a suite
     someone could tick off.
+
+- **P8.2 — the cycle acceptance run (port + machinery):** ✅ delivered on
+  `phase-8-2-acceptance-run`. `ProjectEnvironment`
+  (`app/environment_port.py`) fills the `cycle_verification` slot
+  `planner_orchestrator.py:932` has named since ADR-003 with no behaviour
+  behind it. It fires at both designed trigger points — each goal merge (early
+  signal) and before the publication gate — records an advisory verdict in
+  `acceptance_runs` (migration 0018), and serves it on the cycle evidence
+  endpoint.
+  - **Advisory is enforced, not asserted.** Tests drive a real cyclic walk and
+    prove a `failed` verdict stops neither goal promotion nor the publication
+    gate, an adapter that *raises* is swallowed, and a `skipped` verdict records
+    nothing — so an empty list reads as "nobody asked" and can never be mistaken
+    for a pass.
+  - **The pre-publication run happens BEFORE the gate opens**, which is what
+    makes the port sufficient. Two defects were found by asking whether the
+    domain needed to change, and both had this one cause: `Plan.activity`
+    checks `review_gate` **before** it falls through to `cycle_verification`,
+    so a run placed after the gate reported `review:cycle_completion` and left
+    that label naming an empty slot; and an open gate during a run that takes
+    minutes is a race, because a disposition can be recorded against a verdict
+    that does not exist yet. Running it in the earlier window makes the
+    EXISTING derivation emit `cycle_verification` with nothing added to the
+    domain, and the gate opens only once a verdict is recorded. Locked by
+    `test_the_gate_is_not_open_while_the_acceptance_run_executes` and
+    `test_the_pre_publication_run_fills_the_cycle_verification_slot`.
+  - **No domain un-freeze.** The verdict is an operational ledger beside
+    `goal_promotions`, not plan state, and the environment spec lives in the
+    project-scoped config store. Resolving the repository path goes through an
+    injected callable rather than a new method on the FROZEN `Workspace` port.
+  - **`NoEnvironment` is the only adapter so far**, and is the permanent
+    fallback — most projects the orchestrator gets pointed at are libraries and
+    CLIs whose tests genuinely are the contract.
+  - **`DockerEnvironment` is next (P8.3)** and deliberately not in this branch:
+    no Docker daemon exists in the development container, so the adapter cannot
+    be validated here. Shipping an unexercised container adapter behind a green
+    suite would be the kind of evidence-free claim this roadmap exists to
+    prevent.
 
 ### Exit criteria
 

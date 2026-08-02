@@ -134,7 +134,7 @@ agent-orchestrator/
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
 │   │                       #   src/infra/db/migrations/ holds the migration
-│   │                       #   chain (0001_core .. 0017_goal_promotions; one
+│   │                       #   chain (0001_core .. 0018_acceptance_runs; one
 │   │                       #   linear head) INSIDE the package — an installed
 │   │                       #   copy has no repo to find them beside
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
