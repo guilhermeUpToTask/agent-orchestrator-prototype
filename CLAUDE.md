@@ -11,7 +11,7 @@
 - **CLI Entry Point**: `python -m agent_orchestrator.infra.cli.main` (or `orchestrate` if installed) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check agent_orchestrator tests --fix`
 - **Type Check**: `mypy agent_orchestrator` (zero errors, no excludes)
-- **Test All**: `pytest`
+- **Test All**: `pytest` — runs `-n auto` (pytest-xdist) from `addopts`; add `-p no:xdist` for a serial run when you need `--pdb` or readable output. Coverage is NOT on by default: `make coverage`.
 - **Test Unit (fast)**: `pytest -m "not integration"`
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
 - **Test real-LLM smoke** (cost-gated, never in normal CI): `pytest -m llm` with `REASONER_SMOKE_API_KEY` (+ optional `REASONER_SMOKE_BASE_URL` / `REASONER_SMOKE_MODEL`)

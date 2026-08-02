@@ -9,7 +9,10 @@ import subprocess
 RULES = (
     (("backend/agent_orchestrator/domain/", "backend/agent_orchestrator/app/"), "cd backend && pytest -q tests/unit/orchestration"),
     (("backend/agent_orchestrator/infra/db/",), "cd backend && pytest -q tests/integration/test_reference_repos.py"),
-    (("backend/alembic/", "backend/agent_orchestrator/infra/db/tables.py"), "cd backend && pytest -q tests/integration/test_migrations.py"),
+    # Migrations live INSIDE the package (an installed copy has no repository
+    # to find them beside); `backend/alembic/` stopped existing and this rule
+    # quietly matched nothing.
+    (("backend/agent_orchestrator/infra/db/migrations/", "backend/agent_orchestrator/infra/db/tables.py"), "cd backend && pytest -q tests/integration/test_migrations.py"),
     (("backend/agent_orchestrator/api/",), "cd backend && pytest -q tests/integration/test_api.py"),
     (("backend/agent_orchestrator/infra/git/",), "cd backend && pytest -q tests/integration/test_git_workspace.py tests/integration/test_drive_plan_sqlite_git.py"),
     (("backend/agent_orchestrator/infra/runtime/",), "cd backend && pytest -q tests/integration/test_runner_taxonomy.py tests/integration/test_agent_runner_factory.py"),
