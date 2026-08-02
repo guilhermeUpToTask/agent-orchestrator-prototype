@@ -176,3 +176,94 @@ def test_the_verdict_survives_publication(tmp_path, monkeypatch):
         latest = uow.acceptance_runs.latest_for_cycle(walk.plan_id, walk.cycle_id)
     assert latest is not None
     assert latest.outcome == "passed"
+
+
+# ---------------------------------------------------------------------------
+# Ordering: the acceptance run happens BEFORE the publication gate opens.
+# Both properties below were broken by an earlier placement that ran it after.
+# ---------------------------------------------------------------------------
+
+
+class ActivityCapturingEnvironment(RecordingEnvironment):
+    """Records what the plan's derived `activity` is while it is running."""
+
+    def __init__(self, container_ref, plan_ref) -> None:
+        super().__init__("passed")
+        self.activities: list[str] = []
+        self._container_ref = container_ref
+        self._plan_ref = plan_ref
+
+    def verify(self, repo, ref, spec):
+        container = self._container_ref()
+        plan_id = self._plan_ref()
+        if container is not None and plan_id is not None:
+            with container.new_unit_of_work() as uow:
+                self.activities.append(uow.plans.get(plan_id).activity)
+        return super().verify(repo, ref, spec)
+
+
+def test_the_gate_is_not_open_while_the_acceptance_run_executes(tmp_path, monkeypatch):
+    """The race this ordering closes: booting an application takes minutes, so
+    a gate open during the run lets an operator record a disposition against a
+    verdict that does not exist yet."""
+    box: dict[str, object] = {}
+    environment = ActivityCapturingEnvironment(
+        lambda: box.get("container"), lambda: box.get("plan_id")
+    )
+
+    original = environment.verify
+
+    def verify(repo, ref, spec):
+        return original(repo, ref, spec)
+
+    environment.verify = verify  # type: ignore[method-assign]
+
+    walk = drive_cycle_to_publication(
+        tmp_path, monkeypatch, publish=False, environment=environment,
+        on_ready=lambda container, plan_id: box.update(
+            container=container, plan_id=plan_id
+        ),
+    )
+
+    pre_publication = [a for a in environment.activities if a == "cycle_verification"]
+    assert pre_publication, (
+        "the pre-publication run must execute while the plan reports "
+        f"cycle_verification; saw {environment.activities}"
+    )
+    assert not any(a.startswith("review:") for a in environment.activities), (
+        "the publication gate must not be open while the run executes"
+    )
+    # And the gate does open afterwards.
+    with walk.container.new_unit_of_work() as uow:
+        assert uow.plans.get(walk.plan_id).review_gate is not None
+
+
+def test_the_pre_publication_run_fills_the_cycle_verification_slot(tmp_path, monkeypatch):
+    """`Plan.activity` checks review_gate BEFORE falling through to
+    cycle_verification, so a run placed after the gate leaves that label naming
+    a slot with nothing in it. Nothing was added to the domain to fix this —
+    running it in the right window makes the EXISTING derivation produce it."""
+    box: dict[str, object] = {}
+    environment = ActivityCapturingEnvironment(
+        lambda: box.get("container"), lambda: box.get("plan_id")
+    )
+
+    drive_cycle_to_publication(
+        tmp_path, monkeypatch, publish=False, environment=environment,
+        on_ready=lambda container, plan_id: box.update(
+            container=container, plan_id=plan_id
+        ),
+    )
+
+    assert "cycle_verification" in environment.activities
+
+
+def test_the_pre_publication_run_happens_once_per_cycle(tmp_path, monkeypatch):
+    """The ledger is the idempotency key: one pre_publication row per cycle
+    means done. No in-flight state is persisted anywhere, least of all in the
+    aggregate."""
+    walk = _walk(tmp_path, monkeypatch, RecordingEnvironment("passed"))
+
+    pre_publication = [r for r in _runs(walk) if r.trigger == "pre_publication"]
+
+    assert len(pre_publication) == 1

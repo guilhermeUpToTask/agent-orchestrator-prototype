@@ -259,7 +259,7 @@ class ExecutionHandler:
         goal_promotion: tuple[str, str, str] | None = None
         unit: _Unit | None = None
         review_signal: Signal | None = None
-        completion_cycle_id: str | None = None
+        acceptance_cycle_id: str | None = None
         with uow:
             plan = uow.plans.get(plan_id)
             if (
@@ -287,14 +287,14 @@ class ExecutionHandler:
                     # (advance_plan.py) is what checks "every goal terminal"
                     # and calls handle(goal_id=None) for that.
                     return Signal.PAUSED
-                review_signal = self._enter_review(plan_id, plan, uow)
-                # A cyclic completion gate just opened. The acceptance run
-                # boots an application, which is a side effect and must not
-                # happen inside this transaction (invariant #5) — so the
-                # cycle is remembered and verified just past the block.
-                completion_cycle_id = (
-                    plan.active_cycle.id if plan.active_cycle is not None else None
-                )
+                # Every goal is terminal. Before the publication gate opens,
+                # the cycle acceptance run gets its turn — see
+                # `_pending_acceptance_cycle` for why the order matters.
+                pending = self._pending_acceptance_cycle(plan_id, plan, uow)
+                if pending is not None:
+                    acceptance_cycle_id = pending
+                else:
+                    review_signal = self._enter_review(plan_id, plan, uow)
             elif action == NOT_READY:
                 return Signal.NOT_READY
             else:
@@ -334,15 +334,27 @@ class ExecutionHandler:
                         return circuit_signal
                     unit = self._start_unit(plan_id, plan, goal, task, uow, spec)
 
+        if acceptance_cycle_id is not None:
+            # OUTSIDE the transaction (invariant #5): booting an application is
+            # a side effect. The gate has NOT opened yet, so the plan reports
+            # `cycle_verification` for exactly this window, and nobody can
+            # publish against a verdict that does not exist.
+            self._run_acceptance(
+                plan_id, acceptance_cycle_id, None, "pre_publication", uow
+            )
+            # Then open the gate, in the SAME tick. Deliberately not "return
+            # CONTINUE and let the next tick open it": a skipped or raising
+            # adapter records no row, so a ledger-only guard would re-trigger
+            # the run forever. Doing both here means the gate always opens
+            # exactly once, whatever the adapter did.
+            with uow:
+                plan = uow.plans.get(plan_id)
+                if plan.review_gate is not None and plan.review_gate.unresolved:
+                    # Something opened a gate while the run was executing.
+                    return Signal.PAUSED
+                return self._enter_review(plan_id, plan, uow)
+
         if review_signal is not None:
-            # The publication gate is already open; this only adds the advisory
-            # verdict an operator will read before deciding. Gating the gate on
-            # it would make a flaky acceptance run able to withhold publication,
-            # which the design explicitly rejects.
-            if completion_cycle_id is not None:
-                self._run_acceptance(
-                    plan_id, completion_cycle_id, None, "pre_publication", uow
-                )
             return review_signal
 
         if goal_promotion is not None:
@@ -1335,6 +1347,41 @@ class ExecutionHandler:
         plan.bump_version()
         uow.plans.save(plan)
         return reservation, cycle.id, goal.id
+
+    def _pending_acceptance_cycle(
+        self, plan_id: str, plan: Plan, uow: UnitOfWork
+    ) -> str | None:
+        """The cycle owing a pre-publication acceptance run, or None.
+
+        WHY THIS RUNS BEFORE THE GATE OPENS, and why that removes any reason to
+        put the acceptance run in the domain:
+
+        * `Plan.activity` checks `review_gate` BEFORE it falls through to
+          `cycle_verification`, so a run started after the gate opened reports
+          `review:cycle_completion` and leaves `cycle_verification` naming an
+          empty slot forever. Run it here and the existing DERIVATION produces
+          `cycle_verification` on its own — no new field, no un-freeze.
+        * A gate open while the run is still executing is a race: booting an
+          application takes minutes, and an operator (or a fixture script) can
+          record a disposition before the verdict they were meant to read
+          exists. Opening the gate only once a verdict is recorded closes it.
+
+        Idempotency lives in the ledger rather than in plan state: one
+        `pre_publication` row per cycle means done. A worker that dies mid-run
+        leaves no row, so the next tick simply runs it again — which is the
+        correct behaviour for a fresh observation, and needs nothing persisted
+        in the aggregate.
+        """
+        if self._environment is None or self._environment_context is None:
+            return None
+        cycle = plan.active_cycle
+        if cycle is None:
+            return None
+        already = any(
+            run.trigger == "pre_publication"
+            for run in uow.acceptance_runs.list_for_cycle(plan_id, cycle.id)
+        )
+        return None if already else cycle.id
 
     def _run_acceptance(
         self,

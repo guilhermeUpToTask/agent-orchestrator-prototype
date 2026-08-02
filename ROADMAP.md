@@ -1312,6 +1312,18 @@ that nobody can tell from the evidence document.
     gate, an adapter that *raises* is swallowed, and a `skipped` verdict records
     nothing — so an empty list reads as "nobody asked" and can never be mistaken
     for a pass.
+  - **The pre-publication run happens BEFORE the gate opens**, which is what
+    makes the port sufficient. Two defects were found by asking whether the
+    domain needed to change, and both had this one cause: `Plan.activity`
+    checks `review_gate` **before** it falls through to `cycle_verification`,
+    so a run placed after the gate reported `review:cycle_completion` and left
+    that label naming an empty slot; and an open gate during a run that takes
+    minutes is a race, because a disposition can be recorded against a verdict
+    that does not exist yet. Running it in the earlier window makes the
+    EXISTING derivation emit `cycle_verification` with nothing added to the
+    domain, and the gate opens only once a verdict is recorded. Locked by
+    `test_the_gate_is_not_open_while_the_acceptance_run_executes` and
+    `test_the_pre_publication_run_fills_the_cycle_verification_slot`.
   - **No domain un-freeze.** The verdict is an operational ledger beside
     `goal_promotions`, not plan state, and the environment spec lives in the
     project-scoped config store. Resolving the repository path goes through an
