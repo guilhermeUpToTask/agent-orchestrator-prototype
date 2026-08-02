@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.0](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/compare/agent-orchestrator-v0.1.0...agent-orchestrator-v0.2.0) (2026-08-02)
+
+
+### Features
+
+* **api:** DELETE /api/plans/{id}, so a fixture reset actually resets ([#56](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/56)) ([7702962](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/7702962ccd07bbd4f6346157dab03ba4a3040851))
+* **api:** P4.1 — access and setup truth (G1, G6, G11 + readiness reads) ([#63](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/63)) ([fc54a41](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/fc54a41285889fd20fbc649b0f26ad7540b2517b))
+* **api:** P4.2 — operational truth (G10, requires_human, action_endpoints, un-freeze [#19](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/19)) ([#64](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/64)) ([52d5875](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/52d5875f3a3c7eb3bb4f0e915ba17f29fc11118e))
+* **api:** P4.3 — evidence truth and Phase 4 completion ([#65](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/65)) ([3ee13c4](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/3ee13c4b0f33b3c2d64a9e4de8083bf2d970509f))
+* **execution:** close Phase 2 — six defects, domain un-freeze [#18](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/18), and a fixture that must fail first ([#61](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/61)) ([f4b966e](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/f4b966e40064d01054d09c5bf2bc4b6cd054ae8c))
+* **execution:** finish Phase 1 — protect foreign checks, skip pointless agents, record the baseline ([#59](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/59)) ([28f5bde](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/28f5bde54715d9eababc8dca26962c588539708b))
+* **execution:** identify a task's checks by declaration, and a fixture that cannot be gamed ([#57](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/57)) ([0c9a4fa](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/0c9a4fa87852e63f3757dd12fd439caf36656a26))
+* **fixture:** close Phase 0 — verify and capture a happy-path run ([#54](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/54)) ([308d1f8](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/308d1f8301d19ee337027e01a43f4c69b42f254f))
+* **frontend:** Phase 5 — frontend truth, operator UX, and the review that followed ([#66](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/66)) ([af40a43](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/af40a43011bcaeb1fd71db3157cf3cae58ca36f8))
+* Phase 8 / P8.1 — repository choice, and publication that really opens a pull request ([#73](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/73)) ([c6d8873](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/c6d8873bb53bdd2fecd23a57d7f68f2305aaff6f))
+* Phase 8 / P8.2 — the cycle acceptance run ([#74](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/74)) ([279ad03](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/279ad03d7506ba5c2e41c8fd9bc20d34d75a8da0))
+* Phase 8 / P8.3 — the per-goal review surface ([#75](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/75)) ([06c80fb](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/06c80fb9b929bca024ab70979f670f206fb65b57))
+* Phase 8 / P8.4 — the showcase is a demo, not a fixture ([#76](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/76)) ([2668c94](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/2668c94ada76e708538b2f8cc723e7adc5b7788c))
+* public-preview productization — one installable artifact, and the evidence it works ([#68](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/68)) ([0781d62](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/0781d6233d8144bdf003d6e8cf795402b77348df))
+* **recovery:** keep a repairable mistake away from a human ([#52](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/52)) ([6ca8b5d](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/6ca8b5dec9c63949dbb24cc0441e20bd2b043568))
+
+
+### Bug Fixes
+
+* close the Phase 4/5 critical defects, add the first-cycle walkthrough, and make reasoner config live ([#67](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/67)) ([8e675f5](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/8e675f56be1963484df7b852a22aa333ea4dd3f4))
+* tell the operator where their code actually is, and park what Phase 7 must choose between ([#71](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/71)) ([6add7cd](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/6add7cde2d0a73c6ff741a976a6f58d52e068424))
+* **verification:** protect the checks a task did not write ([#58](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/issues/58)) ([2d7efba](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/commit/2d7efba4434a2e5ea0ebb36151349e051686431b))
+
 ## 0.1.0 (2026-07-24)
 
 
