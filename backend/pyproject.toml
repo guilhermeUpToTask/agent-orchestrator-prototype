@@ -39,6 +39,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
+    "pytest-xdist>=3.6",
     # Starlette 1.3 TestClient prefers httpx2; plain httpx is deprecated.
     "httpx2",
     "coverage>=7.0",
@@ -71,7 +72,29 @@ artifacts = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=agent_orchestrator --cov-report=term-missing"
+# Parallel by default, coverage on request.
+#
+# The integration suite spawns real servers, real agent CLIs and real git
+# repositories, so it is bound by process startup and I/O rather than by this
+# machine — exactly the shape that parallelises. Measured on 8 cores: unit
+# 88s -> 12s, integration 257s -> 119s. It stops improving past about four
+# workers, because what is left is a handful of tests that genuinely wait
+# (`serve` booting an API and a worker, SSE polling), so `auto` is a ceiling
+# rather than a target.
+#
+# Coverage came out of here because it is a 7-12% tax on every run, including
+# the unit suite where nobody reads the report, and nothing gates on the
+# number. `make coverage` still prints it.
+#
+# Debugging: `-p no:xdist` (or `-n0`) restores serial execution — `--pdb`
+# needs it, and a crash is easier to read without interleaved workers.
+#
+# `--dist loadfile` keeps a file's tests inside ONE worker. That is not a
+# balancing preference: the default round-robin ran four `orchestrate serve`
+# tests simultaneously, each booting a real API and a real worker, and they
+# knocked each other over. Per-file also imports each module once per worker
+# instead of many times, which is where this suite's setup cost lives.
+addopts = "-n auto --dist loadfile"
 markers = [
     "integration: exercises real adapters (SQLite, git, subprocess); deselect with -m 'not integration'",
     "llm: cost-gated real-provider smoke tests; run explicitly with -m llm and REASONER_SMOKE_* set",

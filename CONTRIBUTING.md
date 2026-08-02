@@ -23,6 +23,8 @@ ruff check agent_orchestrator tests --fix
 mypy agent_orchestrator                                 # zero errors, no exclude list
 pytest -m "not integration"              # fast
 pytest -m integration                    # real SQLite, real git, TestClient
+# Both run in parallel (`-n auto`). Add `-p no:xdist` when you need `--pdb`
+# or readable output, and `make coverage` when you want the report.
 
 # frontend
 cd ../frontend

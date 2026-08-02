@@ -1185,6 +1185,13 @@ evidence.
 - Tier 1 runs after execution, reasoning, verification, runtime resolution,
   capacity, workspace, or publication changes.
 - Paid provider tests stay opt-in, never an ordinary per-push cost.
+- The suite runs in parallel (`-n auto --dist loadfile`, 2026-08-02): 345s →
+  ~135s for all 1258 tests, coverage moved to `make coverage` because nothing
+  gates on it. Per-file distribution is load-bearing, not a preference — the
+  four `orchestrate serve` tests boot a real API and worker, and the default
+  round-robin ran them simultaneously. Parallelism also has to stay honest: a
+  test that only passes on an idle machine is a flake with good manners, so a
+  change here is validated by a repeated series, not one green run.
 
 ### Run evidence
 

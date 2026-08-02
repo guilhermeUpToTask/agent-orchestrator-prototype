@@ -45,7 +45,23 @@ def _get(url: str, timeout: float = 2.0):
         return json.loads(response.read())
 
 
-def _wait_for(url: str, deadline_seconds: float = 45.0):
+# Generous on purpose. The server has to import the app, migrate a database
+# with `synchronous=FULL` (every commit fsyncs) and bind a port — and under a
+# parallel suite it does that while seven other workers hammer the same disk.
+# 45s was calibrated for a serial run and turned a slow start into a failure;
+# `_wait_for` returns the instant the server answers, so headroom is free, and
+# the liveness check below still fails immediately when it is genuinely dead.
+_STARTUP_DEADLINE = 180.0
+
+
+def _wait_for(url: str, deadline_seconds: float = _STARTUP_DEADLINE, process=None, log: Path | None = None):
+    """Poll `url` until it answers — but stop the moment the server is DEAD.
+
+    Without the liveness check this waited the full deadline on a process that
+    had already exited and reported "never answered: Connection refused":
+    true, useless, and indistinguishable from a slow boot. `log` is the child's
+    own output, which says in one line what the polling never could.
+    """
     deadline = time.monotonic() + deadline_seconds
     last: Exception | None = None
     while time.monotonic() < deadline:
@@ -53,8 +69,19 @@ def _wait_for(url: str, deadline_seconds: float = 45.0):
             return _get(url)
         except (urllib.error.URLError, OSError, TimeoutError) as exc:  # not up yet
             last = exc
+            if process is not None and process.poll() is not None:
+                raise AssertionError(
+                    f"server exited with {process.returncode} before answering {url}:"
+                    f"\n{_tail(log)}"
+                ) from exc
             time.sleep(0.5)
-    raise AssertionError(f"{url} never answered: {last}")
+    raise AssertionError(f"{url} never answered ({last}); server said:\n{_tail(log)}")
+
+
+def _tail(log: Path | None, lines: int = 20) -> str:
+    if log is None or not log.is_file():
+        return "<no server log>"
+    return "\n".join(log.read_text(errors="replace").splitlines()[-lines:])
 
 
 def _children_of(pid: int) -> list[int]:
@@ -77,17 +104,17 @@ def _is_running(pid: int) -> bool:
     return stat.rsplit(")", 1)[1].split()[0] != "Z"
 
 
-@pytest.fixture
-def served(tmp_path):
-    """The real `orchestrate serve`, on a free port, in its own process group."""
-    port = _free_port()
+def _spawn(port: int, home: Path, log: Path) -> subprocess.Popen:
     env = {
         **os.environ,
-        "ORCHESTRATOR_HOME": str(tmp_path / "home"),
+        "ORCHESTRATOR_HOME": str(home),
         "PYTHONPATH": str(BACKEND),
+        # Otherwise the child block-buffers to the log file and a failure
+        # reports an EMPTY server log, which is the one thing it must not do.
+        "PYTHONUNBUFFERED": "1",
     }
     env.pop("ORCHESTRATOR_API_TOKEN", None)
-    process = subprocess.Popen(
+    return subprocess.Popen(
         [
             sys.executable,
             "-m",
@@ -100,13 +127,40 @@ def served(tmp_path):
         ],
         cwd=str(BACKEND),
         env=env,
-        stdout=subprocess.PIPE,
+        # A FILE, not a pipe. `serve` and its worker log structurally on every
+        # tick, and with `--poll-seconds 0.2` that fills a 64K pipe nobody is
+        # draining — at which point the child BLOCKS on write and the API stops
+        # answering. Serially the tests finished long before that; under a
+        # parallel suite they do not, which is what made these tests flaky.
+        stdout=log.open("wb"),
         stderr=subprocess.STDOUT,
-        text=True,
         start_new_session=True,  # own process group, so cleanup takes the worker too
     )
+
+
+@pytest.fixture
+def served(tmp_path):
+    """The real `orchestrate serve`, on a free port, in its own process group.
+
+    `_free_port` binds a port, closes it, and hands the number over — so
+    between that and uvicorn's own bind there is a window another process can
+    take it. Serially that never happened; running the suite in parallel it
+    does, uvicorn exits "address already in use", and the test then polls a
+    corpse for 45 seconds. Retry the whole spawn rather than widen a deadline:
+    losing a port race is not a slow start, and waiting longer never fixes it.
+    """
+    home = tmp_path / "home"
+    log = tmp_path / "serve.log"
+    for attempt in range(3):
+        port = _free_port()
+        process = _spawn(port, home, log)
+        time.sleep(0.5)
+        if process.poll() is None:
+            break
+        if attempt == 2:  # pragma: no cover - three lost races in a row
+            raise AssertionError(f"serve could not start after 3 ports:\n{_tail(log)}")
     try:
-        yield process, port, tmp_path / "home"
+        yield process, port, home, log
     finally:
         if process.poll() is None:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
@@ -118,9 +172,9 @@ def served(tmp_path):
 
 
 def test_one_command_brings_up_the_api(served) -> None:
-    _process, port, _home = served
+    process, port, _home, log = served
 
-    health = _wait_for(f"http://127.0.0.1:{port}/health")
+    health = _wait_for(f"http://127.0.0.1:{port}/health", process=process, log=log)
 
     assert health["status"] == "ok"
 
@@ -128,10 +182,10 @@ def test_one_command_brings_up_the_api(served) -> None:
 def test_one_command_also_brings_up_a_worker(served) -> None:
     """The half an operator forgets. A plan with no worker is accepted and then
     never moves, and every other read still says healthy."""
-    _process, port, _home = served
-    _wait_for(f"http://127.0.0.1:{port}/health")
+    process, port, _home, log = served
+    _wait_for(f"http://127.0.0.1:{port}/health", process=process, log=log)
 
-    deadline = time.monotonic() + 45
+    deadline = time.monotonic() + _STARTUP_DEADLINE
     workers: list = []
     while time.monotonic() < deadline:
         workers = _get(f"http://127.0.0.1:{port}/api/workers")
@@ -146,8 +200,8 @@ def test_it_migrates_the_state_directory_it_was_given(served) -> None:
     """An explicit state directory that starts empty: `serve` has to create the
     schema, or the first request against a real route fails on a missing table
     and the operator is told nothing useful."""
-    _process, port, home = served
-    _wait_for(f"http://127.0.0.1:{port}/health")
+    process, port, home, log = served
+    _wait_for(f"http://127.0.0.1:{port}/health", process=process, log=log)
 
     assert (home / "orchestrator.db").is_file()
     assert _get(f"http://127.0.0.1:{port}/api/plans") == []
@@ -166,8 +220,8 @@ def test_sigterm_to_serve_takes_the_worker_with_it(served) -> None:
     it. Nothing on the control plane can report it, because the control plane
     is the half that exited.
     """
-    process, port, _home = served
-    _wait_for(f"http://127.0.0.1:{port}/health")
+    process, port, _home, log = served
+    _wait_for(f"http://127.0.0.1:{port}/health", process=process, log=log)
     workers = _children_of(process.pid)
     assert workers, "serve started no worker subprocess to begin with"
 
