@@ -31,7 +31,12 @@ from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 from agent_orchestrator.infra.container import AppContainer
 from agent_orchestrator.infra.db.secret_ref import SecretRef
 from agent_orchestrator.infra.errors import InfrastructureError, ProjectBindingInvalidError
-from agent_orchestrator.infra.git.repository_binding import validate_repo_url
+from agent_orchestrator.infra.git.repository_binding import (
+    RepositoryBinding,
+    default_branch_of,
+    probe_remote,
+    validate_repo_url,
+)
 from agent_orchestrator.infra.runtime.factory import AGENT_RUNNER_CONFIG_INVALID, RUNTIME_TYPES
 
 router = APIRouter(tags=["reference"])
@@ -301,6 +306,70 @@ def delete_model(model_id: str, container: AppContainer = Depends(get_container)
 class ProjectBody(BaseModel):
     name: str
     repo_url: str | None = None
+    # Optional on purpose: every fixture and run-cycle.sh posts {name, repo_url},
+    # and inference stays the fallback. When present it is checked against what
+    # the URL actually is, which is what stops "remote" with a blank URL from
+    # silently becoming a scratch repository nobody asked for.
+    binding: Literal["local", "remote", "scratch"] | None = None
+
+
+def _checked_binding(body: ProjectBody) -> RepositoryBinding:
+    binding = validate_repo_url(body.repo_url)
+    if body.binding is not None and body.binding != binding.kind:
+        named = repr(body.repo_url) if body.repo_url else "empty"
+        raise ProjectBindingInvalidError(
+            f"this project names a '{body.binding}' binding but its repository "
+            f"URL is {named}, which is a '{binding.kind}' binding"
+        )
+    return binding
+
+
+class ProbeRequest(BaseModel):
+    repo_url: str
+
+
+class ProbeResponse(BaseModel):
+    binding: str
+    reachable: bool
+    default_branch: str | None
+    resolved_path_preview: str | None
+    problem: str | None
+    problem_kind: str | None
+
+
+@router.post("/projects/probe", response_model=ProbeResponse)
+def probe_project_repository(
+    body: ProbeRequest, container: AppContainer = Depends(get_container)
+) -> ProbeResponse:
+    """Diagnose a repository URL before any project exists.
+
+    Read-only: writes nothing, creates nothing. `create_project` deliberately
+    does NOT call this — write-time validation stays network-free, for the
+    reasons `repository_binding.py`'s module docstring records. This is the
+    separate setup-time check, made with a human watching.
+    """
+    binding = validate_repo_url(body.repo_url)
+    preview = container.workspace_resolver.repository_path_for(
+        ProjectDefinition(id="unsaved", name="unsaved", repo_url=body.repo_url)
+    )
+    if binding.kind != "remote":
+        return ProbeResponse(
+            binding=binding.kind,
+            reachable=True,
+            default_branch=binding.default_branch,
+            resolved_path_preview=str(preview),
+            problem=None,
+            problem_kind=None,
+        )
+    probe = probe_remote(body.repo_url)
+    return ProbeResponse(
+        binding=binding.kind,
+        reachable=probe.reachable,
+        default_branch=probe.default_branch,
+        resolved_path_preview=str(preview),
+        problem=probe.problem,
+        problem_kind=probe.problem_kind,
+    )
 
 
 @router.get("/projects")
@@ -314,7 +383,7 @@ def list_projects(
 def create_project(
     body: ProjectBody, container: AppContainer = Depends(get_container)
 ) -> ProjectDefinition:
-    validate_repo_url(body.repo_url)
+    _checked_binding(body)
     project = ProjectDefinition(id=new_id(), name=body.name, repo_url=body.repo_url)
     container.project_repo.add(project)
     return project
@@ -324,7 +393,7 @@ def create_project(
 def update_project(
     project_id: str, body: ProjectBody, container: AppContainer = Depends(get_container)
 ) -> None:
-    validate_repo_url(body.repo_url)
+    _checked_binding(body)
     container.project_repo.update(
         ProjectDefinition(id=project_id, name=body.name, repo_url=body.repo_url)
     )
@@ -333,6 +402,34 @@ def update_project(
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.project_repo.delete(project_id)
+
+
+class CloneResponse(BaseModel):
+    resolved_path: str
+    default_branch: str | None
+    already_present: bool
+
+
+@router.post("/projects/{project_id}/clone", response_model=CloneResponse)
+def clone_project_repository(
+    project_id: str, container: AppContainer = Depends(get_container)
+) -> CloneResponse:
+    """Materialize this project's repository now, rather than during its first
+    cycle.
+
+    A remote is otherwise cloned lazily inside the worker, so a typo'd or
+    private URL fails mid-cycle instead of at setup. Idempotent: an existing
+    clone is reported, never re-fetched.
+    """
+    project = container.project_repo.get(project_id)
+    destination = container.workspace_resolver.repository_path_for(project)
+    already_present = (destination / ".git").exists()
+    container.workspace_resolver.resolve(project_id)
+    return CloneResponse(
+        resolved_path=str(destination),
+        default_branch=default_branch_of(destination),
+        already_present=already_present,
+    )
 
 
 class ProjectReadinessResponse(BaseModel):

@@ -153,3 +153,134 @@ def test_a_local_path_containing_an_at_sign_is_still_a_path(client, tmp_path):
     response = client.post("/api/projects", json={"name": "P", "repo_url": str(repo)})
 
     assert response.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# P8.1 — a remote must fail fast, and be checkable before it is bound
+# ---------------------------------------------------------------------------
+
+
+def test_materialize_remote_does_not_block_on_a_credential_prompt(tmp_path):
+    """A private https remote makes git ask for a username. There is no tty to
+    answer it, so without GIT_TERMINAL_PROMPT=0 the worker blocked forever
+    while holding a goal lease. It must fail fast instead."""
+    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+
+    class _NoProjects:
+        def get(self, project_id):  # pragma: no cover - never reached
+            raise NotImplementedError
+
+        def list(self):
+            return []
+
+    resolver = ProjectWorkspaceResolver(_NoProjects(), tmp_path / "home")
+    project = ProjectDefinition(
+        id="p1",
+        name="private",
+        # Port 1 on loopback: refused instantly, so the test cannot hang on a
+        # TCP connect and still proves the clone terminates rather than prompting.
+        repo_url="https://127.0.0.1:1/private/repo.git",
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        resolver._materialize_remote(project, tmp_path / "clone")
+
+
+def test_probe_classifies_an_unreachable_host():
+    from agent_orchestrator.infra.git.repository_binding import probe_remote
+
+    probe = probe_remote("https://127.0.0.1:1/a/b.git", timeout_seconds=5.0)
+
+    assert probe.reachable is False
+    assert probe.problem_kind in {"unreachable", "timeout", "needs_credentials"}
+    assert probe.problem
+
+
+def test_probe_reads_the_default_branch_of_a_local_repository(tmp_path):
+    """A file:// URL is a remote as far as ls-remote is concerned, so the probe
+    is exercised end to end with no network."""
+    from agent_orchestrator.infra.git.repository_binding import probe_remote
+
+    origin = tmp_path / "origin"
+    _git_repo(origin)
+
+    probe = probe_remote(f"file://{origin}")
+
+    assert probe.reachable is True
+    assert probe.default_branch == "main"
+    assert probe.problem is None
+
+
+def test_probe_route_reports_the_resolved_path_preview(client):
+    response = client.post(
+        "/api/projects/probe", json={"repo_url": "https://127.0.0.1:1/a/b.git"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding"] == "remote"
+    assert body["reachable"] is False
+    assert "/repos/" in body["resolved_path_preview"]
+
+
+
+# ---------------------------------------------------------------------------
+# P8.1 — an explicitly named binding, and an on-request clone
+# ---------------------------------------------------------------------------
+
+
+def test_naming_remote_with_no_url_is_refused(client):
+    """The silent scratch substitution the phase forbids: an operator who says
+    'remote' and leaves the URL blank must not quietly get a demo repository."""
+    response = client.post(
+        "/api/projects", json={"name": "p", "repo_url": None, "binding": "remote"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PROJECT_BINDING_INVALID"
+    assert "remote" in response.json()["error"]["message"]
+
+
+def test_naming_scratch_with_a_url_is_refused(client):
+    response = client.post(
+        "/api/projects",
+        json={"name": "p", "repo_url": "https://example.com/a/b.git", "binding": "scratch"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PROJECT_BINDING_INVALID"
+
+
+def test_a_binding_that_agrees_is_accepted(client):
+    response = client.post(
+        "/api/projects",
+        json={"name": "p", "repo_url": "https://example.com/a/b.git", "binding": "remote"},
+    )
+
+    assert response.status_code == 201
+
+
+def test_omitting_the_binding_still_works(client):
+    """Every fixture and run-cycle.sh posts {name, repo_url}; inference stays."""
+    response = client.post("/api/projects", json={"name": "p", "repo_url": None})
+
+    assert response.status_code == 201
+
+
+def test_clone_is_idempotent_and_reports_the_resolved_path(client, tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    created = client.post("/api/projects", json={"name": "p", "repo_url": str(repo)})
+    project_id = created.json()["id"]
+
+    first = client.post(f"/api/projects/{project_id}/clone")
+    second = client.post(f"/api/projects/{project_id}/clone")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["resolved_path"] == str(repo)
+    assert first.json()["resolved_path"] == second.json()["resolved_path"]
+    assert first.json()["default_branch"] == "main"
+    # A local binding is already materialized: the endpoint reports it rather
+    # than copying anything.
+    assert first.json()["already_present"] is True

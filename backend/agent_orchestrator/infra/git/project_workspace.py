@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from urllib.parse import unquote, urlparse
 from agent_orchestrator.app.ports import UnitOfWork, WorkspaceHandle
 from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
 from agent_orchestrator.domain.repositories.project_repo import ProjectRepository
+from agent_orchestrator.infra.git.repository_binding import GIT_NONINTERACTIVE_ENV
 from agent_orchestrator.infra.git.workspace import GitBranchWorkspace
 
 
@@ -134,6 +136,7 @@ class ProjectWorkspaceResolver:
             check=True,
             capture_output=True,
             text=True,
+            env={**os.environ, **GIT_NONINTERACTIVE_ENV},
         )
 
 
