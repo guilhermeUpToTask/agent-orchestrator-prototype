@@ -81,7 +81,7 @@ and [ADR-003](adr-003-cyclic-project-plan-lifecycle.md).*
 
 ## Deferred by decision (seams preserved)
 
-PR gate · project spec governance · decision gate · GitHub PR output · parallelism · env provisioner · Postgres · Redis claim path · pi NDJSON streaming. Details and reintroduction designs: [../legacy/pre-refactor-backend.md](../legacy/pre-refactor-backend.md); scheduling: [ROADMAP.md](../../ROADMAP.md).
+PR gate · project spec governance · decision gate · ~~GitHub PR output~~ (built 2026-08-02, decision 61) · parallelism · env provisioner · Postgres · Redis claim path · pi NDJSON streaming. Details and reintroduction designs: [../legacy/pre-refactor-backend.md](../legacy/pre-refactor-backend.md); scheduling: [ROADMAP.md](../../ROADMAP.md).
 
 
 43. **Domain unfreeze #4 (2026-07-14): cyclic ProjectPlan + deterministic TDD execution.** [ADR-003](adr-003-cyclic-project-plan-lifecycle.md) deliberately supersedes the terminal nine-phase lifecycle and the incompatible parts of decisions 1-9, 13, 17-18, 22, 24-25, 34-35, and unfreezes 2-3. One immutable project owns one long-lived plan; root status is `running | paused | waiting | blocked | idle`; finite work lives in cycles; intent, architecture, and publication are exact-revision review gates; pause and retry are separate; runs are monotonic and leased; task completion requires protected, independently verified executable evidence; and verified task-to-goal-to-cycle staging produces one recorded output disposition per cycle. Legacy rows are preserved through the explicit mapping and project-binding quarantine in ADR-003; ownership and approval/publication history are never fabricated.
@@ -505,3 +505,53 @@ The legacy half is unchanged and locked: a plan with no cyclic artifact is still
 judged by its phase, so a legacy row in REPLANNING still refuses to pause.
 Locked by `test_a_cyclic_plan_awaiting_architecture_can_pause` and
 `test_a_legacy_plan_is_still_judged_by_its_phase`.
+
+**Decision 61 (2026-08-02) — authenticated GitHub publication is promoted out
+of the deferred list into Phase 8 (P8.1). No domain unfreeze.**
+`OutputDisposition.OPEN_PR` recorded that a human opened a pull request;
+`output_reference` was free text they typed. The orchestrator now pushes
+`cycle/<id>` and opens the pull request itself, so that reference is a fact it
+produced.
+
+The trigger was a contradiction inside Phase 8's own wizard deliverable, which
+requires that "declining the token must downgrade the delivery method". That
+presumes a delivery method a token *changes*, and none existed. Shipping the
+token step first would have collected a credential nothing reads — which is the
+workaround the constraint exists to forbid. It also answers open question #3 of
+the 2026-08-02 delivery analysis: `output_reference` was "the one place a human
+asserts something the system cannot verify".
+
+**Bounds, chosen so promoting a deferred item does not become open-ended:**
+
+- **GitHub only.** One adapter behind `app/forge_port.py`. Guessing GitLab or
+  Gitea semantics with no user asking is the completeness the roadmap's scope
+  discipline forbids.
+- **Opens a pull request, never merges one.** There is no merge method on the
+  port, so the guarantee is structural rather than documented; `MERGE` stays a
+  recorded human claim. Automatic merging remains rejected.
+- **Pushes `cycle/<id>` and nothing else.** The default branch is still never
+  written by plan work.
+- **`NoForge` is a permanent fallback, not a placeholder** — the `NoSandbox`
+  principle. An installation with no token keeps recording the disposition an
+  operator typed; that is a supported configuration.
+
+**Why no unfreeze was needed.** The binding could have become fields on
+`ProjectDefinition`, which is frozen. It did not: the config store is already
+two-tier with a project id as a scope, so `forge.provider` / `forge.repository`
+/ `forge.token_ref` live there, and the token in the existing secret store under
+`secret://forge/<project_id>`. Per project rather than global, because two
+projects can live on different accounts and one credential spanning every
+project is the wrong blast radius for a tool running unsandboxed agents.
+
+**The ordering is the load-bearing part.** `record_output_disposition` does
+everything in one transaction, which is correct for a claim a human typed. A
+push and an API call are side effects, and invariant #5 forbids those inside a
+transaction — so `app/use_cases/publish_cycle.py` reads (transaction opens and
+closes), pushes and opens the PR (outside), then records the disposition with
+the real URL (new transaction, re-read and re-guarded). A forge failure leaves
+the gate open with nothing written, and `retain_branch` is still available.
+Locked by `tests/integration/test_publish_cycle.py`, including the retry.
+
+The token is verified at save time against the exact repository — one call
+confirming it exists, is reachable, and can push — so a read-only credential
+fails at setup rather than at a publication gate at the end of a cycle.

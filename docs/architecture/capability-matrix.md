@@ -79,6 +79,11 @@ Serves **J1**. All routes token-guarded.
 | Create project (binding validated) | `project_repo`, `repository_binding` | `POST /api/projects` | `ProjectsSection`, `Plans` | `test_api.py`, `test_repository_binding.py` | full | critical |
 | Edit project (binding validated) | `project_repo`, `repository_binding` | `PUT /api/projects/{project_id}` | `ProjectsSection` | `test_api.py`, `test_repository_binding.py` | full | critical |
 | Delete project | `project_repo` | `DELETE /api/projects/{project_id}` | `ProjectsSection` | `test_api.py` | full | critical |
+| Probe a repository URL before binding (P8.1) | `repository_binding.probe_remote` | `POST /api/projects/probe` | `ProjectsSection` wizard | `test_repository_binding.py` | full | critical |
+| Materialize a project's clone on request (P8.1) | `ProjectWorkspaceResolver.resolve` | `POST /api/projects/{project_id}/clone` | `ProjectsSection` wizard | `test_repository_binding.py` | full | critical |
+| Read a project's forge binding (P8.1) | `infra/forge/binding.read_binding` | `GET /api/projects/{project_id}/forge` | `ProjectsSection` wizard | `test_forge_binding_api.py` | full | critical |
+| Bind a GitHub forge, token verified at save (P8.1) | `infra/forge/github.verify_github_token`, `secret_store` | `PUT /api/projects/{project_id}/forge` | `ProjectsSection` wizard | `test_forge_binding_api.py` | full | critical |
+| Remove a forge binding and its token (P8.1) | `infra/forge/binding.clear_binding`, `secret_store` | `DELETE /api/projects/{project_id}/forge` | `ProjectsSection` wizard | `test_forge_binding_api.py` | full | critical |
 | Read config scope | `config_repo` | `GET /api/config/{scope}` | `ReasonerSection`, `RunnerSection` | `test_api.py` | full | critical |
 | Set config key | `config_repo` | `PUT /api/config/{scope}/{key}` | `ReasonerSection`, `RunnerSection` | `test_api.py` | full | critical |
 | Unset config key | `config_repo` | `DELETE /api/config/{scope}/{key}` | — | `test_api.py` | api-only | post-launch |

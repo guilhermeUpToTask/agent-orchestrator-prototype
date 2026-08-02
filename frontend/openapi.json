@@ -4024,6 +4024,82 @@
         }
       }
     },
+    "/api/projects/probe": {
+      "post": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Probe Project Repository",
+        "description": "Diagnose a repository URL before any project exists.\n\nRead-only: writes nothing, creates nothing. `create_project` deliberately\ndoes NOT call this \u2014 write-time validation stays network-free, for the\nreasons `repository_binding.py`'s module docstring records. This is the\nseparate setup-time check, made with a human watching.",
+        "operationId": "reference-probe_project_repository",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects": {
       "get": {
         "tags": [
@@ -4294,6 +4370,311 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/forge": {
+      "get": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Get Forge Binding",
+        "operationId": "reference-get_forge_binding",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ForgeBindingResponse"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Reference-Get Forge Binding"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Set Forge Binding",
+        "description": "Verify the token against the exact repository BEFORE storing anything.\n\nOne call answers whether the repository exists, whether the token reaches\nit, and whether it can push \u2014 so a credential that cannot open a pull\nrequest fails here, at setup, rather than at the publication gate at the\nend of a cycle.",
+        "operationId": "reference-set_forge_binding",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgeBindingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgeBindingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Delete Forge Binding",
+        "operationId": "reference-delete_forge_binding",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/clone": {
+      "post": {
+        "tags": [
+          "reference"
+        ],
+        "summary": "Clone Project Repository",
+        "description": "Materialize this project's repository now, rather than during its first\ncycle.\n\nA remote is otherwise cloned lazily inside the worker, so a typo'd or\nprivate URL fails mid-cycle instead of at setup. Idempotent: an existing\nclone is reported, never re-fetched.",
+        "operationId": "reference-clone_project_repository",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloneResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -5712,6 +6093,36 @@
         ],
         "title": "ChatMessageResponse"
       },
+      "CloneResponse": {
+        "properties": {
+          "resolved_path": {
+            "type": "string",
+            "title": "Resolved Path"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "already_present": {
+            "type": "boolean",
+            "title": "Already Present"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolved_path",
+          "default_branch",
+          "already_present"
+        ],
+        "title": "CloneResponse"
+      },
       "ConfigValue": {
         "properties": {
           "value": {
@@ -6715,6 +7126,54 @@
         ],
         "title": "FailureKind",
         "description": "Typed classification of a task failure. Produced by the agent runner,\nconsumed by RetryPolicy.should_retry \u2014 a checked classification, not string\nmatching (DESIGN_NOTES #2)."
+      },
+      "ForgeBindingBody": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository",
+          "token"
+        ],
+        "title": "ForgeBindingBody"
+      },
+      "ForgeBindingResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "repository",
+          "default_branch"
+        ],
+        "title": "ForgeBindingResponse"
       },
       "Goal": {
         "properties": {
@@ -8017,6 +8476,85 @@
         ],
         "title": "PlanningOperationResponse"
       },
+      "ProbeRequest": {
+        "properties": {
+          "repo_url": {
+            "type": "string",
+            "title": "Repo Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo_url"
+        ],
+        "title": "ProbeRequest"
+      },
+      "ProbeResponse": {
+        "properties": {
+          "binding": {
+            "type": "string",
+            "title": "Binding"
+          },
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "resolved_path_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Path Preview"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "problem_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "binding",
+          "reachable",
+          "default_branch",
+          "resolved_path_preview",
+          "problem",
+          "problem_kind"
+        ],
+        "title": "ProbeResponse"
+      },
       "ProjectBindingRequest": {
         "properties": {
           "project_id": {
@@ -8046,6 +8584,22 @@
               }
             ],
             "title": "Repo Url"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "local",
+                  "remote",
+                  "scratch"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding"
           }
         },
         "type": "object",

@@ -373,6 +373,24 @@ export type ChatMessageResponse = {
 };
 
 /**
+ * CloneResponse
+ */
+export type CloneResponse = {
+    /**
+     * Resolved Path
+     */
+    resolved_path: string;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+    /**
+     * Already Present
+     */
+    already_present: boolean;
+};
+
+/**
  * ConfigValue
  */
 export type ConfigValue = {
@@ -883,6 +901,38 @@ export type ExecutionRunTimelineResponse = {
  * matching (DESIGN_NOTES #2).
  */
 export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error' | 'verification_error';
+
+/**
+ * ForgeBindingBody
+ */
+export type ForgeBindingBody = {
+    /**
+     * Repository
+     */
+    repository: string;
+    /**
+     * Token
+     */
+    token: string;
+};
+
+/**
+ * ForgeBindingResponse
+ */
+export type ForgeBindingResponse = {
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * Repository
+     */
+    repository: string;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+};
 
 /**
  * Goal
@@ -1570,6 +1620,46 @@ export type PlanningOperationResponse = {
 };
 
 /**
+ * ProbeRequest
+ */
+export type ProbeRequest = {
+    /**
+     * Repo Url
+     */
+    repo_url: string;
+};
+
+/**
+ * ProbeResponse
+ */
+export type ProbeResponse = {
+    /**
+     * Binding
+     */
+    binding: string;
+    /**
+     * Reachable
+     */
+    reachable: boolean;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+    /**
+     * Resolved Path Preview
+     */
+    resolved_path_preview: string | null;
+    /**
+     * Problem
+     */
+    problem: string | null;
+    /**
+     * Problem Kind
+     */
+    problem_kind: string | null;
+};
+
+/**
  * ProjectBindingRequest
  */
 export type ProjectBindingRequest = {
@@ -1591,6 +1681,10 @@ export type ProjectBody = {
      * Repo Url
      */
     repo_url?: string | null;
+    /**
+     * Binding
+     */
+    binding?: 'local' | 'remote' | 'scratch' | null;
 };
 
 /**
@@ -4842,6 +4936,41 @@ export type ReferenceUpdateModelResponses = {
 
 export type ReferenceUpdateModelResponse = ReferenceUpdateModelResponses[keyof ReferenceUpdateModelResponses];
 
+export type ReferenceProbeProjectRepositoryData = {
+    body: ProbeRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/projects/probe';
+};
+
+export type ReferenceProbeProjectRepositoryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceProbeProjectRepositoryError = ReferenceProbeProjectRepositoryErrors[keyof ReferenceProbeProjectRepositoryErrors];
+
+export type ReferenceProbeProjectRepositoryResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProbeResponse;
+};
+
+export type ReferenceProbeProjectRepositoryResponse = ReferenceProbeProjectRepositoryResponses[keyof ReferenceProbeProjectRepositoryResponses];
+
 export type ReferenceListProjectsData = {
     body?: never;
     headers?: {
@@ -4993,6 +5122,168 @@ export type ReferenceUpdateProjectResponses = {
 };
 
 export type ReferenceUpdateProjectResponse = ReferenceUpdateProjectResponses[keyof ReferenceUpdateProjectResponses];
+
+export type ReferenceDeleteForgeBindingData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}/forge';
+};
+
+export type ReferenceDeleteForgeBindingErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceDeleteForgeBindingError = ReferenceDeleteForgeBindingErrors[keyof ReferenceDeleteForgeBindingErrors];
+
+export type ReferenceDeleteForgeBindingResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ReferenceDeleteForgeBindingResponse = ReferenceDeleteForgeBindingResponses[keyof ReferenceDeleteForgeBindingResponses];
+
+export type ReferenceGetForgeBindingData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}/forge';
+};
+
+export type ReferenceGetForgeBindingErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceGetForgeBindingError = ReferenceGetForgeBindingErrors[keyof ReferenceGetForgeBindingErrors];
+
+export type ReferenceGetForgeBindingResponses = {
+    /**
+     * Response Reference-Get Forge Binding
+     *
+     * Successful Response
+     */
+    200: ForgeBindingResponse | null;
+};
+
+export type ReferenceGetForgeBindingResponse = ReferenceGetForgeBindingResponses[keyof ReferenceGetForgeBindingResponses];
+
+export type ReferenceSetForgeBindingData = {
+    body: ForgeBindingBody;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}/forge';
+};
+
+export type ReferenceSetForgeBindingErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceSetForgeBindingError = ReferenceSetForgeBindingErrors[keyof ReferenceSetForgeBindingErrors];
+
+export type ReferenceSetForgeBindingResponses = {
+    /**
+     * Successful Response
+     */
+    200: ForgeBindingResponse;
+};
+
+export type ReferenceSetForgeBindingResponse = ReferenceSetForgeBindingResponses[keyof ReferenceSetForgeBindingResponses];
+
+export type ReferenceCloneProjectRepositoryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Project Id
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/projects/{project_id}/clone';
+};
+
+export type ReferenceCloneProjectRepositoryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReferenceCloneProjectRepositoryError = ReferenceCloneProjectRepositoryErrors[keyof ReferenceCloneProjectRepositoryErrors];
+
+export type ReferenceCloneProjectRepositoryResponses = {
+    /**
+     * Successful Response
+     */
+    200: CloneResponse;
+};
+
+export type ReferenceCloneProjectRepositoryResponse = ReferenceCloneProjectRepositoryResponses[keyof ReferenceCloneProjectRepositoryResponses];
 
 export type ReferenceProjectReadinessData = {
     body?: never;

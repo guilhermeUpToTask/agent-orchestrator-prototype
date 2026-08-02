@@ -84,6 +84,25 @@ table, keyed by `ORCHESTRATOR_MASTER_KEY`.
 - Lose `ORCHESTRATOR_MASTER_KEY` and the stored keys are unrecoverable; that is
   the intended failure mode.
 
+### GitHub forge tokens
+
+A project may bind a GitHub token so `open_pr` really opens a pull request
+(P8.1). It is stored in the same envelope-encrypted `secrets` table, at
+`secret://forge/<project_id>`, and no endpoint returns it.
+
+- **Per project, not global.** Two projects can live on different accounts, and
+  one credential spanning every project is the wrong blast radius here.
+- **It needs write access** to that one repository — a fine-grained token with
+  Contents and Pull requests write, or a classic `repo` scope. It is verified
+  against that exact repository when you save it.
+- **What it is used for, exhaustively:** pushing `cycle/<id>`, and one
+  `POST /repos/{owner}/{repo}/pulls`. The port has no merge method and no way to
+  name another branch. The default branch is never written.
+- The token crosses into plaintext in one Authorization header and one push
+  remote URL. Git echoes that URL in its stderr on failure, so the push scrubs
+  the token out of any error it raises.
+- Deleting the binding deletes the secret.
+
 Note that the **agent CLIs receive a decrypted key in their environment** when
 they run — `cli_runner.py` puts it in the child process env (e.g.
 `ANTHROPIC_API_KEY`) because that is how those CLIs authenticate. Encryption at
@@ -92,9 +111,9 @@ rest does not change what a subprocess, or anything it spawns, can read.
 ## What the preview does not have
 
 - no sandboxing or resource limits on agent processes;
-- no authenticated forge integration — `open_pr` and `merge` dispositions record
-  a reference to an operation *you* performed; the orchestrator never pushes to
-  or merges anything on GitHub;
+- no *automatic* merging — the orchestrator opens a pull request and never
+  merges one. `merge` still records an operation *you* performed. Forge
+  publication itself now exists; see the section above for what it can reach;
 - no multi-tenancy, no user accounts, no audit log of *who* did what (the event
   stream records what happened, not which human asked);
 - no supply-chain verification of the models or CLIs you configure;

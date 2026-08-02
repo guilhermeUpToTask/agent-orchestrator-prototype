@@ -65,6 +65,11 @@ from agent_orchestrator.infra.policies.retry_policy_factory import build_retry_p
 from agent_orchestrator.infra.reasoner.factory import build_reasoner
 from agent_orchestrator.infra.reasoner.live_reasoner import LiveReasoner
 from agent_orchestrator.infra.runtime.factory import build_agent_runner
+from agent_orchestrator.app.forge_port import ForgePort
+from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.infra.forge.binding import read_binding
+from agent_orchestrator.infra.forge.github import GitHubForge
+from agent_orchestrator.infra.forge.no_forge import NoForge
 from agent_orchestrator.infra.runtime.sandbox import NoSandbox
 from agent_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
 
@@ -190,6 +195,20 @@ class AppContainer:
         fallback — a real adapter (e.g. BubblewrapSandbox, item 34) is a
         drop-in swap here, not a change to any caller."""
         return NoSandbox()
+
+    def forge_for(self, project_id: str) -> ForgePort:
+        """The forge bound to this project, or the permanent no-forge fallback.
+
+        A method rather than a cached_property: it takes an argument, and the
+        binding must be re-read per call for the same reason `reasoner` became
+        a LiveReasoner — a token bound in Settings has to land on the next
+        publication, not the next worker restart.
+        """
+        binding = read_binding(self.config_store, project_id)
+        if binding is None:
+            return NoForge()
+        token = self.secret_store.resolve(SecretRef(uri=binding.token_ref))
+        return GitHubForge(binding.repository, token)
 
     @cached_property
     def agent_runner(self) -> AgentRunner:

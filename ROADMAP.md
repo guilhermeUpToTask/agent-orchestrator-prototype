@@ -1262,6 +1262,43 @@ that nobody can tell from the evidence document.
   Design: `docs/superpowers/specs/2026-08-02-phase-8-1-repository-choice-and-forge-publication-design.md`.
 - **The per-goal review surface**, as specified below.
 
+### Delivery status
+
+- **P8.1 — repository choice and real pull-request publication:** ✅ delivered
+  on `phase-8-demonstrability`.
+  - Design: `docs/superpowers/specs/2026-08-02-phase-8-1-repository-choice-and-forge-publication-design.md`
+  - Plan: `docs/superpowers/plans/2026-08-02-phase-8-1-repository-choice-and-forge-publication.md`
+  - **A defect in `main` fell out on the way past:** `_materialize_remote` ran
+    `git clone` under `capture_output` with no `GIT_TERMINAL_PROMPT=0`. A
+    private `https://` remote makes git prompt for a username with no tty to
+    answer it, so the worker blocked indefinitely *while holding a goal lease* —
+    no error, no timeout, indistinguishable from slow work. Every git
+    subprocess that can reach a remote now runs non-interactively.
+  - A project **names** its binding (`local | remote | scratch`) and the API
+    refuses a name that disagrees with the URL, which is what stops "remote"
+    with a blank URL from silently becoming a scratch repository. Optional, so
+    every fixture and `run-cycle.sh` keep working.
+  - `POST /api/projects/probe` checks a remote before it is bound and
+    classifies the failure (`needs_credentials | not_found | unreachable |
+    timeout`); `POST …/clone` materializes it on request. The probe is a
+    separate endpoint rather than part of `create`, because
+    `repository_binding.py` records a deliberate decision against a network
+    check at write time — that reasoning holds for validation and not for setup
+    with a human watching, so the two were separated rather than the decision
+    reversed.
+  - **`open_pr` really opens one** (decision 61): `ForgePort` in `app/`,
+    `GitHubForge`, `NoForge` as the permanent fallback, the token per project in
+    the secret store and verified at save time. The push and the API call run
+    outside any transaction and the disposition is recorded only after the pull
+    request exists, so a forge failure leaves the gate open with nothing
+    written. No domain un-freeze: the binding lives in the project-scoped config
+    store.
+  - **Validated:** full backend suite, `ruff` and `mypy` clean, 46 frontend
+    tests, production build green.
+  - **Not built, deliberately:** the opt-in real-GitHub smoke test needs a live
+    repository and a human's token, so it is a manual check rather than a suite
+    someone could tick off.
+
 ### Exit criteria
 
 - A realistic multi-goal project completes on Tier 1 with evidence that survives

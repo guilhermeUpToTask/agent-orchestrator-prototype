@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from agent_orchestrator.api.dependencies import get_container
 from agent_orchestrator.domain.entities.agent_spec import AgentSpec
@@ -31,6 +31,8 @@ from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 from agent_orchestrator.infra.container import AppContainer
 from agent_orchestrator.infra.db.secret_ref import SecretRef
 from agent_orchestrator.infra.errors import InfrastructureError, ProjectBindingInvalidError
+from agent_orchestrator.infra.forge.binding import clear_binding, read_binding, write_binding
+from agent_orchestrator.infra.forge.github import verify_github_token
 from agent_orchestrator.infra.git.repository_binding import (
     RepositoryBinding,
     default_branch_of,
@@ -402,6 +404,62 @@ def update_project(
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str, container: AppContainer = Depends(get_container)) -> None:
     container.project_repo.delete(project_id)
+
+
+class ForgeBindingBody(BaseModel):
+    repository: str  # "owner/repo"
+    token: str  # accepted ONCE, stored encrypted, never echoed
+
+
+class ForgeBindingResponse(BaseModel):
+    provider: str
+    repository: str
+    default_branch: str | None
+    # Never the token, and never a prefix of it.
+
+
+@router.get("/projects/{project_id}/forge")
+def get_forge_binding(
+    project_id: str, container: AppContainer = Depends(get_container)
+) -> ForgeBindingResponse | None:
+    binding = read_binding(container.config_store, project_id)
+    if binding is None:
+        return None
+    return ForgeBindingResponse(
+        provider=binding.provider, repository=binding.repository, default_branch=None
+    )
+
+
+@router.put("/projects/{project_id}/forge", response_model=ForgeBindingResponse)
+def set_forge_binding(
+    project_id: str,
+    body: ForgeBindingBody,
+    container: AppContainer = Depends(get_container),
+) -> ForgeBindingResponse:
+    """Verify the token against the exact repository BEFORE storing anything.
+
+    One call answers whether the repository exists, whether the token reaches
+    it, and whether it can push — so a credential that cannot open a pull
+    request fails here, at setup, rather than at the publication gate at the
+    end of a cycle.
+    """
+    container.project_repo.get(project_id)  # typed 404 for an unknown project
+    identity = verify_github_token(body.repository, SecretStr(body.token))
+    container.secret_store.put(SecretRef.for_forge(project_id), body.token)
+    binding = write_binding(container.config_store, project_id, identity.repository)
+    return ForgeBindingResponse(
+        provider=binding.provider,
+        repository=binding.repository,
+        default_branch=identity.default_branch,
+    )
+
+
+@router.delete("/projects/{project_id}/forge", status_code=204)
+def delete_forge_binding(
+    project_id: str, container: AppContainer = Depends(get_container)
+) -> None:
+    clear_binding(container.config_store, project_id)
+    container.secret_store.delete(SecretRef.for_forge(project_id))
 
 
 class CloneResponse(BaseModel):
