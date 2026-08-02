@@ -1117,7 +1117,7 @@ three fixed on the branch. The browser smoke passed on its first CI run.
   `backend/scripts/build_frontend.sh` and git-ignored. A source checkout without
   it starts fine and serves no UI, which is intended.
 
-## Phase 7 — in-product understanding 🚧 (current)
+## Phase 7 — in-product understanding ✅
 
 **External capability:** somebody who has installed the orchestrator can
 understand what it is doing, and what they are being asked to decide, without
@@ -1160,19 +1160,60 @@ still contradict it cheaply.
   2026-08-02) current as the surface changes; it is Phase 9's instrument and
   already exists.
 
-### Exit criteria
+### Exit criteria — met 2026-08-02
 
-- A user who has never read the repository can answer, from the console alone:
-  what is it waiting for, what am I approving, and where did my code go.
-- The in-console docs render the repository's own guides, with no second copy.
-- Every guide the console links to describes implemented behavior.
+- ✅ **A user who has never read the repository can answer, from the console
+  alone: what is it waiting for, what am I approving, and where did my code go.**
+  `statuses.md` maps every status and activity to what to do, `gates.md` covers
+  the three decisions, and the delivery block added in #71 answers the third
+  from the publication gate itself.
+- ✅ **The in-console docs render the repository's own guides, with no second
+  copy.** An `import.meta.glob` inlines `docs/guides/*.md` at build time;
+  `DocsLayout.test.tsx` fails if the path stops matching, because a broken glob
+  renders a full nav over an empty manual and breaks nothing else.
+- ✅ **Every guide the console links to describes implemented behavior.**
+  `evidence.md` gained the delivery block the endpoint actually serves, and the
+  reporting template now calls `orchestrate version` instead of the
+  `git rev-parse` workaround it needed while no such command existed.
 
-## Phase 8 — closing the demonstrability gaps ⏸
+### Found while finishing (2026-08-02)
+
+- **`/docs` rendered Swagger, not the manual.** FastAPI's default `docs_url` and
+  `api/frontend.py`'s reserved-prefix list both claimed the path, so the console
+  route was shadowed twice over. Invisible to every test: Swagger and the SPA
+  shell are both `200` with HTML, and only reading the content distinguishes
+  them. Found by screenshotting the page. Fixed by moving the API explorer under
+  `/api/` — everything the API owns now lives there or at `/health` — and locked
+  by content-reading tests plus a browser check in the packaged-UI smoke suite,
+  which is the only place the two surfaces can compete.
+- **The evidence JSON sample was clipped** at the prose measure and scrolled
+  sideways with empty space beside it. Prose keeps a reading width; code blocks
+  and tables now take the full column.
+
+## Phase 8 — closing the demonstrability gaps 🚧 (current)
 
 **Re-scoped 2026-08-02** from "evidence-driven hardening" to committed work.
 The trigger changed: these were deferred pending preview evidence, and the
 preview now comes after them, so the ones that gate a credible demonstration
 are scoped here and the rest stay deferred.
+
+**Ready to start 2026-08-02**, with Phase 7 merged. Suggested order, cheapest
+proof first: the **repository-choice wizard** (no new ports, and it removes the
+one setup step most likely to strand a Phase 9 invitee), then the
+**`ProjectEnvironment` port with a `NoEnvironment` adapter only** — the seam and
+its config, provably inert, before Docker enters the picture — then the
+**`DockerEnvironment` adapter and the acceptance run** at the two trigger
+points, then the **showcase fixture** on top of a system that can finally check
+itself, and the **per-goal review surface** last, since it is the only one that
+is pure addition and blocks nothing.
+
+The showcase project's shape is an open decision and should be made before the
+fixture is started, not during it. A full-stack web application is the obvious
+choice and the worst one until the acceptance run lands, because the majority of
+its goals end as "tests passed, nobody can tell whether it works" — the exact
+gap this phase exists to close. A backend-heavy service with real domain rules
+plus a thin view, or a files-in/files-out generator, keeps most goals inside
+`tdd` where the RED-before-GREEN evidence is the product's actual argument.
 
 **External capability:** the orchestrator can be pointed at a realistic project
 and produce a result somebody would want to look at.
