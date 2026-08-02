@@ -38,6 +38,13 @@ curl -s localhost:8000/api/plans/$PLAN/cycles/$CYCLE/evidence | jq
       ]
     }
   ],
+  "delivery": {
+    "binding": "local",
+    "repository_path": "/home/you/projects/widgets",
+    "default_branch": "main",
+    "cycle_branch": "cycle/51e2…",
+    "in_operator_checkout": true
+  },
   "unattributed_evidence_refs": []
 }
 ```
@@ -54,6 +61,35 @@ Read it as five claims:
 - **`promotion`** — where the code went, recorded when the merge happened rather
   than reconstructed later from a branch-naming convention.
 - **`disposition`** — what you decided at the publication gate.
+
+## Where your code actually is
+
+`delivery` answers the question the rest of the document assumes you already
+know: *which repository on this machine holds `cycle/<id>`?* It has three
+answers, decided by the `repo_url` you gave the project, and only one of them
+means the work is already in a checkout you use.
+
+| `binding` | `repository_path` | What to do |
+|---|---|---|
+| `local` | the repository you named | Nothing to transport. `git -C "$PATH" diff "$BASE".."$BRANCH"` |
+| `remote` | a clone the orchestrator owns, under `$ORCHESTRATOR_HOME/projects/<id>/repos/<hash>` | The branch is **not** in your checkout. Add the clone as a remote and fetch |
+| `scratch` | an auto-seeded demo repository | The run demonstrated the flow; there is no code here you want |
+
+For a `remote` binding — `in_operator_checkout` is `false` — the work reaches
+your own repository like this:
+
+```bash
+git remote add orchestrator "$PATH"
+git fetch orchestrator "$BRANCH"
+```
+
+`default_branch` is probed on disk rather than assumed, so the diff command it
+feeds resolves even when the project's trunk is not called `main`. It is `null`
+only when the repository is unreadable — moved or deleted since the run — in
+which case `repository_path` still tells you where the work was written.
+
+The console renders whichever of the three applies, with the commands filled
+in, under **Output** in the cycle evidence summary.
 
 ## Verifying it yourself
 

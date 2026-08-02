@@ -14,6 +14,7 @@ flowchart TB
         plans["/ — PlansView<br/>plan list + 'New plan' composer"]
         shell["/plans/:id/* — PlanShell"]
         settings["/settings — SettingsLayout"]
+        docs["/docs/:slug — DocsLayout<br/>renders docs/guides/*.md"]
     end
 
     subgraph shellparts["PlanShell layout"]
@@ -32,6 +33,7 @@ flowchart TB
     settings --> settingsparts
 ```
 
+- **DocsLayout** renders the repository's own `docs/guides/*.md`, inlined at build time by an `import.meta.glob` and rendered with `react-markdown` + `remark-gfm` in the app's own tokens. One source, two surfaces: a second hand-written copy for the browser would drift from the markdown, and this project treats a doc contradicting the code as a bug in the doc. It is `React.lazy`-loaded — the renderer plus every guide is ~65 kB gzipped and most sessions never open it. Cross-guide links (`[x](statuses.md)`) are rewritten to in-app routes; the relative glob path is locked by `DocsLayout.test.tsx`, because a broken path matches nothing and fails silently.
 - **GoalsView** renders the goal/task tree as a two-level dagre-laid-out flow graph (`lib/layout.ts`): goal group nodes containing task nodes with status badges.
 - **GatePanel** renders the version-bound intent and cycle-draft artifacts before approval. Operators can revise the replan objective, scope, constraints, exclusions, unfinished-source treatment, and proposed goals; the cycle draft is shown beside the locked source cycle so completed work and carry-over decisions are visible before activation.
 - **LifecycleRail** renders backend `status`, `status_reason`, gates, blocks, and legal actions. **Resume** releases only a manual pause. Failed tasks and structured blocks expose targeted **Retry**, provider-capacity **Clear & retry**, planning-stage retry, and **Edit failed task** controls. Replan starts with an explicit operator objective instead of silently resubmitting the original brief.
