@@ -85,6 +85,36 @@ def test_health_still_wins_over_the_fallback(bundle, client) -> None:
     assert client.get("/health").json()["status"] == "ok"
 
 
+def test_docs_reaches_the_console_manual_not_swagger(bundle, client) -> None:
+    """`/docs` is the console's own documentation.
+
+    FastAPI puts Swagger there by default, and the reserved-prefix list used to
+    name `docs` outright — so the console route was shadowed twice over and
+    rendered the API explorer instead. Nothing failed: both are a 200 with
+    HTML, which is why this needs a test that reads the title rather than the
+    status code.
+    """
+    response = client.get("/docs")
+
+    assert response.status_code == 200
+    assert "<title>Orchestrator</title>" in response.text
+    assert "swagger" not in response.text.lower()
+
+
+def test_the_api_explorer_moved_under_api(bundle, client) -> None:
+    assert client.get("/api/docs").status_code == 200
+    assert client.get("/api/openapi.json").json()["info"]["title"]
+
+
+def test_the_old_schema_location_404s_rather_than_serving_html(bundle, client) -> None:
+    """A generator pointed at the old `/openapi.json` must fail legibly. An
+    HTML page with a 200 is the worst possible answer for tooling."""
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 404
+    assert "<title>" not in response.text
+
+
 def test_the_api_starts_without_a_bundle(tmp_path, monkeypatch) -> None:
     """A source checkout that never ran `npm run build` must still work — that
     is how the test suite and every fixture run operate."""

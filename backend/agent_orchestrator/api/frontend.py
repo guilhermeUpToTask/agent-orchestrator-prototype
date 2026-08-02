@@ -26,10 +26,18 @@ from fastapi.staticfiles import StaticFiles
 
 
 #: Paths the API owns. The SPA fallback must refuse these rather than answer
-#: them with the HTML shell — `/docs` and `/openapi.json` included, because a
-#: generator pointed at a 200-OK HTML page fails in a far more confusing way
-#: than one pointed at a 404.
-_RESERVED_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json")
+#: them with the HTML shell, because a generator pointed at a 200-OK HTML page
+#: fails in a far more confusing way than one pointed at a 404.
+#:
+#: Swagger, ReDoc and the schema moved under `/api/` (see `server.py`) because
+#: bare `/docs` collided with the console's own manual — and won, since a path
+#: reserved here never reaches the SPA at all.
+#:
+#: `redoc` and `openapi.json` stay reserved even though nothing serves them any
+#: more, and deliberately: tooling pointed at the old location should get an
+#: honest 404 rather than an HTML page with a 200. `docs` is absent because it
+#: is now a real console route. `api/` already covers the new locations.
+_RESERVED_PREFIXES = ("api/", "health", "redoc", "openapi.json")
 
 
 def bundle_dir() -> Path:

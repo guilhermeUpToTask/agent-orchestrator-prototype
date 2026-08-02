@@ -11,6 +11,14 @@ import { GoalsView } from './views/Goals';
 import { ActivityView } from './views/Activity';
 import { AgentsView } from './views/Agents';
 import { SettingsLayout } from './views/settings/SettingsLayout';
+
+/**
+ * Split out: the markdown renderer plus every guide's text is ~65 kB gzipped,
+ * and most sessions never open the manual. Loaded on the first visit to /docs.
+ */
+const DocsLayout = React.lazy(() =>
+  import('./views/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })),
+);
 import { PlansView } from './views/Plans';
 import { usePlannerStore } from './store/plannerStore';
 import { useSSEBridge } from './lib/queries';
@@ -86,6 +94,20 @@ export default function App() {
               <div className={styles.body}>
                 <main className={styles.main}>
                   <SettingsLayout />
+                </main>
+              </div>
+            }
+          />
+          <Route
+            path="/docs/*"
+            element={
+              <div className={styles.body}>
+                <main className={styles.main}>
+                  <React.Suspense
+                    fallback={<div className="skeleton" style={{ margin: 24, height: 320 }} />}
+                  >
+                    <DocsLayout />
+                  </React.Suspense>
                 </main>
               </div>
             }

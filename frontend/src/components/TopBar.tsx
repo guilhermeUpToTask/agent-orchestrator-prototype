@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Moon, RefreshCw, Settings as SettingsIcon, List, Sun } from 'lucide-react';
+import { BookOpen, Moon, RefreshCw, Settings as SettingsIcon, List, Sun } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlannerStore } from '../store/plannerStore';
@@ -101,6 +101,9 @@ export function TopBar() {
       <div className={styles.spacer} />
       <Link to="/" aria-label="All plans" title="All plans" className={styles.navIcon}>
         <List size={15} aria-hidden />
+      </Link>
+      <Link to="/docs" aria-label="Documentation" title="Documentation" className={styles.navIcon}>
+        <BookOpen size={15} aria-hidden />
       </Link>
       <Link
         to="/settings"

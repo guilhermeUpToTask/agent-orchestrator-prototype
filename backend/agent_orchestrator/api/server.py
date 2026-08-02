@@ -117,6 +117,14 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         ),
         generate_unique_id_function=_unique_operation_id,
         lifespan=lifespan,
+        # Everything the API owns lives under /api (or /health). FastAPI's
+        # defaults put Swagger on bare /docs, which collided with the console's
+        # own manual at the same path — and won, because the SPA fallback
+        # reserves what the API claims, so the route rendered Swagger instead.
+        # Moving these makes the ownership rule true rather than nearly true.
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
     )
 
     configure_logging()

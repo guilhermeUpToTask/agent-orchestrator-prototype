@@ -28,9 +28,14 @@ reproducible fixture
 → API control-plane completion
 → frontend truth and operator UX
 → onboarding, packaging, documentation, and demo
+→ in-product understanding
+→ closing the demonstrability gaps
 → small peer preview
-→ evidence-driven hardening
 ```
+
+The last three were reordered on 2026-08-02: the preview used to come before
+the gap-closing work. See Phase 7 for the reasoning and for what that reorder
+costs.
 
 Accepted ADRs and current code are authoritative. Domain changes require a
 recorded unfreeze in [the decision log](docs/decisions/decision-log.md).
@@ -1112,43 +1117,188 @@ three fixed on the branch. The browser smoke passed on its first CI run.
   `backend/scripts/build_frontend.sh` and git-ignored. A source checkout without
   it starts fine and serves no UI, which is intended.
 
-## Phase 7 — small peer preview 🚧 (current)
+## Phase 7 — in-product understanding ✅
+
+**External capability:** somebody who has installed the orchestrator can
+understand what it is doing, and what they are being asked to decide, without
+leaving the console for a repository they may not have read.
+
+**Re-scoped 2026-08-02.** This phase used to be the peer preview itself; the
+invitations moved to Phase 9 and the reason is worth keeping, because it
+overrules an argument that looks stronger than it is.
+
+The roadmap's own gate says Phase 8 items wait for preview evidence, which
+argues for inviting people as early as possible: evidence is cheap, guesses are
+expensive, and every week of delay is a week of building on assumption. That
+argument is correct about evidence and wrong about invitations, because the two
+resources are not alike. **Evidence-gathering is repeatable; a first impression
+is not.** There are 10–50 people who will try this because they know the author,
+they will each try it roughly once, and a version that installs cleanly and then
+shows them a slug-formatting fixture spends that goodwill on the least
+interesting thing the system can do. The order that follows is: make it
+comprehensible, make it demonstrably good at something, then invite.
+
+The cost is real and should be stated plainly: Phase 8 gets built without the
+preview evidence that was meant to prioritize it. The mitigation is that its
+scope is now written down with the reasoning (below), so a later report can
+still contradict it cheaply.
+
+### Deliverables
+
+- **In-console documentation** at `/docs`, rendering the same `docs/guides/`
+  markdown the repository serves. One source, two surfaces: an operator looking
+  at a blocked plan should not have to find a GitHub page to learn what the
+  block means, and a second hand-maintained copy would drift within a month.
+- Conceptual guides the existing set lacks — how the loop works, what each gate
+  asks, what every status means and which actions are legal in it, how to read
+  the evidence document, where the code goes, and what to do when something
+  breaks.
+- An `orchestrate version` command. Every run report is supposed to carry the
+  orchestrator version (see Run evidence below) and there is no command that
+  prints one.
+- Keep the feedback template (`docs/guides/preview-report.md`, written
+  2026-08-02) current as the surface changes; it is Phase 9's instrument and
+  already exists.
+
+### Exit criteria — met 2026-08-02
+
+- ✅ **A user who has never read the repository can answer, from the console
+  alone: what is it waiting for, what am I approving, and where did my code go.**
+  `statuses.md` maps every status and activity to what to do, `gates.md` covers
+  the three decisions, and the delivery block added in #71 answers the third
+  from the publication gate itself.
+- ✅ **The in-console docs render the repository's own guides, with no second
+  copy.** An `import.meta.glob` inlines `docs/guides/*.md` at build time;
+  `DocsLayout.test.tsx` fails if the path stops matching, because a broken glob
+  renders a full nav over an empty manual and breaks nothing else.
+- ✅ **Every guide the console links to describes implemented behavior.**
+  `evidence.md` gained the delivery block the endpoint actually serves, and the
+  reporting template now calls `orchestrate version` instead of the
+  `git rev-parse` workaround it needed while no such command existed.
+
+### Found while finishing (2026-08-02)
+
+- **`/docs` rendered Swagger, not the manual.** FastAPI's default `docs_url` and
+  `api/frontend.py`'s reserved-prefix list both claimed the path, so the console
+  route was shadowed twice over. Invisible to every test: Swagger and the SPA
+  shell are both `200` with HTML, and only reading the content distinguishes
+  them. Found by screenshotting the page. Fixed by moving the API explorer under
+  `/api/` — everything the API owns now lives there or at `/health` — and locked
+  by content-reading tests plus a browser check in the packaged-UI smoke suite,
+  which is the only place the two surfaces can compete.
+- **The evidence JSON sample was clipped** at the prose measure and scrolled
+  sideways with empty space beside it. Prose keeps a reading width; code blocks
+  and tables now take the full column.
+
+## Phase 8 — closing the demonstrability gaps 🚧 (current)
+
+**Re-scoped 2026-08-02** from "evidence-driven hardening" to committed work.
+The trigger changed: these were deferred pending preview evidence, and the
+preview now comes after them, so the ones that gate a credible demonstration
+are scoped here and the rest stay deferred.
+
+**Ready to start 2026-08-02**, with Phase 7 merged. Suggested order, cheapest
+proof first: the **repository-choice wizard** (no new ports, and it removes the
+one setup step most likely to strand a Phase 9 invitee), then the
+**`ProjectEnvironment` port with a `NoEnvironment` adapter only** — the seam and
+its config, provably inert, before Docker enters the picture — then the
+**`DockerEnvironment` adapter and the acceptance run** at the two trigger
+points, then the **showcase fixture** on top of a system that can finally check
+itself, and the **per-goal review surface** last, since it is the only one that
+is pure addition and blocks nothing.
+
+The showcase project's shape is an open decision and should be made before the
+fixture is started, not during it. A full-stack web application is the obvious
+choice and the worst one until the acceptance run lands, because the majority of
+its goals end as "tests passed, nobody can tell whether it works" — the exact
+gap this phase exists to close. A backend-heavy service with real domain rules
+plus a thin view, or a files-in/files-out generator, keeps most goals inside
+`tdd` where the RED-before-GREEN evidence is the product's actual argument.
+
+**External capability:** the orchestrator can be pointed at a realistic project
+and produce a result somebody would want to look at.
+
+The gap that drives this phase: verification modes are `tdd | characterization
+| executable_check`, so the system can prove *a command exited 0 against this
+commit* but not *the application works*. For a library, a CLI, a parser or a
+rules engine that distinction barely matters — the tests are the product's
+contract. For the web application most people will imagine when they hear
+"builds software", it is the whole question, and the honest answer today is
+that nobody can tell from the evidence document.
+
+### Deliverables
+
+- **The cycle acceptance run** (`ProjectEnvironment` port + adapters), specified
+  in the deferred list below. This is the one that closes the gap above.
+- **A showcase fixture** — one realistic, multi-goal project driven end to end
+  on Tier 1, with captured evidence, as the artifact an invitation points at.
+  Deliberately NOT a fixture that exercises every capability: several paths
+  (contract repair, block resolution, capacity backoff, planning recovery) only
+  exist on failure, and `contract-repair-v1` already has to poison a contract to
+  reach one. A showcase that breaks on purpose is a bad showcase; capability
+  coverage belongs in a separate adversarial fixture.
+  It cannot be locked in CI the way Tier 0 fixtures are — a real reasoner
+  decomposes goals differently every run — so its assertions are structural:
+  every goal promoted, every served SHA resolving in git, the default branch
+  untouched, and no goal merged without accepted evidence.
+- **The repository-choice wizard** — clone a remote, point at a local
+  repository, or create an empty one. Note the two questions it must keep
+  separate: *where the code lives* needs no credentials, and *whether we can
+  push and open a PR* does. Declining the token must downgrade the delivery
+  method, never silently substitute a scratch repository for the project the
+  operator named.
+- **The per-goal review surface**, as specified below.
+
+### Exit criteria
+
+- A realistic multi-goal project completes on Tier 1 with evidence that survives
+  independent checking.
+- The acceptance run's verdict appears at the publication gate and never blocks
+  it.
+- Someone who did not run it can look at the captured result and say what was
+  built and why they should believe it.
+
+## Phase 9 — small peer preview ⏸
 
 **External capability:** a narrow group can use the orchestrator on disposable
 or personal repos and provide comparable evidence.
 
-**Ready to start 2026-08-02**, with Phase 6 merged: `pipx install` →
-`orchestrate serve` → `first-cycle-v1` is proven from the built artifact, the
-guides are the only thing an invitee needs, and `capture-run.sh` /
-`verify_run.py` are the comparable-evidence format. What is NOT prepared yet:
-the invitee list, the feedback template, and the support/issue path — those are
-this phase's first three deliverables and nothing about them exists today.
+Was Phase 7 until 2026-08-02; see that phase for why it moved rather than why it
+waits. Nothing here is blocked on design — the instrument exists — it is blocked
+on having something worth a person's one attempt.
 
 - Invite approximately 10–50 technical users familiar with local CLIs and Git.
+- Point the invitation at the Phase 8 showcase result, not at a slug fixture.
 - Start with canonical Tier 0/Tier 1 before treating larger projects as evidence.
-- Provide one feedback template and explicit support/issue path.
+- Provide an explicit support/issue path. **Not yet built**, and deliberately:
+  a support channel with nobody in it is a maintenance cost, and the right
+  channel depends on how the invitations go out.
 - Measure install/time-to-first-cycle, setup/runtime/repo failures, unclear
   states/actions, recovery, capacity/cost, evidence trust, Git output, and
   missing controls.
 - Avoid speculative architecture work while collecting evidence.
 
-### What each report would promote
+### The instrument
 
-The feedback template is a decision instrument, not a survey: several Phase 8
-items are already designed far enough to start, and are deliberately unstarted
-because nothing yet says which one an operator needs. Each complaint below maps
-to exactly one item, so a report that names it promotes that item and nothing
-else.
+`docs/guides/preview-report.md` is the feedback template, written 2026-08-02
+before any invitation existed, so its questions were not shaped by what we hoped
+to hear. It is a decision instrument rather than a survey: each complaint below
+maps to exactly one deferred item, so a report that names it promotes that item
+and nothing else.
 
 | What an operator reports | What it promotes |
 |---|---|
-| "I couldn't find my code" / "I couldn't get it out" | the repository-choice wizard, then bundle export |
+| "I couldn't find my code" / "I couldn't get it out" | bundle export (the wizard is Phase 8) |
 | "the diff was too big to review" | the per-goal review surface |
-| "the tests passed but the app was broken" | `ProjectEnvironment` + the cycle acceptance run |
+| "the tests passed but the app was broken" | more acceptance-run coverage |
 | "I want it as a PR like everything else" | authenticated forge publication |
 | "it got stuck and I couldn't tell why" | the advisory observer agent |
 
 A complaint nobody makes is the cheapest possible answer to a feature question.
+This table is weaker than it was when the preview came first — Phase 8 builds
+several of these on reasoning rather than reports — so a report that
+*contradicts* one is now the most valuable kind, and the template's last
+question is written to invite exactly that.
 
 ### Exit criteria
 
@@ -1156,13 +1306,13 @@ A complaint nobody makes is the cheapest possible answer to a feature question.
 - Blockers are ranked by frequency, severity, and workflow.
 - The next hardening work is selected from repeated user evidence.
 
-## Phase 8 — evidence-driven hardening and expansion ⏸
-
-Take these up only when preview evidence proves the need:
+## Deferred — reconsider only with run or user evidence ⏸
 
 - stronger sandboxing and pointer-free workspaces;
 - authenticated forge publication and automatic GitHub PR creation;
-- persisted project-wide `ProjectSpec` and cycle-wide verification. Designed
+- persisted project-wide `ProjectSpec`. **Cycle-wide verification moved to
+  Phase 8** as the cycle acceptance run; the design stays here because the rest
+  of the entry is still deferred. Designed
   2026-08-02 as a **cycle acceptance run**: a `ProjectEnvironment` port
   (`app/environment_port.py`, beside the existing `Sandbox` port and
   deliberately not a domain concept) with a `DockerEnvironment` adapter and a
@@ -1180,7 +1330,8 @@ Take these up only when preview evidence proves the need:
   jobs, two words: `Sandbox` is isolation of one task-attempt subprocess
   (bubblewrap, above), `ProjectEnvironment` is containerization of a whole
   project — do not merge them;
-- **a per-goal review surface**: diff and accepted evidence per goal, read-only,
+- **a per-goal review surface** — **moved to Phase 8**; the design stays here:
+  diff and accepted evidence per goal, read-only,
   each view paired with the local command that opens the same thing. A cycle
   branch is one large diff, but the orchestrator recorded the internal
   boundaries — which task produced which commit, which stage was test-authoring
