@@ -1247,6 +1247,19 @@ that nobody can tell from the evidence document.
   push and open a PR* does. Declining the token must downgrade the delivery
   method, never silently substitute a scratch repository for the project the
   operator named.
+- **Authenticated forge publication — promoted out of the deferred list
+  2026-08-02**, and delivered with the wizard as **P8.1**. The constraint above
+  presumes a delivery method a token *changes*, and none existed: `open_pr`
+  recorded that a human opened a pull request, with `output_reference` as free
+  text they typed. Shipping the token step before its consumer would collect a
+  credential nothing reads, which is the workaround that constraint exists to
+  forbid. Scope is bounded hard: a `ForgePort` beside `sandbox_port.py`, a
+  GitHub-only adapter, the token per project in the existing secret store, the
+  push and the API call **outside** the transaction that records the
+  disposition — and the orchestrator opens a pull request but never merges one,
+  and pushes `cycle/<id>` but never the default branch. It needs no domain
+  un-freeze: the forge binding lives in the project-scoped config store.
+  Design: `docs/superpowers/specs/2026-08-02-phase-8-1-repository-choice-and-forge-publication-design.md`.
 - **The per-goal review surface**, as specified below.
 
 ### Exit criteria
@@ -1309,7 +1322,10 @@ question is written to invite exactly that.
 ## Deferred — reconsider only with run or user evidence ⏸
 
 - stronger sandboxing and pointer-free workspaces;
-- authenticated forge publication and automatic GitHub PR creation;
+- ~~authenticated forge publication and automatic GitHub PR creation~~ —
+  **promoted to Phase 8 (P8.1) on 2026-08-02**; see that phase. Automatic
+  *merging* stays rejected: the orchestrator opens a pull request and a human
+  merges it;
 - persisted project-wide `ProjectSpec`. **Cycle-wide verification moved to
   Phase 8** as the cycle acceptance run; the design stays here because the rest
   of the entry is still deferred. Designed
