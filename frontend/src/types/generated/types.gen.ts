@@ -562,6 +562,7 @@ export type CycleEvidenceResponse = {
      */
     goals: Array<GoalEvidenceResponse>;
     disposition: DispositionResponse | null;
+    delivery: DeliveryResponse | null;
     /**
      * Unattributed Evidence Refs
      */
@@ -581,6 +582,46 @@ export type DefaultAgentResponse = {
      * Agent Id
      */
     agent_id: string | null;
+};
+
+/**
+ * DeliveryResponse
+ *
+ * Where this cycle's work physically is, so the hand-off can be true.
+ *
+ * `ProjectDefinition.repo_url` decides three different topologies and they
+ * need three different answers. A LOCAL binding put `cycle/<id>` in the
+ * operator's own checkout — it is already delivered and only needs finding. A
+ * REMOTE binding put it in a clone the orchestrator owns, under
+ * `$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the
+ * operator has ever looked. A SCRATCH binding produced a demo repository whose
+ * contents nobody wants.
+ *
+ * Serving these as facts rather than as a rendered instruction follows the
+ * same rule as `status`/`legal_actions`: the API states what is true, and the
+ * frontend and the API-only fixtures each render the commands they need.
+ */
+export type DeliveryResponse = {
+    /**
+     * Binding
+     */
+    binding: string;
+    /**
+     * Repository Path
+     */
+    repository_path: string;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+    /**
+     * Cycle Branch
+     */
+    cycle_branch: string;
+    /**
+     * In Operator Checkout
+     */
+    in_operator_checkout: boolean;
 };
 
 /**

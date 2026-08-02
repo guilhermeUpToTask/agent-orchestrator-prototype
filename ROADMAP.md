@@ -1132,6 +1132,24 @@ this phase's first three deliverables and nothing about them exists today.
   missing controls.
 - Avoid speculative architecture work while collecting evidence.
 
+### What each report would promote
+
+The feedback template is a decision instrument, not a survey: several Phase 8
+items are already designed far enough to start, and are deliberately unstarted
+because nothing yet says which one an operator needs. Each complaint below maps
+to exactly one item, so a report that names it promotes that item and nothing
+else.
+
+| What an operator reports | What it promotes |
+|---|---|
+| "I couldn't find my code" / "I couldn't get it out" | the repository-choice wizard, then bundle export |
+| "the diff was too big to review" | the per-goal review surface |
+| "the tests passed but the app was broken" | `ProjectEnvironment` + the cycle acceptance run |
+| "I want it as a PR like everything else" | authenticated forge publication |
+| "it got stuck and I couldn't tell why" | the advisory observer agent |
+
+A complaint nobody makes is the cheapest possible answer to a feature question.
+
 ### Exit criteria
 
 - Reports include fixture/version/runtime evidence rather than anecdotes alone.
@@ -1144,7 +1162,54 @@ Take these up only when preview evidence proves the need:
 
 - stronger sandboxing and pointer-free workspaces;
 - authenticated forge publication and automatic GitHub PR creation;
-- persisted project-wide `ProjectSpec` and cycle-wide verification;
+- persisted project-wide `ProjectSpec` and cycle-wide verification. Designed
+  2026-08-02 as a **cycle acceptance run**: a `ProjectEnvironment` port
+  (`app/environment_port.py`, beside the existing `Sandbox` port and
+  deliberately not a domain concept) with a `DockerEnvironment` adapter and a
+  `NoEnvironment` permanent fallback, brings the assembled tree up and runs a
+  scenario against it. It fills `Plan._current_activity`'s `cycle_verification`
+  label, which today names a slot with no behaviour behind it. Two trigger
+  points, one machinery: at each goal merge (early signal) and before the
+  publication gate. The operator authors *how to boot it* — image, command,
+  port, healthcheck — because LLM-authored boot shell run against a live app is
+  the failure mode; the reasoner may propose *what to check*, from the cycle's
+  own approved intent. The verdict is **advisory and never blocks
+  publication**: a flaky acceptance run that refuses to publish costs more
+  trust than it earns, and `start_replan` already exists as the "fix it
+  instead" path, so no new `OutputDisposition` value is needed. Two ports, two
+  jobs, two words: `Sandbox` is isolation of one task-attempt subprocess
+  (bubblewrap, above), `ProjectEnvironment` is containerization of a whole
+  project — do not merge them;
+- **a per-goal review surface**: diff and accepted evidence per goal, read-only,
+  each view paired with the local command that opens the same thing. A cycle
+  branch is one large diff, but the orchestrator recorded the internal
+  boundaries — which task produced which commit, which stage was test-authoring
+  versus implementation, what the protected scope was — so it is the only
+  component that can split a cycle into review-sized units. Review research puts
+  defect detection near 87% under 100 changed lines and near 28% over 1,000.
+  Explicitly NOT hunk-level accept/reject: half-accepting a candidate
+  invalidates the revision-bound evidence that makes it trustworthy, so
+  acceptance stays at the granularity the orchestrator can actually verify;
+- **an advisory observer agent**: the LLM generalization of the deterministic
+  auto-recovery already in `app/` (`agent_feedback.py`, `contract_repair.py`,
+  `promotion_failures.py`, `block_policy.py`). It plugs in at the moment before
+  a `PlanBlock` opens — diagnose with full run context before escalating to a
+  human, and if it cannot fix the cause, attach the diagnosis to the block so
+  the operator starts from a hypothesis instead of raw evidence. Event-triggered
+  (repeated same-kind failure, block about to open), never streaming: a
+  continuous observer on a healthy run burns tokens producing nothing. Advisory
+  only — its output is a record, and the human still acts. Giving an agent write
+  authority over the aggregate makes a second orchestrator competing with the
+  worker for the CAS version, which is rejected;
+- **`git bundle` export** (`GET …/cycles/{id}/bundle`): one file carrying the
+  cycle's commits and their ancestry, so the receiver sees what base it was
+  built against and the evidence document's commit SHAs still resolve. Strictly
+  better than a `.zip` of the tree, which discards history, provenance and
+  reviewability, and than a `format-patch` series, which is several files with
+  no record of the base commit. Likely unnecessary: for a remote-bound project
+  `git remote add orchestrator <path> && git fetch orchestrator cycle/<id>` —
+  already served by the delivery block on the evidence endpoint — covers the
+  same need in one line;
 - browser-driven full-cycle Playwright E2E;
 - workspace/branch/checkpoint retention and garbage collection;
 - richer telemetry analytics, OpenTelemetry, and retention;
@@ -1174,6 +1239,16 @@ Take these up only when preview evidence proves the need:
 Task-level parallelism, relational goal/task persistence, a continuous domain
 reconciler, and a workflow-engine dependency remain rejected absent new
 evidence.
+
+Also rejected, 2026-08-02: a **continuously running live preview of in-progress
+task work**. Superseded by the cycle acceptance run above, which is cheaper and
+produces a verdict rather than an impression. Live preview is a web-frontend
+feature in general-purpose clothing — of the shapes an operator will point this
+at, single-command frontends and CLIs preview well, HTTP APIs preview weakly,
+and libraries, full-stack-with-a-database, and native projects do not preview at
+all, where the honest answer is the verification command that already ran and
+its recorded exit code. A `.zip` export of the resulting tree is rejected on the
+same terms as the bundle entry above.
 
 ## Continuous workstreams
 

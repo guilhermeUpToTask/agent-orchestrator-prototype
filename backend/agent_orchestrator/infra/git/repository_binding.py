@@ -53,7 +53,15 @@ def _local_path(repo_url: str) -> Path | None:
     return None
 
 
-def _default_branch(repo: Path) -> str | None:
+def default_branch_of(repo: Path) -> str | None:
+    """The branch plan work is cut from, probed on disk.
+
+    Public because `validate_repo_url` cannot answer this for a REMOTE binding —
+    it never touches the filesystem there, by design (see the module docstring).
+    The cycle evidence read model still has to name the branch an operator
+    should diff against, and by then the clone exists, so it probes the resolved
+    path rather than re-deriving these two `symbolic-ref` calls a second time.
+    """
     for args in (
         ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
         ["symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -88,7 +96,7 @@ def validate_repo_url(repo_url: str | None) -> RepositoryBinding:
         )
     if not (path / ".git").exists():
         raise ProjectBindingInvalidError(f"{path} is not a git repository")
-    branch = _default_branch(path)
+    branch = default_branch_of(path)
     if branch is None:
         raise ProjectBindingInvalidError(
             f"cannot determine the default branch of {path}; it has no HEAD and no branches"

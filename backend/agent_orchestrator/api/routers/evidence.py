@@ -19,10 +19,18 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from agent_orchestrator.api.dependencies import get_container
+from agent_orchestrator.app.branch_names import cycle_branch
 from agent_orchestrator.domain.entities.planning_artifacts import Cycle
 from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.errors import CycleNotFoundError
+from agent_orchestrator.infra.errors import (
+    CycleNotFoundError,
+    ProjectBindingInvalidError,
+)
+from agent_orchestrator.infra.git.repository_binding import (
+    default_branch_of,
+    validate_repo_url,
+)
 
 router = APIRouter(prefix="/plans", tags=["evidence"])
 
@@ -86,12 +94,36 @@ class DispositionResponse(BaseModel):
     output_reference: str | None
 
 
+class DeliveryResponse(BaseModel):
+    """Where this cycle's work physically is, so the hand-off can be true.
+
+    `ProjectDefinition.repo_url` decides three different topologies and they
+    need three different answers. A LOCAL binding put `cycle/<id>` in the
+    operator's own checkout — it is already delivered and only needs finding. A
+    REMOTE binding put it in a clone the orchestrator owns, under
+    `$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the
+    operator has ever looked. A SCRATCH binding produced a demo repository whose
+    contents nobody wants.
+
+    Serving these as facts rather than as a rendered instruction follows the
+    same rule as `status`/`legal_actions`: the API states what is true, and the
+    frontend and the API-only fixtures each render the commands they need.
+    """
+
+    binding: str
+    repository_path: str
+    default_branch: str | None
+    cycle_branch: str
+    in_operator_checkout: bool
+
+
 class CycleEvidenceResponse(BaseModel):
     plan_id: str
     cycle_id: str
     cycle_status: str
     goals: list[GoalEvidenceResponse]
     disposition: DispositionResponse | None
+    delivery: DeliveryResponse | None
     unattributed_evidence_refs: list[str]
 
 
@@ -163,6 +195,41 @@ def _task_evidence(task: Task) -> TaskEvidenceResponse:
     )
 
 
+def _delivery(
+    container: AppContainer, project_id: str | None, cycle_id: str
+) -> DeliveryResponse | None:
+    """None only when the plan is not bound to a project — a legacy unbound row
+    quarantined as BLOCKED has no repository to hand anything over from."""
+    if project_id is None:
+        return None
+    project = container.project_repo.get(project_id)
+    resolved_path = container.workspace_resolver.repository_path_for(project)
+
+    try:
+        kind = validate_repo_url(project.repo_url).kind
+    except ProjectBindingInvalidError:
+        # The binding was valid when the plan ran or the cycle could not have
+        # produced evidence; the path has since moved or been deleted. Reporting
+        # the topology we resolved beats refusing to answer, and the operator
+        # can see for themselves that the path is gone.
+        kind = "local"
+
+    # `validate_repo_url` returns no default branch for a remote binding (it
+    # never touches the network or the disk there). The clone exists by now, so
+    # probe it. `local` gets the same treatment for one code path, not two.
+    return DeliveryResponse(
+        binding=kind,
+        repository_path=str(resolved_path),
+        default_branch=(
+            default_branch_of(resolved_path) if resolved_path.exists() else None
+        ),
+        cycle_branch=cycle_branch(cycle_id),
+        # The one fact that changes the instruction: is the branch already in a
+        # repository the operator works in, or in one they have never seen?
+        in_operator_checkout=kind == "local",
+    )
+
+
 @router.get(
     "/{plan_id}/cycles/{cycle_id}/evidence",
     response_model=CycleEvidenceResponse,
@@ -216,6 +283,7 @@ def get_cycle_evidence(
                 output_reference=cycle.output_reference,
             )
         ),
+        delivery=_delivery(container, plan.project_id, cycle_id),
         # Cycles promoted before migration 0017 have SHAs with no attribution.
         # Serving them under an honest name beats an empty `promotion` that
         # would imply nothing was ever promoted.
