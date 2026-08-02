@@ -1220,11 +1220,75 @@ item in the phase that cannot be validated where the work happens:
    hunk-level accept/reject: half-accepting a candidate invalidates the
    revision-bound evidence that makes it trustworthy. A garbage-collected SHA
    degrades ONE unit with a stated reason rather than failing the document.
-4. ⬜ **P8.4 — the showcase fixture.** Its project shape is still an open
-   decision and must be made before it is started, not during it.
+4. 🚧 **P8.4 — the showcase, and it is a DEMO rather than a fixture.** Decided
+   2026-08-02. The roadmap already said this artifact "cannot be locked in CI
+   the way Tier 0 fixtures are", so filing it under `fixtures/` beside six
+   deterministic, checkable, partly CI-locked walkthroughs was a category
+   error: someone would try to make it repeatable and conclude something was
+   broken. `demos/` states the split, and `demos/README.md` is the contract —
+   fixtures catch regressions, demos show what the system produces; a red
+   fixture run is a bug, a red demo run is evidence and gets published rather
+   than retried.
+   - **Shape: `static-site-v1`**, a files-in/files-out generator (markdown +
+     front-matter → a browsable HTML site). Chosen against the obvious
+     full-stack web app *because* P8.5 is blocked: a web app's goals would end
+     as "tests passed, nobody can tell whether it runs", showcasing the exact
+     gap this phase exists to close. A generator has no such gap — the demo
+     ends with a file you open in a browser, so **a human confirms the product
+     works with no container and no trust in the evidence document**, and only
+     then reads the evidence for *why*.
+   - **Assertions are structural only** (every goal promoted, every served SHA
+     resolves, default branch byte-identical to the seed tag, nothing merged
+     without accepted evidence, disposition recorded, root back to idle), plus
+     an out-of-repo acceptance check on the produced HTML. Nothing asserts a
+     goal count: a real reasoner decomposes differently every run, so a pinned
+     count would fail a working system.
+   - **The run is never in CI; the harness is.** `test_static_site_demo.py`
+     locks the three properties that make the demo mean anything — the seed
+     does not contain the answer, the brief is postable verbatim, and the
+     acceptance check *cannot pass against the seed*. It found a real defect on
+     its first run: an unset `SITEGEN_REPO` made `Path("")`, which is `.` and
+     always exists, so the skip guard never fired and a forgetful operator got
+     eleven errors instead of a clear skip.
+   - **Remaining: run it.** Tier 1, real models, captured — and whatever it
+     finds gets published. **Parked 2026-08-02 on a missing
+     `ORCHESTRATOR_MASTER_KEY`** (see *Two blockers parked* below); everything
+     up to that point is staged and verified.
 5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that
    can run containers. The port it plugs into already exists and is exercised,
    so this is an adapter and its tests, not a redesign.
+
+### Two blockers parked, both environmental ⏸
+
+Neither is a design problem and neither blocks the other phases. Both need the
+maintainer's own machine, so they are recorded here rather than worked around.
+
+**1. The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`.** Everything else is
+staged and verified against a live server: `orchestrate serve` up on :8000 with
+the worker live in `real` mode, `pi` 0.73.1 on PATH, the reasoner and all six
+agents resolving to free OpenRouter models, and project `e0e54bc8` bound to
+`~/.orchestrator/demos/static-site-v1/repo` (local, git, clean, `main`, seeded
+and tagged `static-site-v1-seed`). `GET /api/readiness` returns exactly one
+`fail`:
+
+```text
+fail  secrets: ORCHESTRATOR_MASTER_KEY is not set, and reasoner and
+      agent runner must decrypt a provider key
+```
+
+The OpenRouter key is in the database at `secret://provider/openrouter`, and
+its data key is wrapped with the master key. **A new master key must NOT be
+generated to "fix" this**: it does not reset the store, it makes the existing
+secret permanently undecryptable, and the only recovery is re-entering the
+OpenRouter API key. Resume by exporting the existing key and posting
+`demos/static-site-v1/brief.txt` to project `e0e54bc8`.
+
+Worth noting as evidence rather than annoyance: readiness named the single
+cause and the two consumers that need it, instead of a run dying twenty minutes
+in on a decrypt error. That is Phase 5's first-mile work doing its job.
+
+**2. P8.5 needs a container-capable host** — see *Containerization is
+unavailable* above for the six blockers and the one that proved final.
 
 ### Containerization is unavailable in the development environment ⏸
 
