@@ -2,6 +2,7 @@
 agent_orchestrator/infra/cli/main.py — the orchestrate CLI (fundamental commands only,
 roadmap 4.2).
 
+    orchestrate version [--json]            what this install is, for a report
     orchestrate db upgrade                  run migrations to head
     orchestrate api start [--port]          serve the FastAPI app
     orchestrate worker start [--worker-id]  run the claim-and-drive worker
@@ -26,6 +27,73 @@ from agent_orchestrator.infra.cli.error_handler import catch_domain_errors, ok
 @click.group()
 def cli() -> None:
     """AIPOM agent orchestrator."""
+
+
+# ---------------------------------------------------------------------------
+# version
+# ---------------------------------------------------------------------------
+
+
+def _package_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("agent-orchestrator")
+    except PackageNotFoundError:
+        # Running from a source tree that was never installed. Not an error —
+        # the commit below is the better identifier for that case anyway.
+        return "unknown"
+
+
+def _commit() -> str:
+    """The checkout's SHA, or `unknown` for an installed copy with no repository.
+
+    Deliberately probes the directory the PACKAGE was imported from rather than
+    the working directory: `orchestrate version` run from inside some other
+    git repository must not report that repository's SHA as the orchestrator's.
+    """
+    import subprocess
+    from pathlib import Path
+
+    package_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(package_root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+@cli.command("version")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def version_cmd(as_json: bool) -> None:
+    """Print what this install is, for a run report.
+
+    Two runs can only be compared if both say which orchestrator produced them,
+    and until this existed the guides had to tell people to run `git rev-parse`
+    by hand — which an installed copy cannot do at all.
+    """
+    import platform
+    import sys
+
+    facts = {
+        "version": _package_version(),
+        "commit": _commit(),
+        "python": platform.python_version(),
+        "platform": f"{platform.system()} {platform.machine()}",
+        "executable": sys.executable,
+    }
+
+    if as_json:
+        click.echo(json.dumps(facts, indent=2))
+        return
+    click.echo(f"agent-orchestrator {facts['version']}")
+    for key in ("commit", "python", "platform"):
+        click.echo(f"  {key:<9} {facts[key]}")
 
 
 # ---------------------------------------------------------------------------

@@ -70,13 +70,23 @@
   padding: var(--sp-6);
 }
 
-/* A measure, not a full-bleed wall of text: long prose is unreadable past
-   roughly 80 characters, and these pages are prose. */
+/* Two widths, deliberately.
+   Prose gets a reading measure — past roughly 80 characters the eye loses the
+   line. Code blocks and tables get the whole column, because constraining THEM
+   to the measure only clips content that then scrolls sideways while empty
+   space sits beside it. */
 .prose {
-  max-width: 74ch;
+  max-width: 940px;
   color: var(--text-1);
   font-size: var(--fs-body);
   line-height: 1.65;
+}
+
+.prose > p,
+.prose > ul,
+.prose > ol,
+.prose > blockquote {
+  max-width: 74ch;
 }
 
 .prose > * + * { margin-top: var(--sp-4); }

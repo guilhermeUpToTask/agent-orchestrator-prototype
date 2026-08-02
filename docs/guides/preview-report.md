@@ -14,10 +14,8 @@ minutes to set up is as useful as a crash.
 ## Part 1 — the facts (generated, don't retype)
 
 ```bash
-# what you installed (there is no `orchestrate --version` yet — the clone's SHA
-# is the version, and it is what makes two reports comparable)
-git rev-parse --short HEAD && pip show agent-orchestrator | head -2
-python3 --version && git --version
+# what you installed — this is what makes two reports comparable
+orchestrate version
 
 # the run itself: plan, planning operations, runs, attempts, telemetry, events
 python3 -m agent_orchestrator.infra.cli.main config list

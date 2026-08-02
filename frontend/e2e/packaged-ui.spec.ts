@@ -78,6 +78,27 @@ test('the readiness checklist reports real backend state', async ({ page }) => {
   await shoot(page, "04-readiness.png");
 });
 
+test('the manual renders in the console, not the API explorer', async ({ page }) => {
+  /**
+   * `/docs` is FastAPI's Swagger by default, and the SPA fallback used to
+   * reserve that path outright — so this route silently rendered the API
+   * explorer instead of the guides. Both are a 200 with HTML, so only a check
+   * that reads the CONTENT catches it. That is why this is here and not in the
+   * vitest suite: the collision lives in the packaged same-origin server, which
+   * is the only place the two can compete.
+   */
+  await page.goto('/docs');
+
+  await expect(page.getByRole('heading', { name: /getting started/i }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /reading the console/i })).toBeVisible();
+  await expect(page.getByText(/swagger/i)).toHaveCount(0);
+
+  // The guides are inlined at build time; an empty glob renders a full nav and
+  // a body that says the page does not exist.
+  await page.goto('/docs/statuses');
+  await expect(page.getByRole('heading', { name: /the five statuses/i })).toBeVisible();
+});
+
 test('the settings sections all mount', async ({ page }) => {
   for (const [path, heading] of [
     ['providers', /providers/i],
