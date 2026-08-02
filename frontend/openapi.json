@@ -5428,6 +5428,195 @@
         }
       }
     },
+    "/api/plans/{plan_id}/cycles/{cycle_id}/review": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Get Cycle Review",
+        "operationId": "review-get_cycle_review",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleReviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{plan_id}/cycles/{cycle_id}/review/patch": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Get Review Patch",
+        "description": "The patch text for one unit, bounded.\n\nSeparate from the index on purpose: the index has to stay cheap enough to\nopen on a large cycle, and a reviewer opens one unit at a time. Truncation\nis reported rather than hidden \u2014 a silently clipped patch is how somebody\nreviews half a change believing it was all of it.",
+        "operationId": "review-get_review_patch",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "name": "base",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "the ref this change is measured against",
+              "title": "Base"
+            },
+            "description": "the ref this change is measured against"
+          },
+          {
+            "name": "head",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "the ref being reviewed",
+              "title": "Head"
+            },
+            "description": "the ref being reviewed"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
@@ -6553,6 +6742,65 @@
         ],
         "title": "CycleEvidenceResponse"
       },
+      "CycleReviewResponse": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "cycle_id": {
+            "type": "string",
+            "title": "Cycle Id"
+          },
+          "repository_path": {
+            "type": "string",
+            "title": "Repository Path"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "cycle_branch": {
+            "type": "string",
+            "title": "Cycle Branch"
+          },
+          "whole_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewUnitResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/GoalReviewResponse"
+            },
+            "type": "array",
+            "title": "Goals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id",
+          "cycle_id",
+          "repository_path",
+          "default_branch",
+          "cycle_branch",
+          "whole_cycle",
+          "goals"
+        ],
+        "title": "CycleReviewResponse"
+      },
       "CycleStatus": {
         "type": "string",
         "enum": [
@@ -6623,6 +6871,47 @@
         ],
         "title": "DeliveryResponse",
         "description": "Where this cycle's work physically is, so the hand-off can be true.\n\n`ProjectDefinition.repo_url` decides three different topologies and they\nneed three different answers. A LOCAL binding put `cycle/<id>` in the\noperator's own checkout \u2014 it is already delivered and only needs finding. A\nREMOTE binding put it in a clone the orchestrator owns, under\n`$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the\noperator has ever looked. A SCRATCH binding produced a demo repository whose\ncontents nobody wants.\n\nServing these as facts rather than as a rendered instruction follows the\nsame rule as `status`/`legal_actions`: the API states what is true, and the\nfrontend and the API-only fixtures each render the commands they need."
+      },
+      "DiffStatResponse": {
+        "properties": {
+          "files_changed": {
+            "type": "integer",
+            "title": "Files Changed"
+          },
+          "insertions": {
+            "type": "integer",
+            "title": "Insertions"
+          },
+          "deletions": {
+            "type": "integer",
+            "title": "Deletions"
+          },
+          "changed_lines": {
+            "type": "integer",
+            "title": "Changed Lines"
+          },
+          "review_band": {
+            "type": "string",
+            "title": "Review Band"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileChangeResponse"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files_changed",
+          "insertions",
+          "deletions",
+          "changed_lines",
+          "review_band",
+          "files"
+        ],
+        "title": "DiffStatResponse"
       },
       "DispositionResponse": {
         "properties": {
@@ -7191,6 +7480,34 @@
         "title": "FailureKind",
         "description": "Typed classification of a task failure. Produced by the agent runner,\nconsumed by RetryPolicy.should_retry \u2014 a checked classification, not string\nmatching (DESIGN_NOTES #2)."
       },
+      "FileChangeResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "insertions": {
+            "type": "integer",
+            "title": "Insertions"
+          },
+          "deletions": {
+            "type": "integer",
+            "title": "Deletions"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "insertions",
+          "deletions",
+          "binary"
+        ],
+        "title": "FileChangeResponse"
+      },
       "ForgeBindingBody": {
         "properties": {
           "repository": {
@@ -7423,6 +7740,48 @@
           "position"
         ],
         "title": "GoalOutline"
+      },
+      "GoalReviewResponse": {
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "title": "Goal Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "merge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewUnitResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskReviewResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_id",
+          "name",
+          "status",
+          "merge",
+          "tasks"
+        ],
+        "title": "GoalReviewResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -7908,6 +8267,44 @@
           "discard"
         ],
         "title": "OutputDisposition"
+      },
+      "PatchResponse": {
+        "properties": {
+          "base": {
+            "type": "string",
+            "title": "Base"
+          },
+          "head": {
+            "type": "string",
+            "title": "Head"
+          },
+          "patch": {
+            "type": "string",
+            "title": "Patch"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "local_command": {
+            "type": "string",
+            "title": "Local Command"
+          }
+        },
+        "type": "object",
+        "required": [
+          "base",
+          "head",
+          "patch",
+          "truncated",
+          "total_bytes",
+          "local_command"
+        ],
+        "title": "PatchResponse"
       },
       "PauseRequest": {
         "properties": {
@@ -9502,6 +9899,63 @@
         ],
         "title": "ReviewSubjectType"
       },
+      "ReviewUnitResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "base": {
+            "type": "string",
+            "title": "Base"
+          },
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiffStatResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "local_command": {
+            "type": "string",
+            "title": "Local Command"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "sha",
+          "base",
+          "resolved",
+          "diff",
+          "local_command",
+          "unavailable_reason"
+        ],
+        "title": "ReviewUnitResponse",
+        "description": "One reviewable thing: a commit, or a goal's whole merge.\n\n`kind` is the orchestrator's own record of what this commit WAS, which is\nthe part no generic diff viewer can tell you. A `test_authoring` unit is the\ncheck that was proven RED before the implementation existed; reading those\ntwo separately is a different and much better experience than reading their\nsum."
+      },
       "RunnerAgentStatus": {
         "properties": {
           "agent_id": {
@@ -10073,6 +10527,77 @@
         ],
         "title": "TaskResult",
         "description": "Typed output of a task run, and the idempotency record: if set, the work\nalready happened and must not re-execute.\n\nDesign: `status` and `output` are ALWAYS present (always assertable in tests);\n`artifacts` is the flexible per-task-type payload (a code task stores\nfiles_changed, a research task stores sources) so we don't force one rigid\nschema across all task types. This structure is the seam that makes\norchestration deterministically testable: tests fabricate TaskResults by hand,\nproduction builds them from the agent \u2014 the orchestration treats both identically."
+      },
+      "TaskReviewResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "verification_command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Command"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "allowed_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Scope"
+          },
+          "forbidden_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Scope"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewUnitResponse"
+            },
+            "type": "array",
+            "title": "Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "name",
+          "status",
+          "verification_command",
+          "exit_code",
+          "allowed_scope",
+          "forbidden_scope",
+          "units"
+        ],
+        "title": "TaskReviewResponse"
       },
       "TestBundle": {
         "properties": {

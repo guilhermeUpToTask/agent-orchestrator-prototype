@@ -76,6 +76,8 @@ _STATUS_BY_CODE: dict[str, int] = {
     # Forge (P8.1): the remote was reached and refused, or could not be reached.
     "FORGE_PUSH_FAILED": 502,
     "FORGE_REQUEST_FAILED": 502,
+    # The review surface could not read a diff the evidence says exists.
+    "REVIEW_DIFF_UNAVAILABLE": 502,
 }
 _DEFAULT_DOMAIN_STATUS = 400
 _DEFAULT_INFRA_STATUS = 503

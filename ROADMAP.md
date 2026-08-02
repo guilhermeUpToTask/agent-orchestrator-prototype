@@ -1207,8 +1207,19 @@ item in the phase that cannot be validated where the work happens:
 2. ✅ **P8.2 — the `ProjectEnvironment` port and the acceptance-run machinery**,
    with `NoEnvironment` as the only adapter: the seam, its config, its ledger
    and both trigger points, provably inert.
-3. ⬜ **P8.3 — the per-goal review surface.** Promoted from last to next: it is
-   pure addition, blocks nothing, and needs no container runtime.
+3. ✅ **P8.3 — the per-goal review surface.** Promoted from last to next
+   because it is pure addition, blocks nothing, and needs no container runtime.
+   `GET …/cycles/{id}/review` splits a cycle into review-sized units and
+   `…/review/patch` serves one unit's diff, bounded and reporting truncation.
+   The split is the product: a task appears as *the test proven RED first* and
+   *the implementation that made it GREEN*, because the orchestrator recorded
+   that boundary and nothing else can. Each unit carries its `review_band`
+   (from the 87%-under-100-lines research) and the `local_command` that opens
+   the same change in the operator's own tools — the browser answers *what
+   should I look at first*, the terminal answers *show me*. Read-only, with no
+   hunk-level accept/reject: half-accepting a candidate invalidates the
+   revision-bound evidence that makes it trustworthy. A garbage-collected SHA
+   degrades ONE unit with a stated reason rather than failing the document.
 4. ⬜ **P8.4 — the showcase fixture.** Its project shape is still an open
    decision and must be made before it is started, not during it.
 5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that

@@ -90,6 +90,8 @@ import {
   getForgeBinding,
   setForgeBinding,
   type ProjectBody,
+  fetchCycleReview,
+  fetchReviewPatch,
 } from "./api";
 import { toast, errorDetail } from "./toast";
 import { usePlannerStore } from "../store/plannerStore";
@@ -202,6 +204,28 @@ export function useCycleEvidence(planId: string | null, cycleId: string | null) 
     queryKey: keys.cycleEvidence(planId ?? "", cycleId ?? ""),
     queryFn: () => fetchCycleEvidence(planId as string, cycleId as string),
     enabled: !!planId && !!cycleId,
+  });
+}
+
+export function useCycleReview(planId: string | null, cycleId: string | null) {
+  return useQuery({
+    queryKey: ["cycleReview", planId ?? "", cycleId ?? ""],
+    queryFn: () => fetchCycleReview(planId as string, cycleId as string),
+    enabled: !!planId && !!cycleId,
+  });
+}
+
+export function useReviewPatch(
+  planId: string | null,
+  cycleId: string | null,
+  base: string | null,
+  head: string | null,
+) {
+  return useQuery({
+    queryKey: ["reviewPatch", planId ?? "", cycleId ?? "", base ?? "", head ?? ""],
+    queryFn: () =>
+      fetchReviewPatch(planId as string, cycleId as string, base as string, head as string),
+    enabled: !!planId && !!cycleId && !!base && !!head,
   });
 }
 

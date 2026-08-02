@@ -414,6 +414,77 @@ export const fetchCycleEvidence = (
 ): Promise<CycleEvidenceResponse> =>
   get(`/api/plans/${enc(planId)}/cycles/${enc(cycleId)}/evidence`);
 
+/** One reviewable unit of a cycle: a commit, or a goal's whole merge.
+ *  `kind` is the orchestrator's own record of what the commit WAS — the part
+ *  no generic diff viewer can tell you. */
+export type ReviewUnit = {
+  kind: string;
+  sha: string;
+  base: string;
+  resolved: boolean;
+  diff: {
+    files_changed: number;
+    insertions: number;
+    deletions: number;
+    changed_lines: number;
+    review_band: "small" | "moderate" | "large" | "very_large";
+    files: { path: string; insertions: number; deletions: number; binary: boolean }[];
+  } | null;
+  local_command: string;
+  unavailable_reason: string | null;
+};
+
+export type CycleReview = {
+  plan_id: string;
+  cycle_id: string;
+  repository_path: string;
+  default_branch: string | null;
+  cycle_branch: string;
+  whole_cycle: ReviewUnit | null;
+  goals: {
+    goal_id: string;
+    name: string;
+    status: string;
+    merge: ReviewUnit | null;
+    tasks: {
+      task_id: string;
+      name: string;
+      status: string;
+      verification_command: string | null;
+      exit_code: number | null;
+      allowed_scope: string[];
+      forbidden_scope: string[];
+      units: ReviewUnit[];
+    }[];
+  }[];
+};
+
+export type ReviewPatch = {
+  base: string;
+  head: string;
+  patch: string;
+  truncated: boolean;
+  total_bytes: number;
+  local_command: string;
+};
+
+export const fetchCycleReview = (
+  planId: string,
+  cycleId: string,
+): Promise<CycleReview> =>
+  get(`/api/plans/${enc(planId)}/cycles/${enc(cycleId)}/review`);
+
+export const fetchReviewPatch = (
+  planId: string,
+  cycleId: string,
+  base: string,
+  head: string,
+): Promise<ReviewPatch> =>
+  get(
+    `/api/plans/${enc(planId)}/cycles/${enc(cycleId)}/review/patch` +
+      `?base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`,
+  );
+
 /** A plan's fine-grained agent/reasoner telemetry history (most-recent first). */
 export const fetchAgentEvents = (
   planId: string,

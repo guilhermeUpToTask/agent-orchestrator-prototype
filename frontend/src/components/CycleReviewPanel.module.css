@@ -1,0 +1,143 @@
+.panel {
+  margin-top: var(--sp-4);
+  border-top: 1px solid var(--border-0);
+  padding-top: var(--sp-3);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.title {
+  font-size: var(--fs-emph);
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.meta {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.unit {
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-0);
+}
+
+.unitHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.kind {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sha,
+.command,
+.verified {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.command {
+  display: block;
+  margin-top: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+.stat { font-size: var(--fs-sm); color: var(--text-3); }
+.added { font-size: var(--fs-sm); color: var(--ok, #3fb950); }
+.removed { font-size: var(--fs-sm); color: var(--danger, #f85149); }
+
+/* The band is the actionable half of the review research: a number tells you
+   how big it is, the band tells you how carefully to read it. */
+.band {
+  font-size: var(--fs-sm);
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--border-0);
+  color: var(--text-3);
+}
+.band[data-band='small'] { color: var(--ok, #3fb950); border-color: currentColor; }
+.band[data-band='moderate'] { color: var(--text-2); }
+.band[data-band='large'] { color: var(--warn, #d29922); border-color: currentColor; }
+.band[data-band='very_large'] { color: var(--danger, #f85149); border-color: currentColor; }
+
+.unavailable {
+  font-size: var(--fs-sm);
+  color: var(--warn, #d29922);
+}
+
+.truncated {
+  font-size: var(--fs-sm);
+  color: var(--warn, #d29922);
+  padding: var(--sp-1) 0;
+}
+
+.patchBox { margin-top: var(--sp-2); }
+
+.patch {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-1);
+  padding: var(--sp-2);
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre;
+  margin: 0;
+}
+
+.goal { margin-top: var(--sp-2); }
+
+.goalHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+}
+
+.goalName {
+  font-size: var(--fs-emph);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.task {
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border-0);
+  margin: var(--sp-2) 0;
+}
+
+.taskHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.taskName {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.scope {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  padding: 2px 0;
+}
