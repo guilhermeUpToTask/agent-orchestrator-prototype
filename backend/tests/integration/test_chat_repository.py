@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import text
 
-from src.app.testing.fakes import InMemoryChatStore
-from src.domain.ports.reasoner_port import ChatMessage
-from src.infra.db.chat_repository import SqliteChatRepository
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
+from agent_orchestrator.app.testing.fakes import InMemoryChatStore
+from agent_orchestrator.domain.ports.reasoner_port import ChatMessage
+from agent_orchestrator.infra.db.chat_repository import SqliteChatRepository
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 

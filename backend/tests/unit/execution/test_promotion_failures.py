@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.promotion_failures import is_transient_merge_failure
+from agent_orchestrator.app.promotion_failures import is_transient_merge_failure
 
 CONFLICTS = [
-    "CONFLICT (content): Merge conflict in src/app.py",
+    "CONFLICT (content): Merge conflict in agent_orchestrator/app.py",
     "Automatic merge failed; fix conflicts and then commit the result.",
     "error: Your local changes to the following files would be overwritten by merge",
     "goal branch is missing: goal/abc",
@@ -26,7 +26,7 @@ CONFLICTS = [
 TRANSIENT = [
     "fatal: 'cycle-merge-xyz' is already checked out at '/tmp/cycle-merge-xyz'",
     "fatal: Unable to create '/repo/.git/index.lock': File exists.",
-    "error: unable to write file src/app.py: No space left on device",
+    "error: unable to write file agent_orchestrator/app.py: No space left on device",
     "fatal: could not read Username for 'https://github.com': No such device",
     "OSError: [Errno 5] Input/output error",
 ]

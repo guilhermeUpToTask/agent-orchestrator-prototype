@@ -14,8 +14,8 @@ import asyncio
 
 import pytest
 
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     DummyBehavior,
@@ -25,26 +25,26 @@ from src.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from src.app.use_cases.apply_edit import UpdateTask, apply_edit
-from src.app.use_cases.control import (
+from agent_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
+from agent_orchestrator.app.use_cases.control import (
     finish_review,
     reopen_discovery,
     resume_from_review,
     review_replan,
 )
-from src.app.use_cases.conversation import discovery_message, replanning_message
-from src.app.use_cases.create_plan import create_plan
-from src.app.use_cases.pause_resume import pause_plan, resume_plan
-from src.app.use_cases.request_replan import request_replan
-from src.app.use_cases.run_worker import worker_tick
-from src.domain.aggregates.planner_orchestrator import PlanPhase
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.value_objects.lifecycle import Status
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.reference_repos import SqliteProjectRepository
-from src.infra.db.unit_of_work import SqliteUnitOfWork
-from src.infra.reasoner.stub_reasoner import StubReasoner
+from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
+from agent_orchestrator.app.use_cases.create_plan import create_plan
+from agent_orchestrator.app.use_cases.pause_resume import pause_plan, resume_plan
+from agent_orchestrator.app.use_cases.request_replan import request_replan
+from agent_orchestrator.app.use_cases.run_worker import worker_tick
+from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.reference_repos import SqliteProjectRepository
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 from tests.support import make_agent_spec
 
 pytestmark = pytest.mark.integration
@@ -251,8 +251,8 @@ def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
     """The container-wired entrypoint: boots on an empty db, idles (sleeps, no
     spin) and honors the stop event. agent_runner.mode defaults to dry-run —
     no env, no master key."""
-    from src.infra.container import AppContainer
-    from src.infra.worker.main import run_worker_forever
+    from agent_orchestrator.infra.container import AppContainer
+    from agent_orchestrator.infra.worker.main import run_worker_forever
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

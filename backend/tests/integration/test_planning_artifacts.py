@@ -16,9 +16,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.app.ports import PlanningArtifact
-from src.app.testing.fakes import InMemoryPlanningArtifactStore
-from src.infra.db.planning_artifact_repository import SqlitePlanningArtifactRepository
+from agent_orchestrator.app.ports import PlanningArtifact
+from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
+from agent_orchestrator.infra.db.planning_artifact_repository import SqlitePlanningArtifactRepository
 
 pytestmark = pytest.mark.integration
 
@@ -31,10 +31,10 @@ def store(request, tmp_path, monkeypatch):
     if request.param == "memory":
         return InMemoryPlanningArtifactStore()
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    from src.domain.aggregates.planner_orchestrator import Plan
-    from src.domain.entities.project_definition import ProjectDefinition
-    from src.infra.container import AppContainer
-    from src.infra.db.tables import Base
+    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from agent_orchestrator.infra.container import AppContainer
+    from agent_orchestrator.infra.db.tables import Base
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

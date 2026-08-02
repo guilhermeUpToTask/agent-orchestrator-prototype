@@ -70,7 +70,7 @@ def main() -> int:
     run(PLUGIN / "skills/orchestrator-doc-audit/scripts/audit_docs.py")
     run(
         PLUGIN / "skills/orchestrator-change-impact/scripts/change_impact.py",
-        "backend/src/api/routers/plans.py",
+        "backend/agent_orchestrator/api/routers/plans.py",
         "frontend/src/lib/api.ts",
         "--json",
     )

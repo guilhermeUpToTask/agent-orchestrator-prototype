@@ -7,17 +7,17 @@ root never reaches a terminal DONE or FAILED state.
 Code anchors:
 
 - aggregate and compatibility projection:
-  `backend/src/domain/aggregates/planner_orchestrator.py`
+  `backend/agent_orchestrator/domain/aggregates/planner_orchestrator.py`
 - proposals, drafts, gates, blocks, cycles, and statuses:
-  `backend/src/domain/entities/planning_artifacts.py`
+  `backend/agent_orchestrator/domain/entities/planning_artifacts.py`
 - goal/task verification contracts:
-  `backend/src/domain/entities/execution_contracts.py`
+  `backend/agent_orchestrator/domain/entities/execution_contracts.py`
 - deterministic navigation:
-  `backend/src/domain/services/navigation.py`
+  `backend/agent_orchestrator/domain/services/navigation.py`
 - transactional lifecycle commands:
-  `backend/src/app/use_cases/cyclic_planning.py`
+  `backend/agent_orchestrator/app/use_cases/cyclic_planning.py`
 - worker routing:
-  `backend/src/app/use_cases/advance_plan.py`
+  `backend/agent_orchestrator/app/use_cases/advance_plan.py`
 
 ## Root status
 
@@ -46,16 +46,16 @@ Planning proceeds through three versioned subjects, in order:
 ### IntentProposal
 
 `IntentProposal` is a **domain entity**
-(`backend/src/domain/entities/planning_artifacts.py`), not a dedicated API
+(`backend/agent_orchestrator/domain/entities/planning_artifacts.py`), not a dedicated API
 DTO. It carries the human-reviewed objective, scope, constraints, exclusions,
 proposal kind (`initial` | `replan`), `base_plan_version`, optional replan
 `source_cycle_id`, and a `revision` counter. The plan detail response field
 `intent_proposal` on `PlanDetailResponse`
-(`backend/src/api/routers/plans.py`) surfaces this domain model directly as
+(`backend/agent_orchestrator/api/routers/plans.py`) surfaces this domain model directly as
 the OpenAPI schema.
 
 `revision` **starts at 1**. The Plan aggregate is the only mutator
-(`backend/src/domain/aggregates/planner_orchestrator.py`):
+(`backend/agent_orchestrator/domain/aggregates/planner_orchestrator.py`):
 
 - `revise_intent` requires the replacement's `revision` to equal
   `current.revision + 1` (monotonic +1 only). Any other step raises

@@ -48,10 +48,6 @@ jobs:
           cache-dependency-glob: backend/uv.lock
           python-version: "3.12"
 
-      - name: Build Python package
-        working-directory: backend
-        run: uv build
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -59,12 +55,47 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend bundle
-        working-directory: frontend
+      # BEFORE `uv build`, not after: the UI ships INSIDE the wheel
+      # (agent_orchestrator/api/static), so staging it afterwards would release a
+      # wheel that serves no UI at all — which is exactly what this workflow did
+      # until the verification step below was added to catch it.
+      - name: Build and stage the frontend into the package
+        run: ./backend/scripts/build_frontend.sh
+
+      - name: Build Python package
+        working-directory: backend
+        run: uv build
+
+      - name: Verify the wheel carries its migrations and its UI
         run: |
-          npm ci
-          npm run build
-          tar -czf ../frontend-dist.tar.gz -C dist .
+          python - <<'CHECK'
+          import glob, sys, zipfile
+
+          wheels = glob.glob("backend/dist/*.whl")
+          if len(wheels) != 1:
+              sys.exit(f"expected exactly one wheel, found {wheels}")
+          names = zipfile.ZipFile(wheels[0]).namelist()
+
+          # Without these an installed copy cannot create its schema — the
+          # database is unreachable and every route 500s on a missing table.
+          migrations = [n for n in names if "/db/migrations/versions/" in n and n.endswith(".py")]
+          if not migrations:
+              sys.exit("wheel ships no migration scripts")
+          if not any(n.endswith("/db/migrations/env.py") for n in names):
+              sys.exit("wheel ships no alembic env.py")
+
+          # Without this the wheel is a backend with no console.
+          if not any(n.endswith("api/static/index.html") for n in names):
+              sys.exit("wheel ships no UI bundle")
+
+          print(f"wheel ok: {len(migrations)} migrations, UI bundle present")
+          CHECK
+
+      - name: Package the frontend bundle separately
+        working-directory: frontend
+        # Still published for anyone serving the UI from their own host; the
+        # wheel is the supported path.
+        run: tar -czf ../frontend-dist.tar.gz -C dist .
 
       - name: Attach artifacts to GitHub Release
         env:

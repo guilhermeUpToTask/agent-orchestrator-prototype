@@ -8,13 +8,13 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from src.infra.cli.main import cli
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
-from src.infra.errors import InfrastructureError
-from src.infra.reasoner.factory import build_reasoner, validate_reasoner_config
-from src.infra.reasoner.openai_reasoner import OpenAIReasoner
-from src.infra.reasoner.stub_reasoner import StubReasoner
+from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.errors import InfrastructureError
+from agent_orchestrator.infra.reasoner.factory import build_reasoner, validate_reasoner_config
+from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
+from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 
 pytestmark = pytest.mark.integration
 

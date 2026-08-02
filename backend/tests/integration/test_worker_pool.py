@@ -16,16 +16,16 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.entities.task import Task
-from src.domain.value_objects.lifecycle import Status
-from src.infra.cli.main import cli
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
-from src.infra.worker.main import run_worker_forever
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.worker.main import run_worker_forever
 
 pytestmark = pytest.mark.integration
 
@@ -163,7 +163,7 @@ def test_a_worker_keeps_beating_while_a_goal_is_running(tmp_path, monkeypatch) -
     design, so this one holds a goal open and watches the beat continue.
     """
     monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setattr("src.infra.worker.main._HEARTBEAT_SECONDS", 0.05)
+    monkeypatch.setattr("agent_orchestrator.infra.worker.main._HEARTBEAT_SECONDS", 0.05)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])

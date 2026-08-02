@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.api.routers.plans import PlanDetailResponse
+from agent_orchestrator.api.routers.plans import PlanDetailResponse
 
 UI_TYPES = (
     Path(__file__).resolve().parents[3] / "frontend" / "src" / "types" / "ui.ts"

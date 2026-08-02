@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.infra.runtime.cli_runner import ClaudeCodeRunner, GeminiRunner, PiAgentRunner
+from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, GeminiRunner, PiAgentRunner
 
 
 @pytest.mark.parametrize(

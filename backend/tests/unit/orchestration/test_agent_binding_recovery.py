@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.use_cases.pause_resume import retry_planning_stage
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.errors.agent_errors import RoleUnsatisfiableError
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
-from src.domain.entities.task import Task
-from src.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.app.use_cases.pause_resume import retry_planning_stage
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 
 
 def role_agent(agent_id: str, capabilities: list[str]) -> AgentSpec:

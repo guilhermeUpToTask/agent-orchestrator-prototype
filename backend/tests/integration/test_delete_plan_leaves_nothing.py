@@ -20,12 +20,12 @@ from pathlib import Path
 
 import pytest
 
-from src.app.use_cases.delete_plan import delete_plan
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.infra.db.plan_repository import SqlitePlanRepository
-from src.infra.db.tables import Base
+from agent_orchestrator.app.use_cases.delete_plan import delete_plan
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.infra.db.plan_repository import SqlitePlanRepository
+from agent_orchestrator.infra.db.tables import Base
 
 from tests.support import make_sqlite_env
 

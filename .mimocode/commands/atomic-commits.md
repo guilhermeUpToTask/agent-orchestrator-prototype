@@ -49,7 +49,7 @@ For each commit in order:
 **Verification shortcut** (for Python projects with `ruff`/`mypy`/`pytest`):
 ```bash
 git stash push --keep-index -u -q -m "verify-commit-N"
-(ruff check src tests; mypy src; pytest -m "not integration" -q) 2>&1 | tail -20
+(ruff check agent_orchestrator tests; mypy agent_orchestrator; pytest -m "not integration" -q) 2>&1 | tail -20
 git stash pop -q
 ```
 

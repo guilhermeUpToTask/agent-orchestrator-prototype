@@ -18,6 +18,14 @@ function response(status = 204, body?: unknown): Response {
 
 afterEach(() => vi.unstubAllGlobals());
 
+/**
+ * Requests are SAME-ORIGIN by default. These assertions used to hardcode
+ * `http://localhost:8000`, which was the old default base — and that default
+ * was the packaging defect: the UI shipped inside the wheel called port 8000
+ * no matter which port `orchestrate serve` was given. What matters here is the
+ * PATH each call builds, so that is what these assert.
+ */
+
 describe('Phase 5 critical frontend API contracts', () => {
   it('sends the complete task contract repair body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response());
@@ -37,7 +45,7 @@ describe('Phase 5 critical frontend API contracts', () => {
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://localhost:8000/api/plans/plan%2F1/edits');
+    expect(url).toBe('/api/plans/plan%2F1/edits');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toMatchObject({
       type: 'update_task_contract',
@@ -86,11 +94,11 @@ describe('Phase 5 critical frontend API contracts', () => {
     await deletePlan('plan-1');
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/plans/plan-1/project-binding',
+      '/api/plans/plan-1/project-binding',
     );
     expect(fetchMock.mock.calls[0][1].method).toBe('POST');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ project_id: 'project-1' });
-    expect(fetchMock.mock.calls[1][0]).toBe('http://localhost:8000/api/plans/plan-1');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/plans/plan-1');
     expect(fetchMock.mock.calls[1][1].method).toBe('DELETE');
   });
 
@@ -120,7 +128,7 @@ describe('Phase 5 critical frontend API contracts', () => {
     });
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/plans/plan-1/attempts/attempt-1/log/stream?offset=0',
+      '/api/plans/plan-1/attempts/attempt-1/log/stream?offset=0',
     );
     expect(truncated).toHaveBeenCalledOnce();
     expect(entries).toEqual([

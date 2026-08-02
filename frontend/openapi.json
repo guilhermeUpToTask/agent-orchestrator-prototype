@@ -5649,7 +5649,7 @@
           "resolution"
         ],
         "title": "BlockResponse",
-        "description": "The domain `PlanBlock` plus the one fact only `block_policy` knows.\n\n`requires_human` is a pure function of `kind` (`src/app/block_policy.py`),\nso it is projected here rather than persisted: a policy change must not\nleave stale copies in old rows, and adding a field to the FROZEN\n`PlanBlock` would need a domain un-freeze for a value the block can\nalready derive from a field it carries today."
+        "description": "The domain `PlanBlock` plus the one fact only `block_policy` knows.\n\n`requires_human` is a pure function of `kind` (`agent_orchestrator/app/block_policy.py`),\nso it is projected here rather than persisted: a policy change must not\nleave stale copies in old rows, and adding a field to the FROZEN\n`PlanBlock` would need a domain un-freeze for a value the block can\nalready derive from a field it carries today."
       },
       "Capability": {
         "properties": {

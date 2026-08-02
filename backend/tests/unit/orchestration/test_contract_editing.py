@@ -20,15 +20,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.entities.execution_contracts import (
+from agent_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     TestBundle,
     VerificationStrategy,
 )
-from src.domain.entities.task import Task
-from src.domain.errors.tasks_errors import InvalidTransitionError
-from src.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 NOW_ISO = "2026-07-26T00:00:00+00:00"
 
@@ -215,9 +215,9 @@ def test_the_goal_contract_tracks_the_task_it_describes():
     """
     from datetime import datetime, timezone
 
-    from src.domain.entities.execution_contracts import GoalContract
-    from src.domain.entities.goal import Goal
-    from src.domain.services.edit_service import resync_goal_contract
+    from agent_orchestrator.domain.entities.execution_contracts import GoalContract
+    from agent_orchestrator.domain.entities.goal import Goal
+    from agent_orchestrator.domain.services.edit_service import resync_goal_contract
 
     task = frozen_task()
     goal = Goal(
@@ -252,9 +252,9 @@ def test_resync_refuses_an_edit_that_uncovers_a_goal_criterion():
     import pytest as _pytest
     from pydantic import ValidationError
 
-    from src.domain.entities.execution_contracts import GoalContract
-    from src.domain.entities.goal import Goal
-    from src.domain.services.edit_service import resync_goal_contract
+    from agent_orchestrator.domain.entities.execution_contracts import GoalContract
+    from agent_orchestrator.domain.entities.goal import Goal
+    from agent_orchestrator.domain.services.edit_service import resync_goal_contract
 
     task = frozen_task(goal_criterion_ids=["g-1", "g-2"])
     goal = Goal(
@@ -286,10 +286,10 @@ def test_resync_refuses_an_edit_that_uncovers_a_goal_criterion():
 def _cyclic_plan_with_contract():
     from datetime import datetime, timezone
 
-    from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-    from src.domain.entities.execution_contracts import GoalContract
-    from src.domain.entities.goal import Goal
-    from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from agent_orchestrator.domain.entities.execution_contracts import GoalContract
+    from agent_orchestrator.domain.entities.goal import Goal
+    from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
 
     task = frozen_task()
     goal = Goal(
@@ -333,8 +333,8 @@ def test_repairing_a_command_needs_no_replan_and_survives_the_round_trip(env_fac
     persistence — the plan is stored as one JSON document, so a field the
     reconstruct path drops would make the edit look applied and then vanish.
     """
-    from src.app.testing.fakes import InMemoryCapabilityRepository
-    from src.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
+    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from agent_orchestrator.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())
@@ -363,8 +363,8 @@ def test_repairing_a_command_needs_no_replan_and_survives_the_round_trip(env_fac
 
 
 def test_a_scope_repair_is_persisted_and_keeps_the_bundle(env_factory):
-    from src.app.testing.fakes import InMemoryCapabilityRepository
-    from src.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
+    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from agent_orchestrator.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())
@@ -392,7 +392,7 @@ def test_a_plan_written_before_the_unfreeze_still_rehydrates():
     for cycle in payload["cycles"]:
         cycle.pop("approved_intent", None)  # exactly what an older row looks like
 
-    from src.domain.aggregates.planner_orchestrator import Plan
+    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
 
     restored = Plan.model_validate(payload)
 
@@ -412,11 +412,11 @@ def test_a_broken_contract_blocks_then_the_repair_lets_execution_finish(env_fact
     """
     import asyncio
 
-    from src.app.handlers.base import Signal
-    from src.app.handlers.execution_handler import ExecutionHandler
-    from src.app.testing.fakes import InMemoryCapabilityRepository
-    from src.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
-    from src.domain.entities.planning_artifacts import PlanStatus
+    from agent_orchestrator.app.handlers.base import Signal
+    from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
+    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from agent_orchestrator.app.use_cases.apply_edit import UpdateTaskContract, apply_edit
+    from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())
@@ -508,8 +508,8 @@ class _RejectsTheCandidate:
         self.calls = 0
 
     async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
-        from src.app.ports import TaskFailed
-        from src.domain.value_objects.lifecycle import FailureKind
+        from agent_orchestrator.app.ports import TaskFailed
+        from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 
         self.calls += 1
         raise TaskFailed(
@@ -519,7 +519,7 @@ class _RejectsTheCandidate:
 
 
 def _repairing_handler(env, artifacts, paths, runner=None):
-    from src.app.handlers.execution_handler import ExecutionHandler
+    from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 
     _, agents, ws, sink, clock = env.args[1:6]
     return ExecutionHandler(
@@ -540,7 +540,7 @@ def test_an_unsatisfiable_contract_is_repaired_instead_of_blocking(env_factory):
     own test directory and the task requeued — no block, no replan."""
     import asyncio
 
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     plan = _cyclic_plan_with_contract()
@@ -580,8 +580,8 @@ def test_repair_is_bounded_and_still_ends_in_a_block(env_factory):
     import asyncio
     from datetime import datetime, timezone
 
-    from src.app.ports import PlanningArtifact
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.ports import PlanningArtifact
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     plan = _cyclic_plan_with_contract()
@@ -625,7 +625,7 @@ def test_without_repository_sight_the_behaviour_is_exactly_as_before(env_factory
     must not change the outcome for anyone who has not wired it."""
     import asyncio
 
-    from src.app.handlers.execution_handler import ExecutionHandler
+    from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 
     env = env_factory()
     plan = _cyclic_plan_with_contract()
@@ -675,7 +675,7 @@ def _promotion_env(env, workspace, artifacts):
     Both code paths re-check it — an unmatched reservation means someone else
     owns the goal, and neither retry nor block may touch their state.
     """
-    from src.app.handlers.execution_handler import ExecutionHandler
+    from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 
     reserved = env.stored("p1")
     reserved.reserve_promotion("g1", "res-1")
@@ -695,8 +695,8 @@ def test_a_transient_merge_failure_releases_and_retries_instead_of_blocking(env_
     lock threw away a fully verified goal and asked a human to replan."""
     import asyncio
 
-    from src.app.handlers.base import Signal
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.handlers.base import Signal
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())
@@ -721,7 +721,7 @@ def test_a_merge_conflict_still_blocks_immediately(env_factory):
     burning worktrees pretending otherwise helps nobody."""
     import asyncio
 
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())
@@ -742,8 +742,8 @@ def test_promotion_retries_are_bounded(env_factory):
     import asyncio
     from datetime import datetime, timezone
 
-    from src.app.ports import PlanningArtifact
-    from src.app.testing.fakes import InMemoryPlanningArtifactStore
+    from agent_orchestrator.app.ports import PlanningArtifact
+    from agent_orchestrator.app.testing.fakes import InMemoryPlanningArtifactStore
 
     env = env_factory()
     env.seed(_cyclic_plan_with_contract())

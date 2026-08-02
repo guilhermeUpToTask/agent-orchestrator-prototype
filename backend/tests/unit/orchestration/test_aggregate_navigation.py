@@ -4,31 +4,31 @@ that kill the reconciler and the FAILED-loop, plus error paths."""
 import pytest
 
 
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.capability import Capability
-from src.domain.services.capability_matching import match_agent
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.services.capability_matching import match_agent
 from datetime import datetime, timezone
-from src.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
+from agent_orchestrator.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
 
-from src.domain.services import edit_service as ed
-from src.domain.factories.plan_factory import PlanFactory
-from src.domain.errors.tasks_errors import (
+from agent_orchestrator.domain.services import edit_service as ed
+from agent_orchestrator.domain.factories.plan_factory import PlanFactory
+from agent_orchestrator.domain.errors.tasks_errors import (
     GoalNotFoundError,
     InvalidTransitionError,
     TaskNotFoundError,
     GoalAlreadyRunningError,
 )
-from src.domain.errors.planning_errors import (
+from agent_orchestrator.domain.errors.planning_errors import (
     PlanAlreadyTerminalError,
     EmptyPlanError,
     InvalidEditError,
 )
-from src.domain.value_objects.lifecycle import FailureKind, Status
-from src.domain.value_objects.tasks_vos import TaskResult
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
+from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

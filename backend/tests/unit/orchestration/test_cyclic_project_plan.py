@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.domain.aggregates.planner_orchestrator import Plan
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     CycleDraft,
     CycleStatus,
@@ -19,7 +19,7 @@ from src.domain.entities.planning_artifacts import (
     ReviewGate,
     ReviewSubjectType,
 )
-from src.domain.errors.planning_errors import InvalidEditError
+from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
 

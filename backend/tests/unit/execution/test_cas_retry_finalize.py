@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.app.handlers.execution_handler import ExecutionHandler
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     FakeClock,
     InMemoryAgentRepository,
@@ -23,19 +23,19 @@ from src.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, PlanStatus
-from src.domain.entities.task import Task
-from src.domain.errors.tasks_errors import StaleVersionError
-from src.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.tasks_errors import StaleVersionError
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 NOW = datetime(2026, 7, 22, tzinfo=timezone.utc)
 
 
 def _agent() -> AgentSpec:
-    from src.domain.policies.retry_policies import RetryPolicy
+    from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 
     return AgentSpec(
         id="agent-1",
@@ -78,7 +78,7 @@ class PausableRunner:
         self.entered = asyncio.Event()
 
     async def run(self, task, spec, *, idempotency_key, event_sink, workspace):
-        from src.domain.value_objects.tasks_vos import TaskResult
+        from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
         self.entered.set()
         await self.can_proceed.wait()

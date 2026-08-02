@@ -36,7 +36,19 @@ import type {
   VerificationStrategy,
 } from "../types/ui";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+/**
+ * Empty means SAME ORIGIN, which is what a packaged install needs: the wheel
+ * serves this bundle from the API itself, on whatever port the operator chose
+ * (`orchestrate serve --port 9000`). Defaulting to a hardcoded
+ * `http://localhost:8000` made every request from the packaged UI fail with
+ * ERR_CONNECTION_REFUSED unless the operator happened to pick port 8000 — the
+ * UI loaded, and nothing in it worked.
+ *
+ * The Vite dev server is the case that DOES need an absolute URL, because it
+ * serves on :5173 while the API is elsewhere; `.env.development` sets
+ * VITE_API_URL for exactly that.
+ */
+const BASE = import.meta.env.VITE_API_URL ?? "";
 
 // Control-plane auth (reference/config routers): open when the backend has no
 // ORCHESTRATOR_API_TOKEN; otherwise mirror it here as VITE_API_TOKEN.

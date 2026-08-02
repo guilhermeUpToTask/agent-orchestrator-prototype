@@ -1,12 +1,27 @@
 [project]
 name = "agent-orchestrator"
 version = "0.1.0"
-description = "Agent Orchestrated Dev System — Agent-CLI Mode (Hexagonal + Event-Driven)"
+description = "Local-first, human-gated, verified multi-agent coding orchestrator"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "agent-orchestrator contributors" }]
+keywords = ["ai", "agents", "orchestration", "code-generation", "cli"]
+classifiers = [
+    # Preview, not production: the runtime is unsandboxed and the API's auth is
+    # a single shared token. SECURITY.md states the posture plainly.
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+    "Environment :: Console",
+]
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "redis>=5.0",
     "pyyaml>=6.0",
     "gitpython>=3.1",
     "click>=8.1",
@@ -27,27 +42,36 @@ dev = [
     # Starlette 1.3 TestClient prefers httpx2; plain httpx is deprecated.
     "httpx2",
     "coverage>=7.0",
-    # >=2.36: earlier releases lose messages on multi-stream XREADGROUP
-    # (cursor advances on every stream while delivering only one)
-    "fakeredis>=2.36",
     "ruff>=0.4",
     "mypy>=1.10",
     "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
-orchestrate = "src.infra.cli.main:cli"
+orchestrate = "agent_orchestrator.infra.cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["agent_orchestrator"]
+# The migration scripts are DATA, not modules, so hatchling would not ship them
+# on its own — and an installed copy with no migrations cannot create its
+# database at all (see agent_orchestrator/infra/db/migration_config.py).
+artifacts = [
+    "agent_orchestrator/infra/db/migrations/env.py",
+    "agent_orchestrator/infra/db/migrations/script.py.mako",
+    "agent_orchestrator/infra/db/migrations/versions/*.py",
+    # The built UI, staged by scripts/build_frontend.sh. Git-ignored and absent
+    # in a source checkout: the API serves it only when present, so a wheel
+    # built without it is a working backend, not a broken install.
+    "agent_orchestrator/api/static/**/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src --cov-report=term-missing"
+addopts = "--cov=agent_orchestrator --cov-report=term-missing"
 markers = [
     "integration: exercises real adapters (SQLite, git, subprocess); deselect with -m 'not integration'",
     "llm: cost-gated real-provider smoke tests; run explicitly with -m llm and REASONER_SMOKE_* set",
@@ -61,13 +85,13 @@ target-version = "py311"
 python_version = "3.11"
 strict = true
 
-# Honest per-layer typing: src/domain and src/app are fully strict (the
+# Honest per-layer typing: agent_orchestrator/domain and .../app are fully strict (the
 # layers that claim it); the adapter layers carry explicit relaxations
-# until they are brought up to strict. Ratchet rule: `mypy src` must stay
+# until they are brought up to strict. Ratchet rule: `mypy agent_orchestrator` must stay
 # at zero errors under this config — tighten flags here, never loosen.
 # TODO(type-health): remove these overrides module by module.
 [[tool.mypy.overrides]]
-module = ["src.infra.*", "src.api.*"]
+module = ["agent_orchestrator.infra.*", "agent_orchestrator.api.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_any_generics = false

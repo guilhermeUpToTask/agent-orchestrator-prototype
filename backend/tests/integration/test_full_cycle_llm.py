@@ -7,8 +7,8 @@ import asyncio
 
 import pytest
 
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     FakeClock,
@@ -17,19 +17,19 @@ from src.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from src.app.use_cases.conversation import discovery_message, replanning_message
-from src.app.use_cases.create_plan import create_plan
-from src.app.use_cases.cyclic_planning import activate_cycle, approve_intent
-from src.app.use_cases.run_worker import worker_tick
-from src.domain.aggregates.planner_orchestrator import PlanPhase
-from src.domain.entities.planning_artifacts import PlanStatus
-from src.domain.entities.capability import Capability
-from src.domain.entities.project_definition import ProjectDefinition
-from src.infra.db.engine import build_engine, make_session_factory
-from src.infra.db.tables import Base
-from src.infra.db.reference_repos import SqliteProjectRepository
-from src.infra.db.unit_of_work import SqliteUnitOfWork
-from src.infra.reasoner.openai_reasoner import OpenAIReasoner
+from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
+from agent_orchestrator.app.use_cases.create_plan import create_plan
+from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent
+from agent_orchestrator.app.use_cases.run_worker import worker_tick
+from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.db.reference_repos import SqliteProjectRepository
+from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
 from tests.support import make_agent_spec
 

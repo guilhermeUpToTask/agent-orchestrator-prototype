@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
-from src.infra.db.tables import Base
+from agent_orchestrator.infra.db.migration_config import alembic_config
+from agent_orchestrator.infra.db.tables import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,9 +27,7 @@ def _columns(engine, table: str) -> dict[str, bool]:
 def test_alembic_upgrade_head_matches_metadata(tmp_path):
     # migrate one db
     migrated_url = f"sqlite:///{tmp_path / 'migrated.db'}"
-    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", migrated_url)
+    cfg = alembic_config(migrated_url)
     command.upgrade(cfg, "head")
 
     # create_all another
@@ -50,9 +48,7 @@ def test_alembic_upgrade_head_matches_metadata(tmp_path):
 
 def test_upgrade_from_0006_preserves_rows_and_adds_execution_ledger(tmp_path):
     url = f"sqlite:///{tmp_path / 'predecessor.db'}"
-    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg = alembic_config(url)
     command.upgrade(cfg, "0006_pause_and_telemetry")
 
     engine = create_engine(url)
@@ -116,9 +112,7 @@ def test_upgrade_from_0006_preserves_rows_and_adds_execution_ledger(tmp_path):
 
 def test_upgrade_from_0007_backfills_typed_observation_metadata(tmp_path):
     url = f"sqlite:///{tmp_path / 'observations-predecessor.db'}"
-    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg = alembic_config(url)
     command.upgrade(cfg, "0007_execution_ledger")
 
     engine = create_engine(url)
@@ -198,9 +192,7 @@ def test_upgrade_from_0007_backfills_typed_observation_metadata(tmp_path):
 
 def test_cyclic_migration_maps_legacy_phases_then_quarantines_unbound_rows(tmp_path):
     url = f"sqlite:///{tmp_path / 'legacy-lifecycle.db'}"
-    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg = alembic_config(url)
     command.upgrade(cfg, "0008_typed_observations")
 
     expected = {
@@ -263,9 +255,7 @@ def test_cyclic_migration_maps_legacy_phases_then_quarantines_unbound_rows(tmp_p
 
 def test_operational_recovery_migration_backfills_open_attempt_liveness(tmp_path):
     url = f"sqlite:///{tmp_path / 'operational-recovery.db'}"
-    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg = alembic_config(url)
     command.upgrade(cfg, "0009_cyclic_project_plan")
 
     engine = create_engine(url)

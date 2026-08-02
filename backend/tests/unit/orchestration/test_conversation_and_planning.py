@@ -13,23 +13,23 @@ import asyncio
 
 import pytest
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanBlock, PlanStatus
-from src.domain.entities.task import Task
-from src.domain.errors.planning_errors import InvalidEditError
-from src.domain.ports.reasoner_port import ChatMessage, IntentCandidate, ReasonerReply
-from src.domain.value_objects.lifecycle import Status
-from src.domain.value_objects.tasks_vos import TaskResult
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanBlock, PlanStatus
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
+from agent_orchestrator.domain.ports.reasoner_port import ChatMessage, IntentCandidate, ReasonerReply
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
-from src.app.handlers.base import Signal
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.testing.fakes import (
+from agent_orchestrator.app.handlers.base import Signal
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.testing.fakes import (
     InMemoryCapabilityRepository,
     InMemoryChatStore,
 )
-from src.app.use_cases.conversation import discovery_message, replanning_message
-from src.app.use_cases.request_replan import request_replan
+from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
+from agent_orchestrator.app.use_cases.request_replan import request_replan
 
 
 def goal(gid: str, position: int, tasks: list[Task] | None = None) -> Goal:
@@ -143,7 +143,7 @@ def test_commit_turn_advances_and_marks_meta(env_factory):
 
 def test_discovery_after_reopen_proposes_intent_without_mutating_roadmap(env_factory):
     """Reopened chat proposes reviewable intent; roadmap mutation waits for approval."""
-    from src.app.use_cases.control import reopen_discovery
+    from agent_orchestrator.app.use_cases.control import reopen_discovery
 
     env = env_factory()
     # a plan already enriched and sitting at the pre-execution gate

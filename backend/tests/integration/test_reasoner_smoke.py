@@ -16,10 +16,10 @@ import os
 
 import pytest
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.capability import Capability
-from src.infra.reasoner.openai_reasoner import OpenAIReasoner
-from src.infra.reasoner.runtime.llm_client import OpenAIChatClient
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
+from agent_orchestrator.infra.reasoner.runtime.llm_client import OpenAIChatClient
 
 pytestmark = [
     pytest.mark.llm,

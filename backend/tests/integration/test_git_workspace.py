@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from src.app.ports import TaskFailed
-from src.app.testing.fakes import FakeClock
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.git.project_workspace import ProjectWorkspaceResolver
-from src.infra.git.workspace import GitBranchWorkspace, LocalDirWorkspace
-from src.infra.runtime.verification_executor import LocalVerificationExecutor
+from agent_orchestrator.app.ports import TaskFailed
+from agent_orchestrator.app.testing.fakes import FakeClock
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+from agent_orchestrator.infra.git.workspace import GitBranchWorkspace, LocalDirWorkspace
+from agent_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
 
 pytestmark = pytest.mark.integration
 
@@ -280,7 +280,7 @@ def test_concurrent_merge_goal_for_same_cycle_succeeds_for_both_goals(repo, monk
     cycle at nearly the same moment and both call merge_goal concurrently.
     Without the per-cycle flock, both race to `git worktree add` the same
     cycle branch and one hits 'fatal: already checked out'."""
-    import src.infra.git.workspace as workspace_mod
+    import agent_orchestrator.infra.git.workspace as workspace_mod
 
     ws = GitBranchWorkspace(repo)
     real_git = workspace_mod._git
@@ -318,7 +318,7 @@ def test_merge_goal_serializes_for_the_same_cycle_id(repo, monkeypatch):
     """Unit-level proof the flock actually blocks: two direct calls to
     _merge_goal_sync for the SAME cycle_id run one-after-another (total time
     >= two sequential holds of the artificially slowed critical section)."""
-    import src.infra.git.workspace as workspace_mod
+    import agent_orchestrator.infra.git.workspace as workspace_mod
 
     ws = GitBranchWorkspace(repo)
     real_git = workspace_mod._git
@@ -363,7 +363,7 @@ def test_merge_goal_serializes_for_the_same_cycle_id(repo, monkeypatch):
 def test_merge_goal_does_not_serialize_across_different_cycle_ids(repo, monkeypatch):
     """The lock is per-cycle-id: two DIFFERENT cycles must not block each
     other even though they share the same GitBranchWorkspace instance."""
-    import src.infra.git.workspace as workspace_mod
+    import agent_orchestrator.infra.git.workspace as workspace_mod
 
     ws = GitBranchWorkspace(repo)
     real_git = workspace_mod._git

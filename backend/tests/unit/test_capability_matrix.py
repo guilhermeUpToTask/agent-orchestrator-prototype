@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.api.server import create_app
+from agent_orchestrator.api.server import create_app
 
 MATRIX = (
     Path(__file__).resolve().parents[3] / "docs" / "architecture" / "capability-matrix.md"

@@ -13,7 +13,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from src.infra.runtime.process_supervisor import follow_attempt_log
+from agent_orchestrator.infra.runtime.process_supervisor import follow_attempt_log
 
 RECORDS = [
     {"monotonic_seconds": 0.1, "stream": "stdout", "text": "one"},

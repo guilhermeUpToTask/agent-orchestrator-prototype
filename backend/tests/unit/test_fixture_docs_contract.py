@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures"
-BACKEND_SRC = Path(__file__).resolve().parents[2] / "src"
+BACKEND_SRC = Path(__file__).resolve().parents[2] / "agent_orchestrator"
 
 
 def _walkthrough_docs() -> list[Path]:

@@ -7,7 +7,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[5]
-VERSIONS = ROOT / "backend" / "alembic" / "versions"
+# Inside the package, not beside it: an installed copy has no repository to find
+# them next to, so `backend/alembic/versions` stopped existing when the wheel
+# started shipping its own schema.
+VERSIONS = ROOT / "backend" / "agent_orchestrator" / "infra" / "db" / "migrations" / "versions"
 
 
 def literal_assignment(tree: ast.AST, name: str) -> str | None:
@@ -19,6 +22,12 @@ def literal_assignment(tree: ast.AST, name: str) -> str | None:
 
 
 def main() -> int:
+    # A missing directory used to read out as "0 revisions, no head" — the same
+    # failure a genuinely broken chain produces, which is how a moved migration
+    # directory hid behind a chain-integrity error.
+    if not VERSIONS.is_dir():
+        print(f"No migration directory at {VERSIONS.relative_to(ROOT)}")
+        return 1
     revisions: dict[str, tuple[str | None, Path]] = {}
     for path in sorted(VERSIONS.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))

@@ -82,7 +82,7 @@ command) stays in Phase 8, where it is scheduled against preview evidence.
   also necessarily DONE (`accept_verification` and `complete_task` are atomic),
   and `_assert_task_mutable` refuses an edit on a DONE task — so the edit
   returns 409 and no revision bump ever occurs. `Plan.reopen_task` exists on the
-  aggregate but nothing in `src/app` calls it.
+  aggregate but nothing in `agent_orchestrator/app` calls it.
   Consequence: the evidence read model's `superseded_evidence_count` and its
   `task_revision == task.revision` filter are unreachable today. **Both are
   kept deliberately** — insurance on the endpoint's central claim. If the
@@ -289,14 +289,37 @@ One entry from the same review remains recorded here rather than open:
   exactly the coordination infrastructure the roadmap forbids without run
   evidence.
 
+## Shutdown
+
+- **The worker has no graceful stop.** `orchestrate serve` reaps its worker on
+  SIGINT/SIGTERM (fixed 2026-08-02, locked by
+  `test_sigterm_to_serve_takes_the_worker_with_it` — before it, SIGTERM to the
+  supervisor stopped the API and left the worker running against the same state
+  directory, because uvicorn re-raises the captured signal and the reaping
+  `finally` never ran). But the reap is `SIGTERM` to a process that installs no
+  handler, so the worker dies where it stands rather than finishing its current
+  atomic action. Nothing is corrupted — an interrupted attempt is exactly the
+  crash case lease expiry and startup reconciliation are built for — so the cost
+  is recovery latency: an orderly restart mid-attempt still waits out the goal
+  lease (~5 min) like a hard kill. Making it graceful is Phase 2's deferred
+  improvement (2), "release goal leases on graceful shutdown", and wants that
+  design rather than a bare signal handler. `serve` still waits 30s before
+  `SIGKILL`, which today is generosity toward a handler that does not exist yet.
+
 ## Operator walkthrough and documentation
 
-- Several current-facing descriptions still reflect superseded implementation
-  details: plan-level sequential execution, the nine-phase lifecycle as current,
-  `PROJECT_REPO_DIR`, the old branch hierarchy/migration head, or snapshot-only
-  attempt logs. The cyclic lifecycle, project workspace resolver, goal leases,
-  current migration chain, and live attempt-log route are authoritative until
-  those docs and API metadata are reconciled.
+- Reconciled 2026-08-02 for the package rename (`src/…` → `agent_orchestrator/…`
+  in module docstrings and `overview.md`), `PROJECT_REPO_DIR` (removed from
+  `overview.md`, `data-model.md` and the README's "going real" steps — the
+  README told operators to export a variable nothing reads, which is the
+  repository-binding trap the fixtures found), the state-directory layout,
+  plan-level sequential execution (`execution-model.md` now describes per-goal
+  leases and the in-process goal pool), startup reconciliation checking both
+  leases, and the README architecture diagram's branch ladder.
+- Still outstanding: the per-layer `README.md` files beside the code
+  (`backend/agent_orchestrator/*/README.md`) and `backend/docs/INTEGRATION_GUIDE.md`
+  have not been re-read end to end against the cyclic model; they are the most
+  likely remaining home for pre-cyclic detail.
 
 ## Invariants to preserve
 

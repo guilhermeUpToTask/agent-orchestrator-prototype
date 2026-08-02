@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from src.app.ports import TaskFailed
-from src.app.runtime_failures import safe_runtime_tail
-from src.app.testing.fakes import CollectingEventSink
-from src.app.testing.observations import InMemoryObservationRepository
-from src.domain.entities.agent_spec import AgentSpec
-from src.domain.entities.task import Task
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.runtime.cli_runner import CliAgentRunner
-from src.infra.runtime.pi_protocol import extract_stream_error, parse_pi_events
-from src.infra.runtime.taxonomy import classify_failure, normalize_failure
+from agent_orchestrator.app.ports import TaskFailed
+from agent_orchestrator.app.runtime_failures import safe_runtime_tail
+from agent_orchestrator.app.testing.fakes import CollectingEventSink
+from agent_orchestrator.app.testing.observations import InMemoryObservationRepository
+from agent_orchestrator.domain.entities.agent_spec import AgentSpec
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.runtime.cli_runner import CliAgentRunner
+from agent_orchestrator.infra.runtime.pi_protocol import extract_stream_error, parse_pi_events
+from agent_orchestrator.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 pytestmark = pytest.mark.integration
 

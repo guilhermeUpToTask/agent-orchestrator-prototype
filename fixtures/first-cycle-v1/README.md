@@ -25,11 +25,11 @@ finding.
 # 0. once per machine — the database must be at head, or /api/workers and the
 #    evidence endpoint answer 500 for reasons that look like anything else
 cd backend && set -a && . ./.env && set +a
-python -m src.infra.cli.main db upgrade
+python -m agent_orchestrator.infra.cli.main db upgrade
 
 # 1. start the API and the worker (each needs the env exported)
-python -m src.infra.cli.main api start --port 8000 &
-python -m src.infra.cli.main worker start &
+python -m agent_orchestrator.infra.cli.main api start --port 8000 &
+python -m agent_orchestrator.infra.cli.main worker start &
 
 # 2. create the disposable target repository
 cd .. && ./fixtures/first-cycle-v1/scripts/materialize.sh

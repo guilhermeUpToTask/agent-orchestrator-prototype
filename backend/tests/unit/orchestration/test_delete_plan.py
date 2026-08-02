@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.use_cases.delete_plan import delete_plan
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.domain.errors.planning_errors import PlanBusyError, PlanNotFoundError
+from agent_orchestrator.app.use_cases.delete_plan import delete_plan
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.errors.planning_errors import PlanBusyError, PlanNotFoundError
 
 
 def running_plan(plan_id: str = "p1") -> Plan:

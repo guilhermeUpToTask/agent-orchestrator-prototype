@@ -6,18 +6,18 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from src.app.execution_records import RuntimeCircuit
-from src.app.handlers.planning_handler import PlanningHandler
-from src.app.use_cases.claim_ready_goal import claim_ready_goal
-from src.app.use_cases.cyclic_planning import activate_cycle, approve_intent, propose_intent
-from src.app.use_cases.run_worker import drive_goal, drive_plan
-from src.domain.aggregates.planner_orchestrator import Plan
-from src.domain.entities.planning_artifacts import PlanStatus, ProposalKind
-from src.domain.entities.project_definition import ProjectDefinition
-from src.domain.value_objects.lifecycle import Status
-from src.infra.cli.main import cli
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
+from agent_orchestrator.app.execution_records import RuntimeCircuit
+from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+from agent_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
+from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent, propose_intent
+from agent_orchestrator.app.use_cases.run_worker import drive_goal, drive_plan
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus, ProposalKind
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.domain.value_objects.lifecycle import Status
+from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
 from tests.integration.cyclic_walk import _git, _init_trunk_repo, drive_cycle_to_publication
 
 pytestmark = pytest.mark.integration

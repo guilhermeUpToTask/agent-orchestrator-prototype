@@ -5,9 +5,9 @@ over any concurrency-shaped substrings (daily checks run first)."""
 
 from __future__ import annotations
 
-from src.app.runtime_failures import LimitScope
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.runtime.taxonomy import classify_failure, normalize_failure
+from agent_orchestrator.app.runtime_failures import LimitScope
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 _NVIDIA_CONCURRENCY_MESSAGE = (
     "Upstream error from Nvidia: ResourceExhausted: "

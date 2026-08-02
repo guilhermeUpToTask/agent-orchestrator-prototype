@@ -45,7 +45,7 @@ are skipped entirely. No task-less goal left ⇒ `bind_agents` → AWAITING_REVI
 
 ## Reasoner (the planning LLM)
 
-The domain port (`src/domain/ports/reasoner_port.py`) is exactly two methods:
+The domain port (`agent_orchestrator/domain/ports/reasoner_port.py`) is exactly two methods:
 
 ```python
 converse(plan, history, message, mode) -> ReasonerReply  # message + goals|None
@@ -63,7 +63,7 @@ Implementations behind the same port:
 * `StubReasoner` — deterministic. `ask: <text>` in a message ⇒ reply without
   commit; otherwise the `goal:/task: [caps: a,b]` grammar ⇒ commit (goals may
   be committed task-less — the JIT populates them). Dry-run/tests run on this.
-* `OpenAIReasoner` on `src/infra/reasoner/runtime/` — the tool-calling agent
+* `OpenAIReasoner` on `agent_orchestrator/infra/reasoner/runtime/` — the tool-calling agent
   loop (`run_tool_session`): terminal submit tools (`submit_goals`,
   `submit_tasks`), `{accepted:false, errors}` self-correction, AsyncOpenAI
   with transient/permanent retry classification + the in-band empty-choices
@@ -72,7 +72,7 @@ Implementations behind the same port:
   every tool argument; unknown capability ids are rejected twice then filtered
   with a warning. History replays as plain text, never provider transcripts.
 
-Selection is catalog-driven (`src/infra/reasoner/factory.py`), config scope
+Selection is catalog-driven (`agent_orchestrator/infra/reasoner/factory.py`), config scope
 `orchestrator`: `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`,
 `reasoner.model_id`, `reasoner.temperature`, `reasoner.max_turns`. `llm` mode
 fail-fasts with `REASONER_CONFIG_INVALID` (HTTP 422); the API key resolves
@@ -87,7 +87,7 @@ the config keys.
 `plan_chat_messages` (migration 0003): append-only per-plan history, written
 on its OWN short transactions (`SqliteChatRepository`) — never inside the plan
 UoW. A lost display reply never loses plan state; a state rollback never
-erases what the user said. The `ChatStore` port lives in `src/app/ports.py`;
+erases what the user said. The `ChatStore` port lives in `agent_orchestrator/app/ports.py`;
 the in-memory mirror is `InMemoryChatStore`.
 
 ## PlanRepository (SQLite) — the exact shapes
@@ -141,10 +141,10 @@ Raises `TaskFailed(reason, kind)` with the SHARED FAILURE TAXONOMY
 (`FailureKind`): connection_error / rate_limit / timeout / tool_error are
 retryable; **token_limit / auth_error are terminal**
 (`RetryPolicy.non_retryable_kinds`). The classifier
-(`src/infra/runtime/taxonomy.py`) is conservative: unknown output ⇒ TOOL_ERROR
+(`agent_orchestrator/infra/runtime/taxonomy.py`) is conservative: unknown output ⇒ TOOL_ERROR
 (retryable). The dummy runner (`AGENT_MODE=dry-run`) emits the same kinds, so
 dry-run tests exercise exactly the production retry/terminal paths. The pi
-NDJSON streaming contract is isolated in `src/infra/runtime/pi_protocol.py`
+NDJSON streaming contract is isolated in `agent_orchestrator/infra/runtime/pi_protocol.py`
 (seam, not yet implemented).
 
 ## Workspace (git branching = the rollback)
@@ -191,7 +191,7 @@ tails `agent_events` by cursor → `"agent.event"`.
 turn (phase unchanged), committed=true is the roadmap commit. The chat reply
 travels in the HTTP response body; SSE carries only the domain events.
 
-Error mapping lives in ONE table: `src/api/exceptions.py::_STATUS_BY_CODE`.
+Error mapping lives in ONE table: `agent_orchestrator/api/exceptions.py::_STATUS_BY_CODE`.
 
 ## Verification procedure (the truth test)
 

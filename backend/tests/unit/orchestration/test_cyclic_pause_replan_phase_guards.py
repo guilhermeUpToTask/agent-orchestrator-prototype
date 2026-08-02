@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     IntentProposal,
     PlanStatus,
@@ -13,7 +13,7 @@ from src.domain.entities.planning_artifacts import (
     ReviewGate,
     ReviewSubjectType,
 )
-from src.domain.errors.tasks_errors import InvalidTransitionError
+from agent_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
 

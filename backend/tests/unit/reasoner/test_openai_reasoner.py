@@ -9,17 +9,17 @@ import json
 from datetime import datetime, timezone
 
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.capability import Capability
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.capability import Capability
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     CycleStatus,
     IntentProposal,
     ProposalKind,
 )
-from src.domain.ports.reasoner_port import ChatMessage
-from src.infra.reasoner.openai_reasoner import OpenAIReasoner
+from agent_orchestrator.domain.ports.reasoner_port import ChatMessage
+from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
 
 T0 = datetime(2026, 7, 3, tzinfo=timezone.utc)
@@ -113,8 +113,8 @@ def test_schema_invalid_submission_raises_reasoner_unavailable_not_a_crash():
     backoff/block machinery handles it."""
     import pytest
 
-    from src.app.ports import ReasonerUnavailable
-    from src.domain.value_objects.lifecycle import FailureKind
+    from agent_orchestrator.app.ports import ReasonerUnavailable
+    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     client = FakeLLMClient(
         [
@@ -560,8 +560,8 @@ def test_goal_contract_filters_unknown_capabilities_once_the_budget_is_spent():
 
 # ---- runtime-neutral model usage observations ----
 def test_converse_records_reported_usage_with_provenance():
-    from src.app.observations import ObservationQuality, ObservationSource
-    from src.app.testing.observations import InMemoryObservationRepository
+    from agent_orchestrator.app.observations import ObservationQuality, ObservationSource
+    from agent_orchestrator.app.testing.observations import InMemoryObservationRepository
 
     client = FakeLLMClient(
         [
@@ -610,8 +610,8 @@ def test_converse_records_reported_usage_with_provenance():
 
 
 def test_enrich_records_missing_usage_as_unavailable_not_zero():
-    from src.app.observations import ObservationQuality
-    from src.app.testing.observations import InMemoryObservationRepository
+    from agent_orchestrator.app.observations import ObservationQuality
+    from agent_orchestrator.app.testing.observations import InMemoryObservationRepository
 
     client = FakeLLMClient(
         [tool_turn("submit_tasks", {"tasks": [{"name": "t", "description": "d"}]})]
@@ -825,7 +825,7 @@ def test_scope_entry_that_is_really_a_directory_survives_with_a_trailing_slash()
 
 def test_enrichment_schema_states_what_allowed_scope_means():
     """The field had no description at all, which is why the model had to guess."""
-    from src.infra.reasoner.openai_reasoner import SUBMIT_GOAL_CONTRACT_SCHEMA
+    from agent_orchestrator.infra.reasoner.openai_reasoner import SUBMIT_GOAL_CONTRACT_SCHEMA
 
     task_props = SUBMIT_GOAL_CONTRACT_SCHEMA["properties"]["tasks"]["items"]["properties"]
     described = task_props["allowed_scope"]["description"]
@@ -852,7 +852,7 @@ class FakeRepositoryReader:
 
     def orientation(self, project_id):
         self._guard()
-        from src.app.ports import RepositoryOrientation
+        from agent_orchestrator.app.ports import RepositoryOrientation
 
         return RepositoryOrientation(
             default_branch="main",
@@ -1239,7 +1239,7 @@ class FakePriorAttempts:
 
 
 def _artifact(fingerprint, *, outcome="rejected", payload=None, reasons=(), sequence=1):
-    from src.app.ports import PlanningArtifact
+    from agent_orchestrator.app.ports import PlanningArtifact
 
     return PlanningArtifact(
         plan_id="p1",
@@ -1255,7 +1255,7 @@ def _artifact(fingerprint, *, outcome="rejected", payload=None, reasons=(), sequ
 
 
 def _fingerprint_for(plan, goal):
-    from src.infra.reasoner.openai_reasoner import _enrichment_fingerprint
+    from agent_orchestrator.infra.reasoner.openai_reasoner import _enrichment_fingerprint
 
     return _enrichment_fingerprint(plan, goal, {c.id for c in CAPS})
 
@@ -1282,7 +1282,7 @@ def test_a_failed_session_carries_its_rejected_work_out_on_the_exception():
     in-process message list that the raise discarded."""
     import pytest
 
-    from src.app.ports import ReasonerUnavailable
+    from agent_orchestrator.app.ports import ReasonerUnavailable
 
     plan, goal = _enrichment_plan_and_goal()
     bad = {
@@ -1422,7 +1422,7 @@ def test_the_turn_budget_grows_with_each_replayed_attempt():
     gets it, however much better informed it now is."""
     import pytest
 
-    from src.app.ports import ReasonerUnavailable
+    from agent_orchestrator.app.ports import ReasonerUnavailable
 
     plan, goal = _enrichment_plan_and_goal()
     fp = _fingerprint_for(plan, goal)
@@ -1447,7 +1447,7 @@ def test_the_turn_budget_grows_with_each_replayed_attempt():
 
 def test_the_escalating_budget_is_capped():
     """Unbounded growth would let one goal spend a whole provider budget."""
-    from src.infra.reasoner.openai_reasoner import MAX_ENRICH_TURN_ESCALATION
+    from agent_orchestrator.infra.reasoner.openai_reasoner import MAX_ENRICH_TURN_ESCALATION
 
     assert MAX_ENRICH_TURN_ESCALATION <= 8
 
@@ -1497,7 +1497,7 @@ def test_a_replan_never_replays_the_superseded_cycles_attempts():
 def test_the_same_goal_in_a_new_cycle_gets_a_different_fingerprint():
     """The cycle id is in the fingerprint precisely so a goal that looks
     identical after a replan cannot inherit the old cycle's rejections."""
-    from src.infra.reasoner.openai_reasoner import _enrichment_fingerprint
+    from agent_orchestrator.infra.reasoner.openai_reasoner import _enrichment_fingerprint
 
     plan, goal = _enrichment_plan_and_goal()
     before = _enrichment_fingerprint(plan, goal, {c.id for c in CAPS})
@@ -1512,7 +1512,7 @@ def test_editing_the_goal_invalidates_its_replay():
     """`update_goal` changes name/description, which is what the contract was
     written against. A replay from before the edit describes work no longer
     asked for."""
-    from src.infra.reasoner.openai_reasoner import _enrichment_fingerprint
+    from agent_orchestrator.infra.reasoner.openai_reasoner import _enrichment_fingerprint
 
     plan, goal = _enrichment_plan_and_goal()
     before = _enrichment_fingerprint(plan, goal, {c.id for c in CAPS})
@@ -1528,7 +1528,7 @@ def test_editing_the_goal_invalidates_its_replay():
 def test_a_changed_capability_catalog_invalidates_the_replay():
     """A contract's required_capabilities are drawn from the catalog; if the
     catalog moved, the rejected draft may be wrong for a new reason."""
-    from src.infra.reasoner.openai_reasoner import _enrichment_fingerprint
+    from agent_orchestrator.infra.reasoner.openai_reasoner import _enrichment_fingerprint
 
     plan, goal = _enrichment_plan_and_goal()
 

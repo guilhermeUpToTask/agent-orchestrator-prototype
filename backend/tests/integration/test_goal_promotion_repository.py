@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from src.app.promotion_records import GoalPromotion
+from agent_orchestrator.app.promotion_records import GoalPromotion
 
 pytestmark = pytest.mark.integration
 

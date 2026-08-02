@@ -28,18 +28,18 @@ import pytest
 import uvicorn
 from cryptography.fernet import Fernet
 
-from src.api import dependencies
-from src.api.server import create_app
-from src.app.execution_records import (
+from agent_orchestrator.api import dependencies
+from agent_orchestrator.api.server import create_app
+from agent_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
 )
-from src.domain.entities.project_definition import ProjectDefinition
-from src.infra.container import AppContainer
-from src.infra.db.tables import Base
-from src.infra.runtime.process_supervisor import attempt_log_path
+from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.runtime.process_supervisor import attempt_log_path
 
 pytestmark = pytest.mark.integration
 

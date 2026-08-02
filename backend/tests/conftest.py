@@ -1,5 +1,5 @@
-"""Test bootstrap: make the repo root importable so `src.*` resolves without an
-editable install."""
+"""Test bootstrap: make the backend root importable so `agent_orchestrator.*`
+resolves without an editable install."""
 
 from __future__ import annotations
 

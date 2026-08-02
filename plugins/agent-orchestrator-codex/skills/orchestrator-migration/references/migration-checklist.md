@@ -4,7 +4,7 @@
 - Preserve data through renames and type changes.
 - Backfill before introducing non-null constraints.
 - Keep SQLite limitations in mind; use batch operations when required.
-- Update `backend/src/infra/db/tables.py`.
+- Update `backend/agent_orchestrator/infra/db/tables.py`.
 - Update repository encode/decode and reference guards.
 - Keep fake semantics aligned when the persistence contract changes.
 - Update Pydantic/API/frontend contracts when persisted data is public.

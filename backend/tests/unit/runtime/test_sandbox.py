@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.app.sandbox_port import SandboxPolicy
-from src.infra.runtime import process_supervisor
-from src.infra.runtime.cli_runner import ClaudeCodeRunner
-from src.infra.runtime.process_supervisor import ProcessSupervisorResult
-from src.infra.runtime.sandbox import NoSandbox
+from agent_orchestrator.app.sandbox_port import SandboxPolicy
+from agent_orchestrator.infra.runtime import process_supervisor
+from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner
+from agent_orchestrator.infra.runtime.process_supervisor import ProcessSupervisorResult
+from agent_orchestrator.infra.runtime.sandbox import NoSandbox
 
 
 def test_no_sandbox_passes_the_command_through_unchanged():
@@ -59,7 +59,7 @@ def test_cli_agent_runner_wraps_the_command_through_its_sandbox(monkeypatch, tmp
 
     monkeypatch.setattr(process_supervisor, "supervise_process", fake_supervise_process)
     monkeypatch.setattr(
-        "src.infra.runtime.cli_runner.supervise_process", fake_supervise_process
+        "agent_orchestrator.infra.runtime.cli_runner.supervise_process", fake_supervise_process
     )
 
     runner._run_sync(prompt="hello", cwd=str(tmp_path), execution_env={}, observations=[])

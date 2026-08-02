@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.app.observations import (
+from agent_orchestrator.app.observations import (
     ObservationCorrelation,
     ObservationKind,
     ObservationQuality,
@@ -13,11 +13,11 @@ from src.app.observations import (
     ProcessObservationPayload,
     TelemetryObservation,
 )
-from src.app.testing.fakes import FakeClock
-from src.infra.container import AppContainer
-from src.infra.db.observation_repository import SqliteObservationRepository
-from src.infra.db.tables import Base
-from src.infra.runtime.cli_runner import PiAgentRunner
+from agent_orchestrator.app.testing.fakes import FakeClock
+from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.db.observation_repository import SqliteObservationRepository
+from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.runtime.cli_runner import PiAgentRunner
 
 from tests.support import seed_plan_row
 

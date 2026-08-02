@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import asyncio
 
-from src.app.handlers.base import Signal
-from src.app.ports import UnitOfWork
-from src.app.use_cases.advance_plan import PlanDispatcher
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.planning_artifacts import (
+from agent_orchestrator.app.handlers.base import Signal
+from agent_orchestrator.app.ports import UnitOfWork
+from agent_orchestrator.app.use_cases.advance_plan import PlanDispatcher
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     IntentProposal,
     PlanStatus,
     ProposalKind,
     ReviewSubjectType,
 )
-from src.domain.entities.task import Task
-from src.domain.value_objects.lifecycle import Status
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 
 class RecordingPlanningHandler:

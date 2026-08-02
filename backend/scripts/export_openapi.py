@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.api.server import create_app  # noqa: E402
+from agent_orchestrator.api.server import create_app  # noqa: E402
 
 
 def _canonicalize(value: object, *, in_default: bool = False) -> object:

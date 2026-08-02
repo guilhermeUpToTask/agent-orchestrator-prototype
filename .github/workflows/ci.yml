@@ -60,10 +60,10 @@ jobs:
         run: uv sync --all-extras --dev --locked
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run ruff check agent_orchestrator tests
 
       - name: Mypy typing ratchet
-        run: uv run mypy src
+        run: uv run mypy agent_orchestrator
 
       - name: Unit tests
         run: uv run pytest -q tests/unit
@@ -108,6 +108,37 @@ jobs:
 
       - name: Typecheck and build
         run: npm run build
+
+      # These existed but had never run in CI: the Phase 5 API-contract tests,
+      # the plan-truth derivations and the settings interaction tests all
+      # verified locally and nowhere else.
+      - name: Frontend tests
+        run: npm run test
+
+      # The browser smoke answers the one question nothing else can: does the
+      # bundle the wheel ships actually BOOT? `curl` returns 200 for a shell
+      # whose JavaScript throws on the first line. On its first run it caught
+      # the packaged UI calling a hardcoded http://localhost:8000 regardless of
+      # the port `serve` was given — a defect that would have shipped in a
+      # release and made the console load with nothing in it working.
+      - name: Stage the UI into the package
+        run: ../backend/scripts/build_frontend.sh
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Packaged UI browser smoke
+        run: npm run test:e2e
+        env:
+          E2E_PYTHON: ${{ github.workspace }}/backend/.venv/bin/python
+          E2E_HOME: ${{ runner.temp }}/aipom-e2e-home
 
       - name: Regenerate API types
         run: |

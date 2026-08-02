@@ -228,7 +228,7 @@ evidence:
   `test author produced no executable checks` and
   `did not establish a passing characterization/check baseline`. The reasoner's
   contract was correct both times.
-- **A task's checks are identified by declaration** (`src/app/test_identity.py`),
+- **A task's checks are identified by declaration** (`agent_orchestrator/app/test_identity.py`),
   from the author's diff or a `verification_command` naming a concrete file —
   never a repository scan, which cannot tell task 3's checks from task 1's. When
   the contract names a check that is already present, no agent runs at all.
@@ -301,7 +301,7 @@ free endpoint that answered six concurrent probes instantly between them. The ru
 completed green, so this cost wall-clock rather than correctness — but it backed
 off hardest exactly when a short retry would most likely succeed.
 
-Fixed by a per-scope curve in `src/app/provider_capacity.py`
+Fixed by a per-scope curve in `agent_orchestrator/app/provider_capacity.py`
 (`capacity_backoff_seconds`): a positively identified `request_concurrency`
 refusal waits the plan's ordinary configured curve, unscaled, and every other
 scope — including an unclassified one, which degrades to patience for the same
@@ -773,7 +773,7 @@ boundaries, and the dependency rule.
   - Plan: `docs/superpowers/plans/2026-07-28-phase-4-3-evidence-truth.md`
     (9 tasks; execution ledger at
     `.superpowers/sdd/2026-07-28-phase-4-3-evidence-truth/progress.md`)
-  - **Complete:** branch-naming module (`src/app/branch_names.py`), migration
+  - **Complete:** branch-naming module (`agent_orchestrator/app/branch_names.py`), migration
     `0017_goal_promotions`, the transactional promotion ledger as a fifth
     UnitOfWork repository, promotion recording in
     `ExecutionHandler._promote_goal`, and
@@ -913,7 +913,7 @@ Delivered after the review, before Phase 6 opens:
 **Validated:** 718 unit + 525 integration tests, ruff and mypy clean, frontend
 type-check/build and 15 frontend tests green, migration head `0017`.
 
-## Phase 6 — public-preview productization ⬜
+## Phase 6 — public-preview productization ✅
 
 **External capability:** an external developer can install the preview, complete
 the first walkthrough, understand limits/costs, and share useful evidence.
@@ -952,12 +952,153 @@ the first walkthrough, understand limits/costs, and share useful evidence.
 - Validate versioning, changelog, license/contribution/security files, and
   artifact installation on a clean machine.
 
-### Exit criteria
+### Exit criteria — met 2026-08-02
 
-- A technical user goes from install to green Tier 0 using public docs only.
-- Tier 1 requires explicit model/runtime/cost choices and a readiness result.
-- Packaged frontend/backend agree on API version/types.
-- Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.
+- ✅ **A technical user goes from install to green Tier 0 using public docs
+  only.** Verified by doing it: wheel → clean venv → `orchestrate serve` →
+  `first-cycle-v1` → 10/10, following the published commands rather than
+  repository knowledge. The one thing that would have broken it — `serve`
+  leaking its worker on a restart — was found on this path and fixed.
+- ✅ **Tier 1 requires explicit model/runtime/cost choices and a readiness
+  result.** Tier is data, not an environment variable; `preflight.sh` prints the
+  resolved reasoner and runner, fails a mixed pair on purpose, and fails a
+  missing CLI only when an agent is bound to it.
+- ✅ **Packaged frontend/backend agree on API version/types.** CI regenerates
+  the types and fails on drift; the wheel carries the bundle that was built from
+  those types, and the browser smoke now proves the packaged bundle boots and
+  reaches its own API same-origin.
+- ✅ **Docs make no unsupported autonomy, sandbox, SaaS, or forge claims.**
+  `SECURITY.md` states the unsandboxed runtime plainly, publication records a
+  disposition rather than performing a forge write, and the reconciliation above
+  removed the remaining places where the docs described a system that no longer
+  exists.
+
+### Delivery status (updated 2026-08-01, `phase-6-public-preview`)
+
+**Install path chosen: a single `uvx`/`pipx` wheel.** Docker was rejected because
+the orchestrator runs agent CLIs against the user's own repository with their
+git identity and credentials — bind-mounting a repo, translating paths and
+reproducing auth inside an image is friction the local-first model does not
+need. A packaged desktop app is a larger build surface than any preview evidence
+justifies.
+
+**Done, each proved on a clean venv rather than argued:**
+
+- ✅ **Migrations ship inside the package.** `db_upgrade` resolved them from
+  `Path(__file__).parents[3]` — the repo root in a checkout, `site-packages`
+  when installed, where the only `alembic` is the LIBRARY. An installed copy
+  could not create its schema at all. Moved to `agent_orchestrator/infra/db/migrations/`, one
+  resolver (`migration_config.py`) derived from its own module location.
+- ✅ **The UI ships inside the wheel** and is served by the API
+  (`agent_orchestrator/api/frontend.py`), so there is no second artifact and no CORS story on
+  the first-run path. The SPA fallback explicitly refuses `api/`, `health`,
+  `docs`, `redoc`, `openapi.json` — registering it last is necessary but not
+  sufficient, and a test caught it answering unknown API paths with HTML.
+- ✅ **`orchestrate serve`** — migrate, API, worker, UI, one command. The worker
+  stays a separate process; it terminates gracefully with 30s for the current
+  atomic action.
+- ✅ **Guided first run** — `/settings/setup` sequences setup in dependency
+  order from live catalog state (so it is re-entrant), and Tier 0 never asks for
+  an API key.
+- ✅ **The release actually ships it.** The workflow built the wheel BEFORE the
+  frontend, so every release would have published a backend with no console. Now
+  ordered correctly, with a verification step that opens the wheel and refuses
+  a release missing the migrations or the UI — demonstrated firing.
+- ✅ **Apache-2.0**, PyPI metadata, `SECURITY.md` (written from the code and
+  corrected against it), `CONTRIBUTING.md`.
+- ✅ **Guides** — `docs/guides/`: getting-started, tier-1, evidence,
+  troubleshooting (real failure signatures only).
+- ✅ **Test layers the UI never had**: jsdom + Testing Library interaction tests,
+  and a light Playwright suite against the packaged bundle. It found a real
+  defect on its first run — the packaged UI called a hardcoded
+  `http://localhost:8000` regardless of the port `serve` was given, so the
+  console loaded and nothing in it worked. Now same-origin.
+
+**Branch state:** `phase-6-public-preview`, worktree clean, **no PR opened** —
+that call is the maintainer's. `main` is at the Phase 5 merge (`8e675f5`).
+
+- ✅ **The distribution package is `agent_orchestrator`.** Renamed from a
+  top-level `src`, which would have collided in site-packages with any other
+  distribution doing the same — install order deciding the winner, silently.
+  221 Python files plus packaging, tooling and 63 docs/scripts. Three tests
+  failed after the bulk rewrite, each locating the source tree by PATH STRING
+  rather than by import; verified past the suites by installing the wheel into a
+  clean venv and running `orchestrate serve`.
+- ✅ **CI runs the frontend tests.** It never had — the Frontend job
+  typechecked, built and verified generated types, so every Phase 5 API-contract
+  test ran on a laptop and nowhere else.
+
+**Closed 2026-08-02 — the four items the previous session left open:**
+
+1. ✅ **Closing evidence, from the artifact a user installs.** The wheel was
+   built, installed into a clean venv outside the checkout, and driven with
+   `orchestrate serve` against the real state directory. **Tier 0: 10/10
+   expectations, all guards green. Tier 1: 11/11 expectations, 7/7 guards**
+   (`plan a603d457`, reasoner `nvidia/nemotron-3-ultra-550b-a55b:free`, `pi`
+   runtime on the same free model, $0). The Tier 1 run was clean end to end:
+   two runs — test authoring then implementation — one attempt each, no
+   capacity events, no retries, `main` byte-identical to the seed tag, the
+   accepted evidence naming `python -m pytest -q tests/test_slug.py` exit 0
+   against candidate `4620490d`, and `goal/02f5bac7…` promoted into
+   `cycle/b3d23fb7…` at `cb7443af`. Intent to publication took about three
+   minutes. A **second** Tier 1 run from the same installed wheel
+   (`plan 4929491b`, driven to produce the documentation screenshots) also
+   passed 11/11 — so the closing evidence is two consecutive green Tier 1 runs
+   from the artifact, not one.
+2. ✅ **Screenshots and a five-minute demo.** `docs/images/` (committed) holds
+   the console during a live run — goal lease, TDD stage, bound agent, accepted
+   evidence — regenerated by `frontend/e2e/docs-screenshots.spec.ts` rather than
+   cropped by hand. The demo is the fixture, stated first in the getting-started
+   guide, and it ends on a checker rather than on trust.
+3. ✅ **Architecture-doc reconciliation.** Fixed rather than restated: 60 module
+   docstrings still named themselves `src/…` after the rename, `overview.md` drew
+   the layers the same way, `PROJECT_REPO_DIR` appeared as the repository source
+   in two architecture docs *and as the README's setup instruction* (nothing
+   reads it — that is the binding trap documented as advice),
+   `execution-model.md` still called execution "sequential per plan" and
+   described startup reconciliation as the pre-Phase-2 defect, the state-directory
+   layout named a `workspace-repo/` that no longer exists, and the README diagram
+   still drew `plan/<id>` branches. What remains is named in known-issues: the
+   per-layer READMEs and `INTEGRATION_GUIDE.md` have not been re-read end to end.
+4. ✅ **Playwright runs in CI.** The value was demonstrated rather than assumed,
+   and the suite now starts its own stack (`orchestrate serve --no-worker` on a
+   wiped state directory) instead of requiring a server on port 8210 that
+   nothing documented and nothing started. Twelve seconds, one cached Chromium
+   download, inside the Frontend job that already installs both toolchains.
+
+**Two defects found in the course of it, both fixed:**
+
+- **`orchestrate serve` leaked its worker on SIGTERM.** uvicorn captures the
+  signal, drains, restores the previous handler and re-raises it, so the process
+  died inside `uvicorn.run()` and the `finally` that reaps the child never ran.
+  `kill <pid>` — systemd, any process manager — stopped the API and left the
+  worker claiming plans and spending tokens against the same state directory,
+  with no control plane left to report it. Ctrl-C hid it: the terminal signals
+  the whole process group. Every existing `serve` test tore down by process
+  group, which is exactly why nothing caught it; the regression test signals the
+  supervisor alone. Fixed by installing the reaper as a signal handler before
+  uvicorn runs, and verified live from the installed wheel.
+- **CI was red on this branch before anything was changed.** The package rename
+  left `ruff check src tests` and `mypy src` aimed at a directory that no longer
+  exists (exit 1 and exit 2), and `--cov=src` made the coverage report silently
+  empty rather than failing. The Makefile, CONTRIBUTING, CLAUDE.md and git-flow
+  all still told a contributor to run the broken commands.
+
+**Environment notes for whoever picks this up:**
+
+- `~/.orchestrator` holds this phase's completed cycles (five by the end of the
+  closing-evidence session) and was migrated `0015 → 0017`. It sits at **Tier 1
+  by default**: a Tier 0 run means flipping BOTH `reasoner.mode` and
+  `agent_runner.mode`, and flipping them back — nothing restores them for you,
+  and `seed demo` would overwrite the free-model bindings outright.
+- `frontend/` gained dev dependencies (`@testing-library/react`,
+  `@testing-library/user-event`, `jsdom`, `@playwright/test`) and vitest now runs
+  in the `jsdom` environment. Playwright's chromium and its OS libraries were
+  installed into this container and will not survive a fresh one — run
+  `npx playwright install --with-deps chromium` before `npm run test:e2e`.
+- `backend/agent_orchestrator/api/static/` is generated by
+  `backend/scripts/build_frontend.sh` and git-ignored. A source checkout without
+  it starts fine and serves no UI, which is intended.
 
 ## Phase 7 — small peer preview ⬜
 

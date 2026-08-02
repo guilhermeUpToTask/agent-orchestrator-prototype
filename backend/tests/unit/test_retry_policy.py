@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.domain.policies.retry_policies import RetryPolicy
-from src.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 
 
 def test_per_kind_attempt_budgets() -> None:

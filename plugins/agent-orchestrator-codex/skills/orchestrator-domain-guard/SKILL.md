@@ -1,6 +1,6 @@
 ---
 name: orchestrator-domain-guard
-description: Implement or review Agent Orchestrator domain and application changes while protecting the frozen phase machine, aggregate authority, dependency boundaries, injected time, CAS, transactional outbox, lease semantics, retry and pause gates, and fake/SQLite parity. Use for changes under backend/src/domain or backend/src/app and for worker lifecycle behavior.
+description: Implement or review Agent Orchestrator domain and application changes while protecting the frozen phase machine, aggregate authority, dependency boundaries, injected time, CAS, transactional outbox, lease semantics, retry and pause gates, and fake/SQLite parity. Use for changes under backend/agent_orchestrator/domain or backend/agent_orchestrator/app and for worker lifecycle behavior.
 ---
 
 # Orchestrator Domain Guard

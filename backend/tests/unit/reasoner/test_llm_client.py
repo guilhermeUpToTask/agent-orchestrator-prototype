@@ -12,14 +12,14 @@ from types import SimpleNamespace
 import openai
 import pytest
 
-from src.domain.value_objects.lifecycle import FailureKind
-from src.infra.reasoner.runtime.errors import (
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from agent_orchestrator.infra.reasoner.runtime.errors import (
     ReasonerError,
     classify_provider_error,
     provider_error_from_empty_choices,
 )
-from src.infra.reasoner.runtime.llm_client import OpenAIChatClient, to_provider_tools
-from src.infra.reasoner.runtime.tools import ToolSpec
+from agent_orchestrator.infra.reasoner.runtime.llm_client import OpenAIChatClient, to_provider_tools
+from agent_orchestrator.infra.reasoner.runtime.tools import ToolSpec
 
 
 def make_client(responses, temperature=0.2, max_retries=3):

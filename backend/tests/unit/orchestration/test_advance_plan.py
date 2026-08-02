@@ -7,17 +7,17 @@ import asyncio
 
 import pytest
 
-from src.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from src.domain.entities.goal import Goal
-from src.domain.entities.task import Task
-from src.domain.events.outbox import PlanCompleted
-from src.domain.value_objects.lifecycle import FailureKind, Status
-from src.domain.value_objects.tasks_vos import TaskResult
-from src.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from agent_orchestrator.domain.entities.goal import Goal
+from agent_orchestrator.domain.entities.task import Task
+from agent_orchestrator.domain.events.outbox import PlanCompleted
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
+from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 
-from src.app.use_cases.advance_plan import advance_plan
-from src.app.use_cases.control import finish_review
-from src.app.testing.fakes import DummyBehavior
+from agent_orchestrator.app.use_cases.advance_plan import advance_plan
+from agent_orchestrator.app.use_cases.control import finish_review
+from agent_orchestrator.app.testing.fakes import DummyBehavior
 
 
 def make_plan(tasks_per_goal=1, n_goals=1, retry_max=3):
@@ -151,7 +151,7 @@ def test_check_before_act_skips_completed_task(env_factory):
 
 # ---- transactional outbox: rollback discards staged events ----
 def test_outbox_rolls_back_on_failed_transaction(env_factory):
-    from src.domain.errors.tasks_errors import StaleVersionError
+    from agent_orchestrator.domain.errors.tasks_errors import StaleVersionError
 
     env = env_factory()
     env.seed(make_plan())
@@ -176,7 +176,7 @@ def test_agent_events_streamed_and_tagged(env_factory):
 
 # ---- missing agent fails fast (reactive safety net) ----
 def test_missing_agent_raises_before_running(env_factory):
-    from src.domain.errors.agent_errors import AgentNotFoundError
+    from agent_orchestrator.domain.errors.agent_errors import AgentNotFoundError
 
     env = env_factory()
     plan = make_plan()
