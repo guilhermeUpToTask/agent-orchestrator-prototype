@@ -191,6 +191,8 @@ Serves **J7**.
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
 | Frozen test bundle + accepted evidence | `Task.test_bundle`, `verification_evidence` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_tdd_execution.py` | full | critical |
+| Review a cycle in review-sized units (P8.3) | `GitReviewReader`, `goal_promotions`, task evidence | `GET /api/plans/{plan_id}/cycles/{cycle_id}/review` | `CycleReviewPanel` | `test_cycle_review_api.py` | full | critical |
+| Patch text for one review unit (P8.3) | `GitReviewReader.patch` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/review/patch` | `CycleReviewPanel` | `test_cycle_review_api.py` | full | critical |
 | Protected scope / foreign-check protection | `verification`, `test_identity` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_existing_check_protection.py` | full | critical |
 | Promoted git refs (cycle/goal branches) | `project_workspace`, `goal_promotion_repository` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py`, `test_goal_promotion_repository.py`, `test_git_workspace.py` | full | critical |
 | Record the output disposition | `cyclic_planning.record_output_disposition` | `POST /api/plans/{plan_id}/publication` | `GatePanel` | `test_api.py`, `test_default_cyclic_execution.py` | full | critical |

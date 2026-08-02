@@ -15,6 +15,7 @@ import { usePlannerStore } from '../store/plannerStore';
 import { StatusBadge } from '../components/StatusBadge';
 import { AttentionItem, Button, CountChip, ErrorState, Select } from '../components/ui';
 import { CycleEvidenceSummary } from '../components/CycleEvidenceSummary';
+import { CycleReviewPanel } from '../components/CycleReviewPanel';
 import { PLAN_STATUS } from '../styles/tokens';
 import type { Goal, Plan, PlanBlock, Task } from '../types/ui';
 import styles from './Overview.module.css';
@@ -422,6 +423,7 @@ export function Overview() {
                         </div>
                       ))}
                       <CycleEvidenceSummary planId={planId} cycle={cycle} />
+                      <CycleReviewPanel planId={planId} cycleId={cycle.id} />
                     </div>
                   </details>
                 );

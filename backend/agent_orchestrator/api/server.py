@@ -38,6 +38,7 @@ from agent_orchestrator.api.security import require_api_token, require_api_token
 from agent_orchestrator.api.routers import (
     config,
     evidence,
+    review,
     events,
     metrics,
     plans,
@@ -160,6 +161,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     # Evidence carries commands, commit SHAs and output refs. It is
     # control-plane data.
     app.include_router(evidence.router, prefix=_prefix, dependencies=_guarded)
+    app.include_router(review.router, prefix=_prefix, dependencies=_guarded)
     # The one exception, and only to the MECHANISM: EventSource cannot send
     # headers, so the stream a browser opens directly also accepts `?token=`.
     app.include_router(

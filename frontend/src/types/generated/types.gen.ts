@@ -637,6 +637,37 @@ export type CycleEvidenceResponse = {
 };
 
 /**
+ * CycleReviewResponse
+ */
+export type CycleReviewResponse = {
+    /**
+     * Plan Id
+     */
+    plan_id: string;
+    /**
+     * Cycle Id
+     */
+    cycle_id: string;
+    /**
+     * Repository Path
+     */
+    repository_path: string;
+    /**
+     * Default Branch
+     */
+    default_branch: string | null;
+    /**
+     * Cycle Branch
+     */
+    cycle_branch: string;
+    whole_cycle: ReviewUnitResponse | null;
+    /**
+     * Goals
+     */
+    goals: Array<GoalReviewResponse>;
+};
+
+/**
  * CycleStatus
  */
 export type CycleStatus = 'active' | 'completed' | 'superseded' | 'cancelled';
@@ -689,6 +720,36 @@ export type DeliveryResponse = {
      * In Operator Checkout
      */
     in_operator_checkout: boolean;
+};
+
+/**
+ * DiffStatResponse
+ */
+export type DiffStatResponse = {
+    /**
+     * Files Changed
+     */
+    files_changed: number;
+    /**
+     * Insertions
+     */
+    insertions: number;
+    /**
+     * Deletions
+     */
+    deletions: number;
+    /**
+     * Changed Lines
+     */
+    changed_lines: number;
+    /**
+     * Review Band
+     */
+    review_band: string;
+    /**
+     * Files
+     */
+    files: Array<FileChangeResponse>;
 };
 
 /**
@@ -952,6 +1013,28 @@ export type ExecutionRunTimelineResponse = {
 export type FailureKind = 'connection_error' | 'rate_limit' | 'token_limit' | 'auth_error' | 'timeout' | 'tool_error' | 'verification_error';
 
 /**
+ * FileChangeResponse
+ */
+export type FileChangeResponse = {
+    /**
+     * Path
+     */
+    path: string;
+    /**
+     * Insertions
+     */
+    insertions: number;
+    /**
+     * Deletions
+     */
+    deletions: number;
+    /**
+     * Binary
+     */
+    binary: boolean;
+};
+
+/**
  * ForgeBindingBody
  */
 export type ForgeBindingBody = {
@@ -1095,6 +1178,29 @@ export type GoalOutline = {
      * Depends On
      */
     depends_on?: Array<string>;
+};
+
+/**
+ * GoalReviewResponse
+ */
+export type GoalReviewResponse = {
+    /**
+     * Goal Id
+     */
+    goal_id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Status
+     */
+    status: string;
+    merge: ReviewUnitResponse | null;
+    /**
+     * Tasks
+     */
+    tasks: Array<TaskReviewResponse>;
 };
 
 /**
@@ -1383,6 +1489,36 @@ export type NewTaskBody = {
  * OutputDisposition
  */
 export type OutputDisposition = 'open_pr' | 'merge' | 'retain_branch' | 'discard';
+
+/**
+ * PatchResponse
+ */
+export type PatchResponse = {
+    /**
+     * Base
+     */
+    base: string;
+    /**
+     * Head
+     */
+    head: string;
+    /**
+     * Patch
+     */
+    patch: string;
+    /**
+     * Truncated
+     */
+    truncated: boolean;
+    /**
+     * Total Bytes
+     */
+    total_bytes: number;
+    /**
+     * Local Command
+     */
+    local_command: string;
+};
 
 /**
  * PauseRequest
@@ -2226,6 +2362,45 @@ export type ReviewResolution = {
 export type ReviewSubjectType = 'intent' | 'cycle_draft' | 'cycle_completion';
 
 /**
+ * ReviewUnitResponse
+ *
+ * One reviewable thing: a commit, or a goal's whole merge.
+ *
+ * `kind` is the orchestrator's own record of what this commit WAS, which is
+ * the part no generic diff viewer can tell you. A `test_authoring` unit is the
+ * check that was proven RED before the implementation existed; reading those
+ * two separately is a different and much better experience than reading their
+ * sum.
+ */
+export type ReviewUnitResponse = {
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Sha
+     */
+    sha: string;
+    /**
+     * Base
+     */
+    base: string;
+    /**
+     * Resolved
+     */
+    resolved: boolean;
+    diff: DiffStatResponse | null;
+    /**
+     * Local Command
+     */
+    local_command: string;
+    /**
+     * Unavailable Reason
+     */
+    unavailable_reason: string | null;
+};
+
+/**
  * RunnerAgentStatus
  */
 export type RunnerAgentStatus = {
@@ -2554,6 +2729,44 @@ export type TaskResult = {
     metadata?: {
         [key: string]: string;
     };
+};
+
+/**
+ * TaskReviewResponse
+ */
+export type TaskReviewResponse = {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Verification Command
+     */
+    verification_command: string | null;
+    /**
+     * Exit Code
+     */
+    exit_code: number | null;
+    /**
+     * Allowed Scope
+     */
+    allowed_scope: Array<string>;
+    /**
+     * Forbidden Scope
+     */
+    forbidden_scope: Array<string>;
+    /**
+     * Units
+     */
+    units: Array<ReviewUnitResponse>;
 };
 
 /**
@@ -5731,6 +5944,107 @@ export type EvidenceGetCycleEvidenceResponses = {
 };
 
 export type EvidenceGetCycleEvidenceResponse = EvidenceGetCycleEvidenceResponses[keyof EvidenceGetCycleEvidenceResponses];
+
+export type ReviewGetCycleReviewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Cycle Id
+         */
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/cycles/{cycle_id}/review';
+};
+
+export type ReviewGetCycleReviewErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReviewGetCycleReviewError = ReviewGetCycleReviewErrors[keyof ReviewGetCycleReviewErrors];
+
+export type ReviewGetCycleReviewResponses = {
+    /**
+     * Successful Response
+     */
+    200: CycleReviewResponse;
+};
+
+export type ReviewGetCycleReviewResponse = ReviewGetCycleReviewResponses[keyof ReviewGetCycleReviewResponses];
+
+export type ReviewGetReviewPatchData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Cycle Id
+         */
+        cycle_id: string;
+    };
+    query: {
+        /**
+         * Base
+         *
+         * the ref this change is measured against
+         */
+        base: string;
+        /**
+         * Head
+         *
+         * the ref being reviewed
+         */
+        head: string;
+    };
+    url: '/api/plans/{plan_id}/cycles/{cycle_id}/review/patch';
+};
+
+export type ReviewGetReviewPatchErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReviewGetReviewPatchError = ReviewGetReviewPatchErrors[keyof ReviewGetReviewPatchErrors];
+
+export type ReviewGetReviewPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: PatchResponse;
+};
+
+export type ReviewGetReviewPatchResponse = ReviewGetReviewPatchResponses[keyof ReviewGetReviewPatchResponses];
 
 export type EventsStreamEventsData = {
     body?: never;
