@@ -531,14 +531,60 @@ export const deleteModel = (modelId: string): Promise<void> =>
 
 // ─── Reference data: projects ─────────────────────────────────────────────────
 
-export const createProject = (body: {
+/** local = your own checkout, remote = a clone the orchestrator owns,
+ *  scratch = an empty repository it creates. Named rather than inferred, so
+ *  "remote" with a blank URL is refused instead of silently becoming scratch. */
+export type RepositoryBindingKind = "local" | "remote" | "scratch";
+
+export type ProjectBody = {
   name: string;
   repo_url?: string | null;
-}): Promise<ProjectDefinition> => post("/api/projects", body);
-export const updateProject = (
+  binding?: RepositoryBindingKind | null;
+};
+
+export type RepositoryProbe = {
+  binding: RepositoryBindingKind;
+  reachable: boolean;
+  default_branch: string | null;
+  resolved_path_preview: string | null;
+  problem: string | null;
+  problem_kind:
+    | "needs_credentials"
+    | "not_found"
+    | "unreachable"
+    | "timeout"
+    | null;
+};
+
+export type CloneResult = {
+  resolved_path: string;
+  default_branch: string | null;
+  already_present: boolean;
+};
+
+export type ForgeBinding = {
+  provider: string;
+  repository: string;
+  default_branch: string | null;
+};
+
+export const createProject = (body: ProjectBody): Promise<ProjectDefinition> =>
+  post("/api/projects", body);
+export const updateProject = (id: string, body: ProjectBody): Promise<void> =>
+  put(`/api/projects/${enc(id)}`, body);
+
+export const probeRepository = (repoUrl: string): Promise<RepositoryProbe> =>
+  post("/api/projects/probe", { repo_url: repoUrl });
+export const cloneProject = (id: string): Promise<CloneResult> =>
+  post(`/api/projects/${enc(id)}/clone`, {});
+export const getForgeBinding = (id: string): Promise<ForgeBinding | null> =>
+  get(`/api/projects/${enc(id)}/forge`);
+export const setForgeBinding = (
   id: string,
-  body: { name: string; repo_url?: string | null },
-): Promise<void> => put(`/api/projects/${enc(id)}`, body);
+  body: { repository: string; token: string },
+): Promise<ForgeBinding> => put(`/api/projects/${enc(id)}/forge`, body);
+export const deleteForgeBinding = (id: string): Promise<void> =>
+  del(`/api/projects/${enc(id)}/forge`);
 export const deleteProject = (id: string): Promise<void> =>
   del(`/api/projects/${enc(id)}`);
 

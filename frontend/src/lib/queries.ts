@@ -85,6 +85,11 @@ import {
   type EditBody,
   type IntentProposalBody,
   type SSEEvent,
+  probeRepository,
+  cloneProject,
+  getForgeBinding,
+  setForgeBinding,
+  type ProjectBody,
 } from "./api";
 import { toast, errorDetail } from "./toast";
 import { usePlannerStore } from "../store/plannerStore";
@@ -634,9 +639,28 @@ export const useSetDefaultAgent = () =>
   );
 
 // Projects
+export const useProbeRepository = () =>
+  useMutation({ mutationFn: (repoUrl: string) => probeRepository(repoUrl) });
+export const useCloneProject = () =>
+  useRefMutation((id: string) => cloneProject(id), "Clone repository", [keys.projects]);
+export const useForgeBinding = (projectId: string | null) =>
+  useQuery({
+    queryKey: ["forge", projectId ?? ""],
+    queryFn: () => getForgeBinding(projectId as string),
+    enabled: projectId !== null,
+  });
+export const useSetForgeBinding = () =>
+  useRefMutation(
+    ({ id, body }: { id: string; body: { repository: string; token: string } }) =>
+      setForgeBinding(id, body),
+    "Bind GitHub",
+    [keys.projects],
+    "GitHub connected",
+  );
+
 export const useCreateProject = () =>
   useRefMutation(
-    (body: { name: string; repo_url?: string | null }) => createProject(body),
+    (body: ProjectBody) => createProject(body),
     "Create project",
     [keys.projects],
     "Project created",
@@ -648,7 +672,7 @@ export const useUpdateProject = () =>
       body,
     }: {
       id: string;
-      body: { name: string; repo_url?: string | null };
+      body: ProjectBody;
     }) => updateProject(id, body),
     "Update project",
     [keys.projects],

@@ -39,6 +39,8 @@ from agent_orchestrator.app.use_cases.apply_edit import (
 )
 from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
 from agent_orchestrator.app.use_cases.create_plan import open_project_plan
+from agent_orchestrator.app.use_cases.publish_cycle import publish_cycle
+from agent_orchestrator.infra.git.repository_binding import default_branch_of
 from agent_orchestrator.app.use_cases.bind_project import bind_legacy_project
 from agent_orchestrator.app.use_cases.delete_plan import delete_plan
 from agent_orchestrator.app.use_cases.cyclic_planning import (
@@ -47,7 +49,6 @@ from agent_orchestrator.app.use_cases.cyclic_planning import (
     cancel_cycle_draft,
     cancel_intent,
     propose_intent,
-    record_output_disposition,
     revise_cycle_draft,
     revise_intent,
     submit_cycle_draft as submit_cycle_draft_use_case,
@@ -1197,14 +1198,26 @@ def publish_cycle_route(
     body: PublicationRequest,
     container: AppContainer = Depends(get_container),
 ) -> None:
-    record_output_disposition(
-        plan_id,
-        body.gate_id,
-        body.subject_revision,
-        body.disposition,
-        body.output_reference,
-        container.new_unit_of_work(),
-        container.clock,
+    with container.new_unit_of_work() as uow:
+        plan = uow.plans.get(plan_id)
+    # A cyclic plan is always project-bound; a legacy unbound row quarantines as
+    # BLOCKED long before it can reach a publication gate, so this is the
+    # narrowing mypy needs rather than a case to handle.
+    project_id = plan.project_id
+    assert project_id is not None
+    project = container.project_repo.get(project_id)
+    repo_path = container.workspace_resolver.repository_path_for(project)
+    publish_cycle(
+        plan_id=plan_id,
+        gate_id=body.gate_id,
+        revision=body.subject_revision,
+        disposition=body.disposition,
+        output_reference=body.output_reference,
+        uow_factory=container.new_unit_of_work,
+        clock=container.clock,
+        forge=container.forge_for(project_id),
+        repo_path=repo_path,
+        default_branch=default_branch_of(repo_path) or "main",
     )
 
 

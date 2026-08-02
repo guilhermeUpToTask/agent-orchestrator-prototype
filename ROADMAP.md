@@ -1247,7 +1247,57 @@ that nobody can tell from the evidence document.
   push and open a PR* does. Declining the token must downgrade the delivery
   method, never silently substitute a scratch repository for the project the
   operator named.
+- **Authenticated forge publication — promoted out of the deferred list
+  2026-08-02**, and delivered with the wizard as **P8.1**. The constraint above
+  presumes a delivery method a token *changes*, and none existed: `open_pr`
+  recorded that a human opened a pull request, with `output_reference` as free
+  text they typed. Shipping the token step before its consumer would collect a
+  credential nothing reads, which is the workaround that constraint exists to
+  forbid. Scope is bounded hard: a `ForgePort` beside `sandbox_port.py`, a
+  GitHub-only adapter, the token per project in the existing secret store, the
+  push and the API call **outside** the transaction that records the
+  disposition — and the orchestrator opens a pull request but never merges one,
+  and pushes `cycle/<id>` but never the default branch. It needs no domain
+  un-freeze: the forge binding lives in the project-scoped config store.
+  Design: `docs/superpowers/specs/2026-08-02-phase-8-1-repository-choice-and-forge-publication-design.md`.
 - **The per-goal review surface**, as specified below.
+
+### Delivery status
+
+- **P8.1 — repository choice and real pull-request publication:** ✅ delivered
+  on `phase-8-demonstrability`.
+  - Design: `docs/superpowers/specs/2026-08-02-phase-8-1-repository-choice-and-forge-publication-design.md`
+  - Plan: `docs/superpowers/plans/2026-08-02-phase-8-1-repository-choice-and-forge-publication.md`
+  - **A defect in `main` fell out on the way past:** `_materialize_remote` ran
+    `git clone` under `capture_output` with no `GIT_TERMINAL_PROMPT=0`. A
+    private `https://` remote makes git prompt for a username with no tty to
+    answer it, so the worker blocked indefinitely *while holding a goal lease* —
+    no error, no timeout, indistinguishable from slow work. Every git
+    subprocess that can reach a remote now runs non-interactively.
+  - A project **names** its binding (`local | remote | scratch`) and the API
+    refuses a name that disagrees with the URL, which is what stops "remote"
+    with a blank URL from silently becoming a scratch repository. Optional, so
+    every fixture and `run-cycle.sh` keep working.
+  - `POST /api/projects/probe` checks a remote before it is bound and
+    classifies the failure (`needs_credentials | not_found | unreachable |
+    timeout`); `POST …/clone` materializes it on request. The probe is a
+    separate endpoint rather than part of `create`, because
+    `repository_binding.py` records a deliberate decision against a network
+    check at write time — that reasoning holds for validation and not for setup
+    with a human watching, so the two were separated rather than the decision
+    reversed.
+  - **`open_pr` really opens one** (decision 61): `ForgePort` in `app/`,
+    `GitHubForge`, `NoForge` as the permanent fallback, the token per project in
+    the secret store and verified at save time. The push and the API call run
+    outside any transaction and the disposition is recorded only after the pull
+    request exists, so a forge failure leaves the gate open with nothing
+    written. No domain un-freeze: the binding lives in the project-scoped config
+    store.
+  - **Validated:** full backend suite, `ruff` and `mypy` clean, 46 frontend
+    tests, production build green.
+  - **Not built, deliberately:** the opt-in real-GitHub smoke test needs a live
+    repository and a human's token, so it is a manual check rather than a suite
+    someone could tick off.
 
 ### Exit criteria
 
@@ -1309,7 +1359,10 @@ question is written to invite exactly that.
 ## Deferred — reconsider only with run or user evidence ⏸
 
 - stronger sandboxing and pointer-free workspaces;
-- authenticated forge publication and automatic GitHub PR creation;
+- ~~authenticated forge publication and automatic GitHub PR creation~~ —
+  **promoted to Phase 8 (P8.1) on 2026-08-02**; see that phase. Automatic
+  *merging* stays rejected: the orchestrator opens a pull request and a human
+  merges it;
 - persisted project-wide `ProjectSpec`. **Cycle-wide verification moved to
   Phase 8** as the cycle acceptance run; the design stays here because the rest
   of the entry is still deferred. Designed

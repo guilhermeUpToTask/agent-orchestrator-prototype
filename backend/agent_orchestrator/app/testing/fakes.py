@@ -6,6 +6,10 @@ mirror what the real SQLite adapter must do."""
 
 from __future__ import annotations
 
+from agent_orchestrator.app.forge_port import ForgeRequestFailedError, PullRequestRef
+
+from pathlib import Path
+
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
@@ -561,3 +565,30 @@ __all__ = [
     "DummyAgentRunner",
     "UnitOfWork",
 ]
+
+
+class FakeForge:
+    """In-memory ForgePort.
+
+    `fail_on` scripts a failure at either step, which is how a test proves the
+    publication gate stays open and nothing is recorded when the forge refuses.
+    """
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        self.pushes: list[tuple[Path, str]] = []
+        self.pull_requests: list[dict[str, str]] = []
+        self._fail_on = fail_on
+
+    def push_branch(self, repo: Path, branch: str) -> None:
+        if self._fail_on == "push":
+            raise ForgeRequestFailedError("scripted push failure")
+        self.pushes.append((repo, branch))
+
+    def open_pull_request(
+        self, *, head: str, base: str, title: str, body: str
+    ) -> PullRequestRef:
+        if self._fail_on == "pull_request":
+            raise ForgeRequestFailedError("scripted pull-request failure")
+        self.pull_requests.append({"head": head, "base": base, "title": title, "body": body})
+        number = len(self.pull_requests)
+        return PullRequestRef(url=f"https://github.test/o/r/pull/{number}", number=number)

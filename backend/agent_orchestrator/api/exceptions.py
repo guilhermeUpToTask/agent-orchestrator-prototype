@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from agent_orchestrator.api.middleware.request_logging import get_request_id
 from agent_orchestrator.api.schemas.common import ErrorEnvelope
+from agent_orchestrator.app.forge_port import ForgeError
 from agent_orchestrator.domain.errors.base import DomainError
 from agent_orchestrator.infra.errors import InfrastructureError, UnauthorizedError
 
@@ -64,10 +65,17 @@ _STATUS_BY_CODE: dict[str, int] = {
     "REASONER_CONFIG_INVALID": 422,
     "AGENT_RUNNER_CONFIG_INVALID": 422,
     "PROJECT_BINDING_INVALID": 422,
+    # Forge (P8.1): a configuration or credential problem the operator can fix.
+    "FORGE_NOT_CONFIGURED": 422,
+    "FORGE_AUTH_FAILED": 422,
+    "FORGE_REPO_NOT_FOUND": 422,
     # 502 — upstream provider failed (rate limit / out of credits / upstream error).
     # The chat path (DISCOVERY/REPLANNING) surfaces reasoner failures through this;
     # worker-phase reasoner failures surface via the ReasonerFailed SSE event.
     "REASONER_FAILED": 502,
+    # Forge (P8.1): the remote was reached and refused, or could not be reached.
+    "FORGE_PUSH_FAILED": 502,
+    "FORGE_REQUEST_FAILED": 502,
 }
 _DEFAULT_DOMAIN_STATUS = 400
 _DEFAULT_INFRA_STATUS = 503
@@ -104,6 +112,24 @@ def register_exception_handlers(app: FastAPI) -> None:
         status = _STATUS_BY_CODE.get(exc.code, _DEFAULT_INFRA_STATUS)
         log.warning(
             "request_infra_error",
+            code=exc.code,
+            status_code=status,
+            path=request.url.path,
+        )
+        return JSONResponse(status_code=status, content=_envelope(exc.code, exc.message))
+
+    @app.exception_handler(ForgeError)
+    async def forge_error_handler(request: Request, exc: ForgeError) -> JSONResponse:
+        """A forge failure is a coded error like any other, not a 500.
+
+        ForgeError subclasses BaseAppException rather than DomainError (the
+        frozen domain never hears about forges) or InfrastructureError (it
+        lives in app/, beside the port), so it needs its own registration to
+        reach the one status table instead of the generic handler.
+        """
+        status = _STATUS_BY_CODE.get(exc.code, _DEFAULT_INFRA_STATUS)
+        log.warning(
+            "request_forge_error",
             code=exc.code,
             status_code=status,
             path=request.url.path,

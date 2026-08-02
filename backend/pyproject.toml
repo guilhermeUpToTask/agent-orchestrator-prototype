@@ -27,6 +27,9 @@ dependencies = [
     "click>=8.1",
     "structlog>=24.0",
     "openai>=2.30.0",
+    # Explicit: the GitHub forge adapter uses it directly. It reached runtime
+    # only transitively through openai before, which is not a contract.
+    "httpx>=0.28",
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
     "sqlalchemy>=2.0",

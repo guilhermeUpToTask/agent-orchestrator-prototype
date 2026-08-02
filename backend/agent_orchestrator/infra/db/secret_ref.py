@@ -26,3 +26,13 @@ class SecretRef(BaseModel):
     def for_provider(cls, provider_id: str) -> "SecretRef":
         """Canonical ref for a provider's API key."""
         return cls(uri=f"secret://provider/{provider_id}")
+
+    @classmethod
+    def for_forge(cls, project_id: str) -> "SecretRef":
+        """Canonical ref for one project's forge token.
+
+        Per project rather than global: two projects can live on different
+        accounts, and one credential spanning every project is the wrong blast
+        radius for a tool that runs unsandboxed agents on your own machine.
+        """
+        return cls(uri=f"secret://forge/{project_id}")
