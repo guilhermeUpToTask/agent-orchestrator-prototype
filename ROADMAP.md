@@ -1014,8 +1014,20 @@ justifies.
   `http://localhost:8000` regardless of the port `serve` was given, so the
   console loaded and nothing in it worked. Now same-origin.
 
-**Branch state:** `phase-6-public-preview`, worktree clean, **no PR opened** —
-that call is the maintainer's. `main` is at the Phase 5 merge (`8e675f5`).
+**Merged 2026-08-02** as [#68](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/pull/68),
+squashed to `main` at `0781d62`; `phase-6-public-preview` is deleted.
+
+Opening the PR was itself a finding: **three CI jobs were red on the branch
+before the phase's own changes were reviewed**, all of them fallout from the
+packaging move that nothing had exercised. `uv sync --locked` refused a lockfile
+still carrying redis and fakeredis, which nothing declares or imports; the codex
+plugin's migration-chain check read `backend/alembic/versions`, which stopped
+existing when the migrations moved inside the package, and reported the empty
+directory as `Heads: []` — the same output a genuinely broken chain produces, so
+a moved directory hid behind a chain-integrity error; and the generated API
+types drifted because a schema docstring *is* an OpenAPI `description`, so the
+`src/…` → `agent_orchestrator/…` rename changed the published contract. All
+three fixed on the branch. The browser smoke passed on its first CI run.
 
 - ✅ **The distribution package is `agent_orchestrator`.** Renamed from a
   top-level `src`, which would have collided in site-packages with any other
@@ -1100,10 +1112,17 @@ that call is the maintainer's. `main` is at the Phase 5 merge (`8e675f5`).
   `backend/scripts/build_frontend.sh` and git-ignored. A source checkout without
   it starts fine and serves no UI, which is intended.
 
-## Phase 7 — small peer preview ⬜
+## Phase 7 — small peer preview 🚧 (current)
 
 **External capability:** a narrow group can use the orchestrator on disposable
 or personal repos and provide comparable evidence.
+
+**Ready to start 2026-08-02**, with Phase 6 merged: `pipx install` →
+`orchestrate serve` → `first-cycle-v1` is proven from the built artifact, the
+guides are the only thing an invitee needs, and `capture-run.sh` /
+`verify_run.py` are the comparable-evidence format. What is NOT prepared yet:
+the invitee list, the feedback template, and the support/issue path — those are
+this phase's first three deliverables and nothing about them exists today.
 
 - Invite approximately 10–50 technical users familiar with local CLIs and Git.
 - Start with canonical Tier 0/Tier 1 before treating larger projects as evidence.
