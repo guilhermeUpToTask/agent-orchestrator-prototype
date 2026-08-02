@@ -1251,10 +1251,44 @@ item in the phase that cannot be validated where the work happens:
      always exists, so the skip guard never fired and a forgetful operator got
      eleven errors instead of a clear skip.
    - **Remaining: run it.** Tier 1, real models, captured — and whatever it
-     finds gets published.
+     finds gets published. **Parked 2026-08-02 on a missing
+     `ORCHESTRATOR_MASTER_KEY`** (see *Two blockers parked* below); everything
+     up to that point is staged and verified.
 5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that
    can run containers. The port it plugs into already exists and is exercised,
    so this is an adapter and its tests, not a redesign.
+
+### Two blockers parked, both environmental ⏸
+
+Neither is a design problem and neither blocks the other phases. Both need the
+maintainer's own machine, so they are recorded here rather than worked around.
+
+**1. The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`.** Everything else is
+staged and verified against a live server: `orchestrate serve` up on :8000 with
+the worker live in `real` mode, `pi` 0.73.1 on PATH, the reasoner and all six
+agents resolving to free OpenRouter models, and project `e0e54bc8` bound to
+`~/.orchestrator/demos/static-site-v1/repo` (local, git, clean, `main`, seeded
+and tagged `static-site-v1-seed`). `GET /api/readiness` returns exactly one
+`fail`:
+
+```text
+fail  secrets: ORCHESTRATOR_MASTER_KEY is not set, and reasoner and
+      agent runner must decrypt a provider key
+```
+
+The OpenRouter key is in the database at `secret://provider/openrouter`, and
+its data key is wrapped with the master key. **A new master key must NOT be
+generated to "fix" this**: it does not reset the store, it makes the existing
+secret permanently undecryptable, and the only recovery is re-entering the
+OpenRouter API key. Resume by exporting the existing key and posting
+`demos/static-site-v1/brief.txt` to project `e0e54bc8`.
+
+Worth noting as evidence rather than annoyance: readiness named the single
+cause and the two consumers that need it, instead of a run dying twenty minutes
+in on a decrypt error. That is Phase 5's first-mile work doing its job.
+
+**2. P8.5 needs a container-capable host** — see *Containerization is
+unavailable* above for the six blockers and the one that proved final.
 
 ### Containerization is unavailable in the development environment ⏸
 
