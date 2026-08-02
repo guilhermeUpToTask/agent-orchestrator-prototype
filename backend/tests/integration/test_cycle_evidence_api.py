@@ -350,6 +350,108 @@ def test_cycle_straddling_the_migration_reports_only_the_unmatched_refs(
         assert f"git:{sha}" not in unattributed, "an attributed ref is not repeated"
 
 
+# ---------------------------------------------------------------------------
+# Delivery: where the work actually is. `ProjectDefinition.repo_url` decides
+# three topologies and they need three different answers -- the UI used to give
+# all three the same one ("push refs/heads/cycle/<id> and open a pull request"),
+# which is advice a REMOTE-bound operator cannot follow, because the branch is
+# in a clone the orchestrator owns and they have never seen.
+# ---------------------------------------------------------------------------
+
+
+def _rebind(walk, repo_url: str | None) -> None:
+    """Repoint the completed walk's project at another topology.
+
+    The delivery block is derived per request from the project row and the
+    cycle id -- it does not depend on how the cycle executed -- so rebinding
+    afterwards exercises the real endpoint for all three topologies without
+    paying for three full cycle drives.
+    """
+    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+
+    project = walk.container.project_repo.get("project-1")
+    walk.container.project_repo.update(
+        ProjectDefinition(id=project.id, name=project.name, repo_url=repo_url)
+    )
+
+
+def test_local_binding_reports_the_operators_own_checkout(evidence_walk) -> None:
+    body = evidence_walk.client.get(
+        f"/api/plans/{evidence_walk.plan_id}"
+        f"/cycles/{evidence_walk.cycle_id}/evidence"
+    ).json()
+
+    delivery = body["delivery"]
+    assert delivery["binding"] == "local"
+    assert delivery["repository_path"] == str(evidence_walk.repo)
+    assert delivery["in_operator_checkout"] is True
+    assert delivery["cycle_branch"] == f"cycle/{evidence_walk.cycle_id}"
+    # `trunk`, not `main`: proves the branch is probed on disk rather than
+    # assumed, so the diff command the operator is handed actually resolves.
+    assert delivery["default_branch"] == "trunk"
+
+
+def test_remote_binding_does_not_point_at_a_checkout_that_lacks_the_branch(
+    evidence_walk,
+) -> None:
+    """The regression this whole read model exists for.
+
+    A remote-bound project's cycle branch lives ONLY inside
+    `$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`. Telling that
+    operator to push it from their own checkout is a dead end, so the endpoint
+    must name the orchestrator's clone and say plainly that it is not theirs.
+    """
+    _rebind(evidence_walk, "https://example.test/acme/widgets.git")
+
+    body = evidence_walk.client.get(
+        f"/api/plans/{evidence_walk.plan_id}"
+        f"/cycles/{evidence_walk.cycle_id}/evidence"
+    ).json()
+
+    delivery = body["delivery"]
+    assert delivery["binding"] == "remote"
+    assert delivery["in_operator_checkout"] is False
+    assert delivery["repository_path"] != str(evidence_walk.repo)
+    assert "/repos/" in delivery["repository_path"], "the orchestrator-owned clone"
+    assert delivery["cycle_branch"] == f"cycle/{evidence_walk.cycle_id}"
+
+
+def test_scratch_binding_is_named_rather_than_dressed_up_as_a_repository(
+    evidence_walk,
+) -> None:
+    _rebind(evidence_walk, None)
+
+    delivery = evidence_walk.client.get(
+        f"/api/plans/{evidence_walk.plan_id}"
+        f"/cycles/{evidence_walk.cycle_id}/evidence"
+    ).json()["delivery"]
+
+    assert delivery["binding"] == "scratch"
+    assert delivery["in_operator_checkout"] is False
+
+
+def test_a_repository_deleted_after_the_run_still_reports_where_it_was(
+    evidence_walk,
+) -> None:
+    """`validate_repo_url` raises for a local path that has since vanished. A
+    delivery block that 500s at that point is worse than one that says where
+    the work was written -- the operator needs the path precisely because
+    something is wrong with it."""
+    import shutil
+
+    shutil.rmtree(evidence_walk.repo)
+
+    response = evidence_walk.client.get(
+        f"/api/plans/{evidence_walk.plan_id}"
+        f"/cycles/{evidence_walk.cycle_id}/evidence"
+    )
+
+    assert response.status_code == 200
+    delivery = response.json()["delivery"]
+    assert delivery["repository_path"] == str(evidence_walk.repo)
+    assert delivery["default_branch"] is None, "nothing to probe once it is gone"
+
+
 def test_superseded_cycle_still_serves_its_evidence(replanned_client) -> None:
     """Replan is source-preserving: the source cycle stays visible and
     immutable. Its evidence must remain addressable after a new cycle

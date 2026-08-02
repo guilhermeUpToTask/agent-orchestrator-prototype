@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCycleEvidence } from '../lib/queries';
-import type { Cycle } from '../types/ui';
+import type { Cycle, CycleEvidenceResponse } from '../types/ui';
 import { CountChip } from './ui';
 import styles from '../views/Overview.module.css';
 
@@ -90,15 +90,69 @@ export function CycleEvidenceSummary({ planId, cycle }: { planId: string; cycle:
             {disposition.output_reference ? ` · ${disposition.output_reference}` : ''}
           </span>
         ) : (
-          <span className={styles.docText}>
-            No output disposition recorded. To publish a reviewable result, push{' '}
-            <code>refs/heads/cycle/{cycle.id}</code> and open a pull request into the repository's
-            default branch.
-          </span>
+          <span className={styles.docText}>No output disposition recorded.</span>
         )}
+        <CycleDelivery delivery={evidence.data.delivery} />
       </div>
     </div>
   );
+}
+
+/**
+ * Where the work is, and how to reach it from here.
+ *
+ * `repo_url` decides three topologies with three different answers, and the
+ * operator only ever sees one of them. A LOCAL binding already delivered the
+ * branch into their own checkout; a REMOTE binding put it in a clone they have
+ * never seen; a SCRATCH binding produced a demo repository. The single generic
+ * "push it and open a pull request" this replaced was correct for the first,
+ * impossible for the second, and pointless for the third.
+ */
+function CycleDelivery({ delivery }: { delivery: CycleEvidenceResponse['delivery'] }) {
+  if (!delivery) return null;
+
+  const { repository_path: path, cycle_branch: branch, default_branch: base } = delivery;
+  const commands: string[] =
+    delivery.binding === 'scratch'
+      ? []
+      : delivery.in_operator_checkout
+        ? [
+            ...(base ? [`git -C ${path} diff ${base}..${branch}`] : []),
+            `git -C ${path} switch ${branch}`,
+          ]
+        : [
+            `git remote add orchestrator ${path}`,
+            `git fetch orchestrator ${branch}`,
+            ...(base ? [`git -C ${path} diff ${base}..${branch}`] : []),
+          ];
+
+  return (
+    <>
+      <span className={styles.docText}>{describe(delivery)}</span>
+      {commands.map((command) => (
+        <div className={styles.evidenceItem} key={command}>
+          <code>{command}</code>
+        </div>
+      ))}
+      {!base && delivery.binding !== 'scratch' && (
+        <span className={styles.rowMeta}>
+          The repository's default branch could not be read at {path}, so no diff command is
+          shown — the branch itself is still there.
+        </span>
+      )}
+    </>
+  );
+}
+
+function describe(delivery: NonNullable<CycleEvidenceResponse['delivery']>): string {
+  const { repository_path: path, cycle_branch: branch } = delivery;
+  if (delivery.binding === 'scratch') {
+    return `This project has no repository bound, so the work is in a scratch repository at ${path}. It demonstrates the flow rather than producing code for a project of yours.`;
+  }
+  if (delivery.in_operator_checkout) {
+    return `The work is on ${branch} in your own repository at ${path} — it is already delivered, and needs reviewing rather than transporting.`;
+  }
+  return `This project is bound to a remote URL, so the work is on ${branch} inside the clone the orchestrator owns at ${path} — not in your checkout. Fetch it into your own repository, or review it in place.`;
 }
 
 function humanize(value: string): string {

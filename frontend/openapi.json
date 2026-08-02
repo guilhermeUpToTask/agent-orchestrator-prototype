@@ -6048,6 +6048,16 @@
               }
             ]
           },
+          "delivery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "unattributed_evidence_refs": {
             "items": {
               "type": "string"
@@ -6063,6 +6073,7 @@
           "cycle_status",
           "goals",
           "disposition",
+          "delivery",
           "unattributed_evidence_refs"
         ],
         "title": "CycleEvidenceResponse"
@@ -6096,6 +6107,47 @@
           "agent_id"
         ],
         "title": "DefaultAgentResponse"
+      },
+      "DeliveryResponse": {
+        "properties": {
+          "binding": {
+            "type": "string",
+            "title": "Binding"
+          },
+          "repository_path": {
+            "type": "string",
+            "title": "Repository Path"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "cycle_branch": {
+            "type": "string",
+            "title": "Cycle Branch"
+          },
+          "in_operator_checkout": {
+            "type": "boolean",
+            "title": "In Operator Checkout"
+          }
+        },
+        "type": "object",
+        "required": [
+          "binding",
+          "repository_path",
+          "default_branch",
+          "cycle_branch",
+          "in_operator_checkout"
+        ],
+        "title": "DeliveryResponse",
+        "description": "Where this cycle's work physically is, so the hand-off can be true.\n\n`ProjectDefinition.repo_url` decides three different topologies and they\nneed three different answers. A LOCAL binding put `cycle/<id>` in the\noperator's own checkout \u2014 it is already delivered and only needs finding. A\nREMOTE binding put it in a clone the orchestrator owns, under\n`$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the\noperator has ever looked. A SCRATCH binding produced a demo repository whose\ncontents nobody wants.\n\nServing these as facts rather than as a rendered instruction follows the\nsame rule as `status`/`legal_actions`: the API states what is true, and the\nfrontend and the API-only fixtures each render the commands they need."
       },
       "DispositionResponse": {
         "properties": {
