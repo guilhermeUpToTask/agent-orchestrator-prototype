@@ -36,12 +36,14 @@ check "cgroup2 mounts in a user namespace" \
     bash -c 'mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg'
 
 # 4. podman WITHOUT --cgroups=disabled, with a private PID namespace.
+#    Assert the capability itself (the container's own process is PID 1),
+#    not just that the flag was accepted.
 check "podman runs with cgroups and a private PID namespace" \
-  podman run --rm --pid=private docker.io/library/alpine:3.20 /bin/true
+  podman run --rm --pid=private docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
 
-# 5. docker with a private PID namespace.
+# 5. docker with a private PID namespace (the default — no runtime-specific flag).
 check "docker runs with a private PID namespace" \
-  docker run --rm --pid=private docker.io/library/alpine:3.20 /bin/true
+  docker run --rm docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
 
 # 6. Rootless podman with full isolation.
 check "rootless podman runs with full isolation" \
