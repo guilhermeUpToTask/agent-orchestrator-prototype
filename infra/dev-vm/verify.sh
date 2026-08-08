@@ -37,17 +37,18 @@ check "cgroup2 mounts in a user namespace" \
 
 # 4. podman WITHOUT --cgroups=disabled, with a private PID namespace.
 #    Assert the capability itself (the container's own process is PID 1),
-#    not just that the flag was accepted.
+#    not just that the flag was accepted. --network=none skips tap-device
+#    setup so the check fails on the capability under test, not on networking.
 check "podman runs with cgroups and a private PID namespace" \
-  podman run --rm --pid=private docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
+  podman run --rm --pid=private --network=none docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
 
 # 5. docker with a private PID namespace (the default — no runtime-specific flag).
 check "docker runs with a private PID namespace" \
-  docker run --rm docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
+  docker run --rm --network=none docker.io/library/alpine:3.20 sh -c '[ "$$" -eq 1 ]'
 
 # 6. Rootless podman with full isolation.
 check "rootless podman runs with full isolation" \
-  podman --runtime crun run --rm --userns=auto docker.io/library/alpine:3.20 /bin/true
+  podman --runtime crun run --rm --userns=auto --network=none docker.io/library/alpine:3.20 /bin/true
 
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]
