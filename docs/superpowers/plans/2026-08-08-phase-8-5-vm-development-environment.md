@@ -86,7 +86,7 @@ write_files:
 
 runcmd:
   - usermod -aG docker dev
-  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 dev
+  - grep -q '^dev:' /etc/subuid || usermod --add-subuids 100000-165535 --add-subgids 100000-165535 dev
   - systemctl enable --now docker
   - loginctl enable-linger dev
   - curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
@@ -141,7 +141,7 @@ VM_NAME="${VM_NAME:-aipom-dev}"
 VM_VCPUS="${VM_VCPUS:-4}"
 VM_MEMORY_MB="${VM_MEMORY_MB:-8192}"
 VM_DISK_GB="${VM_DISK_GB:-40}"
-IMAGE_DIR="${IMAGE_DIR:-$HOME/.local/share/libvirt/images}"
+IMAGE_DIR="${IMAGE_DIR:-/var/lib/libvirt/images}"
 BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 BASE_IMG="$IMAGE_DIR/noble-server-cloudimg-amd64.img"
 VM_DISK="$IMAGE_DIR/$VM_NAME.qcow2"
@@ -159,11 +159,16 @@ if [[ ! -f "$SSH_KEY" ]]; then
   exit 1
 fi
 
+# qemu:///system runs QEMU as libvirt-qemu:kvm, which cannot traverse a
+# user's $HOME (0700 on Ubuntu 24.04). /var/lib/libvirt/images is the
+# libvirt-managed pool: root-owned and world-traversable, and libvirtd's
+# dynamic_ownership relabels the disk file to libvirt-qemu:kvm at start.
 # The directory must exist before df can measure it (and before the image
 # lands in it) — create it before the free-space guard reads it.
-mkdir -p "$IMAGE_DIR"
+sudo mkdir -p "$IMAGE_DIR"
 
 # Disk is the binding constraint on this host: refuse rather than fill it.
+# The directory is root-owned but world-traversable, so df needs no sudo.
 AVAIL_GB="$(df -BG --output=avail "$IMAGE_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')" || true
 if [[ -z "$AVAIL_GB" ]]; then
   echo "ERROR: could not determine free space in $IMAGE_DIR (df failed)." >&2
@@ -175,10 +180,15 @@ if [[ "$AVAIL_GB" -lt $((VM_DISK_GB + 5)) ]]; then
   exit 1
 fi
 
-[[ -f "$BASE_IMG" ]] || curl -fL --progress-bar -o "$BASE_IMG" "$BASE_URL"
+# Download to a .part file so an interrupted transfer can never be mistaken
+# for a complete base image on re-run.
+if [[ ! -f "$BASE_IMG" ]]; then
+  sudo curl -fL --progress-bar -o "$BASE_IMG.part" "$BASE_URL"
+  sudo mv "$BASE_IMG.part" "$BASE_IMG"
+fi
 
-cp --reflink=auto "$BASE_IMG" "$VM_DISK"
-qemu-img resize "$VM_DISK" "${VM_DISK_GB}G"
+sudo cp --reflink=auto "$BASE_IMG" "$VM_DISK"
+sudo qemu-img resize "$VM_DISK" "${VM_DISK_GB}G"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -220,14 +230,34 @@ ip:
 	@$(VIRSH) domifaddr $(VM_NAME) | awk '/ipv4/ {split($$4,a,"/"); print a[1]}'
 
 ssh:
-	@ssh -o StrictHostKeyChecking=accept-new dev@$$($(MAKE) -s ip)
+	@state="$$($(VIRSH) domstate $(VM_NAME) 2>/dev/null)"; \
+	if [ "$$state" != "running" ]; then \
+	  echo "ERROR: $(VM_NAME) is not running (state: $${state:-absent}). Run 'make up' first." >&2; \
+	  exit 1; \
+	fi; \
+	vmip="$$($(MAKE) -s ip)"; \
+	if [ -z "$$vmip" ]; then \
+	  echo "ERROR: $(VM_NAME) is running but has no DHCP lease yet. Wait a few seconds and retry." >&2; \
+	  exit 1; \
+	fi; \
+	ssh -o StrictHostKeyChecking=accept-new dev@$$vmip
 
 status:
 	@$(VIRSH) dominfo $(VM_NAME)
 
 verify:
-	@scp -o StrictHostKeyChecking=accept-new verify.sh dev@$$($(MAKE) -s ip):/tmp/verify.sh
-	@ssh dev@$$($(MAKE) -s ip) 'bash /tmp/verify.sh'
+	@state="$$($(VIRSH) domstate $(VM_NAME) 2>/dev/null)"; \
+	if [ "$$state" != "running" ]; then \
+	  echo "ERROR: $(VM_NAME) is not running (state: $${state:-absent}). Run 'make up' first." >&2; \
+	  exit 1; \
+	fi; \
+	vmip="$$($(MAKE) -s ip)"; \
+	if [ -z "$$vmip" ]; then \
+	  echo "ERROR: $(VM_NAME) is running but has no DHCP lease yet. Wait a few seconds and retry." >&2; \
+	  exit 1; \
+	fi; \
+	scp -o StrictHostKeyChecking=accept-new verify.sh dev@$$vmip:/tmp/verify.sh; \
+	ssh dev@$$vmip 'bash /tmp/verify.sh'
 
 destroy:
 	-$(VIRSH) destroy $(VM_NAME)
@@ -270,6 +300,12 @@ git commit -m "feat(dev-vm): idempotent virt-install provisioning and lifecycle 
 #!/usr/bin/env bash
 # Asserts exactly the six capabilities the devcontainer could not provide.
 # This script is the artifact P8.5's environment work is judged by.
+#
+# Before concluding the guest is incapable: Ubuntu 24.04 ships
+# kernel.apparmor_restrict_unprivileged_userns=1. Checks 1, 2, 4 and 7 each
+# create an unprivileged user namespace; if the stock AppArmor profiles don't
+# permit that here, those four checks false-fail exactly like a kernel wall
+# would. Run `sysctl kernel.apparmor_restrict_unprivileged_userns` first.
 set -uo pipefail
 
 PASS=0
@@ -298,8 +334,11 @@ check "fresh procfs in a private PID namespace" \
   unshare --user --map-root-user --pid --fork --mount-proc /bin/true
 
 # 3. cgroup2 is writable, and mounts inside a user namespace.
+#    The cgroup2 root is 755 root:root on every systemd host, so this must
+#    run as root (via the dev user's NOPASSWD sudo) to test the capability
+#    the devcontainer's read-only mount actually denies — not permissions.
 check "cgroup2 is writable" \
-  bash -c 'mkdir -p /sys/fs/cgroup/aipom-probe && rmdir /sys/fs/cgroup/aipom-probe'
+  bash -c 'sudo mkdir -p /sys/fs/cgroup/aipom-probe && sudo rmdir /sys/fs/cgroup/aipom-probe'
 check "cgroup2 mounts in a user namespace" \
   unshare -Urm --propagation private \
     bash -c 'mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg'

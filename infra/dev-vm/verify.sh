@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Asserts exactly the six capabilities the devcontainer could not provide.
 # This script is the artifact P8.5's environment work is judged by.
+#
+# Before concluding the guest is incapable: Ubuntu 24.04 ships
+# kernel.apparmor_restrict_unprivileged_userns=1. Checks 1, 2, 4 and 7 each
+# create an unprivileged user namespace; if the stock AppArmor profiles don't
+# permit that here, those four checks false-fail exactly like a kernel wall
+# would. Run `sysctl kernel.apparmor_restrict_unprivileged_userns` first.
 set -uo pipefail
 
 PASS=0
@@ -29,8 +35,11 @@ check "fresh procfs in a private PID namespace" \
   unshare --user --map-root-user --pid --fork --mount-proc /bin/true
 
 # 3. cgroup2 is writable, and mounts inside a user namespace.
+#    The cgroup2 root is 755 root:root on every systemd host, so this must
+#    run as root (via the dev user's NOPASSWD sudo) to test the capability
+#    the devcontainer's read-only mount actually denies — not permissions.
 check "cgroup2 is writable" \
-  bash -c 'mkdir -p /sys/fs/cgroup/aipom-probe && rmdir /sys/fs/cgroup/aipom-probe'
+  bash -c 'sudo mkdir -p /sys/fs/cgroup/aipom-probe && sudo rmdir /sys/fs/cgroup/aipom-probe'
 check "cgroup2 mounts in a user namespace" \
   unshare -Urm --propagation private \
     bash -c 'mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg'

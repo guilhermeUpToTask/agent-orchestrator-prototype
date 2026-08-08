@@ -32,7 +32,7 @@ write_files:
 
 runcmd:
   - usermod -aG docker dev
-  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 dev
+  - grep -q '^dev:' /etc/subuid || usermod --add-subuids 100000-165535 --add-subgids 100000-165535 dev
   - systemctl enable --now docker
   - loginctl enable-linger dev
   - curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
