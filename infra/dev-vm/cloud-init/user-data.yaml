@@ -1,0 +1,41 @@
+#cloud-config
+users:
+  - name: dev
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - SSH_PUBKEY_PLACEHOLDER
+
+package_update: true
+packages:
+  - git
+  - curl
+  - build-essential
+  - python3
+  - python3-pip
+  - python3-venv
+  - podman
+  - buildah
+  - crun
+  - docker.io
+  - bubblewrap
+  - uidmap
+  - slirp4netns
+  - fuse-overlayfs
+  - jq
+
+write_files:
+  - path: /etc/profile.d/aipom.sh
+    content: |
+      export ORCHESTRATOR_HOME="$HOME/.orchestrator"
+
+runcmd:
+  - usermod -aG docker dev
+  - systemctl enable --now docker
+  - loginctl enable-linger dev
+  - curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g @anthropic-ai/claude-code @openai/codex
+  - su - dev -c 'mkdir -p ~/.orchestrator'
