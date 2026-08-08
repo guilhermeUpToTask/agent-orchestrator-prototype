@@ -25,15 +25,22 @@ if [[ ! -f "$SSH_KEY" ]]; then
   exit 1
 fi
 
+# The directory must exist before df can measure it (and before the image
+# lands in it) — create it before the free-space guard reads it.
+mkdir -p "$IMAGE_DIR"
+
 # Disk is the binding constraint on this host: refuse rather than fill it.
-AVAIL_GB=$(df -BG --output=avail "$IMAGE_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
-if [[ -z "$AVAIL_GB" || "$AVAIL_GB" -lt $((VM_DISK_GB + 5)) ]]; then
+AVAIL_GB="$(df -BG --output=avail "$IMAGE_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')" || true
+if [[ -z "$AVAIL_GB" ]]; then
+  echo "ERROR: could not determine free space in $IMAGE_DIR (df failed)." >&2
+  exit 1
+fi
+if [[ "$AVAIL_GB" -lt $((VM_DISK_GB + 5)) ]]; then
   echo "ERROR: need $((VM_DISK_GB + 5))G free in $IMAGE_DIR, have ${AVAIL_GB}G." >&2
   echo "Prune host images first, or lower VM_DISK_GB." >&2
   exit 1
 fi
 
-mkdir -p "$IMAGE_DIR"
 [[ -f "$BASE_IMG" ]] || curl -fL --progress-bar -o "$BASE_IMG" "$BASE_URL"
 
 cp --reflink=auto "$BASE_IMG" "$VM_DISK"
