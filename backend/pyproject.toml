@@ -89,7 +89,7 @@ testpaths = ["tests"]
 # the unit suite where nobody reads the report, and nothing gates on the
 # number. `make coverage` still prints it.
 #
-# Debugging: `-p no:xdist` (or `-n0`) restores serial execution — `--pdb`
+# Debugging: `-n0` restores serial execution — `--pdb`
 # needs it, and a crash is easier to read without interleaved workers.
 #
 # `--dist loadfile` keeps a file's tests inside ONE worker. That is not a

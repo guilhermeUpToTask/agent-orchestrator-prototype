@@ -137,19 +137,20 @@ git config --global user.name "..." && git config --global user.email "..."
 ```
 
 **Install.** `uv pip install --system -e '.[dev]'` fails here — see fact 1. Use
-either shape:
+the same command CI uses, which populates `backend/.venv` from the lockfile:
 
 ```bash
-# system-wide (what this guest was built with)
-sudo env "PATH=$PATH" uv pip install --system --break-system-packages -e '.[dev]'
-
-# or a project venv — then prefix every python command with `uv run`
-uv venv && uv pip install -e '.[dev]'
+uv sync --all-extras --dev --locked
 ```
 
-This guest has **both**: a system editable install and a `backend/.venv`.
-`uv run <cmd>` resolves through the venv and is the recommended form, because it
-does not depend on which shell you are in or whether `PATH` was inherited.
+Do **not** settle for `sudo env "PATH=$PATH" uv pip install --system
+--break-system-packages -e '.[dev]'` alone. It installs the runtime deps and
+leaves `backend/.venv` without the dev group — no `pytest`, no `ruff`, no
+`mypy` — and that breaks more than the test command (see fact 7).
+
+`uv run <cmd>` then resolves through the venv and is the form to use everywhere,
+because it does not depend on which shell you are in or whether `PATH` was
+inherited.
 
 **Secrets.** A master key already exists in this guest. Do not generate a second
 one — the secret store is envelope-encrypted, and a new key silently orphans
@@ -218,8 +219,8 @@ and its Nemotron model (both UUIDs — see fact 3).
 
 ## Guest facts that contradict the obvious assumption
 
-Six things this environment does that the plan for it did not predict. Each was
-found by running something on real hardware, not by reading.
+Seven things this environment does that the plan for it did not predict. Each
+was found by running something on real hardware, not by reading.
 
 **1. `uv pip install --system` fails.** Ubuntu 24.04 marks `/usr` PEP 668
 externally-managed. What works is
@@ -269,6 +270,18 @@ since make's noise is never empty. Make 4.4 made `-s` imply
 defines `VM_IP` as a plain command and never re-enters make.
 
 ---
+
+**7. A venv without the dev group silently breaks verification, not just
+testing.** The orchestrator's own verification executor shells out to commands
+like `python -m pytest -q tests/…` — arbitrary strings from a task contract, run
+against the repo. With `pytest` missing from `backend/.venv` those commands exit
+non-zero with `No module named pytest`, which is indistinguishable from a
+genuinely red check: the RED stage looks correct and the GREEN stage can never
+arrive, so tasks sit at `pending` forever. Two integration tests caught it here;
+a real Tier 1 run would have burned model budget on a wall no agent could climb.
+`uv sync --all-extras --dev --locked` is the fix and the CI-equivalent state. It
+also pins `ruff` to the locked version — a drifted local ruff reports hundreds of
+findings CI never sees, which is its own way to waste an afternoon.
 
 ## Threat model
 
