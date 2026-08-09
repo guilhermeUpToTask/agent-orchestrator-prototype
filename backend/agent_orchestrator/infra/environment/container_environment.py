@@ -220,7 +220,12 @@ class ContainerEnvironment:
     def _exec(
         self, cmd: list[str], timeout: int, check: bool = True
     ) -> subprocess.CompletedProcess[str]:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # `check=False` to subprocess deliberately: this method's own `check`
+        # raises `_CommandFailed` (carrying the output) rather than letting a
+        # `CalledProcessError` escape with it stripped off.
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        )
         if check and proc.returncode != 0:
             raise _CommandFailed((proc.stdout + proc.stderr).strip())
         return proc
