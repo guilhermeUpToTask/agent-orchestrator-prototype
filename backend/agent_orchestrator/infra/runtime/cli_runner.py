@@ -749,6 +749,15 @@ class ClaudeCodeRunner(CliAgentRunner):
         return {**_base_child_env(), "ANTHROPIC_API_KEY": self._api_key}
 
 
+# A catalog model row must exist (the binding requires one), but with a
+# ChatGPT-subscription login the entitled model set is the PLAN's, not ours to
+# guess — `codex doctor` reports the model as `<default>`. Naming the row one of
+# these means "omit -m and let codex resolve it", which fails loudly at
+# registration time rather than silently on every attempt with a model the
+# account is not entitled to.
+_CODEX_DEFAULT_MODEL_NAMES = frozenset({"default", "codex-default", "auto"})
+
+
 class CodexRunner(CliAgentRunner):
     """Runs `codex exec --json` against a ChatGPT-subscription login.
 
@@ -815,7 +824,7 @@ class CodexRunner(CliAgentRunner):
             "--sandbox",
             "workspace-write",
         ]
-        if self._model:
+        if self._model and self._model.strip().lower() not in _CODEX_DEFAULT_MODEL_NAMES:
             cmd += ["-m", self._model]
         return cmd + self._extra_flags + [prompt]
 

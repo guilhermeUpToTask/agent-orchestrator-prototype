@@ -333,3 +333,16 @@ def test_codex_command_is_non_interactive_and_writes_only_the_workspace():
     assert cmd[cmd.index("-m") + 1] == "gpt-5-codex"
     assert cmd[-1] == "do the task"  # prompt last, never interpolated into a flag
     assert runner._env()["CODEX_HOME"] == "/home/dev/.codex"
+
+
+def test_a_default_named_model_lets_codex_resolve_its_own() -> None:
+    """With a subscription login the entitled model set belongs to the PLAN.
+
+    A catalog row is still required by the binding, so naming it `default`
+    means "omit -m". Passing a guessed model id instead would fail on every
+    attempt with a model the account may not be entitled to.
+    """
+    assert "-m" not in CodexRunner(model="default")._build_cmd("go")
+    assert "-m" not in CodexRunner(model="  Default  ")._build_cmd("go")
+    # An explicitly named model is still honoured.
+    assert CodexRunner(model="gpt-5-codex")._build_cmd("go").count("-m") == 1
