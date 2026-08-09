@@ -69,22 +69,23 @@ def _tiers(role: RunRole, catalog: list[AgentSpec]) -> list[list[AgentSpec]]:
     2. Declares no run role at all — "configured", "reviewer", whatever an
        operator typed. Neutral, so a registry that never adopted these labels
        resolves normally instead of blocking.
-    3. Declares a DIFFERENT run role. Last resort, and it has to exist: the
-       out-of-the-box `seed demo` registry is a single agent labelled
-       `implementer` that holds every capability, and refusing to let it author
-       a test would make the default installation unable to run a TDD task at
-       all. A block is the right answer to "nobody can do this", not to
-       "nobody said they specialise in it".
 
-    The tiers, not a score, are what make this deterministic: tier 1 is
-    considered in full before tier 3 is looked at, so as long as a dedicated
-    agent exists it wins, whatever order the registry was built in.
+    An agent declaring a DIFFERENT run role appears in neither tier and can
+    never be selected. There is deliberately no third, permissive tier: an
+    agent that calls itself a `test_author` is not an implementer of last
+    resort, and binding one anyway does not degrade gracefully — it fails as an
+    agent-quality problem three layers from the cause, which is exactly what
+    made the P8.4 defect cost a full cycle to find. `seed demo` now registers a
+    real pair, so the default installation satisfies both roles honestly rather
+    than by making the resolver permissive.
     """
-    tiers: list[list[AgentSpec]] = [[], [], []]
+    tiers: list[list[AgentSpec]] = [[], []]
     for agent in catalog:
         declared = _DECLARED_ROLES.get(agent.role)
-        index = 0 if declared is role else 1 if declared is None else 2
-        tiers[index].append(agent)
+        if declared is role:
+            tiers[0].append(agent)
+        elif declared is None:
+            tiers[1].append(agent)
     return tiers
 
 

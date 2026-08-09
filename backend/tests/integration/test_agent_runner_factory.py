@@ -264,10 +264,17 @@ def test_seed_binds_the_demo_agent_runtime(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     seeded = container.agent_repo.get("dev-agent")
     assert seeded.runtime_type == "dry-run"
-    assert {capability.id for capability in seeded.capabilities} >= {
-        "test_authoring",
-        "implementation",
-    }
+    seeded_caps = {capability.id for capability in seeded.capabilities}
+    assert "implementation" in seeded_caps
+    # The implementer must NOT hold test_authoring. One agent covering both
+    # roles is what forced role resolution to be permissive, which is how the
+    # implementer stage ended up bound to an agent instructed not to implement
+    # (P8.4). `seed demo` now registers a real pair instead.
+    assert "test_authoring" not in seeded_caps
+    author = container.agent_repo.get("test-agent")
+    assert author.role == "test_author"
+    assert "test_authoring" in {capability.id for capability in author.capabilities}
+    assert "implementation" not in {capability.id for capability in author.capabilities}
 
     result = runner.invoke(cli, ["seed", "demo", "--provider", "openrouter", "--model", "gpt-x"])
     assert result.exit_code == 0, result.output

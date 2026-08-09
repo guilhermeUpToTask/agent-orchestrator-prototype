@@ -21,7 +21,11 @@ from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
 from agent_orchestrator.domain.errors.base import DomainError
-from agent_orchestrator.domain.services.agent_role_resolution import RunRole, resolve_role_agent
+from agent_orchestrator.domain.services.agent_role_resolution import (
+    RunRole,
+    resolve_role_agent,
+    resolve_task_role_agents,
+)
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 
@@ -251,33 +255,43 @@ def test_the_implementer_role_is_never_bound_to_a_test_author() -> None:
     assert resolve_role_agent(RunRole.IMPLEMENTER, task_capabilities, repository).id == "impl"
 
 
-def test_a_contradicting_declared_role_is_the_last_resort_not_the_first_choice() -> None:
-    """A different declared role is a LAST resort, never a competitor.
+def test_a_declared_test_author_is_never_bound_to_the_implementer_role() -> None:
+    """Deterministic, not "preferred": a contradicting role is NEVER selected.
 
-    It cannot be forbidden outright: the out-of-the-box `seed demo` registry is
-    a single agent labelled `implementer` holding every capability, and
-    refusing to let it author a test would make the default installation unable
-    to run a TDD task at all. A block is the right answer to "nobody can do
-    this", not to "nobody said they specialise in it".
-
-    What must never happen is the contradicting agent winning while a suitable
-    one is registered — that is the P8.4 defect, and it is the assertion above.
+    An agent that calls itself a `test_author` is not an implementer of last
+    resort. Binding one anyway does not degrade gracefully — it fails as an
+    agent-quality problem three layers from the cause, which is what made the
+    P8.4 defect cost a full cycle to find. `RoleUnsatisfiableError` opens an
+    `agent_capability` block that names the gap immediately and is already
+    resolvable from the API.
     """
     lone_author = role_agent("tests", "test_author", ["test_authoring", "implementation", "python"])
     repository = InMemoryAgentRepository([lone_author], default_id="tests")
 
-    assert resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], repository).id == (
-        "tests"
-    )
+    with pytest.raises(RoleUnsatisfiableError, match="implementer"):
+        resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], repository)
 
-    # …but the moment a real implementer exists, it wins outright.
-    with_impl = InMemoryAgentRepository(
-        [lone_author, role_agent("impl", "implementer", ["implementation", "python"])],
-        default_id="tests",
+
+def test_seed_demo_registers_a_registry_that_satisfies_both_roles() -> None:
+    """The reason the resolver can afford to be strict.
+
+    A single agent holding every capability is what forced the permissive
+    fallback in the first place. The default installation now registers a real
+    pair, so both roles resolve honestly rather than by weakening the rule.
+    """
+    repository = InMemoryAgentRepository(
+        [
+            role_agent("dev-agent", "implementer", ["backend", "testing", "implementation"]),
+            role_agent("test-agent", "test_author", ["backend", "testing", "test_authoring"]),
+        ],
+        default_id="dev-agent",
     )
-    assert resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], with_impl).id == (
-        "impl"
-    )
+    caps = ["test_authoring", "implementation", "backend"]
+
+    assert resolve_task_role_agents(caps, repository) == {
+        "test_author": "test-agent",
+        "implementer": "dev-agent",
+    }
 
 
 def test_role_resolution_still_blocks_when_no_agent_has_the_capability() -> None:

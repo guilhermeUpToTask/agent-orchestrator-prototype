@@ -112,10 +112,17 @@ def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):
         "testing",
     }
     assert container.agent_repo.default_agent_id() == "dev-agent"
+    # The seeded pair splits the two TDD roles rather than giving one agent
+    # every capability — see the P8.4 note in `seed demo`.
     assert {c.id for c in container.agent_repo.get("dev-agent").capabilities} == {
         "backend",
         "frontend",
         "implementation",
+        "testing",
+    }
+    assert {c.id for c in container.agent_repo.get("test-agent").capabilities} == {
+        "backend",
+        "frontend",
         "test_authoring",
         "testing",
     }

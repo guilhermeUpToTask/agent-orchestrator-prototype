@@ -467,10 +467,36 @@ def seed_demo(
             name="dev-agent",
             role="implementer",
             model_role="smart",
-            instructions="Implement the task exactly as described.",
-            capabilities=capabilities,
+            instructions=(
+                "Implement the task exactly as described. Do NOT edit the "
+                "frozen tests — they are the specification you must satisfy."
+            ),
+            # Deliberately WITHOUT test_authoring: a TDD task's two stages are
+            # two different jobs, and the registry has to be able to say so.
+            # A single agent holding every capability is what forced role
+            # resolution to be permissive, which is how the implementer stage
+            # ended up bound to a test author (P8.4, 2026-08-09).
+            capabilities=[c for c in capabilities if c.id != "test_authoring"],
             default_retry=RetryPolicy(),
             # seeded valid out of the box; the LLM branch below re-binds it
+            runtime_type="dry-run",
+        ),
+    )
+    upsert(
+        container.agent_repo,
+        AgentSpec(
+            id="test-agent",
+            name="test-agent",
+            role="test_author",
+            model_role="smart",
+            instructions=(
+                "You are a TEST AUTHOR working test-first (TDD). Do NOT "
+                "implement the feature. Author executable tests that specify "
+                "the task's acceptance criteria and FAIL against the current "
+                "code, and give the exact command that runs them."
+            ),
+            capabilities=[c for c in capabilities if c.id != "implementation"],
+            default_retry=RetryPolicy(),
             runtime_type="dry-run",
         ),
     )
