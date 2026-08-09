@@ -29,11 +29,14 @@ goal count.
 The obvious showcase is a web application. It is the wrong one right now, and
 for a specific reason worth stating plainly.
 
-The orchestrator can prove *this command exited 0 against this commit*. It
-cannot yet prove *the application works* — that is the cycle acceptance run,
-whose Docker adapter is blocked on an environment that can run containers
-(ROADMAP P8.5). A web app's goals would therefore end as *"tests passed, nobody
-can tell whether it runs"*, showcasing exactly the gap Phase 8 exists to close.
+The orchestrator can prove *this command exited 0 against this commit*. Proving
+*the application works* is the cycle acceptance run, whose container adapter
+**shipped in P8.5 on 2026-08-09** and is no longer blocked. This demo keeps its
+generator shape anyway, and the original reasoning is worth preserving: it was
+chosen while the adapter did not exist, because a web app's goals would have
+ended as *"tests passed, nobody can tell whether it runs"* — exactly the gap
+Phase 8 exists to close. A generator needs no adapter to be checkable by eye,
+which is a better property for a showcase than a dependency on one.
 
 A generator has no such gap. **The demo ends with a file you open in a
 browser.** A human confirms the product works with no container and no trust in
