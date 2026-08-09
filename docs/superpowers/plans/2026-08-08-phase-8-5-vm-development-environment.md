@@ -30,7 +30,7 @@
 
 **Last updated 2026-08-08, on branch `phase-8-5-container-environment`.**
 
-Stage 1 authoring is COMPLETE and reviewed. Tasks 4 onward are unstarted.
+Stage 1 is COMPLETE: the guest is provisioned and the capability gate is GREEN.
 
 | Task | State | Commits |
 |---|---|---|
@@ -38,9 +38,55 @@ Stage 1 authoring is COMPLETE and reviewed. Tasks 4 onward are unstarted.
 | 2 — lifecycle scripts | ✅ complete, 1 fix round | `0187a8a`, `4822404` |
 | 3 — capability proof | ✅ complete, 2 fix rounds | `277c760`, `4d75740`, `04e892f` |
 | final review fix wave | ✅ 6/6 addressed | `fe50dda` |
-| 4 — provision & bootstrap | ⏸ **NEXT** — needs libvirt/KVM on the host | — |
-| 5 — retire devcontainer | ⏸ after the gate | — |
-| 6–11 — the adapter | ⏸ behind the gate | — |
+| 4 — provision & bootstrap | 🚧 guest UP, **gate GREEN**; bootstrap remains | `f38adff`, `7472e29`, `d8dade7` |
+| 5 — retire devcontainer | ⏸ **NEXT** | — |
+| 6–11 — the adapter | ⏸ unblocked | — |
+
+## 🚦 THE GATE IS GREEN — 2026-08-08
+
+`make -C infra/dev-vm verify` on the maintainer's host, guest `aipom-dev`
+(Ubuntu 24.04.4, kernel 6.8.0-136):
+
+```text
+=== aipom-dev capability proof ===
+PASS  bwrap mounts a fresh /proc
+PASS  fresh procfs in a private PID namespace
+PASS  cgroup2 is writable
+PASS  cgroup2 mounts in a user namespace
+PASS  podman runs with cgroups and a private PID namespace
+PASS  docker runs with a private PID namespace
+PASS  rootless podman runs with full isolation
+=== 7 passed, 0 failed ===
+```
+
+**Stage 2 is unblocked.** The roadmap's "Containerization is unavailable"
+blocker is resolved, and Task 5 must say so.
+
+Remaining in Task 4: bootstrap (Step 5), the suite smoke run (Step 6), and
+`infra/dev-vm/README.md` (Step 7).
+
+### Three more defects the real run exposed
+
+The field run found what no amount of inspection had. All three are fixed in
+both the script and this plan.
+
+6. `Makefile` used a recursive `$(MAKE) -s ip`. `make -C` implies `-w`, and on
+   **GNU Make 4.3** (what Ubuntu 24.04 ships) `-s` does not suppress it, so
+   `make[1]: Entering directory…` was captured as the guest IP and `ssh` tried
+   to resolve `make[1]:`. Make 4.4 made `-s` imply `--no-print-directory`,
+   which is why it passed review on 4.4.1. It also silently defeated the
+   empty-IP guard, since make's noise is never empty.
+7. `kernel.apparmor_restrict_unprivileged_userns=1` (an Ubuntu 24.04 default)
+   blocked every `bwrap`/`unshare` check while podman and docker passed via
+   their own AppArmor profiles — a guest that ran PID-isolated containers
+   perfectly while three checks failed like a kernel wall. Now shipped as
+   `/etc/sysctl.d/60-aipom-userns.conf` in cloud-init.
+8. `verify.sh` check 4 used `unshare -Urm`, which leaves the process in the
+   INITIAL cgroup namespace; mounting cgroup2 from a non-initial userns needs
+   `CAP_SYS_ADMIN` over the cgroup namespace's owning userns, so it returned
+   EPERM on **any** host. `-C` fixes it. The most deceptive of the eight: it
+   also failed in the devcontainer, where it read as corroborating the
+   read-only-cgroup wall rather than as a broken instrument.
 
 **Verified in the devcontainer:** both scripts `bash -n` clean, cloud-init YAML
 parses, and `verify.sh` runs RED (`0 passed, 7 failed`, exit 1) — which is the
@@ -48,7 +94,7 @@ required evidence, not a failure. See Task 3.
 
 ### Defects found and fixed during Stage 1
 
-All five originated in this plan's own code blocks, not in transcription. Each
+All eight originated in this plan's own code blocks, not in transcription. Each
 is fixed in both the script and the plan text, so a re-run cannot reintroduce
 them.
 
