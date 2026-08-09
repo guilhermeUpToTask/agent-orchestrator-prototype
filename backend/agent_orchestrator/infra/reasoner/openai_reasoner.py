@@ -1134,6 +1134,14 @@ class OpenAIReasoner:
             tools,
             max_turns=self._converse_max_turns,
             allow_plain_reply=True,
+            # Discovery offers readers against one submission tool, so it can be
+            # read-starved exactly as enrichment was: a free-tier model spent an
+            # entire 20-turn budget reading and never submitted. Reserving the
+            # tail WITHDRAWS the readers, so the model reaches turns where
+            # submitting is the only tool it has. A clarifying question is still
+            # possible on those turns — `allow_plain_reply` handles a no-tool
+            # reply, and the reserve constrains reading, not answering.
+            reserved_submit_turns=RESERVED_SUBMIT_TURNS,
         )
         await self._emit_usage(plan, mode, result)
 
@@ -1276,6 +1284,10 @@ class OpenAIReasoner:
                 tools,
                 max_turns=self._converse_max_turns,
                 allow_plain_reply=False,
+                # Same starvation, same guard: four readers against one
+                # submission tool. Without the reserve, architecture depends on
+                # the model volunteering to stop reading.
+                reserved_submit_turns=RESERVED_SUBMIT_TURNS,
             )
         except ReasonerUnavailable as exc:
             # Same contract as enrichment: the adapter never persists, it attaches

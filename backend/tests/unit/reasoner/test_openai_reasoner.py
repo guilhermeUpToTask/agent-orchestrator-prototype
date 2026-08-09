@@ -1535,3 +1535,92 @@ def test_a_changed_capability_catalog_invalidates_the_replay():
     assert _enrichment_fingerprint(plan, goal, {"backend"}) != _enrichment_fingerprint(
         plan, goal, {"backend", "frontend"}
     )
+
+
+def _cycle_draft_plan():
+    """A plan with an approved intent, ready for architecture."""
+    plan = make_plan()
+    plan.intent_proposal = IntentProposal(
+        id="intent-1",
+        kind=ProposalKind.INITIAL,
+        base_plan_version=0,
+        objective="ship a static site generator",
+        approved_at=T0,
+    )
+    return plan
+
+
+def test_reads_cannot_starve_the_submission_in_intent_discovery():
+    """Found by the P8.4 demo run on a free-tier model: discovery died
+    `exceeded 20 turns without submitting (20 spent on reads, 0 on submissions)`.
+
+    `converse` hands the model four readers against one submission tool and
+    passed no `reserved_submit_turns`, so the readers were never withdrawn and
+    a read-happy model could burn the entire budget without ever being offered
+    a turn where submitting was the only thing it could do. Enrichment already
+    had this guard; discovery did not.
+    """
+    # max_turns 6 with RESERVED_SUBMIT_TURNS 2 leaves a read budget of 4.
+    reads = [tool_turn("read_project_spec", {}, "spec") for _ in range(4)]
+    client = FakeLLMClient(
+        reads
+        + [
+            tool_turn(
+                "submit_intent_proposal",
+                {
+                    "normalized_brief": "build a static site generator",
+                    "objective": "a static site generator",
+                    "constraints": [],
+                    "open_questions": [],
+                },
+                "ok",
+            )
+        ]
+    )
+    reasoner = OpenAIReasoner(client, CAPS, converse_max_turns=6)
+
+    converse(reasoner, make_plan(), [], "build me a static site generator")
+
+    # Readers offered while the read budget lasted, WITHDRAWN once it was spent,
+    # so the submission turn is one where submitting is the only option.
+    assert len(client.calls) == 5
+    assert "read_project_spec" in client.calls[3]["tool_names"]
+    assert client.calls[4]["tool_names"] == ["submit_intent_proposal"]
+
+
+def test_reads_cannot_starve_the_submission_in_cycle_architecture():
+    """The same starvation, same fix, second unprotected call site.
+
+    `architect_cycle` offers four readers against `submit_cycle_draft` and, like
+    discovery, reserved nothing — so the model that never stops reading never
+    reaches a turn where submitting is its only option.
+    """
+    # max_turns 6 with RESERVED_SUBMIT_TURNS 2 leaves a read budget of 4.
+    reads = [tool_turn("read_project_spec", {}, "spec") for _ in range(4)]
+    client = FakeLLMClient(
+        reads
+        + [
+            tool_turn(
+                "submit_cycle_draft",
+                {
+                    "goals": [
+                        {
+                            "key": "delivery",
+                            "name": "Delivery",
+                            "objective": "ship",
+                            "position": 0,
+                            "depends_on": [],
+                        }
+                    ]
+                },
+                "ok",
+            )
+        ]
+    )
+    reasoner = OpenAIReasoner(client, CAPS, converse_max_turns=6)
+
+    asyncio.run(reasoner.architect_cycle(_cycle_draft_plan()))
+
+    assert len(client.calls) == 5
+    assert "read_project_spec" in client.calls[3]["tool_names"]
+    assert client.calls[4]["tool_names"] == ["submit_cycle_draft"]
