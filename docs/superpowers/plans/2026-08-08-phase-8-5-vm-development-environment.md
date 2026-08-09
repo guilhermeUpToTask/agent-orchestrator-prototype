@@ -45,7 +45,9 @@ Stage 1 is COMPLETE: the guest is provisioned and the capability gate is GREEN.
 ## 🚦 THE GATE IS GREEN — 2026-08-08
 
 `make -C infra/dev-vm verify` on the maintainer's host, guest `aipom-dev`
-(Ubuntu 24.04.4, kernel 6.8.0-136):
+(Ubuntu 24.04.4, kernel **6.8.0-137**), re-run **after a kernel upgrade and a
+full power cycle** — so the sysctl is proven to apply at boot rather than only
+in a session where it was set by hand:
 
 ```text
 === aipom-dev capability proof ===
@@ -64,6 +66,20 @@ blocker is resolved, and Task 5 must say so.
 
 Remaining in Task 4: bootstrap (Step 5), the suite smoke run (Step 6), and
 `infra/dev-vm/README.md` (Step 7).
+
+**Two guest facts the README must record**, both discovered during bootstrap and
+neither matching what this plan originally assumed:
+
+- `uv pip install --system` FAILS on Ubuntu 24.04 — `/usr` is PEP 668
+  externally-managed. What works is
+  `sudo env "PATH=$PATH" uv pip install --system --break-system-packages -e '.[dev]'`.
+  Acceptable for a disposable guest; it deviates from `CLAUDE.md` and so must be
+  written down rather than left as folklore.
+- `~/.bashrc` returns early for non-interactive shells, so anything exported
+  there is invisible to `ssh host 'cmd'` and to an agent's tool calls. Secrets
+  belong in `~/.orchestrator-env` (mode 600), exported in the shell that
+  launches the agent. A session that cannot see the master key will otherwise
+  generate a second one and silently orphan the encrypted secret store.
 
 ### Three more defects the real run exposed
 
