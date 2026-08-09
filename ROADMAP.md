@@ -1380,6 +1380,23 @@ gap is scoped into the phase rather than deferred past it.
    too that items 2 and 3 are free-tier-shaped, while 1, 4 and 6 are structural
    and pay off on any provider.
 
+   **Spend a little money before optimising anything.** The free tier is the
+   largest confound and the cheapest to remove: measured consumption puts a full
+   five-goal cycle at roughly **$0.06–$0.12**, so a dollar buys 8–17 complete
+   runs. Budget is not the constraint — reliability is, because a failed run
+   costs an hour of wall-clock and a rerun. Pick the most reliable tool-caller
+   in the cheap tier, not the cheapest model.
+
+   Plan: [`docs/superpowers/plans/2026-08-09-phase-8-6-refinement-and-demo-completion.md`](docs/superpowers/plans/2026-08-09-phase-8-6-refinement-and-demo-completion.md),
+   which also carries the model comparison and the demo-completion checklist.
+
+   **No conclusion about the orchestrator's capability follows from the
+   2026-08-09 runs.** Three defects sat in the path — the implementer role bound
+   to an agent instructed not to implement, planning unable to submit at all,
+   and empty completions misclassified as capacity limits — and the first two
+   were only fixed at the end of that session. The demo has not yet had one
+   clean attempt.
+
 ### Two blockers parked, both environmental — BOTH resolved by 2026-08-09
 
 Neither was a design problem and neither blocked the other phases. Both needed
