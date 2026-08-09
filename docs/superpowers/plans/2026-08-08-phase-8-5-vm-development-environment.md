@@ -26,6 +26,65 @@
 
 ---
 
+## Execution status — resume here
+
+**Last updated 2026-08-08, on branch `phase-8-5-container-environment`.**
+
+Stage 1 authoring is COMPLETE and reviewed. Tasks 4 onward are unstarted.
+
+| Task | State | Commits |
+|---|---|---|
+| 1 — cloud-init | ✅ complete, review clean | `5ea8cb6` |
+| 2 — lifecycle scripts | ✅ complete, 1 fix round | `0187a8a`, `4822404` |
+| 3 — capability proof | ✅ complete, 2 fix rounds | `277c760`, `4d75740`, `04e892f` |
+| final review fix wave | ✅ 6/6 addressed | `fe50dda` |
+| 4 — provision & bootstrap | ⏸ **NEXT** — needs libvirt/KVM on the host | — |
+| 5 — retire devcontainer | ⏸ after the gate | — |
+| 6–11 — the adapter | ⏸ behind the gate | — |
+
+**Verified in the devcontainer:** both scripts `bash -n` clean, cloud-init YAML
+parses, and `verify.sh` runs RED (`0 passed, 7 failed`, exit 1) — which is the
+required evidence, not a failure. See Task 3.
+
+### Defects found and fixed during Stage 1
+
+All five originated in this plan's own code blocks, not in transcription. Each
+is fixed in both the script and the plan text, so a re-run cannot reintroduce
+them.
+
+1. `create-vm.sh` read `$IMAGE_DIR` for the free-space guard **before**
+   `mkdir -p` created it — on a fresh host `df` failed, `|| echo 0` set
+   `AVAIL_GB=0`, and provisioning was impossible.
+2. `verify.sh` check 5 used `docker run --pid=private` — podman-only
+   vocabulary that Docker rejects, so the gate could never open.
+3. Container checks failed on `/dev/net/tun` during tap setup before reaching
+   the PID/cgroup wall they test; fixed with `--network=none`.
+4. `IMAGE_DIR` defaulted under `$HOME` while the domain is created on
+   `qemu:///system` — Ubuntu 24.04's `HOME_MODE 0700` blocks `libvirt-qemu`
+   traversal, failing the domain start **after** a 40 GiB write.
+5. `verify.sh` check 3 ran `mkdir /sys/fs/cgroup/...` as unprivileged `dev`;
+   the cgroup2 root is `755 root:root`, so it always returned `EACCES` — a
+   permanent false red.
+
+### Carried findings — triage at the final whole-branch review
+
+- **Minor, deferred:** `/etc/profile.d/aipom.sh` sets `ORCHESTRATOR_HOME` only
+  for login shells. A non-interactive `ssh host 'cmd'` will not see it. Revisit
+  if a Stage 2 step runs remote commands non-interactively.
+- **Minor, deferred:** `verify.sh`'s AppArmor comment lists checks 1/2/4/7 as
+  userns-creating and omits check 5.
+- **Recommendation, operator's call:** on a host with ~55 GiB free, `VM_DISK_GB`
+  30 leaves a wider margin than the default 40. The qcow2 is sparse, so 40 is a
+  ceiling (~15 GiB realistic use), not a reservation.
+
+### If `verify.sh` is red in the guest
+
+Check `kernel.apparmor_restrict_unprivileged_userns` before suspecting the
+kernel — Ubuntu 24.04 ships it enabled, and it fails in a way that looks exactly
+like a capability wall.
+
+---
+
 # STAGE 1 — The VM
 
 ## Task 1: cloud-init guest definition
