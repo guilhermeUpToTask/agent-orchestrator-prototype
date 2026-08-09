@@ -68,8 +68,12 @@ from agent_orchestrator.infra.runtime.factory import build_agent_runner
 from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.forge_port import ForgePort
 from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
 from agent_orchestrator.infra.environment.no_environment import NoEnvironment
-from agent_orchestrator.infra.environment.spec import read_environment_spec
+from agent_orchestrator.infra.environment.spec import (
+    read_container_binary,
+    read_environment_spec,
+)
 from agent_orchestrator.infra.forge.binding import read_binding
 from agent_orchestrator.infra.forge.github import GitHubForge
 from agent_orchestrator.infra.forge.no_forge import NoForge
@@ -201,12 +205,21 @@ class AppContainer:
 
     @cached_property
     def environment(self) -> ProjectEnvironment:
-        """The cycle acceptance run (P8.2). `NoEnvironment` is today's behaviour
-        and the PERMANENT fallback, like `NoSandbox` and `NoForge` — most
-        projects are libraries and CLIs whose tests genuinely are the contract,
-        and for those an acceptance run has nothing to add. A `DockerEnvironment`
-        plugs in here without any caller changing."""
-        return NoEnvironment()
+        """The cycle acceptance run (P8.2/P8.5). `NoEnvironment` remains the
+        PERMANENT fallback, like `NoSandbox` and `NoForge` — most projects are
+        libraries and CLIs whose tests genuinely are the contract, and for those
+        an acceptance run has nothing to add.
+
+        `environment.mode = container` selects the real adapter; the container
+        CLI itself is a separate key, because which runtime exists is a property
+        of the machine and not of the project. Anything else falls back rather
+        than raising: an acceptance run is advisory, so a typo here must not
+        take down the promotion or publication gate it was only observing.
+        """
+        mode = (self.config_store.get("orchestrator", "environment.mode") or "").strip()
+        if mode != "container":
+            return NoEnvironment()
+        return ContainerEnvironment(binary=read_container_binary(self.config_store))
 
     def environment_context(self, plan_id: str) -> tuple[Path, EnvironmentSpec | None]:
         """Where a plan's repository is, and how the operator says to boot it.

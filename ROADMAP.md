@@ -1257,12 +1257,12 @@ because P8.5 is still blocked:
      finds gets published. **Parked 2026-08-02 on a missing
      `ORCHESTRATOR_MASTER_KEY`** (see *Two blockers parked* below); everything
      up to that point is staged and verified.
-5. 🚧 **P8.5 — the `ContainerEnvironment` adapter. UNPARKED 2026-08-08.** The
-   environment blocker is gone: the `aipom-dev` libvirt/KVM guest
-   (`infra/dev-vm/`) runs nested containers, gate 7/7 (see *Containerization was
-   unavailable* below). The port it plugs into already exists and is exercised,
-   so this is an adapter and its tests, not a redesign — and it can now be
-   validated against real podman and real docker where the work happens.
+5. ✅ **P8.5 — the `ContainerEnvironment` adapter.** Delivered 2026-08-09, after
+   the environment blocker was retired by the `aipom-dev` libvirt/KVM guest
+   (`infra/dev-vm/`, gate 7/7 — see *Containerization was unavailable* below).
+   Selected by `environment.mode=container`, with `environment.container_binary`
+   choosing the runtime; validated against real docker AND real podman, not a
+   scripted fake. `NoEnvironment` stays the permanent fallback.
 
 ### Two blockers parked, both environmental — one resolved 2026-08-08
 
@@ -1507,7 +1507,53 @@ that nobody can tell from the evidence document.
     no Docker daemon exists in the development container, so the adapter cannot
     be validated here. Shipping an unexercised container adapter behind a green
     suite would be the kind of evidence-free claim this roadmap exists to
-    prevent.
+    prevent. *(Delivered as P8.5 / `ContainerEnvironment`; see below.)*
+
+- **P8.5 — the container acceptance run, on a VM development environment:**
+  ✅ delivered on `phase-8-5-container-environment-adapter`.
+  - Design: `docs/superpowers/specs/2026-08-08-phase-8-5-vm-development-environment-design.md`
+  - Plan: `docs/superpowers/plans/2026-08-08-phase-8-5-vm-development-environment.md`
+  - **The environment came first, and it had to.** `.devcontainer/` was retired
+    for the `aipom-dev` libvirt/KVM guest (`infra/dev-vm/`, decision 63,
+    capability gate 7/7): the adapter cannot be validated where containers
+    cannot run isolated. See *Containerization was unavailable* above for the
+    corrected finding — two walls deadlocking each other, not one kernel wall.
+  - **Two config keys, deliberately separate.** `environment.mode`
+    (`container` selects the adapter; anything else falls back) and
+    `environment.container_binary` (default `docker`). Which container CLI
+    exists is a property of the MACHINE, so the binary is orchestrator-scoped;
+    the boot spec stays project-scoped. An unrecognised mode falls back rather
+    than raising — the run is advisory, and a typo must not take down the gate
+    it was only observing.
+  - **`NoEnvironment` remains the PERMANENT fallback**, like `NoSandbox` and
+    `NoForge`. Most projects are libraries and CLIs whose tests genuinely are
+    the contract; those record `skipped`, which is not a pass.
+  - **Both runtimes are exercised for real.** Every behavioural test is
+    parametrized over each container runtime on PATH and passes twice — once
+    on `docker`, once on `podman` (16 passed). That double pass is what turns
+    "the binary is configuration" from a decision into a tested fact. Tests
+    cover a passing scenario, a failing scenario, healthcheck pass and
+    timeout, ref isolation, and teardown.
+  - **Exactly two cases use a scripted CLI, and only because a live daemon
+    cannot be made to take those paths on demand**: the binary is absent, and
+    the daemon refuses. Failure injection, stated as such — not a substitute
+    for the real-container tests.
+  - **The real-container suite earned its cost immediately.** Under parallel
+    load it exposed a defect the serial run and any scripted fake would both
+    have missed: `run -d` was given `startup_timeout_seconds`, which budgets
+    how long the APPLICATION may take to become healthy rather than how long
+    the DAEMON may take to accept a detached create. On a loaded machine the
+    client call timed out while the daemon created the container anyway — and
+    because the teardown `finally` was armed only *after* a successful start,
+    that container was never removed. An `errored` verdict AND a leak.
+    Teardown now wraps the start and never raises; daemon calls have their own
+    budget. Locked by
+    `test_a_small_startup_budget_does_not_abort_the_daemon_call`.
+  - **The run sees the ref, never the working tree** — a disposable git
+    worktree at the commit under test, mounted at `/app`. A verdict attributed
+    to a commit that was not what actually ran is worse than no verdict.
+  - **No domain un-freeze.** This is an adapter behind `app/environment_port.py`,
+    which decision 62 already placed outside the domain.
 
 ### Exit criteria
 

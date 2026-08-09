@@ -16,7 +16,10 @@ time if you assume otherwise:
 
 - **Prefix every python command with `uv run`.** `backend/.venv` is the
   authoritative interpreter. `uv pip install --system` *fails* here — Ubuntu
-  24.04 marks `/usr` PEP 668 externally-managed.
+  24.04 marks `/usr` PEP 668 externally-managed. Install with
+  `uv sync --all-extras --dev --locked`: a venv missing the dev group has no
+  `pytest`, and the verification executor shells out to `python -m pytest`, so
+  every check fails as "red" and no task can ever go green.
 - **`~/.bashrc` returns early for non-interactive shells.** Anything exported
   there is invisible to `ssh host 'cmd'` and to agent tool calls. Secrets live
   in `~/.orchestrator-env` (mode 600). `ORCHESTRATOR_MASTER_KEY` already exists
@@ -44,7 +47,7 @@ restores it on top of `seed demo` after a rebuild.
 - **CLI Entry Point**: `python -m agent_orchestrator.infra.cli.main` (or `orchestrate` if installed) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check agent_orchestrator tests --fix`
 - **Type Check**: `mypy agent_orchestrator` (zero errors, no excludes)
-- **Test All**: `pytest` — runs `-n auto` (pytest-xdist) from `addopts`; add `-p no:xdist` for a serial run when you need `--pdb` or readable output. Coverage is NOT on by default: `make coverage`.
+- **Test All**: `pytest` — runs `-n auto --dist loadfile` (pytest-xdist) from `addopts`; add **`-n0`** for a serial run when you need `--pdb` or readable output. (`-p no:xdist` does NOT work: unloading the plugin leaves `addopts`' own `-n`/`--dist` unrecognised and pytest exits on a usage error.) Coverage is NOT on by default: `make coverage`.
 - **Test Unit (fast)**: `pytest -m "not integration"`
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
 - **Test real-LLM smoke** (cost-gated, never in normal CI): `pytest -m llm` with `REASONER_SMOKE_API_KEY` (+ optional `REASONER_SMOKE_BASE_URL` / `REASONER_SMOKE_MODEL`)
@@ -54,6 +57,8 @@ Environment: `ORCHESTRATOR_HOME` (state dir), `ORCHESTRATOR_MASTER_KEY` (Fernet 
 **The reasoner resolves via the providers catalog, NOT env vars** — config keys (scope `orchestrator`): `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`, `reasoner.model_id`, `reasoner.temperature` (0.2), `reasoner.max_turns` (8). In `llm` mode `agent_orchestrator/infra/reasoner/factory.py` fail-fasts (`REASONER_CONFIG_INVALID` → 422) and resolves the provider row (base_url + envelope-encrypted key) and model row; **stub mode never touches the secret store** (dry-run needs no master key). `orchestrate seed demo` seeds capabilities, the default agent, provider/model rows, and the config keys idempotently.
 
 **The agent runner resolves via the AGENT REGISTRY + the providers catalog** (`agent_orchestrator/infra/runtime/factory.py`) — the config key `agent_runner.mode` (`dry-run` default | `real`, plus `agent_runner.timeout_seconds` 600) picks the global mode; `dry-run` is the `DummyAgentRunner` and never touches the secret store. In `real` mode the `CatalogAgentRunner` resolves **per task, per run** from the bound `AgentSpec`: `runtime_type` (`pi` default | `claude` | `gemini` | `dry-run`) picks the CLI runtime, `provider_id`/`model_id` rows supply the envelope-encrypted key and model string (pi's backend derives from the provider id/name against `PI_BACKEND_ENV_VAR`). A broken binding raises `TaskFailed(AUTH_ERROR)` (terminal); write-time referential checks + `AGENT_RUNNER_CONFIG_INVALID` → 422; `GET /api/runner/status` reports mode/bindings/binary probes (`dependency_checker.py`) and the worker warns at boot in real mode. Providers/models bound to an agent are delete-guarded (409).
+
+**The cycle acceptance run resolves from config too** (`ProjectEnvironment`, `agent_orchestrator/app/environment_port.py` — a port the FROZEN domain never sees). Orchestrator-scoped keys: `environment.mode` (`container` selects `ContainerEnvironment`; **anything else, including a typo, falls back to `NoEnvironment`** — the verdict is advisory and must never take down the gate it observes) and `environment.container_binary` (`docker` default | `podman` | any CLI-compatible runtime — which one exists is a property of the MACHINE, hence orchestrator scope). Project-scoped keys author the boot itself and are the OPERATOR's, never a model's: `environment.image | command | port | healthcheck | scenario | startup_timeout_seconds` (`infra/environment/spec.py`). `NoEnvironment` is the PERMANENT fallback like `NoSandbox`/`NoForge` and records `skipped`, which `is_signal` distinguishes from a pass. `verify()` MUST NOT raise. `startup_timeout_seconds` budgets the APPLICATION becoming healthy, never the daemon call — conflating them leaked containers (P8.5).
 
 ### Frontend (TypeScript / React / Vite)
 - **Install**: `npm install`

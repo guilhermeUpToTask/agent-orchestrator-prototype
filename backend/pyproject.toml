@@ -89,7 +89,7 @@ testpaths = ["tests"]
 # the unit suite where nobody reads the report, and nothing gates on the
 # number. `make coverage` still prints it.
 #
-# Debugging: `-p no:xdist` (or `-n0`) restores serial execution — `--pdb`
+# Debugging: `-n0` restores serial execution — `--pdb`
 # needs it, and a crash is easier to read without interleaved workers.
 #
 # `--dist loadfile` keeps a file's tests inside ONE worker. That is not a
@@ -101,6 +101,7 @@ addopts = "-n auto --dist loadfile"
 markers = [
     "integration: exercises real adapters (SQLite, git, subprocess); deselect with -m 'not integration'",
     "llm: cost-gated real-provider smoke tests; run explicitly with -m llm and REASONER_SMOKE_* set",
+    "container: needs a working container runtime; deselect with -m 'not container'",
 ]
 
 [tool.ruff]

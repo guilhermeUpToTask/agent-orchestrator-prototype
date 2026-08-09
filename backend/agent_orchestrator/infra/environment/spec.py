@@ -17,6 +17,12 @@ from __future__ import annotations
 from agent_orchestrator.app.environment_port import EnvironmentSpec
 from agent_orchestrator.infra.db.reference_repos import SqliteConfigStore
 
+# Orchestrator-scoped, not project-scoped: which container CLI exists is a
+# property of the machine, not of the project being built.
+CONTAINER_BINARY_KEY = "environment.container_binary"
+
+_DEFAULT_CONTAINER_BINARY = "docker"
+
 IMAGE_KEY = "environment.image"
 COMMAND_KEY = "environment.command"
 PORT_KEY = "environment.port"
@@ -40,6 +46,19 @@ def _int_or(value: str | None, fallback: int) -> int:
     except ValueError:
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def read_container_binary(config_store: SqliteConfigStore) -> str:
+    """The container CLI to shell out to.
+
+    Configuration rather than a hardcoded `docker`: podman, colima and rancher
+    are CLI-compatible for everything the adapter uses, and stranding those
+    operators buys nothing. Orchestrator-scoped — see `CONTAINER_BINARY_KEY`.
+    """
+    configured = config_store.get("orchestrator", CONTAINER_BINARY_KEY)
+    if not configured or not configured.strip():
+        return _DEFAULT_CONTAINER_BINARY
+    return configured.strip()
 
 
 def read_environment_spec(

@@ -200,6 +200,8 @@ Serves **J7**.
 | Export all plan-run analytics and evidence | `backend/scripts/export_plan_runs.py` | — (whole-database CLI export; not the J7 cycle read) | — | `test_plan_run_export.py` | hidden | post-launch |
 | One evidence read model per cycle — accepted evidence, protected scope, promoted refs, disposition | `routers/evidence.py` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` | `CycleEvidenceSummary` | `test_cycle_evidence_api.py` | full | critical |
 | Topology-aware delivery hand-off — where the cycle branch physically is | `routers/evidence.py::_delivery`, `project_workspace.repository_path_for` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` (`delivery`) | `CycleEvidenceSummary` | `test_cycle_evidence_api.py` | full | critical |
+| Cycle acceptance run — advisory verdict (P8.2) | `ProjectEnvironment` (`app/environment_port.py`), `acceptance_runs` | `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` (`acceptance_runs`) | `CycleEvidenceSummary` | `test_acceptance_run.py`, `test_cycle_evidence_api.py` | full | critical |
+| Boot the application in a real container (P8.5) | `ContainerEnvironment` (`infra/environment/container_environment.py`) | — (adapter selected by config; verdict surfaces on the evidence route above) | via `CycleEvidenceSummary` | `test_container_environment.py` (docker + podman), `test_container_environment_failures.py`, `test_environment_selection.py` | full | critical |
 | Authenticated PR / forge write | — | — | — | — | not implemented (deliberate) | post-launch |
 
 ## 9. Nine-phase compatibility surface
