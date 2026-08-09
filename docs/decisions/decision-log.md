@@ -603,3 +603,62 @@ green suite is the evidence-free claim this roadmap exists to prevent. The
 adapter must also take its container binary from configuration rather than
 hardcoding `docker` — rootless podman reached the kernel wall and is
 CLI-compatible.
+
+---
+
+**Decision 63 (2026-08-09) — the development environment moves from a hardened
+devcontainer to a libvirt/KVM guest. No unfreeze; nothing here touches the
+domain.** `.devcontainer/` is deleted; `infra/dev-vm/` provisions `aipom-dev`
+(Ubuntu 24.04 on `qemu:///system`, cloud-init, `make up|start|ssh|verify|destroy`).
+
+**The reason is that the requirement is self-contradictory for a container.**
+The development environment must be **privileged enough to nest containers** —
+P8.5's `ContainerEnvironment` adapter cannot be validated anywhere else — and
+**isolated enough to contain agent-written code**, since agents write and
+execute code here. A container cannot be both: every capability granted to
+satisfy the first weakens the second, and the devcontainer's hardening
+(masked `/proc`, read-only `/sys/fs/cgroup`, a restrictive seccomp profile,
+bubblewrap) was exactly what made nested containers impossible. A VM is both by
+construction — the hypervisor is the boundary, so the guest's interior can be
+as privileged as the workload needs.
+
+**The blocker this retires was recorded wrong, and the correction is the point.**
+ROADMAP's *Containerization is unavailable* claimed one final kernel wall: 13
+masked `/proc` submounts forbidding a fresh `procfs`, and therefore a private
+PID namespace. It was **two walls that deadlocked each other**. The read-only
+cgroup2 tree forced `--cgroups=disabled`, which itself disables the private PID
+namespace — so each workaround re-broke what the other needed. Neither alone
+was terminal. A hand-rolled OCI bundle **did** run a container in the
+devcontainer; what it could not do was run one *with isolation*. The honest
+claim is about isolation, not about containers, and it matters for the adapter:
+a readiness check that only asks "did a container start" would have passed in
+an environment that could not contain anything.
+
+A third finding is recorded so the instrument is not trusted again: the
+cgroup-mount check used `unshare -Urm`, leaving the process in the **initial**
+cgroup namespace, where mounting cgroup2 needs `CAP_SYS_ADMIN` over that
+namespace's owning userns — it returned `EPERM` on *any* host, however capable.
+`-C` fixes it. In the devcontainer that false red read as corroborating the
+cgroup wall rather than as a broken instrument.
+
+**The gate, not the argument, is what licenses Stage 2.** `infra/dev-vm/verify.sh`
+asserts the six capabilities the devcontainer denied and returns **7 passed,
+0 failed** on kernel 6.8.0-137, re-run after a kernel upgrade and a full power
+cycle so the sysctl is proven to apply at boot. The unit suite runs green in the
+guest (`733 passed, 1 skipped`). P8.5 is unparked.
+
+**One deliberate relaxation, and its blast radius.** Ubuntu 24.04 ships
+`kernel.apparmor_restrict_unprivileged_userns=1`, which blocks `bwrap` and
+`unshare` from a plain shell while podman and docker pass on their own AppArmor
+profiles — a guest that runs PID-isolated containers perfectly while several
+checks fail exactly like a kernel wall. Cloud-init disables it
+(`/etc/sysctl.d/60-aipom-userns.conf`). That is sound *here and only here*: the
+VM boundary — **not bubblewrap** — is now what contains agent-written code, the
+host kernel is untouched, and the guest is cattle (`make destroy && make up`)
+rather than a pet. All durable state lives in `~/.orchestrator`. See
+`infra/dev-vm/README.md` for the threat model.
+
+**Why no unfreeze:** this is environment and tooling. No domain module,
+aggregate, port or invariant changes. The `ContainerEnvironment` adapter it
+unblocks plugs into `app/environment_port.py`, which decision 62 already placed
+outside the domain.

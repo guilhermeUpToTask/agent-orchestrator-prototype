@@ -1,5 +1,38 @@
 # CLAUDE.md - AIPOM / Agent Orchestrator
 
+## 💻 Development environment — the `aipom-dev` guest
+
+Development happens **inside a libvirt/KVM guest**, not a devcontainer. The
+`.devcontainer/` was retired on 2026-08-09 (decision 63): the environment must
+be simultaneously privileged enough to nest containers and isolated enough to
+contain agent-written code, which a container cannot be and a VM is by
+construction. Full setup, lifecycle and threat model: **[`infra/dev-vm/README.md`](infra/dev-vm/README.md)**.
+
+From the host: `make -C infra/dev-vm up | start | ssh | verify | destroy`.
+`make verify` is the capability gate and must return **7 passed, 0 failed**.
+
+Inside the guest, four things differ from the commands below and will waste your
+time if you assume otherwise:
+
+- **Prefix every python command with `uv run`.** `backend/.venv` is the
+  authoritative interpreter. `uv pip install --system` *fails* here — Ubuntu
+  24.04 marks `/usr` PEP 668 externally-managed.
+- **`~/.bashrc` returns early for non-interactive shells.** Anything exported
+  there is invisible to `ssh host 'cmd'` and to agent tool calls. Secrets live
+  in `~/.orchestrator-env` (mode 600). `ORCHESTRATOR_MASTER_KEY` already exists
+  — never generate a second one; it silently orphans the encrypted secret store.
+  Verify with `[ -n "$ORCHESTRATOR_MASTER_KEY" ] && echo present`, never by
+  printing it.
+- **Catalog ids are server-generated UUIDs**, and `POST /api/providers` and
+  `POST /api/agents` do **not** deduplicate by name. Look ids up by name from
+  the API; never construct `provider:name`. Duplicates are how
+  `AGENT_RUNNER_CONFIG_INVALID` (422) appears.
+- **Check `ss -ltnp | grep :8000` before starting a server.** A stale one
+  produces results that look like application bugs.
+
+The six-agent free-tier roster is code, not folklore: `infra/dev-vm/seed-agents.py`
+restores it on top of `seed demo` after a rebuild.
+
 ## 🚀 Build & Run Commands
 
 ### Backend (Python) — all commands run from `backend/`
@@ -160,6 +193,13 @@ agent-orchestrator/
 │                           #   repaired in place — a run that must FAIL first).
 │                           #   Never mix modes: Tier 0 = stub + dry-run,
 │                           #   Tier 1 = llm + real.
+├── infra/dev-vm/           # the aipom-dev libvirt/KVM development guest (replaced
+│                           #   .devcontainer/, retired 2026-08-09): create-vm.sh
+│                           #   (idempotent virt-install), Makefile (up/start/ssh/
+│                           #   verify/destroy), cloud-init/, verify.sh (the 7-check
+│                           #   capability gate — the artifact P8.5's environment
+│                           #   work is judged by), seed-agents.py (the free-tier
+│                           #   roster as code), README.md (setup + threat model)
 ├── ROADMAP.md              # everything planned but not yet implemented (+ do-not-do)
 └── frontend/               # React/Vite on the thin API: plan list + /plans/:id shell,
                             #   chat panel, gates, 9-phase rail, goals canvas, SSE bridge

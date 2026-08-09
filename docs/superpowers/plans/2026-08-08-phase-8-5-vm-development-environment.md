@@ -38,9 +38,29 @@ Stage 1 is COMPLETE: the guest is provisioned and the capability gate is GREEN.
 | 2 — lifecycle scripts | ✅ complete, 1 fix round | `0187a8a`, `4822404` |
 | 3 — capability proof | ✅ complete, 2 fix rounds | `277c760`, `4d75740`, `04e892f` |
 | final review fix wave | ✅ 6/6 addressed | `fe50dda` |
-| 4 — provision & bootstrap | 🚧 guest UP, **gate GREEN**; bootstrap remains | `f38adff`, `7472e29`, `d8dade7` |
-| 5 — retire devcontainer | ⏸ **NEXT** | — |
-| 6–11 — the adapter | ⏸ unblocked | — |
+| 4 — provision & bootstrap | ✅ complete — gate GREEN, suite GREEN in guest | `f38adff`, `7472e29`, `d8dade7`, + README |
+| 5 — retire devcontainer | ✅ complete — `.devcontainer/` deleted, record corrected | this commit |
+| 6–11 — the adapter | ⏸ **NEXT**, unblocked | — |
+
+**Task 4 Step 6 evidence**, `uv run pytest -m "not integration" -q` in
+`~/agent-orchestrator/backend` inside the guest, 2026-08-09:
+
+```text
+733 passed, 1 skipped, 8 warnings in 9.07s
+```
+
+The single skip is `tests/integration/test_reasoner_smoke.py:33: REASONER_SMOKE_API_KEY
+not set (cost-gated smoke test)` — the intended cost gate, not a masked failure.
+Re-run green after the Task 5 documentation changes.
+
+**Task 5 correction, in one line:** the *Containerization is unavailable*
+finding was wrong on its central claim. It was not one final kernel wall but
+**two walls deadlocking each other** — masked `/proc` forbidding a fresh procfs
+and therefore a private PID namespace, and a read-only `/sys/fs/cgroup` forcing
+`--cgroups=disabled`, which itself disables the private PID namespace. A
+hand-rolled OCI bundle DID run a container in the devcontainer, so the honest
+statement is that it could not run containers **with isolation**. Recorded in
+ROADMAP.md and as decision 63.
 
 ## 🚦 THE GATE IS GREEN — 2026-08-08
 

@@ -1198,9 +1198,12 @@ preview now comes after them, so the ones that gate a credible demonstration
 are scoped here and the rest stay deferred.
 
 **Order revised 2026-08-02** after the development environment turned out not to
-be able to run containers at all (see *Containerization is unavailable* below).
-`DockerEnvironment` moves from third to **last**, because it is now the only
-item in the phase that cannot be validated where the work happens:
+be able to run containers *with isolation* (see *Containerization was
+unavailable* below). `DockerEnvironment` moved from third to **last**, because
+it was then the only item in the phase that could not be validated where the
+work happens. **That constraint lifted on 2026-08-08** with the `aipom-dev`
+guest; the ordering stands because the other items are further along, not
+because P8.5 is still blocked:
 
 1. ✅ **P8.1 — the repository-choice wizard** (plus authenticated forge
    publication, promoted into it).
@@ -1254,14 +1257,18 @@ item in the phase that cannot be validated where the work happens:
      finds gets published. **Parked 2026-08-02 on a missing
      `ORCHESTRATOR_MASTER_KEY`** (see *Two blockers parked* below); everything
      up to that point is staged and verified.
-5. ⏸ **P8.5 — the `DockerEnvironment` adapter.** Pending an environment that
-   can run containers. The port it plugs into already exists and is exercised,
-   so this is an adapter and its tests, not a redesign.
+5. 🚧 **P8.5 — the `ContainerEnvironment` adapter. UNPARKED 2026-08-08.** The
+   environment blocker is gone: the `aipom-dev` libvirt/KVM guest
+   (`infra/dev-vm/`) runs nested containers, gate 7/7 (see *Containerization was
+   unavailable* below). The port it plugs into already exists and is exercised,
+   so this is an adapter and its tests, not a redesign — and it can now be
+   validated against real podman and real docker where the work happens.
 
-### Two blockers parked, both environmental ⏸
+### Two blockers parked, both environmental — one resolved 2026-08-08
 
-Neither is a design problem and neither blocks the other phases. Both need the
+Neither is a design problem and neither blocks the other phases. Both needed the
 maintainer's own machine, so they are recorded here rather than worked around.
+**Blocker 2 is now resolved**; blocker 1 remains parked.
 
 **1. The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`.** Everything else is
 staged and verified against a live server: `orchestrate serve` up on :8000 with
@@ -1287,48 +1294,87 @@ Worth noting as evidence rather than annoyance: readiness named the single
 cause and the two consumers that need it, instead of a run dying twenty minutes
 in on a decrypt error. That is Phase 5's first-mile work doing its job.
 
-**2. P8.5 needs a container-capable host** — see *Containerization is
-unavailable* above for the six blockers and the one that proved final.
+**2. ~~P8.5 needs a container-capable host~~ — RESOLVED 2026-08-08.** The
+`aipom-dev` guest is that host. See *Containerization was unavailable* below:
+the blocker is retired, and the finding it rested on is corrected there.
 
-### Containerization is unavailable in the development environment ⏸
+### Containerization was unavailable in the devcontainer — RESOLVED 2026-08-08 ✅
 
-Established empirically on 2026-08-02, not assumed. The orchestrator's own
-development container cannot run nested containers, and five of the six
-blockers were worked around before one proved final:
+**Superseded.** The development environment is now the `aipom-dev` libvirt/KVM
+guest (`infra/dev-vm/`), which runs nested containers. The capability gate
+`make -C infra/dev-vm verify` returns **7 passed, 0 failed** on Ubuntu 24.04.4,
+kernel 6.8.0-137, re-run after a kernel upgrade and a full power cycle:
+
+```text
+PASS  bwrap mounts a fresh /proc
+PASS  fresh procfs in a private PID namespace
+PASS  cgroup2 is writable
+PASS  cgroup2 mounts in a user namespace
+PASS  podman runs with cgroups and a private PID namespace
+PASS  docker runs with a private PID namespace
+PASS  rootless podman runs with full isolation
+```
+
+**The original 2026-08-02 finding was wrong on its central claim**, and the
+correction is worth keeping because the wrong version is the more plausible one.
+The record said a single kernel rule proved final. It was not one wall — it was
+**two walls that deadlocked each other**:
 
 | Blocker | Outcome |
 |---|---|
 | No `/var/run/docker.sock` | no Docker-outside-of-Docker |
 | No `CAP_SYS_ADMIN` (stock Docker capability set) | no `dockerd`, so no classic DinD |
 | No `/dev/fuse`, so fuse-overlayfs fails | worked around with the `vfs` storage driver |
-| `/sys/fs/cgroup` read-only | worked around with `--cgroups=disabled` |
 | Single-uid userns vs image files owned by gid 65534 | worked around with `ignore_chown_errors` |
-| **13 masked `/proc` submounts** (`/proc/kcore`, `/proc/keys`, …) | **final** |
+| **13 masked `/proc` submounts** (`/proc/kcore`, `/proc/keys`, …) | half of the deadlock |
+| **`/sys/fs/cgroup` read-only**, forcing `--cgroups=disabled` | the other half |
 
-The last one is a kernel rule, not a configuration gap: an unprivileged user
-namespace may not mount a fresh `procfs` unless it can see a *fully visible*
-proc instance, and the standard container hardening masks 13 entries with
-tmpfs. Unmasking them needs the `CAP_SYS_ADMIN` that is absent. Rootless podman
-gets as far as pulling images and creating storage, then dies on `mount proc`.
+Masked `/proc` forbids a fresh `procfs` — an unprivileged user namespace may not
+mount one unless it can see a *fully visible* proc instance, and standard
+container hardening masks 13 entries with tmpfs — and therefore forbids a
+private PID namespace. Meanwhile the read-only cgroup2 tree forced
+`--cgroups=disabled`, which **itself disables the private PID namespace**. Each
+workaround re-broke what the other needed. Neither alone was terminal; together
+they left no path.
 
-**Two design consequences, both worth keeping:**
+The honest statement is therefore **not** "the devcontainer could not run
+containers." A hand-rolled OCI bundle *did* run a container there. What the
+devcontainer could not do was run containers *with isolation* — no private PID
+namespace, by either route. That distinction matters for the adapter, because a
+`DockerEnvironment` that merely observes "a container started" would have passed
+in an environment that could not actually contain anything.
+
+A third finding, recorded so the instrument is not trusted again: `verify.sh`'s
+cgroup-mount check originally used `unshare -Urm`, which leaves the process in
+the **initial** cgroup namespace. Mounting cgroup2 from a non-initial userns
+needs `CAP_SYS_ADMIN` over the cgroup namespace's owning userns, so it returned
+`EPERM` on *any* host, however capable. `-C` fixes it. In the devcontainer that
+broken check read as corroborating the read-only-cgroup wall rather than as a
+broken instrument — it made a real blocker look worse than it was.
+
+**Two design consequences from the original investigation, both still valid:**
 
 - **The adapter must not hardcode `docker`.** Podman handled everything up to
   the kernel wall and is CLI-compatible; developers running podman, colima or
   rancher would be stranded for no reason. The container binary is
   configuration.
 - **"The binary exists but containers do not work here" is a real state**, and
-  this environment is a specimen of it. The adapter must return `errored` with
-  an actionable message rather than hang — which `ProjectEnvironment` already
-  contracts for (`verify()` must not raise) and the handler already swallows.
+  the retired devcontainer was a specimen of it. The adapter must return
+  `errored` with an actionable message rather than hang — which
+  `ProjectEnvironment` already contracts for (`verify()` must not raise) and the
+  handler already swallows. Keep this even though the guest is capable: the
+  state is real on other people's machines, and the devcontainer's own
+  half-capability (a container that starts but shares the host PID namespace) is
+  exactly the case a naive readiness check waves through.
 
-What P8.5 can still be given without a daemon is a full adapter tested against
-a **scripted fake container CLI**, the pattern the runner taxonomy already uses
-(`test_runner_taxonomy.py`): command construction, output parsing, timeouts,
-teardown-on-failure, and the not-installed and daemon-down paths. What that
-cannot cover — *does a real container actually boot* — stays one manual run on
-a Docker-capable host, and must be recorded as such rather than implied by a
-green suite.
+P8.5 therefore gets **both** halves of its evidence, where it previously could
+only get one. The scripted fake container CLI still covers command construction,
+output parsing, timeouts, teardown-on-failure, and the not-installed and
+daemon-down paths — the pattern the runner taxonomy already uses
+(`test_runner_taxonomy.py`). And *does a real container actually boot, isolated*
+is now answerable in the environment where the work happens, against real podman
+and real docker, rather than deferred to one unrecorded manual run on somebody
+else's host.
 
 The showcase project's shape is an open decision and should be made before the
 fixture is started, not during it. A full-stack web application is the obvious
@@ -1354,8 +1400,8 @@ that nobody can tell from the evidence document.
 - **The cycle acceptance run** (`ProjectEnvironment` port + adapters), specified
   in the deferred list below. This is the one that closes the gap above. The
   port, the ledger and both trigger points shipped in **P8.2**; the
-  `DockerEnvironment` adapter is **P8.5**, pending a container-capable
-  environment.
+  `ContainerEnvironment` adapter is **P8.5**, unparked 2026-08-08 now that the
+  `aipom-dev` guest provides a container-capable environment.
 - **A showcase fixture** — one realistic, multi-goal project driven end to end
   on Tier 1, with captured evidence, as the artifact an invitation points at.
   Deliberately NOT a fixture that exercises every capability: several paths
