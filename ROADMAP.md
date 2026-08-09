@@ -1203,7 +1203,13 @@ unavailable* below). `DockerEnvironment` moved from third to **last**, because
 it was then the only item in the phase that could not be validated where the
 work happens. **That constraint lifted on 2026-08-08** with the `aipom-dev`
 guest; the ordering stands because the other items are further along, not
-because P8.5 is still blocked:
+because P8.5 is still blocked.
+
+**Extended 2026-08-09 with P8.6 — refining.** The first real Tier 1 runs showed
+the phase can deliver every capability it promised and still fail its own
+purpose: a five-goal cycle sat at 61 minutes with nothing promoted. A showcase
+nobody will sit through does not demonstrate anything, so closing the latency
+gap is scoped into the phase rather than deferred past it.
 
 1. ✅ **P8.1 — the repository-choice wizard** (plus authenticated forge
    publication, promoted into it).
@@ -1323,6 +1329,56 @@ because P8.5 is still blocked:
    Selected by `environment.mode=container`, with `environment.container_binary`
    choosing the runtime; validated against real docker AND real podman, not a
    scripted fake. `NoEnvironment` stays the permanent fallback.
+6. ⏳ **P8.6 — refining: make a cycle finish in a time somebody will wait for.**
+   The closing item of Phase 8, scoped 2026-08-09 from measured evidence rather
+   than from intuition — see
+   [`docs/history/analyses/2026-08-09-cycle-latency-analysis.md`](docs/history/analyses/2026-08-09-cycle-latency-analysis.md).
+   A five-goal cycle sat at **61 minutes with zero goals promoted**, never
+   blocked, and **62% of execution wall-clock produced nothing** (38%
+   productive, 20% burned on failed attempts, 42% idle in backoff).
+
+   This is a demonstrability problem, not just an ergonomics one: P8.4's
+   showcase is the artifact an invitation points at, and nobody watches an hour
+   of nothing. The ordered targets:
+
+   1. **Enrich ready goals in parallel.** The one structural change with the
+      largest payoff. Enrichment is JIT *and* strictly serial — goal 2's
+      session starts the second goal 1's commits — so five goals cost ~25
+      minutes of pure sequencing. `ready_goal_ids` already computes the
+      parallelism-safe set and the execution loop already honours it under
+      `max_concurrent_goals`; enrichment simply does not use it.
+   2. **Stop misclassifying an empty completion as `rate_limit`.** Most of the
+      42% idle. `max_backoff_seconds` 900 × `kind_backoff_scale.rate_limit` 4.0
+      is a **one-hour** ceiling per attempt, and it was measured being spent
+      against a model that answered HTTP 200 to a direct call at the same
+      moment. The patience is a feature; spending it on a misdiagnosis is the
+      defect. Tracked in `known-issues.md` under *Failure classification*, and
+      the precedent already exists — a positively identified
+      `REQUEST_CONCURRENCY` refusal opens no circuit and requeues impatiently.
+   3. **Rotate models on a capacity failure rather than waiting on one.**
+      Tier-ordered routing to another capability-satisfying agent exists
+      (un-freeze #16) but engages through the admission gate and circuits; a
+      task that merely got rate-limited waits on the same binding while three
+      other implementers sit idle. Must not mutate the persisted binding.
+   4. **Cap generation size and let stage pick the model tier.** One reasoner
+      response carried **22,242 completion tokens** — a latency cost before it
+      is a token cost. `AgentSpec.model_role` (`smart`/`cheap`) exists for the
+      second half and bought nothing here, because everything was pinned to
+      similar-latency free models.
+   5. **Diagnose the 31-minute gap between an armed `retry_at` and the
+      attempt**, with a live renewing lease and no log in between. Undiagnosed;
+      if it is real and general it dwarfs items 1–4, which is why it is scoped
+      here rather than left in the analysis.
+   6. **Unbuffer the supervised worker's logs.** `serve` runs the worker as a
+      subprocess whose stdout is not a tty, so the log sits frozen at the
+      startup banner while attempts run. This cost real diagnosis time in the
+      P8.4 run and needs no design work.
+
+   **Measure before and after on the same fixture.** The honest baseline is the
+   analysis document above; anything claimed here without a second measured run
+   is the kind of evidence-free assertion this roadmap exists to prevent. Note
+   too that items 2 and 3 are free-tier-shaped, while 1, 4 and 6 are structural
+   and pay off on any provider.
 
 ### Two blockers parked, both environmental — BOTH resolved by 2026-08-09
 
@@ -1630,6 +1686,12 @@ that nobody can tell from the evidence document.
   it.
 - Someone who did not run it can look at the captured result and say what was
   built and why they should believe it.
+- **That completion happens in a time somebody will actually wait for**, shown
+  by a second measured run against the same fixture as
+  `docs/history/analyses/2026-08-09-cycle-latency-analysis.md`. The baseline to
+  beat is 61 minutes with zero goals promoted and 62% of execution wall-clock
+  producing nothing. A cycle that is correct but unwatchable fails the phase's
+  own purpose, because the artifact is meant to be *shown to someone*.
 
 ## Phase 9 — small peer preview ⏸
 
