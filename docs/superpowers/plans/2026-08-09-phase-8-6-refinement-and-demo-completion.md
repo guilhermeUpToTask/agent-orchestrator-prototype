@@ -65,31 +65,28 @@ in Task 3 has something to route to, but never as the reasoner.
 
 ---
 
-## Task 1: an empty completion is not a rate limit
+## Task 1: ~~an empty completion is not a rate limit~~ — VOID
 
-**Why first:** it is the largest single source of dead time (42% of execution
-wall-clock idle), and every later measurement is noise until it is gone.
+**Retracted 2026-08-09 before implementation.** The premise was wrong.
 
-- Files: `backend/agent_orchestrator/infra/runtime/taxonomy.py`,
-  `backend/tests/integration/test_runner_taxonomy.py`
-- The precedent already in the design: a positively identified
-  `REQUEST_CONCURRENCY` refusal opens no circuit and requeues impatiently. This
-  is the same argument for a different signal.
+Every `rate_limit` attempt across both demo runs carries a real upstream
+provider code — `429` ("`google/gemma-4-31b-it:free` is temporarily
+rate-limited upstream") and `RESOURCE_EXHAUSTED` ("Worker local total request
+limit reached"). No attempt was ever classified as capacity without one.
 
-**Steps**
+The mistake: a direct probe of `nvidia/nemotron-…:free` returned HTTP 200 and
+was compared against a failure produced by `google/gemma-4-31b-it:free`. Two
+different models. The `content: []` in the transcript was the consequence of a
+provider refusing, not a separate misdiagnosis.
 
-1. Write the failing test: a scripted runtime whose stream reports a completed
-   turn with empty content and zero token usage must NOT classify as
-   `rate_limit`.
-2. Classify it as `TOOL_ERROR` (retryable, ordinary backoff curve) and carry a
-   distinct `provider_code` so the operator can tell it from a real 429.
-3. Assert a genuine 429 still classifies as `rate_limit` and still gets the
-   patient 4× curve — the fix must not make the system impatient with real
-   capacity limits.
-4. Verify: `uv run pytest tests/integration/test_runner_taxonomy.py -q`.
+**Implementing this would have been actively harmful** — it would make the
+runtime impatient with genuine 429s, which is exactly what the patient
+rate-limit curve exists to prevent. The 42% idle share is real free-tier
+exhaustion; the answers are Task 3 (route to a model that is not exhausted) and
+a paid tier, not a classification change.
 
-**Done when** an empty completion retries in ~30s instead of ~3600s, and a real
-rate limit is unchanged.
+Recorded in `docs/architecture/known-issues.md` under *Failure classification*
+so the reasoning error is not repeated.
 
 ## Task 2: enrich ready goals in parallel
 

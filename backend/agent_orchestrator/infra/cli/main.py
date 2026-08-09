@@ -217,6 +217,13 @@ def serve(
         child = subprocess.Popen(
             [
                 sys.executable,
+                # Unbuffered, non-negotiable: the worker's stdout is a pipe, not
+                # a tty, so Python block-buffers it and the supervised worker
+                # appears frozen at its startup banner while attempts are
+                # actually running. During the P8.4 demo run this made a live
+                # system indistinguishable from a wedged one, and cost an hour
+                # of blind diagnosis. An operator should not have to know this.
+                "-u",
                 "-m",
                 "agent_orchestrator.infra.cli.main",
                 "worker",
