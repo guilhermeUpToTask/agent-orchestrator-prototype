@@ -420,8 +420,14 @@ check "fresh procfs in a private PID namespace" \
 #    the devcontainer's read-only mount actually denies — not permissions.
 check "cgroup2 is writable" \
   bash -c 'sudo mkdir -p /sys/fs/cgroup/aipom-probe && sudo rmdir /sys/fs/cgroup/aipom-probe'
+# -C (unshare the cgroup namespace) is load-bearing, not decoration. Mounting
+# cgroup2 from a non-initial user namespace needs CAP_SYS_ADMIN over the cgroup
+# namespace's OWNING user namespace. Without -C the process stays in the initial
+# cgroup namespace, owned by the initial userns, so the new userns has no
+# authority over it and the mount returns EPERM no matter how capable the host
+# is. Dropping -C makes this check unpassable by construction.
 check "cgroup2 mounts in a user namespace" \
-  unshare -Urm --propagation private \
+  unshare -UrmC --propagation private \
     bash -c 'mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg'
 
 # 4. podman WITHOUT --cgroups=disabled, with a private PID namespace.
