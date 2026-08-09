@@ -77,3 +77,66 @@ def test_no_spec_is_skipped_not_passed(binary: str, repo: Path) -> None:
     verdict = ContainerEnvironment(binary=binary).verify(repo, "HEAD", None)
     assert verdict.outcome == "skipped"
     assert verdict.is_signal is False
+
+
+def test_a_healthcheck_that_never_passes_reports_failed(binary: str, repo: Path) -> None:
+    env = ContainerEnvironment(binary=binary)
+    spec = EnvironmentSpec(
+        image=IMAGE,
+        command="sleep 300",
+        healthcheck="test -f /app/never-appears",
+        scenario=["true"],
+        startup_timeout_seconds=3,
+    )
+    verdict = env.verify(repo, "HEAD", spec)
+    assert verdict.outcome == "failed"
+    assert "healthy" in verdict.summary
+
+
+def test_a_passing_healthcheck_lets_the_scenario_run(binary: str, repo: Path) -> None:
+    env = ContainerEnvironment(binary=binary)
+    spec = EnvironmentSpec(
+        image=IMAGE,
+        command="sleep 300",
+        healthcheck="test -f /app/marker.txt",
+        scenario=["echo scenario-ran"],
+        startup_timeout_seconds=60,
+    )
+    verdict = env.verify(repo, "HEAD", spec)
+    assert verdict.outcome == "passed"
+    assert "scenario-ran" in verdict.detail
+
+
+def test_the_run_sees_the_ref_not_the_working_tree(binary: str, repo: Path) -> None:
+    """A dirty working tree must not leak into the acceptance run."""
+    (repo / "marker.txt").write_text("DIRTY\n", encoding="utf-8")
+    env = ContainerEnvironment(binary=binary)
+    spec = EnvironmentSpec(
+        image=IMAGE,
+        command="sleep 300",
+        scenario=["cat /app/marker.txt"],
+        startup_timeout_seconds=60,
+    )
+    verdict = env.verify(repo, "HEAD", spec)
+    assert verdict.outcome == "passed"
+    assert "from-the-repo" in verdict.detail
+    assert "DIRTY" not in verdict.detail
+
+
+def test_no_container_survives_the_run(binary: str, repo: Path) -> None:
+    """Teardown happens on the failure path too."""
+    env = ContainerEnvironment(binary=binary)
+    spec = EnvironmentSpec(
+        image=IMAGE,
+        command="sleep 300",
+        scenario=["false"],
+        startup_timeout_seconds=60,
+    )
+    assert env.verify(repo, "HEAD", spec).outcome == "failed"
+    listing = subprocess.run(
+        [binary, "ps", "-a", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "aipom-acceptance-" not in listing
