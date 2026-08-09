@@ -1268,16 +1268,31 @@ because P8.5 is still blocked:
    evidence. The implementation stage never produced anything. Four findings,
    in descending order of importance:
 
-   1. **The implementer role was bound to a test-author agent.** The task's
-      `role_agent_ids` resolved BOTH roles to `test-agent`, whose instructions
-      begin *"You are a TEST AUTHOR working test-first (TDD). Do NOT implement
-      the feature."* So the GREEN stage ran an agent explicitly told not to
-      implement, against a frozen bundle protecting the very file it was
-      allowed to touch. The captured prompt shows the contradiction in one
-      screen: `## Your role: implementer` directly above the test-author
-      instructions. The roster contains four implementer agents that were never
-      selected. **This is the finding worth fixing first** and it is not
-      visible at Tier 0, where a single dummy runner answers for every role.
+   1. **The implementer role was bound to a test-author agent — FIXED
+      2026-08-09.** The task's `role_agent_ids` resolved BOTH roles to
+      `test-agent`, whose instructions begin *"You are a TEST AUTHOR working
+      test-first (TDD). Do NOT implement the feature."* So the GREEN stage ran
+      an agent explicitly told not to implement. The captured prompt shows the
+      contradiction in one screen: `## Your role: implementer` directly above
+      the test-author instructions, while four implementer agents in the roster
+      were never considered. Not visible at Tier 0, where a single dummy runner
+      answers for every role.
+
+      **The cause was structural, not a tie-break accident.** Role resolution
+      unioned the ROLE's capability with the TASK's whole
+      `required_capabilities` list. A TDD task declares `test_authoring` AND
+      `implementation` because it has both stages — a property of the task, not
+      a demand on every agent that touches it — so resolving IMPLEMENTER
+      required an agent that could also author tests, and the only agents that
+      qualify are precisely the ones forbidden to implement. A role now asks
+      for its OWN capability plus the task's domain capabilities only, and
+      candidates are considered in tiers: agents declaring the role, then
+      agents declaring none, then (last resort) agents declaring a different
+      one. The last tier has to exist — the default `seed demo` registry is a
+      single agent labelled `implementer` holding every capability, and a
+      blocked default installation would be a worse bug than the one being
+      fixed. Tiers rather than a score are what make it deterministic: a
+      dedicated agent wins whatever order the registry was built in.
    2. **An empty completion is misclassified as `rate_limit`.** The runtime
       reported `kind=rate_limit` and the plan settled onto the patient 4×
       rate-limit backoff — but a direct provider call for the same model at the

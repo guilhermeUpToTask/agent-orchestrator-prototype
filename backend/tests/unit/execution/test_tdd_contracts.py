@@ -221,3 +221,95 @@ def test_dot_prefixed_scope_does_not_match_a_non_dot_directory(tmp_path) -> None
 
     assert not result.accepted
     assert result.reasons == ("path outside allowed scope: config/settings.json",)
+
+
+def role_agent(agent_id: str, role: str, capability_ids: list[str]) -> AgentSpec:
+    """Like `agent`, but with a DECLARED role rather than the neutral placeholder."""
+    return agent(agent_id, capability_ids).model_copy(update={"role": role})
+
+
+def test_the_implementer_role_is_never_bound_to_a_test_author() -> None:
+    """The P8.4 demo defect, reproduced exactly.
+
+    A TDD task declares BOTH `test_authoring` and `implementation`, because it
+    has both stages. Role resolution used to union the ROLE's capability with
+    the TASK's whole list, so resolving IMPLEMENTER demanded an agent that could
+    also author tests — and the only agents that qualify are precisely the ones
+    whose instructions say "Do NOT implement the feature". The live run bound
+    both roles to `test-agent` and the GREEN stage could never succeed.
+    """
+    repository = InMemoryAgentRepository(
+        [
+            role_agent("tests", "test_author", ["test_authoring", "implementation", "python"]),
+            role_agent("impl", "implementer", ["implementation", "python"]),
+        ],
+        default_id="tests",
+    )
+    task_capabilities = ["test_authoring", "implementation", "python"]
+
+    assert resolve_role_agent(RunRole.TEST_AUTHOR, task_capabilities, repository).id == "tests"
+    assert resolve_role_agent(RunRole.IMPLEMENTER, task_capabilities, repository).id == "impl"
+
+
+def test_a_contradicting_declared_role_is_the_last_resort_not_the_first_choice() -> None:
+    """A different declared role is a LAST resort, never a competitor.
+
+    It cannot be forbidden outright: the out-of-the-box `seed demo` registry is
+    a single agent labelled `implementer` holding every capability, and
+    refusing to let it author a test would make the default installation unable
+    to run a TDD task at all. A block is the right answer to "nobody can do
+    this", not to "nobody said they specialise in it".
+
+    What must never happen is the contradicting agent winning while a suitable
+    one is registered — that is the P8.4 defect, and it is the assertion above.
+    """
+    lone_author = role_agent("tests", "test_author", ["test_authoring", "implementation", "python"])
+    repository = InMemoryAgentRepository([lone_author], default_id="tests")
+
+    assert resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], repository).id == (
+        "tests"
+    )
+
+    # …but the moment a real implementer exists, it wins outright.
+    with_impl = InMemoryAgentRepository(
+        [lone_author, role_agent("impl", "implementer", ["implementation", "python"])],
+        default_id="tests",
+    )
+    assert resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], with_impl).id == (
+        "impl"
+    )
+
+
+def test_role_resolution_still_blocks_when_no_agent_has_the_capability() -> None:
+    """The fallback ladder must not swallow a genuinely unsatisfiable role."""
+    repository = InMemoryAgentRepository(
+        [role_agent("tests", "test_author", ["test_authoring"])], default_id="tests"
+    )
+
+    with pytest.raises(RoleUnsatisfiableError, match="implementer"):
+        resolve_role_agent(RunRole.IMPLEMENTER, ["implementation"], repository)
+
+
+def test_an_agent_with_no_declared_run_role_is_a_usable_fallback() -> None:
+    """The edge case that must NOT become a block: a registry of neutrally
+    labelled agents (the `seed demo` shape, role="configured") still resolves.
+    Only a CONTRADICTING declared role disqualifies."""
+    repository = InMemoryAgentRepository(
+        [agent("generalist", ["test_authoring", "implementation", "python"])],
+        default_id="generalist",
+    )
+    caps = ["test_authoring", "implementation", "python"]
+
+    assert resolve_role_agent(RunRole.TEST_AUTHOR, caps, repository).id == "generalist"
+    assert resolve_role_agent(RunRole.IMPLEMENTER, caps, repository).id == "generalist"
+
+
+def test_a_declared_role_beats_a_neutral_agent_regardless_of_registry_order() -> None:
+    """Deterministic: the binding must not depend on who was registered first."""
+    specialist = role_agent("impl", "implementer", ["implementation", "python"])
+    neutral = agent("generalist", ["test_authoring", "implementation", "python"])
+
+    for catalog in ([neutral, specialist], [specialist, neutral]):
+        repository = InMemoryAgentRepository(list(catalog), default_id="generalist")
+        chosen = resolve_role_agent(RunRole.IMPLEMENTER, ["implementation", "python"], repository)
+        assert chosen.id == "impl"
