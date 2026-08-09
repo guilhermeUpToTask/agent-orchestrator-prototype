@@ -149,9 +149,20 @@ def main() -> int:
 
     print("== provider ==")
     code, providers = call("GET", "/api/providers")
-    have_provider = any(p.get("name") == "openrouter" for p in (providers or []))
-    if have_provider:
-        report("openrouter", 409, None)
+    matches = [p for p in (providers or []) if p.get("name") == "openrouter"]
+    if len(matches) > 1:
+        # `POST /api/providers` does not dedupe by name either, so a careless
+        # earlier run can leave two. Picking one arbitrarily is how models end
+        # up parented to a provider the agents are not bound to.
+        print("  FAIL   openrouter — MULTIPLE providers share this name:")
+        for p in matches:
+            print(f"           {p['id']}")
+        print("         Delete the extras (DELETE /api/providers/<id>) or wipe")
+        print("         ~/.orchestrator/orchestrator.db and start clean. Refusing")
+        print("         to guess which one the roster should bind to.")
+        return 1
+    if matches:
+        report(f"openrouter ({matches[0]['id']})", 409, None)
     elif not os.environ.get("OPENROUTER_API_KEY"):
         print("  FAIL   openrouter — OPENROUTER_API_KEY is unset and no provider exists")
         return 1
@@ -163,19 +174,29 @@ def main() -> int:
             "capacity_scope": "per_model",
         })
         ok &= report("openrouter", c, p)
+        code, providers = call("GET", "/api/providers")
+        matches = [p for p in providers if p.get("name") == "openrouter"]
+    provider_id = matches[0]["id"]
 
-    code, providers = call("GET", "/api/providers")
-    provider_id = next(p["id"] for p in providers if p.get("name") == "openrouter")
+    # Only this provider's models count. A model's provider binding is immutable
+    # and the API rejects an agent whose model and provider disagree, so a
+    # name->id map built across ALL providers can hand out a foreign model id.
+    def catalog() -> dict[str, str]:
+        _, models = call("GET", "/api/models")
+        return {m["name"]: m["id"] for m in (models or [])
+                if m.get("provider_id") == provider_id}
 
     print("== models (free tier, max_inflight 2) ==")
+    existing_models = catalog()
     for mname in MODELS:
+        if mname in existing_models:
+            report(mname, 0, None, skipped=True)
+            continue
         c, p = call("POST", f"/api/providers/{provider_id}/models",
                     {"name": mname, "max_inflight": 2})
         ok &= report(mname, c, p)
 
-    # Resolve ids by NAME. Server-generated, never constructible.
-    code, models = call("GET", "/api/models")
-    by_name = {m["name"]: m["id"] for m in (models or [])}
+    by_name = catalog()
 
     print("== agents ==")
     code, existing = call("GET", "/api/agents")
