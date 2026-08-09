@@ -142,8 +142,24 @@ write_files:
   - path: /etc/profile.d/aipom.sh
     content: |
       export ORCHESTRATOR_HOME="$HOME/.orchestrator"
+  - path: /etc/sysctl.d/60-aipom-userns.conf
+    content: |
+      # Ubuntu 24.04 ships kernel.apparmor_restrict_unprivileged_userns=1, which
+      # stops bwrap and unshare creating an unprivileged user namespace from a
+      # plain shell. Podman and docker are unaffected — Ubuntu ships AppArmor
+      # profiles permitting them — so the symptom is a guest that runs
+      # PID-isolated containers fine while verify.sh's bwrap/unshare checks fail
+      # with "setting up uid map: Permission denied", which reads exactly like a
+      # kernel wall and is not one.
+      #
+      # The orchestrator's Sandbox port and the Codex/Pi CLIs both need
+      # unprivileged userns. Disabling this is sound HERE and only here: the VM
+      # boundary is what contains agent-written code, which is the whole reason
+      # this guest replaced the devcontainer. The host kernel is untouched.
+      kernel.apparmor_restrict_unprivileged_userns = 0
 
 runcmd:
+  - sysctl --system
   - usermod -aG docker dev
   - grep -q '^dev:' /etc/subuid || usermod --add-subuids 100000-165535 --add-subgids 100000-165535 dev
   - systemctl enable --now docker
