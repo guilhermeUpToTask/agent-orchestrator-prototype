@@ -280,13 +280,19 @@ echo "Provisioned $VM_NAME. Wait for cloud-init, then: make -C infra/dev-vm ssh"
 VM_NAME ?= aipom-dev
 VIRSH := virsh --connect qemu:///system
 
+# Resolve the guest address WITHOUT a recursive $(MAKE). `make -C` implies -w
+# (print directory) and -s does not suppress it, so a sub-make's "Entering
+# directory" text lands inside the captured value and ssh tries to resolve
+# `make[1]:` as a hostname. Defining the command once keeps every caller honest.
+VM_IP = $(VIRSH) domifaddr $(VM_NAME) 2>/dev/null | awk '/ipv4/ {split($$4,a,"/"); print a[1]}'
+
 .PHONY: up ip ssh status destroy verify
 
 up:
 	./create-vm.sh
 
 ip:
-	@$(VIRSH) domifaddr $(VM_NAME) | awk '/ipv4/ {split($$4,a,"/"); print a[1]}'
+	@$(VM_IP)
 
 ssh:
 	@state="$$($(VIRSH) domstate $(VM_NAME) 2>/dev/null)"; \
@@ -294,7 +300,7 @@ ssh:
 	  echo "ERROR: $(VM_NAME) is not running (state: $${state:-absent}). Run 'make up' first." >&2; \
 	  exit 1; \
 	fi; \
-	vmip="$$($(MAKE) -s ip)"; \
+	vmip="$$($(VM_IP))"; \
 	if [ -z "$$vmip" ]; then \
 	  echo "ERROR: $(VM_NAME) is running but has no DHCP lease yet. Wait a few seconds and retry." >&2; \
 	  exit 1; \
@@ -310,7 +316,7 @@ verify:
 	  echo "ERROR: $(VM_NAME) is not running (state: $${state:-absent}). Run 'make up' first." >&2; \
 	  exit 1; \
 	fi; \
-	vmip="$$($(MAKE) -s ip)"; \
+	vmip="$$($(VM_IP))"; \
 	if [ -z "$$vmip" ]; then \
 	  echo "ERROR: $(VM_NAME) is running but has no DHCP lease yet. Wait a few seconds and retry." >&2; \
 	  exit 1; \
