@@ -1254,9 +1254,54 @@ because P8.5 is still blocked:
      always exists, so the skip guard never fired and a forgetful operator got
      eleven errors instead of a clear skip.
    - **Remaining: run it.** Tier 1, real models, captured — and whatever it
-     finds gets published. **Parked 2026-08-02 on a missing
-     `ORCHESTRATOR_MASTER_KEY`** (see *Two blockers parked* below); everything
-     up to that point is staged and verified.
+     finds gets published. The 2026-08-02 `ORCHESTRATOR_MASTER_KEY` blocker is
+     **resolved** (the `aipom-dev` guest has one). **First real attempt made
+     2026-08-09; it did not reach publication, and what it found is below.**
+
+   #### First run attempt, 2026-08-09 — reached execution, stopped there
+
+   Project bound to the materialized seed, brief posted verbatim, **intent gate
+   and a four-goal cycle draft approved** (front-matter / markdown / layout /
+   build — a faithful decomposition of the brief's four requirements). Goal 1
+   enriched, its contract frozen, and the **test-authoring stage succeeded**:
+   `tests/test_front_matter.py` authored and the `TestBundle` frozen with RED
+   evidence. The implementation stage never produced anything. Four findings,
+   in descending order of importance:
+
+   1. **The implementer role was bound to a test-author agent.** The task's
+      `role_agent_ids` resolved BOTH roles to `test-agent`, whose instructions
+      begin *"You are a TEST AUTHOR working test-first (TDD). Do NOT implement
+      the feature."* So the GREEN stage ran an agent explicitly told not to
+      implement, against a frozen bundle protecting the very file it was
+      allowed to touch. The captured prompt shows the contradiction in one
+      screen: `## Your role: implementer` directly above the test-author
+      instructions. The roster contains four implementer agents that were never
+      selected. **This is the finding worth fixing first** and it is not
+      visible at Tier 0, where a single dummy runner answers for every role.
+   2. **An empty completion is misclassified as `rate_limit`.** The runtime
+      reported `kind=rate_limit` and the plan settled onto the patient 4×
+      rate-limit backoff — but a direct provider call for the same model at the
+      same moment returned **HTTP 200**. The pi transcript shows why: the
+      assistant turn came back with `content: []` and all-zero token usage.
+      Waiting politely for a limit that does not exist is worse than failing,
+      because the operator sees "capacity" and assumes patience will fix it.
+   3. **Two of four free models are unusable as the reasoner**, in ways worth
+      recording because both look like bugs from the outside:
+      `nvidia/nemotron-3-ultra-550b-a55b:free` returns turns with `content:
+      null` and no `tool_calls` while populating a `reasoning` field, and
+      `openai/gpt-oss-20b:free` returns `finish_reason: "error"` mid-generation
+      ("provider rejected the request"). **`poolside/laguna-s-2.1:free` planned
+      the cycle correctly** and is the one to pin for a Tier 1 rerun.
+   4. **A 31-minute gap between an armed retry and the attempt.** Attempt 3
+      armed `retry_at` 18:45:47; attempt 4 began 19:16:37, with the worker
+      holding a live, renewing plan lease throughout and logging nothing. Not
+      yet diagnosed, and not the same thing as the backoff being long — the
+      arming timestamp is the thing that was not honoured.
+
+   The run also confirmed machinery working as designed: capacity failures
+   discarded their worktrees leaving zero trace, the backoff gate persisted
+   across a worker restart, and the failed planning sessions recorded
+   `abandoned` artifacts rather than silently vanishing.
 5. ✅ **P8.5 — the `ContainerEnvironment` adapter.** Delivered 2026-08-09, after
    the environment blocker was retired by the `aipom-dev` libvirt/KVM guest
    (`infra/dev-vm/`, gate 7/7 — see *Containerization was unavailable* below).
@@ -1264,13 +1309,20 @@ because P8.5 is still blocked:
    choosing the runtime; validated against real docker AND real podman, not a
    scripted fake. `NoEnvironment` stays the permanent fallback.
 
-### Two blockers parked, both environmental — one resolved 2026-08-08
+### Two blockers parked, both environmental — BOTH resolved by 2026-08-09
 
-Neither is a design problem and neither blocks the other phases. Both needed the
-maintainer's own machine, so they are recorded here rather than worked around.
-**Blocker 2 is now resolved**; blocker 1 remains parked.
+Neither was a design problem and neither blocked the other phases. Both needed
+the maintainer's own machine, so they are recorded here rather than worked
+around. **Both are now resolved by the `aipom-dev` guest**; what remains under
+P8.4 is a rerun, not a blocker.
 
-**1. The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`.** Everything else is
+**1. ~~The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`~~ — RESOLVED
+2026-08-09.** The `aipom-dev` guest has one, readiness is fully green there, and
+the run was attempted; see *First run attempt* above for what it found. The
+original entry is kept below because its reasoning about the master key is
+still the operative warning for anyone rebuilding the guest.
+
+Everything else is
 staged and verified against a live server: `orchestrate serve` up on :8000 with
 the worker live in `real` mode, `pi` 0.73.1 on PATH, the reasoner and all six
 agents resolving to free OpenRouter models, and project `e0e54bc8` bound to

@@ -33,6 +33,39 @@ command) stays in Phase 8, where it is scheduled against preview evidence.
   by `PlanStatus` plus open artifacts and active-cycle state, but deleting
   the compatibility surface requires a separately versioned API removal.
 
+## Role selection and failure classification
+
+Both found by the first real Tier 1 run of the `static-site-v1` demo on
+2026-08-09 (ROADMAP P8.4, *First run attempt*). Neither is reachable at Tier 0,
+where one dummy runner answers for every role and never fails on capacity.
+
+- **The implementer role can be bound to a test-author agent, which is then
+  instructed not to implement.** On a TDD task declaring both `test_authoring`
+  and `implementation`, `role_agent_ids` resolved BOTH roles to `test-agent`,
+  whose instructions open *"You are a TEST AUTHOR working test-first (TDD). Do
+  NOT implement the feature."* The captured prompt carries the contradiction
+  on consecutive lines — `## Your role: implementer`, then the test-author
+  instructions — and the roster's four implementer agents were never
+  considered. The GREEN stage therefore cannot succeed, and it fails as an
+  agent-quality problem rather than as a selection problem, which is what makes
+  it expensive to diagnose. **Reproduction:** a task whose
+  `required_capabilities` include `test_authoring` and `implementation`, with a
+  roster containing both a test-author and an implementer; inspect
+  `Task.role_agent_ids` after enrichment. A fix should make the implementer
+  role refuse an agent whose `role` is `test_author` when any
+  implementation-capable agent exists, and the regression test should assert
+  the two roles resolve to different agents.
+- **An empty completion is classified as `rate_limit`, so the plan waits out a
+  limit that does not exist.** The pi runtime reported `kind=rate_limit` while
+  a direct provider call for the same model at the same moment returned HTTP
+  200; the transcript shows the assistant turn returning `content: []` with
+  all-zero token usage. The plan then settled onto the patient 4× rate-limit
+  backoff. Misreporting "no output" as "capacity" is worse than failing,
+  because capacity is the one failure class the system is designed to wait
+  through rather than surface. **Reproduction:** point a `pi`-runtime agent at
+  a model that returns an empty completion and read `failure_kind` on the
+  resulting `execution_attempts` row.
+
 ## Verification and publication
 
 - The repository has `ProjectDefinition` but no richer persisted
