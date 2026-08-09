@@ -4,6 +4,8 @@ fail-fast/TaskFailed messages, and the seed CLI's runtime binding."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
@@ -19,7 +21,11 @@ from agent_orchestrator.infra.container import AppContainer
 from agent_orchestrator.infra.db.secret_ref import SecretRef
 from agent_orchestrator.infra.db.tables import Base
 from agent_orchestrator.infra.errors import InfrastructureError
-from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, PiAgentRunner
+from agent_orchestrator.infra.runtime.cli_runner import (
+    ClaudeCodeRunner,
+    CodexRunner,
+    PiAgentRunner,
+)
 from agent_orchestrator.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
 from agent_orchestrator.infra.runtime.factory import (
     CatalogAgentRunner,
@@ -284,3 +290,46 @@ def test_seed_binds_the_demo_agent_runtime(tmp_path, monkeypatch):
     assert agent.model_id == "openrouter:gpt-x"
     binding = validate_agent_binding(agent, container.provider_repo, container.model_repo)
     assert binding.valid is True
+
+
+def test_codex_resolves_without_touching_the_secret_store(container, monkeypatch):
+    """codex authenticates from CODEX_HOME (a `codex login` subscription
+    credential), not from an API key.
+
+    So it must resolve BEFORE the secret store, and it must keep resolving when
+    the master key is absent entirely. Passing `api_key=""` instead would make a
+    runtime that legitimately needs no secret look like one that lost its
+    secret, and fail-closed on the wrong thing.
+    """
+    seed_anthropic(container, monkeypatch)
+    scope = container.config_store.ORCHESTRATOR_SCOPE
+    container.config_store.set(scope, "agent_runner.mode", "real")
+    monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
+
+    runner = build(container)
+    codex = runner._runner_for(
+        spec_with(runtime_type="codex", provider_id="anthropic", model_id="anthropic:sonnet")
+    )
+
+    assert isinstance(codex, CodexRunner)
+    assert codex._model == "claude-sonnet-4-5"  # the catalog model string still applies
+    assert not hasattr(codex, "_api_key")
+
+
+def test_codex_command_is_non_interactive_and_writes_only_the_workspace():
+    """The flags are the safety contract, so they are asserted rather than
+    assumed: JSONL for in-band error detection, no session files, no inherited
+    user config, and a sandbox that lets the agent write its code without
+    granting it the guest."""
+    runner = CodexRunner(model="gpt-5-codex", codex_home=Path("/home/dev/.codex"))
+
+    cmd = runner._build_cmd("do the task")
+
+    assert cmd[:3] == ["codex", "exec", "--json"]
+    assert "--ephemeral" in cmd
+    assert "--ignore-user-config" in cmd
+    assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
+    assert cmd[cmd.index("-m") + 1] == "gpt-5-codex"
+    assert cmd[-1] == "do the task"  # prompt last, never interpolated into a flag
+    assert runner._env()["CODEX_HOME"] == "/home/dev/.codex"

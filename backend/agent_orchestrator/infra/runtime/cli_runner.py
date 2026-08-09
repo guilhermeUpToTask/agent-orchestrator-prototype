@@ -51,6 +51,11 @@ from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.domain.events.agent_events import AgentEvent
 from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 from agent_orchestrator.infra.runtime.taxonomy import normalize_failure
+from agent_orchestrator.infra.runtime.codex_protocol import (
+    extract_final_text as extract_codex_final_text,
+    extract_stream_error as extract_codex_stream_error,
+    parse_codex_events,
+)
 from agent_orchestrator.infra.runtime.pi_protocol import (
     extract_final_text,
     extract_stream_error,
@@ -742,6 +747,96 @@ class ClaudeCodeRunner(CliAgentRunner):
 
     def _env(self) -> dict[str, str]:
         return {**_base_child_env(), "ANTHROPIC_API_KEY": self._api_key}
+
+
+class CodexRunner(CliAgentRunner):
+    """Runs `codex exec --json` against a ChatGPT-subscription login.
+
+    The odd one out, deliberately: every other runtime is handed an
+    envelope-encrypted API key, and codex is not. `codex login` stores a
+    subscription credential under `CODEX_HOME`, so this runner injects the
+    HOME/CODEX_HOME pair and never touches the secret store. That is why the
+    factory branches before key resolution rather than passing `api_key=""` —
+    a runtime that needs no secret should not be made to look like one that
+    lost its secret.
+
+    **Volume, not the auth method, is the thing to be careful about.** A seat
+    credential driven by an unbounded retry loop is what looks abusive. The
+    orchestrator's provider admission gate and per-task retry budget are the
+    controls; do not raise them for this runtime to "go faster".
+    """
+
+    def __init__(
+        self,
+        model: str | None = None,
+        extra_flags: list[str] | None = None,
+        timeout_seconds: int = 600,
+        provider_id: str | None = None,
+        model_id: str | None = None,
+        orchestrator_home: Path | None = None,
+        observation_repository: ObservationRepository | None = None,
+        sandbox: Sandbox | None = None,
+        prior_attempt_feedback: PriorAttemptFeedback | None = None,
+        codex_home: Path | None = None,
+    ) -> None:
+        super().__init__(
+            timeout_seconds,
+            provider_id=provider_id,
+            model_id=model_id,
+            orchestrator_home=orchestrator_home,
+            observation_repository=observation_repository,
+            sandbox=sandbox,
+            prior_attempt_feedback=prior_attempt_feedback,
+        )
+        self._model = model
+        self._extra_flags = extra_flags or []
+        # Where `codex login` put the subscription credential. Defaults to the
+        # real ~/.codex; a temp dir is refused by the CLI for helper binaries.
+        self._codex_home = codex_home or Path.home() / ".codex"
+
+    @property
+    def log_prefix(self) -> str:
+        return "codex"
+
+    def _build_cmd(self, prompt: str) -> list[str]:
+        cmd = [
+            "codex",
+            "exec",
+            "--json",
+            # Do not accumulate session files per attempt: an attempt is
+            # disposable and its worktree is discarded on failure.
+            "--ephemeral",
+            # Reproducibility: the run must not depend on whatever an operator
+            # left in ~/.codex/config.toml. Auth still resolves from CODEX_HOME.
+            "--ignore-user-config",
+            # The attempt already runs inside a disposable git worktree in a VM.
+            # workspace-write lets the agent write the code it was asked for
+            # without granting it the whole guest.
+            "--sandbox",
+            "workspace-write",
+        ]
+        if self._model:
+            cmd += ["-m", self._model]
+        return cmd + self._extra_flags + [prompt]
+
+    def _env(self) -> dict[str, str]:
+        env = {**_base_child_env(), "CODEX_HOME": str(self._codex_home)}
+        # HOME must survive even if the allowlist above did not carry it: the
+        # CLI resolves its credential relative to it.
+        env.setdefault("HOME", str(Path.home()))
+        return env
+
+    def _task_output(self, stdout: str) -> str:
+        return extract_codex_final_text(stdout) or stdout
+
+    def _detect_stream_error(self, stdout: str) -> str | None:
+        # codex reports auth failures, rate limits and provider outages in-band
+        # while exiting 0 — see codex_protocol for the observed shape.
+        return extract_codex_stream_error(stdout)
+
+    def _events_from_output(self, output: str) -> list[tuple[str, dict[str, object]]]:
+        structured = parse_codex_events(output)
+        return structured or super()._events_from_output(output)
 
 
 class GeminiRunner(CliAgentRunner):
