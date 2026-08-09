@@ -123,6 +123,36 @@ def test_the_run_sees_the_ref_not_the_working_tree(binary: str, repo: Path) -> N
     assert "DIRTY" not in verdict.detail
 
 
+def test_a_small_startup_budget_does_not_abort_the_daemon_call(
+    binary: str, repo: Path
+) -> None:
+    """`startup_timeout_seconds` budgets the APPLICATION, not the daemon.
+
+    Regression: `run -d` was given the operator's app-startup budget, so on a
+    loaded machine a legitimate 2s budget timed out the client call while the
+    daemon created the container anyway — an `errored` verdict AND a leaked
+    container. The verdict here must be the honest `failed` (the healthcheck
+    genuinely never passes), never `errored`.
+    """
+    env = ContainerEnvironment(binary=binary)
+    spec = EnvironmentSpec(
+        image=IMAGE,
+        command="sleep 300",
+        healthcheck="test -f /app/never-appears",
+        scenario=["true"],
+        startup_timeout_seconds=2,
+    )
+    verdict = env.verify(repo, "HEAD", spec)
+    assert verdict.outcome == "failed", verdict.summary
+    listing = subprocess.run(
+        [binary, "ps", "-a", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "aipom-acceptance-" not in listing
+
+
 def test_no_container_survives_the_run(binary: str, repo: Path) -> None:
     """Teardown happens on the failure path too."""
     env = ContainerEnvironment(binary=binary)

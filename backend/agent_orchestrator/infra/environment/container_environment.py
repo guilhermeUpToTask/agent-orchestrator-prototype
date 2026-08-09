@@ -38,6 +38,15 @@ _HEALTHCHECK_PROBE_TIMEOUT_SECONDS = 30
 _HEALTHCHECK_POLL_SECONDS = 1.0
 _WORKTREE_TIMEOUT_SECONDS = 120
 
+# How long the DAEMON may take to accept a detached create, which is not how
+# long the APPLICATION may take to become healthy. `spec.startup_timeout_seconds`
+# is the operator's budget for the latter and can legitimately be a few seconds;
+# spending it on `run -d` meant that on a loaded machine the client call timed
+# out while the daemon went on to create the container anyway — an `errored`
+# verdict AND a leaked container. Found by the real-container suite under
+# parallel load; no scripted CLI would have produced it.
+_DAEMON_CALL_TIMEOUT_SECONDS = 120
+
 
 class _CommandFailed(Exception):
     def __init__(self, output: str) -> None:
@@ -123,24 +132,39 @@ class ContainerEnvironment:
 
         name = f"aipom-acceptance-{uuid.uuid4().hex[:12]}"
         with _checkout(repo, ref, self._workspace_root) as tree:
+            # The teardown `finally` must be armed BEFORE the start, not after
+            # it succeeds: a create that fails or times out on the client side
+            # can still have created the container daemon-side, and a run that
+            # leaks containers is worse than one that reports nothing.
             try:
-                self._start(name, tree, spec)
-            except _CommandFailed as exc:
-                return AcceptanceVerdict(
-                    outcome="errored",
-                    summary="The container did not start.",
-                    detail=exc.output,
-                    duration_seconds=time.monotonic() - started,
-                )
-            try:
+                try:
+                    self._start(name, tree, spec)
+                except _CommandFailed as exc:
+                    return AcceptanceVerdict(
+                        outcome="errored",
+                        summary="The container did not start.",
+                        detail=exc.output,
+                        duration_seconds=time.monotonic() - started,
+                    )
                 return self._observe(name, spec, started)
             finally:
-                # Teardown on every path, including failure and timeout.
-                self._exec(
-                    [self._binary, "rm", "-f", name],
-                    timeout=_TEARDOWN_TIMEOUT_SECONDS,
-                    check=False,
-                )
+                self._teardown(name)
+
+    def _teardown(self, name: str) -> None:
+        """Remove the container, and never raise while doing it.
+
+        This runs in a `finally`: an exception here would replace whatever
+        verdict or error the run had actually produced with a teardown failure,
+        which is both less informative and a way for `verify()` to raise.
+        """
+        try:
+            self._exec(
+                [self._binary, "rm", "-f", name],
+                timeout=_TEARDOWN_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — see the docstring.
+            log.warning("acceptance.teardown_failed", container=name, error=str(exc))
 
     def _start(self, name: str, tree: Path, spec: EnvironmentSpec) -> None:
         cmd = [
@@ -159,7 +183,8 @@ class ContainerEnvironment:
         cmd.append(spec.image)
         if spec.command:
             cmd += ["sh", "-c", spec.command]
-        self._exec(cmd, timeout=spec.startup_timeout_seconds)
+        # The daemon's budget, not the application's — see the constant.
+        self._exec(cmd, timeout=_DAEMON_CALL_TIMEOUT_SECONDS)
         log.info("acceptance.container_started", container=name, image=spec.image)
 
     def _observe(
