@@ -24,9 +24,19 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-# Event types carrying the agent's final prose. `item.completed` wraps a
-# structured item; `turn.completed` closes a turn.
-_TEXT_EVENT_TYPES = frozenset({"item.completed", "turn.completed", "thread.message"})
+# Event types carrying the agent's final prose. Confirmed against a real run:
+# the message arrives as `{"type":"item.completed","item":{"type":
+# "agent_message","text":"…"}}`. `turn.completed` is deliberately NOT here — it
+# closes the turn and carries `usage`, not text.
+_TEXT_EVENT_TYPES = frozenset({"item.completed", "thread.message"})
+
+# Token accounting, reported once per turn on `turn.completed`. Worth capturing
+# rather than discarding: a trivial six-word prompt measured 12,973 input
+# tokens (9,984 of them cached), because the CLI ships its system prompt, tool
+# definitions and repository context every turn. That fixed overhead — not the
+# task text — is what actually consumes a subscription's allowance, and it is
+# invisible unless recorded.
+_USAGE_EVENT_TYPES = frozenset({"turn.completed"})
 
 
 def _iter_records(output: str) -> Iterator[dict[str, Any]]:
@@ -85,6 +95,27 @@ def _candidate_texts(value: dict[str, Any]) -> Iterator[str]:
                 raw = nested.get(inner)
                 if isinstance(raw, str) and raw.strip():
                     yield raw.strip()
+
+
+def extract_usage(output: str) -> dict[str, int]:
+    """Summed token usage across every turn in the run, or {} when absent.
+
+    Summed rather than last-wins: one orchestrator attempt can contain several
+    turns, and the cost of the attempt is their total. Only integer fields are
+    kept, so a future field of another type cannot corrupt the accounting.
+    """
+    totals: dict[str, int] = {}
+    for value in _iter_records(output):
+        if value.get("type") not in _USAGE_EVENT_TYPES:
+            continue
+        usage = value.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key, raw in usage.items():
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                continue
+            totals[key] = totals.get(key, 0) + raw
+    return totals
 
 
 def parse_codex_events(output: str) -> list[tuple[str, dict[str, Any]]]:

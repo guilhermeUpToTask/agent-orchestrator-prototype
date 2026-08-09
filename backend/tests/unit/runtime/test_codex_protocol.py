@@ -11,6 +11,7 @@ from __future__ import annotations
 from agent_orchestrator.infra.runtime.codex_protocol import (
     extract_final_text,
     extract_stream_error,
+    extract_usage,
     parse_codex_events,
 )
 
@@ -25,10 +26,15 @@ Reading additional input from stdin...
 {"type":"error","message":"Reconnecting... 5/5 (unexpected status 401 Unauthorized)"}
 """
 
+# Two agent messages in one run. Shaped like the captured output below: prose
+# arrives as `item.completed`, and `turn.completed` closes the turn with usage.
+# An earlier draft of this fixture invented `turn.completed` carrying the final
+# text; the real run disproved it, which is why fixtures here are captured.
 SUCCESSFUL = """{"type":"thread.started","thread_id":"abc"}
 {"type":"turn.started"}
-{"type":"item.completed","item":{"text":"Created src/sitegen/front_matter.py"}}
-{"type":"turn.completed","text":"Done: the parser and its tests are in place."}
+{"type":"item.completed","item":{"type":"agent_message","text":"Created src/sitegen/front_matter.py"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Done: the parser and its tests are in place."}}
+{"type":"turn.completed","usage":{"input_tokens":900,"output_tokens":40}}
 """
 
 
@@ -79,3 +85,54 @@ def test_empty_output_yields_nothing_rather_than_raising() -> None:
     assert extract_final_text("") is None
     assert extract_stream_error("") is None
     assert parse_codex_events("") == []
+
+
+# Verbatim stdout from an authenticated `codex exec --json` run, 2026-08-09.
+# The prompt was six words; the token counts are the CLI's fixed overhead.
+REAL_SUCCESS = (
+    '{"type":"thread.started","thread_id":"019fe8d2-cba8-7ae2-beb4-d75925e1f55a"}\n'
+    '{"type":"turn.started"}\n'
+    '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"pong"}}\n'
+    '{"type":"turn.completed","usage":{"input_tokens":12973,'
+    '"cached_input_tokens":9984,"cache_write_input_tokens":0,'
+    '"output_tokens":5,"reasoning_output_tokens":0}}\n'
+)
+
+
+def test_the_agent_message_is_extracted_from_a_real_run() -> None:
+    """Against captured output, not a guessed shape: the message arrives nested
+    as item.completed -> item.text."""
+    assert extract_final_text(REAL_SUCCESS) == "pong"
+
+
+def test_turn_completed_carries_usage_not_text() -> None:
+    """`turn.completed` closes the turn and reports tokens. Treating it as a
+    text event would have made the last message an empty string."""
+    assert extract_stream_error(REAL_SUCCESS) is None
+    assert extract_final_text(REAL_SUCCESS) == "pong"
+
+
+def test_usage_is_recorded_so_the_real_cost_is_visible() -> None:
+    """A six-word prompt cost 12,973 input tokens because the CLI ships its
+    system prompt, tools and repo context every turn. That fixed overhead is
+    what consumes a subscription allowance, and it is invisible unless
+    recorded."""
+    usage = extract_usage(REAL_SUCCESS)
+
+    assert usage["input_tokens"] == 12973
+    assert usage["cached_input_tokens"] == 9984
+    assert usage["output_tokens"] == 5
+
+
+def test_usage_sums_across_turns_because_an_attempt_may_take_several() -> None:
+    two_turns = REAL_SUCCESS + (
+        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":7}}\n'
+    )
+    usage = extract_usage(two_turns)
+
+    assert usage["input_tokens"] == 13073
+    assert usage["output_tokens"] == 12
+
+
+def test_missing_usage_is_an_empty_mapping_not_an_error() -> None:
+    assert extract_usage(UNAUTHENTICATED) == {}
