@@ -15,8 +15,6 @@ already closed by the finalize-abandon.
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Mapping, Sequence, TypeVar
@@ -30,7 +28,6 @@ from agent_orchestrator.domain.entities.execution_contracts import (
     TestBundle,
     VerificationEvidence,
     VerificationKind,
-    VerificationStrategy,
 )
 from agent_orchestrator.domain.entities.goal import Goal
 from agent_orchestrator.domain.entities.planning_artifacts import (
@@ -55,11 +52,10 @@ from agent_orchestrator.domain.events.outbox import (
     TaskVerificationAccepted,
 )
 from agent_orchestrator.domain.factories.identity import new_id
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 from agent_orchestrator.domain.errors.base import DomainError
 from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.repositories.model_provider_repo import ModelProviderRepository
-from agent_orchestrator.domain.services.lookups import find_goal, find_task
+from agent_orchestrator.domain.services.lookups import find_goal
 from agent_orchestrator.domain.services.navigation import NOT_READY, can_promote_goal
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
@@ -119,13 +115,21 @@ from agent_orchestrator.app.test_identity import (
     declared_checks,
     existing_checks,
 )
+from agent_orchestrator.app.handlers.execution_rules import (
+    Unit,
+    attempts_against_budget,
+    jitter_unit,
+    main_repo_failure,
+    orchestration_failure,
+    raise_on_infrastructure_exit,
+    unit_task,
+)
 from agent_orchestrator.app.verification import (
     BaselineOutcome,
     baseline_outcome,
     is_check_path,
     sha256_file,
     validate_authoring,
-    test_author_path_allowed,
     validate_candidate,
 )
 
@@ -144,37 +148,8 @@ MAX_PROMOTION_RETRIES = 2
 log = structlog.get_logger(__name__)
 
 
-@dataclass(frozen=True)
-class _Unit:
-    """Revision-bound values captured in the start transaction."""
-
-    cycle_id: str | None
-    goal_id: str
-    task_id: str
-    attempt: int
-    policy_attempt: int
-    task_revision: int
-    retry_policy: RetryPolicy
-    task_snapshot: Task
-    spec: AgentSpec
-    execution: ExecutionAttempt
-    run_role: str
 
 
-def _orchestration_failure(reason: str) -> RuntimeFailure:
-    """A Class C failure: an orchestration race or missing infrastructure.
-
-    Un-freeze #17 made VERIFICATION_ERROR retryable so a rejected CANDIDATE gets
-    a second attempt. These are not candidates — a superseded cycle, evidence
-    that moved during promotion, an absent verifier — and retrying only re-races
-    them. `RuntimeFailure.retryable` is an independent veto in the retry
-    condition, so the split stays structural rather than keyed off message text.
-    """
-    return RuntimeFailure(
-        kind=FailureKind.VERIFICATION_ERROR,
-        safe_message=reason[:500],
-        retryable=False,
-    )
 
 
 
@@ -257,7 +232,7 @@ class ExecutionHandler:
     ) -> Signal:
         # ---- txn1: pick the unit, mark RUNNING, persist + outbox atomically ----
         goal_promotion: tuple[str, str, str] | None = None
-        unit: _Unit | None = None
+        unit: Unit | None = None
         review_signal: Signal | None = None
         acceptance_cycle_id: str | None = None
         with uow:
@@ -426,7 +401,7 @@ class ExecutionHandler:
                         # Class C (a missing verifier is configuration, not a candidate the agent can fix). Un-freeze #17 made
                         # VERIFICATION_ERROR retryable for candidate rejections;
                         # this is not one, so it keeps the `retryable` veto.
-                        failure=_orchestration_failure("deterministic verification executor is unavailable"),
+                        failure=orchestration_failure("deterministic verification executor is unavailable"),
                     )
                 if unit.run_role == "test_author":
                     return await self._finalize_test_author(
@@ -442,7 +417,7 @@ class ExecutionHandler:
             exc = failure
             stray_paths = await self._main_repo_stray_paths(main_repo_before)
             if stray_paths:
-                exc = self._main_repo_failure(stray_paths)
+                exc = main_repo_failure(stray_paths)
             await self._workspace.discard(handle)
             return self._finalize_failure(plan_id, unit, exc, uow)
 
@@ -453,21 +428,6 @@ class ExecutionHandler:
             return await self._workspace.main_repo_status()
         return set()
 
-    @staticmethod
-    def _main_repo_failure(stray_paths: list[str]) -> TaskFailed:
-        message = (
-            "agent modified the project main repository outside its assigned "
-            f"worktree; stray paths: {stray_paths}"
-        )
-        return TaskFailed(
-            message,
-            FailureKind.TOOL_ERROR,
-            failure=RuntimeFailure(
-                kind=FailureKind.TOOL_ERROR,
-                safe_message=message,
-                retryable=False,
-            ),
-        )
 
     async def _main_repo_stray_paths(self, before: set[str]) -> list[str]:
         if not isinstance(self._workspace, MainRepositoryWorkspace):
@@ -478,7 +438,7 @@ class ExecutionHandler:
     async def _raise_on_main_repo_changes(self, before: set[str]) -> None:
         stray_paths = await self._main_repo_stray_paths(before)
         if stray_paths:
-            raise self._main_repo_failure(stray_paths)
+            raise main_repo_failure(stray_paths)
 
     def _retry_promotion(
         self,
@@ -558,7 +518,7 @@ class ExecutionHandler:
         self,
         plan_id: str,
         plan: Plan,
-        unit: "_Unit",
+        unit: "Unit",
         exc: TaskFailed,
         uow: UnitOfWork,
         not_before: datetime | None,
@@ -666,61 +626,15 @@ class ExecutionHandler:
         )
         return True
 
-    def _attempts_against_budget(
-        self, plan_id: str, unit: "_Unit", kind: FailureKind | None, uow: UnitOfWork
-    ) -> int:
-        """How many attempts this failure's budget has actually consumed.
 
-        `cycle_attempt` counts EVERY attempt, including ones that never reached
-        the work: a provider capacity failure means there was no room upstream,
-        not that the agent produced something wrong. For a kind bounded by a
-        ceiling that distinction decides the outcome — observed live, a task
-        waited out three rate limits and then its FIRST real candidate rejection
-        blocked the goal, because the ceiling of 2 had already been spent by
-        failures of an unrelated kind.
 
-        Kinds with a ceiling are therefore counted per KIND. Everything else
-        keeps the whole-task counter, which is what a general attempt budget
-        means.
-        """
-        if kind is None or kind not in unit.retry_policy.kind_attempt_ceiling:
-            return unit.policy_attempt
-        # The ledger holds only attempts already finalized; this one is still
-        # RUNNING (finalize happens after the retry decision). Count it, so the
-        # number means the same thing `policy_attempt` does: attempts made,
-        # including the one that just failed.
-        prior = sum(
-            1
-            for attempt in uow.executions.list_attempts(plan_id)
-            if attempt.task_id == unit.task_id
-            and attempt.goal_id == unit.goal_id
-            and attempt.failure_kind == kind.value
-        )
-        return prior + 1
-
-    @staticmethod
-    def _raise_on_infrastructure_exit(outcomes: list[CommandExecution]) -> None:
-        """Exit 126/127 means the command could not run at all — never a test verdict."""
-        failure = next((item for item in outcomes if item.exit_code in {126, 127}), None)
-        if failure is not None:
-            raise TaskFailed(
-                f"verification command {failure.command!r} failed with exit code "
-                f"{failure.exit_code} (infrastructure failure)",
-                FailureKind.TOOL_ERROR,
-            )
-
-    @staticmethod
-    def _test_author_path_allowed(path: str, strategy: VerificationStrategy) -> bool:
-        # One definition, shared with the reasoner's submission-time check so a
-        # contract cannot freeze a strategy its own scope makes unsatisfiable.
-        return test_author_path_allowed(path, strategy)
 
 
 
     def _record_baseline(
         self,
         plan_id: str,
-        unit: _Unit,
+        unit: Unit,
         contract: TaskContract,
         selectors: Sequence[str],
         outcomes: Sequence[CommandExecution],
@@ -806,7 +720,7 @@ class ExecutionHandler:
     async def _finalize_test_author(
         self,
         plan_id: str,
-        unit: _Unit,
+        unit: Unit,
         handle: WorkspaceHandle,
         uow: UnitOfWork,
         checks_before: Mapping[str, str],
@@ -857,7 +771,7 @@ class ExecutionHandler:
         # exits 127 AND left a file behind is an infrastructure failure, not a
         # contract violation, and reporting it as the latter sends the agent to
         # repair something that never ran.
-        self._raise_on_infrastructure_exit(outcomes)
+        raise_on_infrastructure_exit(outcomes)
         after = await self._verifier.changed_paths(workspace_handle.path, base_ref)
         self._reject_authoring_violations(
             Path(workspace_handle.path),
@@ -910,7 +824,7 @@ class ExecutionHandler:
         def finalize() -> Signal:
             with uow:
                 plan = uow.plans.get(plan_id)
-                task = self._unit_task(plan, unit)
+                task = unit_task(plan, unit)
                 if (
                     plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
                     or task.status != Status.RUNNING
@@ -966,7 +880,7 @@ class ExecutionHandler:
     async def _finalize_verified_implementation(
         self,
         plan_id: str,
-        unit: _Unit,
+        unit: Unit,
         handle: WorkspaceHandle,
         uow: UnitOfWork,
     ) -> Signal:
@@ -992,7 +906,7 @@ class ExecutionHandler:
             workspace_handle.path,
             contract.verification_commands,
         )
-        self._raise_on_infrastructure_exit(outcomes)
+        raise_on_infrastructure_exit(outcomes)
         if not outcomes or any(item.exit_code != 0 for item in outcomes):
             raise TaskFailed(
                 "authoritative verification command failed",
@@ -1039,7 +953,7 @@ class ExecutionHandler:
         def finalize() -> Signal:
             with uow:
                 plan = uow.plans.get(plan_id)
-                task = self._unit_task(plan, unit)
+                task = unit_task(plan, unit)
                 if (
                     plan.goal_promotion_reservations.get(unit.goal_id) != unit.execution.id
                     or task.status != Status.RUNNING
@@ -1122,7 +1036,7 @@ class ExecutionHandler:
                     raise
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def _reserve_candidate(self, plan_id: str, unit: _Unit, uow: UnitOfWork) -> bool:
+    def _reserve_candidate(self, plan_id: str, unit: Unit, uow: UnitOfWork) -> bool:
         """Atomically guard the candidate and reserve its Git promotion.
         Retries on StaleVersionError; exhaustion degrades to False (the
         existing "couldn't reserve, abandon this attempt gracefully" path
@@ -1138,7 +1052,7 @@ class ExecutionHandler:
                     plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
                 ):
                     return False
-                task = self._unit_task(plan, unit)
+                task = unit_task(plan, unit)
                 if (
                     task.status != Status.RUNNING
                     or task.revision != unit.task_revision
@@ -1165,26 +1079,8 @@ class ExecutionHandler:
         except StaleVersionError:
             return False
 
-    @staticmethod
-    def _unit_task(plan: Plan, unit: _Unit) -> Task:
-        goals = plan.goals
-        if unit.cycle_id is not None:
-            cycle = next(
-                (item for item in plan.cycles if item.id == unit.cycle_id),
-                None,
-            )
-            if cycle is None:
-                raise TaskFailed(
-                    f"captured cycle '{unit.cycle_id}' no longer exists",
-                    # Class C (the cycle was superseded mid-run; retrying re-races it). Un-freeze #17 made VERIFICATION_ERROR
-                    # retryable for candidate rejections; this is not one, so it
-                    # keeps the independent `retryable` veto.
-                    failure=_orchestration_failure("captured cycle '{unit.cycle_id}' no longer exists"),
-                )
-            goals = cycle.goals
-        return find_task(find_goal(goals, unit.goal_id), unit.task_id)
 
-    def _abandon_stale(self, plan_id: str, unit: _Unit, uow: UnitOfWork) -> None:
+    def _abandon_stale(self, plan_id: str, unit: Unit, uow: UnitOfWork) -> None:
         with uow:
             plan = uow.plans.get(plan_id)
             self._finish_execution(
@@ -1193,7 +1089,7 @@ class ExecutionHandler:
                 ExecutionAttemptStatus.ABANDONED,
                 ExecutionRunStatus.ABANDONED,
             )
-            task = self._unit_task(plan, unit)
+            task = unit_task(plan, unit)
             if (
                 (
                     plan.phase != PlanPhase.RUNNING
@@ -1340,7 +1236,7 @@ class ExecutionHandler:
                 # Class C (a promotion-time state check, not the agent's work). Un-freeze #17 made VERIFICATION_ERROR
                 # retryable for candidate rejections; this is not one, so it
                 # keeps the independent `retryable` veto.
-                failure=_orchestration_failure("goal cannot merge without accepted task evidence"),
+                failure=orchestration_failure("goal cannot merge without accepted task evidence"),
             )
         reservation = f"goal:{cycle.id}:{goal.id}"
         plan.reserve_promotion(goal.id, reservation)
@@ -1501,7 +1397,7 @@ class ExecutionHandler:
                     # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
                     # retryable for candidate rejections; this is not one, so it
                     # keeps the independent `retryable` veto.
-                    failure=_orchestration_failure("goal promotion targets a superseded cycle"),
+                    failure=orchestration_failure("goal promotion targets a superseded cycle"),
                 )
             goal = find_goal(cycle.goals, goal_id)
             if any(
@@ -1512,7 +1408,7 @@ class ExecutionHandler:
                     # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
                     # retryable for candidate rejections; this is not one, so it
                     # keeps the independent `retryable` veto.
-                    failure=_orchestration_failure("goal evidence changed during promotion"),
+                    failure=orchestration_failure("goal evidence changed during promotion"),
                 )
             cycle.evidence_refs.append(f"git:{commit_sha}")
             # Recorded HERE, not at the merge call: everything above this line
@@ -1604,7 +1500,7 @@ class ExecutionHandler:
         task: Task,
         uow: UnitOfWork,
         spec: AgentSpec | None = None,
-    ) -> _Unit:
+    ) -> Unit:
         # resolve agent BEFORE marking running so a missing agent fails fast.
         run_role = _run_role_for(plan, task)
         spec = spec or self._resolve_spec(plan, task)
@@ -1650,7 +1546,7 @@ class ExecutionHandler:
             model_id=spec.model_id,
         )
         uow.executions.add_attempt(execution)
-        unit = _Unit(
+        unit = Unit(
             cycle_id=plan.active_cycle.id if plan.active_cycle is not None else None,
             goal_id=goal.id,
             task_id=task.id,
@@ -1866,7 +1762,7 @@ class ExecutionHandler:
 
     # ---- finalize transactions (each opens its own txn) ----
 
-    def _abandoned_task_status(self, plan: Plan, unit: _Unit) -> Task | None:
+    def _abandoned_task_status(self, plan: Plan, unit: Unit) -> Task | None:
         """If the plan left RUNNING (mid-flight replan), return the task for the
         tolerant-finalize checks; None means the normal path applies."""
         cycle_superseded = unit.cycle_id is not None and (
@@ -1878,10 +1774,10 @@ class ExecutionHandler:
             and not cycle_superseded
         ):
             return None
-        return self._unit_task(plan, unit)
+        return unit_task(plan, unit)
 
     @staticmethod
-    def _clear_runtime_circuit(uow: UnitOfWork, unit: _Unit) -> None:
+    def _clear_runtime_circuit(uow: UnitOfWork, unit: Unit) -> None:
         """A successful run proves the provider recovered — retire its circuit.
 
         Must be called from EVERY success finalizer. It used to live only in
@@ -1908,7 +1804,7 @@ class ExecutionHandler:
     def _finish_execution(
         self,
         uow: UnitOfWork,
-        unit: _Unit,
+        unit: Unit,
         attempt_status: ExecutionAttemptStatus,
         run_status: ExecutionRunStatus,
         *,
@@ -1928,10 +1824,6 @@ class ExecutionHandler:
             stderr_tail=stderr_tail,
         )
 
-    @staticmethod
-    def _jitter_unit(attempt_id: str) -> float:
-        digest = hashlib.sha256(attempt_id.encode("utf-8")).digest()
-        return int.from_bytes(digest[:8], "big") / float(2**64 - 1)
 
     def _settle_requested_pause(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> bool:
         if not plan.pause_requested:
@@ -1942,7 +1834,7 @@ class ExecutionHandler:
         return True
 
     def _finalize_failure(
-        self, plan_id: str, unit: _Unit, exc: TaskFailed, uow: UnitOfWork
+        self, plan_id: str, unit: Unit, exc: TaskFailed, uow: UnitOfWork
     ) -> Signal:
         def finalize() -> Signal:
             # A CAS retry re-runs this whole closure, so anything queued by the
@@ -1984,7 +1876,7 @@ class ExecutionHandler:
                 delay = capacity_backoff_seconds(
                     unit.retry_policy,
                     unit.policy_attempt + 1,
-                    jitter_unit=self._jitter_unit(unit.execution.id),
+                    jitter_unit=jitter_unit(unit.execution.id),
                     kind=exc.kind,
                     # A concurrency refusal does not escalate like an exhausted
                     # allowance; every other scope keeps the patient curve.
@@ -2116,7 +2008,7 @@ class ExecutionHandler:
                     and (
                         capacity_wait
                         or unit.retry_policy.should_retry(
-                            self._attempts_against_budget(plan_id, unit, exc.kind, uow),
+                            attempts_against_budget(plan_id, unit, exc.kind, uow),
                             exc.kind,
                         )
                     )
@@ -2247,7 +2139,7 @@ class ExecutionHandler:
             self._flush_pending_artifacts()
 
     def _finalize_success(
-        self, plan_id: str, unit: _Unit, result: TaskResult, uow: UnitOfWork
+        self, plan_id: str, unit: Unit, result: TaskResult, uow: UnitOfWork
     ) -> Signal:
         def finalize() -> Signal:
             # ---- txn2: persist result + DONE atomically with the event ----
@@ -2257,7 +2149,7 @@ class ExecutionHandler:
                 if unit.cycle_id is not None and (
                     plan.active_cycle is None or plan.active_cycle.id != unit.cycle_id
                 ):
-                    superseded = self._unit_task(plan, unit)
+                    superseded = unit_task(plan, unit)
                     self._finish_execution(
                         uow,
                         unit,

@@ -1412,8 +1412,8 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
    clean attempt.
 
 7. 🚧 **P8.7 — backend and documentation refactoring. DO THIS BEFORE P8.6.**
-   Tasks 1–2 delivered 2026-08-10; **a session resuming here starts at task 3
-   (split `ExecutionHandler`)**. Scoped from measurement:
+   Tasks 1–2 delivered 2026-08-10, task 3 step 1 delivered; **a session
+   resuming here starts at task 3 step 2 (agent selection + admission)**. Scoped from measurement:
    [`docs/superpowers/plans/2026-08-10-backend-refactoring.md`](docs/superpowers/plans/2026-08-10-backend-refactoring.md).
 
    **Why it comes first, ahead of the latency work and the demo rerun.** P8.6's
@@ -1448,9 +1448,32 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
       construction became one `RuntimeBuild` parameter object. codex's
       `needs_api_key=False` is a DECLARED field, not a hidden default — the
       factory reads it to decide whether to touch the secret store at all.
-   3. **Split `ExecutionHandler`** in risk order: pure helpers, then agent
-      selection/admission, then goal promotion/acceptance, and the two finalize
-      functions LAST, once the file is readable. Public surface unchanged.
+   3. 🚧 **Split `ExecutionHandler`** in risk order. **IN PROGRESS — this is
+      where a new session resumes.**
+      - ✅ **Step 1 (2026-08-10): pure helpers extracted** to
+        `app/handlers/execution_rules.py` — `Unit`, `orchestration_failure`,
+        `main_repo_failure`, `raise_on_infrastructure_exit`,
+        `author_path_allowed`, `unit_task`, `jitter_unit`,
+        `attempts_against_budget`. Chosen first because every one was already
+        `@staticmethod` or took `self` without using it, so the move cannot
+        change behaviour. **2328 → 2220 lines; the class 2133 → 2050, 44 → 38
+        methods.** Test count unchanged at 1413, which is the proof.
+      - ⏭ **Step 2 (NEXT): agent selection + admission.** Extract
+        `_resolve_spec`, `_select_spec`, `_admission_signal`,
+        `_runtime_circuit_signal`, `_provider_metadata`, `_spec_wait_seconds`,
+        `_clear_runtime_circuit` into a collaborator, constructor-injected so
+        existing tests construct the handler unchanged. Cohesive, and the piece
+        most likely to grow next.
+      - ⏭ **Step 3: goal promotion + acceptance** — `_reserve_goal_promotion`,
+        `_promote_goal`, `_retry_promotion`, `_block_on_unpromotable_goal`,
+        `_pending_acceptance_cycle`, `_run_acceptance`.
+      - ⏭ **Step 4 (LAST, highest risk): the two finalize functions.**
+        `_finalize_failure` (303 lines) and `finalize` (288) hold the
+        check-before-act idempotency and the revalidation before any merge.
+        Touch them only once the surrounding noise is gone.
+
+      Public surface (`handle`, `handle_goal`, `finalize`) does not change at
+      any step.
    4. **Parameter objects** for the worker drive path (`drive_goal` takes
       **20** parameters, 11 of them optional collaborators).
    5. **Router split and the remaining DRY clusters** — `plans.py` is 1626
