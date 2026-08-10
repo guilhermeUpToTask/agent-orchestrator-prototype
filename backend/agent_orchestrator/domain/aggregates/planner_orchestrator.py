@@ -592,6 +592,64 @@ class Plan(BaseModel):
         if per_goal:
             self._recompute_cyclic_status(resolved_at)
 
+    def rebind_agents(
+        self,
+        goal_id: str,
+        role_agent_ids_by_task: dict[str, dict[str, str]],
+        rebound_at: datetime,
+    ) -> None:
+        """Re-point a goal's UNFINISHED tasks at different agents. Un-freeze #20.
+
+        The sibling of `retry_agent_binding`, and deliberately not a relaxation
+        of it: that one RESOLVES an `agent_capability` block and therefore
+        requires one. This one changes the agents on a perfectly healthy plan,
+        which had no supported route at all — the only way to move in-flight
+        work to a different runtime was to delete the plan and start over,
+        throwing away the approved intent, the frozen contracts and every piece
+        of accepted evidence. That is a bad trade for a change of agent, and it
+        is why this exists.
+
+        Surgical, in the sense `edit_task` is: it changes bindings and nothing
+        else. It does not resolve blocks, clear backoff, touch status, bump
+        revisions or invalidate evidence — a different agent is not a different
+        contract.
+
+        **Finished tasks are never rebound.** A terminal task's accepted
+        evidence was produced BY a specific agent against a specific revision;
+        re-pointing it would attribute that evidence to an agent that never ran.
+
+        **Only while PAUSED.** Rebinding a running plan would swap the agent out
+        from under an attempt that is already executing: the run would finalize
+        against a binding that is no longer the one on disk, and the ledger
+        would attribute it to an agent that never saw the task. Pause is
+        graceful — it lets the active atomic run finish first — so requiring it
+        makes the change unambiguous rather than merely unlikely to race.
+        """
+        if not self.paused:
+            raise InvalidEditError(
+                "agents can only be rebound while the plan is paused — "
+                "pause it first so any in-flight attempt finalizes"
+            )
+        goal = self._goal(goal_id)
+        reboundable = [task for task in goal.tasks if task.status not in TERMINAL]
+        if not reboundable:
+            raise InvalidEditError("goal has no unfinished task to rebind")
+        expected_task_ids = {task.id for task in reboundable}
+        if set(role_agent_ids_by_task) != expected_task_ids:
+            raise InvalidEditError("agent bindings must cover every unfinished task")
+        required_roles = {"test_author", "implementer"}
+        for task in reboundable:
+            binding = role_agent_ids_by_task[task.id]
+            if not required_roles.issubset(binding) or any(
+                not binding[role] for role in required_roles
+            ):
+                raise InvalidEditError("each task requires test-author and implementer bindings")
+
+        for task in reboundable:
+            task.role_agent_ids = dict(role_agent_ids_by_task[task.id])
+            task.agent_id = task.role_agent_ids["implementer"]
+        del rebound_at  # no timestamped state changes: bindings only
+
     # ---- worker-driven planning retry gate (un-freeze 2026-07-08) ----
     def record_planning_retry(self, not_before: datetime | None) -> None:
         """A TRANSIENT reasoner failure in a worker-driven planning phase: bump the

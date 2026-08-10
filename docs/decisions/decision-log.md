@@ -662,3 +662,40 @@ rather than a pet. All durable state lives in `~/.orchestrator`. See
 aggregate, port or invariant changes. The `ContainerEnvironment` adapter it
 unblocks plugs into `app/environment_port.py`, which decision 62 already placed
 outside the domain.
+
+---
+
+**Decision 64 (2026-08-10) — domain un-freeze #20: agents can be rebound on a
+paused plan, without destroying it.** `Plan.rebind_agents(goal_id, bindings,
+now)` re-points a goal's UNFINISHED tasks at different agents;
+`POST /api/plans/{plan_id}/goals/{goal_id}/rebind-agents` serves it.
+
+**Why the un-freeze was necessary.** The only existing rebinding path,
+`retry_agent_binding`, hard-requires an active `agent_capability` block —
+it RESOLVES that block, so requiring one is correct for what it does. There was
+therefore no supported way to move a *healthy* plan's in-flight work to a
+different runtime. The workaround discovered in practice was to delete the plan
+and start over, which throws away the approved intent, the frozen contracts and
+every piece of accepted evidence — for what is merely a change of agent. That
+happened on 2026-08-09 and cost a completed intent, an approved five-goal draft,
+a frozen `GoalContract` and a `TestBundle` with real RED evidence. Mutating task
+fields from a use case is forbidden by the dependency rule, so the capability had
+to be a guarded aggregate transition.
+
+**Three guards, each earning its place:**
+
+- **PAUSED only.** Rebinding a running plan swaps the agent out from under an
+  executing attempt: the run finalizes against a binding that is no longer the
+  one on disk, and the ledger attributes it to an agent that never saw the task.
+  Pause is graceful — the active atomic run finalizes first — so requiring it
+  makes the change unambiguous rather than merely unlikely to race.
+- **Finished tasks are never rebound.** A terminal task's accepted evidence was
+  produced BY a specific agent against a specific revision. Re-pointing it would
+  attribute that evidence to an agent that never ran, which is precisely the
+  claim the evidence chain exists to make trustworthy.
+- **Bindings must cover every unfinished task, with both roles.** A partial
+  rebind would leave a goal half on each runtime with no record of why.
+
+**Surgical, like `edit_task`:** it changes bindings and nothing else — no block
+resolution, no backoff clearing, no status change, no revision bump, no evidence
+invalidation. A different agent is not a different contract.

@@ -7,6 +7,7 @@ from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock
 from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
 from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.services.agent_role_resolution import resolve_task_role_agents
+from agent_orchestrator.domain.value_objects.lifecycle import TERMINAL
 from agent_orchestrator.domain.events.outbox import (
     BlockResolved,
     PauseRequested,
@@ -185,4 +186,47 @@ def retry_planning_stage(
                 resolution="retry_stage",
             )
         )
+        uow.plans.save(plan)
+
+
+def rebind_goal_agents(
+    plan_id: str,
+    goal_id: str,
+    uow: UnitOfWork,
+    clock: Clock,
+    agents: AgentRepository,
+) -> None:
+    """Re-resolve a goal's unfinished tasks against the LIVE agent registry.
+
+    The operator-facing answer to "run the rest of this work on a different
+    runtime". Before it existed the only route was deleting the plan, which
+    throws away the approved intent, the frozen contracts and every piece of
+    accepted evidence — for what is only a change of agent.
+
+    Two transactions for the same reason `retry_planning_stage` uses two:
+    resolving roles reads the registry and must not happen inside the write
+    transaction, and the re-read revalidates that the plan did not move
+    underneath.
+    """
+    with uow:
+        plan = uow.plans.get(plan_id)
+        version = plan.version
+        goal = plan._goal(goal_id)
+        requirements = {
+            task.id: list(task.required_capabilities)
+            for task in goal.tasks
+            if task.status not in TERMINAL
+        }
+
+    role_agent_ids_by_task = {
+        task_id: resolve_task_role_agents(required, agents)
+        for task_id, required in requirements.items()
+    }
+
+    with uow:
+        plan = uow.plans.get(plan_id)
+        if plan.version != version:
+            raise InvalidEditError("plan changed while agent bindings were being resolved")
+        plan.rebind_agents(goal_id, role_agent_ids_by_task, clock.now())
+        plan.bump_version()
         uow.plans.save(plan)

@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.use_cases.pause_resume import retry_planning_stage
+from agent_orchestrator.app.use_cases.pause_resume import (
+    rebind_goal_agents,
+    retry_planning_stage,
+)
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from agent_orchestrator.domain.entities.agent_spec import AgentSpec
 from agent_orchestrator.domain.entities.capability import Capability
 from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
+from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
 from agent_orchestrator.domain.entities.goal import Goal
 from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
 from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
+from agent_orchestrator.domain.value_objects.lifecycle import Status
 
 
 def role_agent(agent_id: str, capabilities: list[str]) -> AgentSpec:
@@ -163,3 +168,100 @@ def test_a_tdd_task_never_binds_both_stages_to_the_test_author(env_factory):
             "the implementer stage was handed an agent instructed not to implement"
         )
         assert task.agent_id == "dev-agent"
+
+
+def running_plan_with_a_bound_goal(now):
+    """A HEALTHY plan: work in flight, no block, bindings already resolved."""
+    plan = blocked_plan(now)
+    plan.block = None
+    plan.goal_blocks = {}
+    # Rebinding is only legal while paused, so an in-flight attempt has
+    # already finalized and cannot be re-attributed to an agent it never used.
+    plan.status = PlanStatus.PAUSED
+    plan.paused = True
+    for task in plan.active_cycle.goals[0].tasks:
+        task.role_agent_ids = {"test_author": "old-tests", "implementer": "old-impl"}
+        task.agent_id = "old-impl"
+    return plan
+
+
+def test_agents_can_be_rebound_on_a_healthy_plan_without_a_block(env_factory):
+    """Re-point in-flight work at a different runtime WITHOUT destroying it.
+
+    Before this existed the only rebinding path was `retry_agent_binding`, which
+    hard-requires an active `agent_capability` block. Switching a working plan
+    from one runtime to another therefore had no supported route, and the
+    workaround — delete the plan and start over — throws away the approved
+    intent, the frozen contracts and every piece of accepted evidence. That is
+    a bad trade for a change of agent.
+    """
+    env = env_factory(
+        agents=[
+            declared("codex-test", "test_author", ["backend", "test_authoring"]),
+            declared("codex-dev", "implementer", ["backend", "implementation"]),
+        ],
+        default_agent_id="codex-dev",
+    )
+    env.seed(running_plan_with_a_bound_goal(env.clock.now()))
+
+    rebind_goal_agents("p1", "g1", env.uow, env.clock, env.agents)
+
+    stored = env.stored("p1")
+    assert stored.status == PlanStatus.PAUSED  # untouched
+    assert stored.block is None
+    for task in stored.active_cycle.goals[0].tasks:
+        assert task.role_agent_ids == {
+            "test_author": "codex-test",
+            "implementer": "codex-dev",
+        }
+        assert task.agent_id == "codex-dev"
+
+
+def test_rebinding_never_touches_a_finished_task(env_factory):
+    """A DONE task's accepted evidence was produced BY a specific agent against
+    a specific revision. Re-pointing it would silently attribute that evidence
+    to an agent that never ran, so finished work is left exactly as it is."""
+    env = env_factory(
+        agents=[
+            declared("codex-test", "test_author", ["backend", "test_authoring"]),
+            declared("codex-dev", "implementer", ["backend", "implementation"]),
+        ],
+        default_agent_id="codex-dev",
+    )
+    plan = running_plan_with_a_bound_goal(env.clock.now())
+    finished = plan.active_cycle.goals[0].tasks[0]
+    finished.status = Status.DONE
+    env.seed(plan)
+
+    rebind_goal_agents("p1", "g1", env.uow, env.clock, env.agents)
+
+    tasks = env.stored("p1").active_cycle.goals[0].tasks
+    assert tasks[0].status == Status.DONE
+    assert tasks[0].role_agent_ids == {"test_author": "old-tests", "implementer": "old-impl"}
+    assert tasks[1].role_agent_ids["implementer"] == "codex-dev"
+
+
+def test_rebinding_a_running_plan_is_refused(env_factory):
+    """Only while paused. Swapping the binding under an executing attempt would
+    let the run finalize against a binding that is no longer the one on disk,
+    and the ledger would attribute it to an agent that never saw the task.
+    Pause is graceful, so requiring it makes the change unambiguous rather than
+    merely unlikely to race."""
+    env = env_factory(
+        agents=[
+            declared("codex-test", "test_author", ["backend", "test_authoring"]),
+            declared("codex-dev", "implementer", ["backend", "implementation"]),
+        ],
+        default_agent_id="codex-dev",
+    )
+    plan = running_plan_with_a_bound_goal(env.clock.now())
+    plan.status = PlanStatus.RUNNING
+    plan.paused = False
+    env.seed(plan)
+
+    with pytest.raises(InvalidEditError, match="paused"):
+        rebind_goal_agents("p1", "g1", env.uow, env.clock, env.agents)
+
+    # and nothing moved
+    for task in env.stored("p1").active_cycle.goals[0].tasks:
+        assert task.role_agent_ids == {"test_author": "old-tests", "implementer": "old-impl"}
