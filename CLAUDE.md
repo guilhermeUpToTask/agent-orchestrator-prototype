@@ -158,9 +158,14 @@ agent-orchestrator/
 │   │   │                   #   Goal/Task/GoalContract/TaskContract), navigation scan,
 │   │   │                   #   RetryPolicy/FailureKind, repo ports,
 │   │   │                   #   ports/ (Reasoner/AgentRunner/Workspace/EventSink/Clock)
-│   │   ├── app/            # Use cases + handlers (Execution/Gate/Planning),
-│   │   │                   #   block_policy (what a block may advertise),
-│   │   │                   #   agent_feedback / contract_repair /
+│   │   ├── app/            # Use cases + handlers/ (Execution/Gate/Planning, plus
+│   │   │                   #   the execution collaborators: execution_rules (pure
+│   │   │                   #   decisions), agent_admission (selection + provider
+│   │   │                   #   admission + the RuntimeCircuit read AND write side),
+│   │   │                   #   goal_promotion (reserve/merge/observe)),
+│   │   │                   #   execution_services (ONE collaborator bundle for
+│   │   │                   #   every driver), block_policy (what a block may
+│   │   │                   #   advertise), agent_feedback / contract_repair /
 │   │   │                   #   promotion_failures (bounded auto-recovery), ports.py
 │   │   │                   #   (TaskFailed/Outbox/UnitOfWork/ChatStore + domain re-exports),
 │   │   │                   #   execution/observation records, run_worker loop,
@@ -169,14 +174,19 @@ agent-orchestrator/
 │   │   │                   #   workspace, CLI agent runners + taxonomy, reasoner/
 │   │   │                   #   (stub + OpenAIReasoner + runtime/ tool loop + factory),
 │   │   │                   #   worker entrypoint, container (composition root), CLI
-│   │   └── api/            # FastAPI: thin routers, ONE error map, SSE broker,
-│   │                       #   outbox relay, security, request logging
+│   │   └── api/            # FastAPI: thin routers (routers/plans/ is a PACKAGE —
+│   │                       #   schemas + lifecycle/read/cycles/control/
+│   │                       #   conversation/telemetry, composed into one router;
+│   │                       #   route paths are unchanged and test-locked), ONE
+│   │                       #   error map, SSE broker, outbox relay, security,
+│   │                       #   request logging
 │   ├── tests/              # support.py + fakes_llm.py + unit/orchestration (dual-backend)
 │   │                       #   + unit/reasoner + integration
-│   │                       #   src/infra/db/migrations/ holds the migration
-│   │                       #   chain (0001_core .. 0018_acceptance_runs; one
-│   │                       #   linear head) INSIDE the package — an installed
-│   │                       #   copy has no repo to find them beside
+│   │                       # agent_orchestrator/infra/db/migrations/versions/
+│   │                       #   holds the migration chain (0001_core ..
+│   │                       #   0018_acceptance_runs; one linear head) INSIDE the
+│   │                       #   package — an installed copy has no repo to find
+│   │                       #   them beside
 │   └── docs/               # INTEGRATION_GUIDE.md — the frozen port contracts
 ├── docs/                   # system documentation:
 │   ├── architecture/       #   overview, plan-lifecycle, execution-model, events,

@@ -2,7 +2,7 @@
 
 *How tasks actually run, and why a crash at any instruction leaves the system resumable.*
 
-Code anchors: `backend/agent_orchestrator/app/use_cases/run_worker.py` (the loop), `backend/agent_orchestrator/infra/db/plan_repository.py` (the lease SQL), `backend/agent_orchestrator/app/execution_records.py` + `backend/agent_orchestrator/infra/db/execution_record_repository.py` (stable run/attempt identity), `backend/agent_orchestrator/app/handlers/execution_handler.py` (the two-transaction choreography), `backend/agent_orchestrator/domain/services/navigation.py` (the scan), `backend/agent_orchestrator/infra/git/workspace.py` (the rollback), `backend/agent_orchestrator/infra/runtime/` (the runners).
+Code anchors: `backend/agent_orchestrator/app/use_cases/run_worker.py` (the loop), `backend/agent_orchestrator/infra/db/plan_repository.py` (the lease SQL), `backend/agent_orchestrator/app/execution_records.py` + `backend/agent_orchestrator/infra/db/execution_record_repository.py` (stable run/attempt identity), `backend/agent_orchestrator/app/handlers/execution_handler.py` (the two-transaction choreography) with its collaborators `backend/agent_orchestrator/app/handlers/agent_admission.py` (which agent runs, whether it may start, and the `RuntimeCircuit` rows on both sides) and `backend/agent_orchestrator/app/handlers/goal_promotion.py` (reserve, merge, observe), `backend/agent_orchestrator/domain/services/navigation.py` (the scan), `backend/agent_orchestrator/infra/git/workspace.py` (the rollback), `backend/agent_orchestrator/infra/runtime/` (the runners).
 
 ## The worker loop
 
