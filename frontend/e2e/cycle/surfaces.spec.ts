@@ -112,6 +112,30 @@ test('the settings sections all mount and report real backend state', async ({ p
   await expect(page.getByText(/dry-run/i).first()).toBeVisible();
 });
 
+test('the console dock exposes three separate controls, not one', async ({ page }) => {
+  // Regression lock for the defect the P9 analysis found (Finding 3). The
+  // toolbar used to be ONE <button> containing two `role="button"` spans:
+  // invalid HTML, and the accessibility tree collapsed it into a single
+  // control named "AGENT EVENTS · 1 FAILED ONLY" — one name covering three
+  // actions. Asserting the names separately is what would have caught it.
+  const planId = await createPlan(page, 'e2e-dock', BRIEF);
+  expect(planId).toBeTruthy();
+
+  const expand = page.getByRole('button', { name: /^AGENT EVENTS/ });
+  const failedOnly = page.getByRole('button', { name: 'FAILED ONLY', exact: true });
+  await expect(expand).toBeVisible();
+  await expect(failedOnly).toBeVisible();
+
+  // The expand control must NOT absorb the filter's label.
+  await expect(expand).not.toHaveAccessibleName(/FAILED ONLY/);
+
+  // And the filter is a toggle, so it has to say whether it is on. A control
+  // that only *looks* pressed is styled, not accessible.
+  await expect(failedOnly).toHaveAttribute('aria-pressed', 'false');
+  await failedOnly.click();
+  await expect(failedOnly).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('the manual renders inside the console', async ({ page }) => {
   // The in-console manual renders the repository's own docs/guides/*.md, so a
   // broken glob shows an empty shell rather than an error.

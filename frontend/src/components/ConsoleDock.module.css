@@ -1,0 +1,194 @@
+/*
+ * ConsoleDock — migrated off inline styles, P9 task 3.
+ *
+ * Every value is the CSS variable the `tokens.*` entry aliased, so the
+ * migration changes no computed style. See ChatPanel.module.css for the
+ * reasoning; this component had the same problem and 19 inline sites.
+ *
+ * The toolbar markup changed as well, and that one is a fix rather than a
+ * move — see `.toolbar` below.
+ */
+
+.dock {
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-0);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  height: 30px;
+  transition: height 0.15s ease;
+}
+
+.dockOpen {
+  height: 280px;
+}
+
+.dockOpenWithLog {
+  height: 430px;
+}
+
+/*
+ * Was ONE <button> with two `<span role="button" tabIndex={0}>` children
+ * inside it: invalid HTML (interactive content may not nest in a button), and
+ * the accessibility tree collapsed the lot into a single control announcing
+ * `"AGENT EVENTS · 1 FAILED ONLY"` — one name covering three separate actions.
+ * It is now a plain row of three real sibling buttons.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 14px;
+  flex-shrink: 0;
+}
+
+.expandToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.expandLabel {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.filter {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-0);
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* `aria-pressed` is the state, so the style follows it rather than a second
+   source of truth in JS. A toggle that looks active and does not say it is
+   active is only styled, not accessible. */
+.filter[aria-pressed='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ── log body ───────────────────────────────────────────────────────────── */
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-1) 14px 10px;
+  font-family: var(--font-mono);
+}
+
+.hydrating {
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+}
+
+.line {
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+}
+
+.planning {
+  composes: line;
+  color: var(--run);
+}
+
+.planningFailed {
+  color: var(--fail);
+}
+
+.task {
+  margin-top: 5px;
+}
+
+.taskHead {
+  composes: line;
+  color: var(--accent);
+}
+
+.run {
+  padding-left: var(--sp-3);
+}
+
+.runHead {
+  composes: line;
+  color: var(--text-2);
+}
+
+.attempt {
+  composes: line;
+  padding-left: var(--sp-3);
+  color: var(--accent);
+}
+
+/* Per-status colour, as classes rather than a `color` computed in JS and
+   pushed through an inline style. `attemptColor()` was the last reason this
+   file imported `tokens`. */
+.attemptFailed { color: var(--fail); }
+.attemptSucceeded { color: var(--ok); }
+.attemptAbandoned { color: var(--text-3); }
+
+.recovery {
+  color: var(--text-3);
+}
+
+.rawLogButton {
+  margin-left: 8px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.tail {
+  color: var(--text-3);
+  white-space: pre-wrap;
+  padding-left: var(--sp-2);
+}
+
+/* ── live events ────────────────────────────────────────────────────────── */
+
+.live {
+  margin-top: 7px;
+  border-top: 1px solid var(--border-0);
+  padding-top: var(--sp-1);
+}
+
+.liveHead {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+
+.liveRow {
+  composes: line;
+  color: var(--text-2);
+}
+
+.liveRowFailed {
+  color: var(--fail);
+}
+
+.empty {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+}
