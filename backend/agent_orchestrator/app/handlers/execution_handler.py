@@ -69,18 +69,14 @@ from agent_orchestrator.app.execution_records import (
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
-    RuntimeCircuit,
 )
 from agent_orchestrator.app.ports import PlanningArtifact, PlanningArtifactStore, RepositoryReader
 from agent_orchestrator.app.provider_capacity import (
     CAPACITY_KINDS,
     ProviderCapacityPolicy,
     RoutingPolicy,
-    capacity_backoff_seconds,
-    circuit_model_id,
-    circuit_ref,
 )
-from agent_orchestrator.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
+from agent_orchestrator.app.runtime_failures import RuntimeFailure, safe_runtime_tail
 from agent_orchestrator.app.handlers.base import Signal
 from agent_orchestrator.app.ports import (
     AgentEventSink,
@@ -105,15 +101,15 @@ from agent_orchestrator.app.test_identity import (
     declared_checks,
     existing_checks,
 )
-from agent_orchestrator.app.handlers.agent_admission import AgentAdmission
+from agent_orchestrator.app.handlers.agent_admission import AgentAdmission, CapacityOutcome
 from agent_orchestrator.app.handlers.goal_promotion import GoalPromoter
 from agent_orchestrator.app.handlers.execution_rules import (
     Unit,
     attempts_against_budget,
-    jitter_unit,
     main_repo_failure,
     orchestration_failure,
     raise_on_infrastructure_exit,
+    retry_delay_seconds,
     run_role_for,
     unit_task,
 )
@@ -1286,6 +1282,103 @@ class ExecutionHandler:
         uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=False))
         return True
 
+    def _abandon_late_failure(
+        self, plan_id: str, plan: Plan, unit: Unit, exc: TaskFailed, uow: UnitOfWork
+    ) -> bool:
+        """The iteration was abandoned while this attempt ran — close the attempt
+        and, if the task is still live, abandon it too. True means handled.
+
+        The load-bearing half is what it does NOT do: a late failure must never
+        requeue into the abandoned iteration. That is the resurrection bug, and
+        it is why this branch precedes every backoff and retry decision below.
+        """
+        abandoned = self._abandoned_task_status(plan, unit)
+        if abandoned is None:
+            return False
+        self._finish_execution(
+            uow,
+            unit,
+            ExecutionAttemptStatus.ABANDONED,
+            ExecutionRunStatus.ABANDONED,
+        )
+        if not abandoned.is_terminal:
+            plan.abandon_execution_task(
+                unit.cycle_id,
+                unit.goal_id,
+                unit.task_id,
+            )
+            plan.bump_version()
+            uow.outbox.add(
+                TaskAbandoned(
+                    plan_id=plan_id,
+                    goal_id=unit.goal_id,
+                    task_id=unit.task_id,
+                    reason=exc.reason,
+                )
+            )
+            uow.plans.save(plan)
+        return True
+
+    def _open_execution_block(
+        self,
+        plan_id: str,
+        plan: Plan,
+        unit: Unit,
+        reason: str,
+        exc: TaskFailed,
+        capacity: CapacityOutcome,
+        uow: UnitOfWork,
+    ) -> None:
+        """Open the goal's block for a terminal task failure.
+
+        Domain unfreeze #14: this goal opens its own `goal_blocks` entry -- a
+        different goal's concurrently opened block never collides here (separate
+        dict entries; before #13 this branch had to no-op and drop this goal's
+        own failure reason when ANY block was already active anywhere in the
+        plan).
+        """
+        # Any capacity kind that latched, not just RATE_LIMIT: a
+        # CONNECTION_ERROR outage past the ceiling is equally a
+        # provider problem, and labelling it execution_failure would
+        # advertise retry_stage instead of wait_and_retry, leaving the
+        # operator no way to clear the circuit.
+        provider_capacity = capacity.latched and exc.kind in CAPACITY_KINDS
+        kind = "provider_capacity" if provider_capacity else "execution_failure"
+        block = PlanBlock(
+            id=new_id(),
+            kind=kind,
+            explanation=reason,
+            stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
+            goal_id=unit.goal_id,
+            task_id=unit.task_id,
+            task_revision=unit.task_revision,
+            run_id=unit.execution.run_id,
+            legal_resolutions=resolutions_for(kind),
+            evidence_refs=(
+                # MUST name the circuit that was actually written --
+                # which for an account-level limit is the PROVIDER-WIDE
+                # key, not this model's. Hand-building it from
+                # spec.model_id pointed wait_and_retry at a row that
+                # does not exist, so the real circuit stayed latched.
+                [f"execution-attempt://{unit.execution.id}", capacity.ref]
+                if provider_capacity and capacity.ref is not None
+                else [f"execution-attempt://{unit.execution.id}"]
+            ),
+            created_at=self._clock.now(),
+        )
+        plan.open_block(block)
+        uow.outbox.add(
+            PlanBlocked(
+                plan_id=plan_id,
+                block_id=block.id,
+                stage=block.stage,
+                goal_id=unit.goal_id,
+                task_id=unit.task_id,
+                task_revision=unit.task_revision,
+                run_id=unit.execution.run_id,
+            )
+        )
+
     def _finalize_failure(
         self, plan_id: str, unit: Unit, exc: TaskFailed, uow: UnitOfWork
     ) -> Signal:
@@ -1300,166 +1393,21 @@ class ExecutionHandler:
                 # TOLERANT FINALIZE: the iteration was abandoned while we ran — a late
                 # failure terminal-skips; it must NEVER requeue into the abandoned
                 # iteration (the resurrection bug).
-                abandoned = self._abandoned_task_status(plan, unit)
-                if abandoned is not None:
-                    self._finish_execution(
-                        uow,
-                        unit,
-                        ExecutionAttemptStatus.ABANDONED,
-                        ExecutionRunStatus.ABANDONED,
-                    )
-                    if not abandoned.is_terminal:
-                        plan.abandon_execution_task(
-                            unit.cycle_id,
-                            unit.goal_id,
-                            unit.task_id,
-                        )
-                        plan.bump_version()
-                        uow.outbox.add(
-                            TaskAbandoned(
-                                plan_id=plan_id,
-                                goal_id=unit.goal_id,
-                                task_id=unit.task_id,
-                                reason=exc.reason,
-                            )
-                        )
-                        uow.plans.save(plan)
+                if self._abandon_late_failure(plan_id, plan, unit, exc, uow):
                     return Signal.PAUSED
 
-                delay = capacity_backoff_seconds(
-                    unit.retry_policy,
-                    unit.policy_attempt + 1,
-                    jitter_unit=jitter_unit(unit.execution.id),
-                    kind=exc.kind,
-                    # A concurrency refusal does not escalate like an exhausted
-                    # allowance; every other scope keeps the patient curve.
-                    limit_scope=exc.failure.limit_scope,
-                )
-                if exc.failure.retry_after_seconds is not None:
-                    delay = max(delay, exc.failure.retry_after_seconds)
-                if (
-                    exc.failure.limit_scope is not None
-                    and exc.failure.limit_scope.value == "daily_quota"
-                    and exc.failure.retry_after_seconds is None
-                ):
-                    delay = max(delay, 3_600.0)
+                delay = retry_delay_seconds(unit, exc.kind, exc.failure)
                 not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
 
-                circuit_manual = False
-                # True only while a capacity outage is being ridden out on
-                # automatic waiting; a REQUEST_CONCURRENCY refusal opens no
-                # circuit and so keeps its ordinary per-task budget as the bound.
-                capacity_wait = False
-                # The circuit this failure was recorded against, if any -- carried
-                # to the block below so its evidence ref names the row that exists.
-                capacity_ref: str | None = None
-                if (
-                    # CONNECTION_ERROR is capacity too: an unreachable or
-                    # overloaded endpoint is not a defect in this task, and
-                    # exhausting the per-task budget against it used to open a
-                    # goal block for something no human edit could fix. Safe to
-                    # widen only now that the ceiling above bounds the wait --
-                    # doing it while the attempt-count latch was live would have
-                    # escalated after five shared failures instead.
-                    exc.kind in CAPACITY_KINDS
-                    and unit.spec.provider_id
-                    and unit.spec.model_id
-                    and not_before is not None
-                    # A CONCURRENCY cap is not an outage: the provider served
-                    # every other in-flight request successfully and refused only
-                    # the one over the ceiling. The remedy is "send fewer at
-                    # once", so this attempt requeues on its own short backoff and
-                    # NO circuit opens -- opening one would halt a provider that
-                    # is working, and stall the siblings that are mid-run.
-                    # The failure is still recorded on the attempt for telemetry.
-                    and exc.failure.limit_scope is not LimitScope.REQUEST_CONCURRENCY
-                ):
-                    # Account-level limits key provider-wide; upstream-level ones
-                    # key per model. Routing to a sibling model escapes the second
-                    # but never the first.
-                    _, capacity_scope = self._admission.provider_metadata(unit.spec)
-                    circuit_model = circuit_model_id(
-                        unit.spec.model_id, exc.failure.limit_scope, capacity_scope
-                    )
-                    capacity_ref = circuit_ref(
-                        unit.spec.runtime_type, unit.spec.provider_id, circuit_model
-                    )
-                    existing = uow.executions.get_runtime_circuit(
-                        unit.spec.runtime_type,
-                        unit.spec.provider_id,
-                        circuit_model,
-                    )
-                    failure_count = (existing.failure_count if existing else 0) + 1
-                    # The START of the outage, preserved across updates within one
-                    # outage (restamping every failure would peg the age at ~0 and
-                    # make the ceiling unreachable) but RESET when the previous
-                    # circuit has been quiet long enough to count as a past outage.
-                    # A row abandoned by an earlier session would otherwise pre-age
-                    # a fresh outage straight past its ceiling — observed live
-                    # against a circuit left behind three days earlier.
-                    scope_value = (
-                        exc.failure.limit_scope.value
-                        if exc.failure.limit_scope is not None
-                        else None
-                    )
-                    opened_at = self._capacity.outage_start(
-                        existing.opened_at if existing else None,
-                        existing.retry_at if existing else None,
-                        self._clock.now(),
-                        scope_value,
-                    )
-                    # ESCALATE ON DURATION, NOT ON A COUNT. The old rule compared
-                    # this provider-global `failure_count` against a PER-TASK
-                    # attempt budget -- different units of measure. It latched
-                    # after a handful of failures shared across concurrent goals
-                    # while each task had barely retried, and it ignored the
-                    # operator's raised `retry_max_attempts` entirely (see
-                    # RetryPolicy.should_retry, which deliberately treats that key
-                    # as a floor). `failure_count` is kept for telemetry only.
-                    circuit_manual = self._capacity.outage_exceeded(
-                        opened_at, self._clock.now(), scope_value
-                    )
-                    uow.executions.upsert_runtime_circuit(
-                        RuntimeCircuit(
-                            runtime=unit.spec.runtime_type,
-                            provider_id=unit.spec.provider_id,
-                            model_id=circuit_model,
-                            failure_count=failure_count,
-                            opened_at=opened_at,
-                            retry_at=not_before,
-                            last_failure_kind=exc.kind.value,
-                            safe_message=exc.reason,
-                            manual_intervention=circuit_manual,
-                            limit_scope=scope_value,
-                            # probe_holder/probe_started_at default to None, so
-                            # rewriting the row RELEASES this attempt's probe --
-                            # load-bearing, and the reason the next window is
-                            # probeable at all.
-                        )
-                    )
-                    # Inside the ceiling a capacity failure must ALSO bypass the
-                    # per-task retry budget. Removing only the circuit latch would
-                    # have changed nothing: the task still exhausted
-                    # kind_max_attempts and reached fail_task, opening the same
-                    # goal block a few attempts later. Waiting is bounded by the
-                    # ceiling above, which is the whole point of the redesign.
-                    capacity_wait = not circuit_manual
-                elif unit.spec.provider_id and unit.spec.model_id:
-                    # This attempt may have held the half-open probe and then
-                    # failed for a NON-capacity reason (the provider answered; the
-                    # run failed on its own merits). Release the probe explicitly
-                    # so the next window is probeable immediately instead of
-                    # waiting out the stale timeout.
-                    for probe_key in (unit.spec.model_id, None):
-                        uow.executions.release_circuit_probe(
-                            unit.spec.runtime_type, unit.spec.provider_id, probe_key
-                        )
+                capacity = self._admission.record_capacity_failure(
+                    unit.spec, exc.kind, exc.failure, exc.reason, not_before, uow
+                )
 
                 if (
                     exc.failure.retryable
-                    and not circuit_manual
+                    and not capacity.latched
                     and (
-                        capacity_wait
+                        capacity.waiting
                         or unit.retry_policy.should_retry(
                             attempts_against_budget(plan_id, unit, exc.kind, uow),
                             exc.kind,
@@ -1520,54 +1468,7 @@ class ExecutionHandler:
                     )
                 )
                 if plan.active_cycle is not None:
-                    # Domain unfreeze #14: this goal opens its own
-                    # goal_blocks entry -- a different goal's concurrently
-                    # opened block never collides here (separate dict
-                    # entries; before #13 this branch had to no-op and drop
-                    # this goal's own failure reason when ANY block was
-                    # already active anywhere in the plan).
-                    # Any capacity kind that latched, not just RATE_LIMIT: a
-                    # CONNECTION_ERROR outage past the ceiling is equally a
-                    # provider problem, and labelling it execution_failure would
-                    # advertise retry_stage instead of wait_and_retry, leaving the
-                    # operator no way to clear the circuit.
-                    provider_capacity = circuit_manual and exc.kind in CAPACITY_KINDS
-                    block = PlanBlock(
-                        id=new_id(),
-                        kind=("provider_capacity" if provider_capacity else "execution_failure"),
-                        explanation=reason,
-                        stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
-                        goal_id=unit.goal_id,
-                        task_id=unit.task_id,
-                        task_revision=unit.task_revision,
-                        run_id=unit.execution.run_id,
-                        legal_resolutions=resolutions_for(
-                            "provider_capacity" if provider_capacity else "execution_failure"
-                        ),
-                        evidence_refs=(
-                            # MUST name the circuit that was actually written --
-                            # which for an account-level limit is the PROVIDER-WIDE
-                            # key, not this model's. Hand-building it from
-                            # spec.model_id pointed wait_and_retry at a row that
-                            # does not exist, so the real circuit stayed latched.
-                            [f"execution-attempt://{unit.execution.id}", capacity_ref]
-                            if provider_capacity and capacity_ref is not None
-                            else [f"execution-attempt://{unit.execution.id}"]
-                        ),
-                        created_at=self._clock.now(),
-                    )
-                    plan.open_block(block)
-                    uow.outbox.add(
-                        PlanBlocked(
-                            plan_id=plan_id,
-                            block_id=block.id,
-                            stage=block.stage,
-                            goal_id=unit.goal_id,
-                            task_id=unit.task_id,
-                            task_revision=unit.task_revision,
-                            run_id=unit.execution.run_id,
-                        )
-                    )
+                    self._open_execution_block(plan_id, plan, unit, reason, exc, capacity, uow)
                 # A human pause landing during a legacy in-flight attempt keeps its
                 # manual semantics. Cyclic failures instead become explicit blocks.
                 elif plan.pause_requested:
