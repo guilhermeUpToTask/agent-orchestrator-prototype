@@ -36,6 +36,10 @@
   --accent: #5a9cf8;
   --accent-hover: #7cb0fa;
   --accent-text-on: #0d1726;
+  /* Text that sits ON the gate colour. `--gate` is bright here and dark in the
+     light theme, so a single hardcoded foreground cannot serve both — which is
+     exactly what `.gateBtn` used to do, at a measured 3.78:1 in light mode. */
+  --gate-text-on: #1f1602;
 
   /* type */
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
@@ -66,13 +70,14 @@
   color-scheme: light;
   --bg-0: #f4f4f5; --bg-1: #ffffff; --bg-2: #f7f7f8; --bg-3: #ededee;
   --border-0: #dcdce0; --border-1: #c4c4ca;
-  --text-1: #1b1c1f; --text-2: #45474d; --text-3: #6b6e76;
+  --text-1: #1b1c1f; --text-2: #45474d; --text-3: #63666e;
   --idle: #6b6e76; --idle-bg: #ececee; --idle-text: #55585f;
   --run:  #1f6fe0; --run-bg:  #e3eefc; --run-text:  #1a5cba;
   --gate: #9a6a00; --gate-bg: #fbf0d7; --gate-text: #7d5600;
   --ok:   #15794a; --ok-bg:   #ddf3e7; --ok-text:   #116239;
   --fail: #c93b3b; --fail-bg: #fbe3e3; --fail-text: #a82f2f;
-  --accent: #1f6fe0; --accent-hover: #3a83ea; --accent-text-on: #ffffff;
+  --accent: #1a63cf; --accent-hover: #1a5cba; --accent-text-on: #ffffff;
+  --gate-text-on: #ffffff;
   --shadow-overlay: 0 8px 24px rgb(20 22 26 / 0.18);
 }
 

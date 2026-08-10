@@ -9,7 +9,10 @@
 }
 
 /* tone: gate (amber — the operator's queue) */
-.armBtn.gate, .confirmBtn.gate { background: var(--gate); color: #1f1602; }
+/* `--gate-text-on` rather than a hex: `--gate` is bright amber in the dark
+   theme and dark amber in the light one, so one hardcoded foreground cannot
+   serve both. Measured 3.77:1 in light mode before this. */
+.armBtn.gate, .confirmBtn.gate { background: var(--gate); color: var(--gate-text-on); }
 .armBtn.gate:hover, .confirmBtn.gate:hover {
   background: color-mix(in srgb, var(--gate) 85%, white);
 }

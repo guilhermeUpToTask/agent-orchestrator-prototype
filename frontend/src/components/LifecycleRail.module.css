@@ -207,7 +207,10 @@
 
 .gateBtn {
   background: var(--gate);
-  color: #1f1602;
+  /* Was a hardcoded #1f1602, which is right on the dark theme's bright amber
+     and measured 3.78:1 on the light theme's dark amber. The variable flips
+     with the theme; a hex cannot. */
+  color: var(--gate-text-on);
 }
 .gateBtn:hover { background: color-mix(in srgb, var(--gate) 85%, white); }
 

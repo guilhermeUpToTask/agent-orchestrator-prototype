@@ -87,7 +87,10 @@
 
 .modeChipLive {
   background: var(--run-bg);
-  color: var(--run);
+  /* `--run` is tuned for markers and borders; `--run-text` is the readable
+     variant of the same hue. Measured 4.44:1 with `--run` on the light theme's
+     `--bg-2`, which is under AA. */
+  color: var(--run-text);
 }
 
 .spacer {
@@ -113,7 +116,7 @@
   font-size: var(--fs-micro);
   font-family: var(--font-mono);
   line-height: 1.5;
-  color: var(--run);
+  color: var(--run-text);
   flex-shrink: 0;
 }
 

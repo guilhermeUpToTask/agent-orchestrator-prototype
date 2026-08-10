@@ -14,7 +14,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { tokens, STATUS, raw } from '../styles/tokens';
+import { tokens, STATUS, KIND_VARS, raw } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { useAgents, usePlan } from '../lib/queries';
 import { TaskNode } from './TaskNode';
@@ -29,8 +29,25 @@ const nodeTypes: NodeTypes = {
   goalGroup: GoalGroupNode as React.ComponentType<any>,
 };
 
-const KIND_COLOR = {
+/**
+ * TWO maps, because there are two contexts and `tokens.ts` is explicit about
+ * the difference.
+ *
+ * `KIND_STROKE` feeds React Flow edge strokes — an SVG attribute, not CSS, so
+ * it must stay `raw`. `KIND_TEXT` feeds text in the legend, where `raw` does
+ * not follow the theme: `raw.ok` is the DARK theme's green and measured
+ * 2.19:1 against the light theme's canvas.
+ *
+ * They were one map, which is how a colour tuned for an edge stroke ended up
+ * as unreadable label text.
+ */
+const KIND_STROKE = {
   idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
+} as const;
+
+const KIND_TEXT = {
+  idle: KIND_VARS.idle.text, run: KIND_VARS.run.text, gate: KIND_VARS.gate.text,
+  ok: KIND_VARS.ok.text, fail: KIND_VARS.fail.text,
 } as const;
 
 // ─── Goal group legend ─────────────────────────────────────────────────────────
@@ -42,7 +59,11 @@ function GoalLegend({ plan }: { plan: Plan | undefined }) {
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 5,
       padding: '10px 12px',
-      background: raw.bg1 + 'ee', // hex+alpha concat — must stay raw
+      // `raw.bg1 + 'ee'` hardcoded the DARK panel colour in both themes, so in
+      // light mode this floated a dark card under theme-following (light) text:
+      // measured 1.54:1. `color-mix` applies the same 93% alpha to the themed
+      // variable, which is what the raw concat could not do.
+      background: 'color-mix(in srgb, var(--bg-1) 93%, transparent)',
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',
@@ -61,7 +82,7 @@ function GoalLegend({ plan }: { plan: Plan | undefined }) {
           </span>
           <span style={{
             fontSize: 8, fontFamily: tokens.fontMono,
-            color: KIND_COLOR[(STATUS[g.status] ?? STATUS.pending).kind],
+            color: KIND_TEXT[(STATUS[g.status] ?? STATUS.pending).kind],
             marginLeft: 2,
           }}>
             [{g.status}]
@@ -80,7 +101,11 @@ function BriefStrip({ plan }: { plan: Plan | undefined }) {
     <div style={{
       maxWidth: 360,
       padding: '8px 12px',
-      background: raw.bg1 + 'ee', // hex+alpha concat — must stay raw
+      // `raw.bg1 + 'ee'` hardcoded the DARK panel colour in both themes, so in
+      // light mode this floated a dark card under theme-following (light) text:
+      // measured 1.54:1. `color-mix` applies the same 93% alpha to the themed
+      // variable, which is what the raw concat could not do.
+      background: 'color-mix(in srgb, var(--bg-1) 93%, transparent)',
       border: `1px solid ${tokens.border}`,
       borderRadius: tokens.r8,
       backdropFilter: 'blur(8px)',
@@ -176,7 +201,7 @@ export function PlanCanvas({ planId }: { planId: string }) {
             if (n.type === 'goalGroup') return '#1c2030';
             const data = (n as Node<TaskNodeData>).data;
             const meta = STATUS[data?.task?.status ?? 'pending'];
-            return meta ? KIND_COLOR[meta.kind] : raw.border0;
+            return meta ? KIND_STROKE[meta.kind] : raw.border0;
           }}
           maskColor="rgba(11,13,18,0.7)"
           nodeStrokeWidth={0}
