@@ -162,9 +162,9 @@ function 195 lines, and the fakes can express what they used to discard.
    revision-bound evidence that makes it trustworthy. A garbage-collected SHA
    degrades ONE unit with a stated reason rather than failing the document.
 4. ✅ **P8.4 — the showcase, and it is a DEMO rather than a fixture.
-   COMPLETED 2026-08-10** with the first clean run, captured in
-   [`demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`](demos/static-site-v1/runs/)
-   and measured in
+   COMPLETED 2026-08-10** with two clean runs, captured in
+   [`demos/static-site-v1/runs/`](demos/static-site-v1/runs/) — quote the
+   second, `20260810T164908Z-d098aece` — and measured in
    [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).
    Decided
    2026-08-02. The roadmap already said this artifact "cannot be locked in CI
@@ -274,21 +274,26 @@ function 195 lines, and the fakes can express what they used to discard.
    blocked, and **62% of execution wall-clock produced nothing** (38%
    productive, 20% burned on failed attempts, 42% idle in backoff).
 
-   **The second measured run:
+   **The measured runs:
    [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).**
-   The cycle **completed** — 4 of 4 goals promoted, publication gate reached,
-   disposition recorded, root back to IDLE — in **13m 37s** for **$0.013**,
-   with **8 attempts and zero failures**, 78.5% productive (92.4% excluding one
-   operator pause) and effectively no idle. Against 61 minutes and zero goals.
+   Two cycles, both **completed** — every goal promoted, publication gate
+   reached, disposition recorded, root back to IDLE. The one to quote is the
+   second, because it is **5 goals like the baseline and uninterrupted**:
+   **13m 03s** for **$0.0134**, **10 attempts and zero failures**, **92.5%
+   productive, 0% wasted, 7.5% idle** — and that 7.5% is entirely JIT
+   enrichment for the next goal, so genuine idle is zero. Against 61 minutes
+   with zero goals promoted, 38% productive and 42% idle.
 
    **Read the attribution before the numbers.** The dominant term is the one
    the plan predicted and it is not this phase's code: the free tier was
    removed on both sides at once (paid reasoner, `codex` agents on a
    subscription). What is genuinely attributable is narrower — parallel
-   enrichment fired and is visible in the ledger (two independent goals, one
-   pass, 8s apart), unbuffered logs carried every diagnosis in the session, and
-   **capacity routing was never exercised at all** because nothing was ever
-   rate-limited. It is locked by tests, not by this run.
+   enrichment fired in both runs and is visible in the ledger (the two
+   independent goals, one pass, 8s and 4s apart), unbuffered logs carried every
+   diagnosis in the session, and **capacity routing was never exercised at
+   all** — nothing was rate-limited in 18 attempts, and a codex-only roster has
+   no sibling provider to route to anyway. It is locked by tests, not by these
+   runs.
 
    This is a demonstrability problem, not just an ergonomics one: P8.4's
    showcase is the artifact an invitation points at, and nobody watches an hour
@@ -362,15 +367,19 @@ function 195 lines, and the fakes can express what they used to discard.
    to an agent instructed not to implement, planning unable to submit at all,
    and empty completions misclassified as capacity limits — and the first two
    were only fixed at the end of that session. ~~The demo has not yet had one
-   clean attempt.~~ **It has now: 2026-08-10, captured in
-   [`demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`](demos/static-site-v1/runs/).**
-   Four defects surfaced during it and were fixed in flight with regression
-   tests — none in the orchestration core, and the one worth remembering is
-   that the demo's own content contradicted its own brief, producing a visibly
-   duplicated `<h1>` that the container acceptance run, the 7/7 structural
-   checks and all eleven out-of-repo acceptance assertions **all passed**. The
-   eye check found it, exactly as `demos/README.md` promises it would. It is
-   now encoded so the next run does not need eyes.
+   clean attempt.~~ **It has now — two, 2026-08-10:
+   [`…runs/20260810T133717Z-aaedbb73/`](demos/static-site-v1/runs/20260810T133717Z-aaedbb73/)
+   and the clean rerun
+   [`…runs/20260810T164908Z-d098aece/`](demos/static-site-v1/runs/20260810T164908Z-d098aece/).**
+   Four defects surfaced during the first and were fixed in flight with
+   regression tests — none in the orchestration core, and the one worth
+   remembering is that the demo's own content contradicted its own brief,
+   producing a visibly duplicated `<h1>` that the container acceptance run, the
+   7/7 structural checks and all eleven out-of-repo acceptance assertions
+   **all passed**. The eye check found it, exactly as `demos/README.md`
+   promises it would. **The rerun surfaced nothing**, and the finding is now
+   asserted in three places — the acceptance suite, a container scenario step,
+   and a seed contract test — so the next run does not need eyes.
 
 7. ✅ **P8.7 — backend and documentation refactoring. DELIVERED 2026-08-10.**
    All six tasks complete. Scoped from measurement:
