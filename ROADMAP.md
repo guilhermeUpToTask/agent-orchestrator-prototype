@@ -1412,7 +1412,8 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
    clean attempt.
 
 7. 🚧 **P8.7 — backend and documentation refactoring. DO THIS BEFORE P8.6.**
-   Scoped 2026-08-10 from measurement:
+   Tasks 1–2 delivered 2026-08-10; **a session resuming here starts at task 3
+   (split `ExecutionHandler`)**. Scoped from measurement:
    [`docs/superpowers/plans/2026-08-10-backend-refactoring.md`](docs/superpowers/plans/2026-08-10-backend-refactoring.md).
 
    **Why it comes first, ahead of the latency work and the demo rerun.** P8.6's
@@ -1427,13 +1428,26 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
 
    The ordered tasks (full detail in the plan):
 
-   1. **Adversarial fakes.** Not cosmetic and cheapest first — the only item
-      that changes whether the NEXT bug is caught. A fake that discards an input
-      cannot fail on it. Opt-in modes so existing tests are untouched, plus one
-      regression test per 2026-08-09 defect.
-   2. **A runtime registry.** Fixes the OCP finding (adding `codex` required
-      edits in four files) and the largest DRY cluster in one move. Keep codex's
-      no-API-key path visible — it is a real difference, not an inconvenience.
+   1. ✅ **Adversarial fakes.** Delivered 2026-08-10. A fake that discards an
+      input cannot fail on it: the audit found `NoOpWorkspace.begin` dropping
+      `base_ref`/`cycle_id`/`goal_id`/`run_id`, `merge_goal` recording nothing,
+      and `DummyAgentRunner.run` dropping the workspace — so a task branch cut
+      from the wrong base, a goal promoted into the wrong cycle branch, and an
+      agent working outside its worktree were all untestable.
+      `GreedyReaderLLMClient` reacts to the tools it is OFFERED rather than
+      replaying a script, so it can *choose* to keep reading; reverting
+      `reserved_submit_turns` makes both new tests fail with the exact
+      production error. No production code changed.
+   2. ✅ **A runtime registry.** Delivered 2026-08-10.
+      `infra/runtime/registry.py` is now the single description of a runtime;
+      `RUNTIME_TYPES`, the dependency-probe table and the factory's dispatch all
+      derive from it, and `test_runtime_registry.py` fails if they can disagree.
+      A sixth runtime is **one registration** instead of four coordinated edits
+      that failed silently when one was forgotten. The factory's four-branch
+      if-chain became a lookup (385 → 355 lines) and its repeated nine-argument
+      construction became one `RuntimeBuild` parameter object. codex's
+      `needs_api_key=False` is a DECLARED field, not a hidden default — the
+      factory reads it to decide whether to touch the secret store at all.
    3. **Split `ExecutionHandler`** in risk order: pure helpers, then agent
       selection/admission, then goal promotion/acceptance, and the two finalize
       functions LAST, once the file is readable. Public surface unchanged.

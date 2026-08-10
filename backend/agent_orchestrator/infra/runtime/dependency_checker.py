@@ -22,6 +22,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
+from agent_orchestrator.infra.runtime.registry import RUNTIME_REGISTRY
+
 
 @dataclass(frozen=True)
 class DepResult:
@@ -58,16 +60,14 @@ class DependencyReport:
         return [r for r in self.results if not r.ok]
 
 
-# runtime_type -> (binary, install hint); the keys ARE the CLI runtime names
-# the agent registry's runtime_type resolves to (dry-run needs no binary).
+# runtime_type -> (binary, install hint), DERIVED from the runtime registry so
+# the two cannot drift. A runtime missing from this table looks installed when
+# it is not, which surfaces as an AUTH_ERROR three layers later instead of at
+# boot. `dry-run` is absent because it shells out to nothing.
 RUNTIME_DEFINITIONS: dict[str, tuple[str, str]] = {
-    "pi": ("pi", "See pi-mono installation docs — build from source or npm"),
-    "claude": ("claude", "npm install -g @anthropic-ai/claude-code"),
-    # Unlike the others, installing codex is only half of it: the runtime
-    # reads a subscription credential from CODEX_HOME, so `codex login` has
-    # to have been run too. The probe can only see the binary.
-    "codex": ("codex", "npm install -g @openai/codex, then run: codex login"),
-    "gemini": ("gemini", "npm install -g @google/gemini-cli"),
+    descriptor.name: (descriptor.binary, descriptor.install_hint)
+    for descriptor in RUNTIME_REGISTRY.values()
+    if descriptor.binary is not None
 }
 
 

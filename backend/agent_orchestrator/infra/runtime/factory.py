@@ -67,12 +67,11 @@ from agent_orchestrator.infra.db.reference_repos import (
 from agent_orchestrator.infra.db.secret_ref import SecretRef
 from agent_orchestrator.infra.db.secret_store import SqliteSecretStore
 from agent_orchestrator.infra.errors import InfrastructureError
-from agent_orchestrator.infra.runtime.cli_runner import (
-    PI_BACKEND_ENV_VAR,
-    ClaudeCodeRunner,
-    CodexRunner,
-    GeminiRunner,
-    PiAgentRunner,
+from agent_orchestrator.infra.runtime.cli_runner import PI_BACKEND_ENV_VAR
+from agent_orchestrator.infra.runtime.registry import (
+    RUNTIME_REGISTRY,
+    RuntimeBuild,
+    runtime_names,
 )
 from agent_orchestrator.infra.runtime.dummy_runner import DryRunAgentRunner
 
@@ -80,7 +79,9 @@ log = structlog.get_logger(__name__)
 
 AGENT_RUNNER_CONFIG_INVALID = "AGENT_RUNNER_CONFIG_INVALID"
 
-RUNTIME_TYPES = ("pi", "claude", "codex", "gemini", "dry-run")
+# DERIVED, never a second list: a name here that the registry does not know
+# would be registerable on an AgentSpec and then undispatchable at run time.
+RUNTIME_TYPES = runtime_names()
 
 _SCOPE = SqliteConfigStore.ORCHESTRATOR_SCOPE
 _DEFAULT_TIMEOUT_SECONDS = 600
@@ -126,11 +127,12 @@ def validate_agent_runner_mode(config_store: SqliteConfigStore) -> RunnerModeSta
 
 
 def _pi_backend_for(provider: ModelProvider) -> str | None:
-    """Map a provider row to the pi backend name (the env var pi reads)."""
-    for candidate in (provider.id.lower(), provider.name.lower()):
-        if candidate in PI_BACKEND_ENV_VAR:
-            return candidate
-    return None
+    """Map a provider row to the pi backend name (the env var pi reads).
+
+    Delegates to the descriptor so the write-time binding check and the run-time
+    construction cannot disagree about which providers pi supports.
+    """
+    return RUNTIME_REGISTRY["pi"].pi_backend(provider)
 
 
 def validate_agent_binding(
@@ -255,68 +257,36 @@ class CatalogAgentRunner:
                 FailureKind.AUTH_ERROR,
             )
         runtime = spec.runtime_type.strip().lower()
-        if runtime == "dry-run":
+        descriptor = RUNTIME_REGISTRY[runtime]  # validated above
+        if descriptor.build is None:
+            # dry-run: shells out to nothing and must never reach the secret
+            # store, so dry-run keeps working without ORCHESTRATOR_MASTER_KEY.
             return self._dummy
 
         provider = binding.provider
         model = binding.model
         assert provider is not None and model is not None  # valid binding carries both
-        timeout = self._timeout_seconds()
-        if runtime == "codex":
-            # BEFORE the secret store, deliberately. `codex login` stores a
-            # ChatGPT-subscription credential under CODEX_HOME, so this runtime
-            # has no API key to decrypt — resolving one would fail-closed on a
-            # secret that is legitimately absent, and passing api_key="" would
-            # make a runtime that needs no secret look like one that lost its
-            # secret. The model name still comes from the catalog row.
-            return CodexRunner(
-                model=model.name,
-                timeout_seconds=timeout,
-                provider_id=provider.id,
-                model_id=model.id,
-                orchestrator_home=self._orchestrator_home,
-                observation_repository=self._observation_repository,
-                sandbox=self._sandbox,
-                prior_attempt_feedback=self._prior_attempt_feedback,
-            )
-        api_key = self._secret_store().resolve_plaintext(SecretRef(uri=provider.api_key_ref))
-        if runtime == "pi":
-            backend = _pi_backend_for(provider)
-            assert backend is not None  # validated in the binding check
-            return PiAgentRunner(
+        # The key is resolved only when the runtime declares it needs one.
+        # codex authenticates from CODEX_HOME, so resolving a secret for it
+        # would fail closed on one that is legitimately absent — and passing
+        # api_key="" would make a runtime needing no secret look like one that
+        # lost its secret.
+        api_key = (
+            self._secret_store().resolve_plaintext(SecretRef(uri=provider.api_key_ref))
+            if descriptor.needs_api_key
+            else None
+        )
+        return descriptor.build(
+            RuntimeBuild(
+                provider=provider,
+                model=model,
                 api_key=api_key,
-                model=model.name,
-                backend=backend,
-                timeout_seconds=timeout,
-                provider_id=provider.id,
-                model_id=model.id,
+                timeout_seconds=self._timeout_seconds(),
                 orchestrator_home=self._orchestrator_home,
                 observation_repository=self._observation_repository,
                 sandbox=self._sandbox,
                 prior_attempt_feedback=self._prior_attempt_feedback,
             )
-        if runtime == "claude":
-            return ClaudeCodeRunner(
-                api_key=api_key,
-                model=model.name,
-                timeout_seconds=timeout,
-                provider_id=provider.id,
-                model_id=model.id,
-                orchestrator_home=self._orchestrator_home,
-                observation_repository=self._observation_repository,
-                sandbox=self._sandbox,
-                prior_attempt_feedback=self._prior_attempt_feedback,
-            )
-        return GeminiRunner(
-            api_key=api_key,
-            model=model.name,
-            timeout_seconds=timeout,
-            provider_id=provider.id,
-            model_id=model.id,
-            orchestrator_home=self._orchestrator_home,
-            observation_repository=self._observation_repository,
-            sandbox=self._sandbox,
-            prior_attempt_feedback=self._prior_attempt_feedback,
         )
 
     async def run(

@@ -90,7 +90,7 @@ class AgentBody(BaseModel):
     instructions: str = ""
     capability_ids: list[str] = []
     default_retry: RetryPolicy = RetryPolicy()
-    runtime_type: str = "pi"  # pi | claude | gemini | dry-run
+    runtime_type: str = "pi"  # valid values: RUNTIME_TYPES, derived from the registry
     provider_id: str | None = None
     model_id: str | None = None
 
