@@ -103,3 +103,35 @@ def test_no_other_route_accepts_a_query_token(guarded_client):
     response = guarded_client.get("/api/providers", params={"token": "sekrit"})
 
     assert response.status_code == 401
+
+
+# The parametrized sweep above cannot see these three. FastAPI mounts its own
+# docs routes on the bare app with `include_in_schema=False`, so they are absent
+# from `openapi()["paths"]` — the very inventory this file trusts — and no
+# router dependency reaches them. Phase 10A found all three answering 200 with
+# `ORCHESTRATOR_API_TOKEN` set, serving the whole control-plane schema to an
+# anonymous caller. They are named explicitly because they cannot be discovered.
+API_DOC_ROUTES = ("/api/openapi.json", "/api/docs", "/api/redoc")
+
+
+@pytest.mark.parametrize("path", API_DOC_ROUTES)
+def test_the_api_documentation_is_guarded(guarded_client, path):
+    response = guarded_client.get(path)
+
+    assert response.status_code == 401, f"{path} served documentation without a token"
+    assert response.json()["error"]["code"] == "INVALID_API_TOKEN"
+
+
+@pytest.mark.parametrize("path", API_DOC_ROUTES)
+def test_the_api_documentation_opens_with_a_token(guarded_client, path):
+    """Guarded, not removed — an authenticated operator still gets the docs."""
+    response = guarded_client.get(path, headers={"X-API-Token": "sekrit"})
+
+    assert response.status_code == 200
+
+
+def test_the_schema_is_not_reachable_by_a_query_token(guarded_client):
+    """The `?token=` mechanism stays confined to the SSE stream."""
+    response = guarded_client.get("/api/openapi.json", params={"token": "sekrit"})
+
+    assert response.status_code == 401

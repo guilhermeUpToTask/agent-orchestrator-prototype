@@ -181,9 +181,13 @@ CapacityScopeLiteral = Literal["per_model", "endpoint_wide"]
 
 
 class ProviderCreateBody(BaseModel):
-    name: str
-    base_url: str
-    api_key: str  # accepted ONCE, stored encrypted, never echoed
+    # `min_length=1` on all three (Phase 10A): an empty string was accepted and
+    # stored, so the failure moved from the write — where an operator is looking
+    # at the form — to the first real run, which fails with a provider AUTH_ERROR
+    # that says nothing about a blank key having been saved weeks earlier.
+    name: str = Field(min_length=1)
+    base_url: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)  # accepted ONCE, stored encrypted, never echoed
     # Capacity metadata (domain unfreeze #16). Both optional: unset falls back to
     # the global execution.provider_max_inflight / per_model defaults.
     #
@@ -201,9 +205,12 @@ class ProviderCreateBody(BaseModel):
 
 
 class ProviderUpdateBody(BaseModel):
-    name: str
-    base_url: str
-    api_key: str | None = None  # present = rotate the stored secret
+    name: str = Field(min_length=1)
+    base_url: str = Field(min_length=1)
+    # None = leave the stored secret alone; a string = rotate to it. `""` is
+    # neither, and silently rotating a live provider to an empty key is the
+    # worse reading of it — see ProviderCreateBody.
+    api_key: str | None = Field(default=None, min_length=1)
     max_inflight: int | None = Field(default=None, ge=1)  # see ProviderCreateBody
     capacity_scope: CapacityScopeLiteral | None = None
 

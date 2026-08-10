@@ -2279,6 +2279,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Limit"
             }
@@ -2739,6 +2741,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
               "default": 200,
               "title": "Limit"
             }
@@ -9344,14 +9348,17 @@
         "properties": {
           "name": {
             "type": "string",
+            "minLength": 1,
             "title": "Name"
           },
           "base_url": {
             "type": "string",
+            "minLength": 1,
             "title": "Base Url"
           },
           "api_key": {
             "type": "string",
+            "minLength": 1,
             "title": "Api Key"
           },
           "max_inflight": {
@@ -9394,16 +9401,19 @@
         "properties": {
           "name": {
             "type": "string",
+            "minLength": 1,
             "title": "Name"
           },
           "base_url": {
             "type": "string",
+            "minLength": 1,
             "title": "Base Url"
           },
           "api_key": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               {
                 "type": "null"

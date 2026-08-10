@@ -52,26 +52,38 @@ export const useToastStore = create<ToastState>((set) => ({
 /**
  * Pull the human-readable detail out of an api.ts error.
  *
- * api.ts throws `Error("POST /path → 409: {"detail":"..."}")`. We surface the
- * server's `detail` when present, falling back to the raw message.
+ * api.ts throws `Error("POST /path → 409: {"error":{...}}")`. We surface the
+ * server's message when we recognise the shape.
+ *
+ * When we do NOT recognise it, we report the status and drop the body. That
+ * asymmetry is deliberate (Phase 10A). This used to fall back to the raw
+ * message, and a request body can contain a credential: FastAPI's default 422
+ * echoed the submitted `api_key` inside `detail[].input`, and because that
+ * `detail` is an ARRAY the string check below missed it and the whole payload —
+ * key included — was rendered into a toast. The backend no longer emits that
+ * shape, but a helper whose failure mode is "print whatever came back" is one
+ * bad response away from doing it again, so an unrecognised body is never shown.
  */
 export function errorDetail(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const jsonStart = message.indexOf('{');
-  if (jsonStart !== -1) {
-    try {
-      const parsed = JSON.parse(message.slice(jsonStart));
-      // Control-plane envelope: { error: { code, message, request_id } }.
-      if (parsed?.error && typeof parsed.error.message === 'string') {
-        const rid = parsed.error.request_id ? ` (request ${parsed.error.request_id})` : '';
-        return `${parsed.error.message}${rid}`;
-      }
-      if (parsed && typeof parsed.detail === 'string') return parsed.detail;
-    } catch {
-      // not JSON — fall through to the raw message
+  if (jsonStart === -1) return message; // no body — the bare "METHOD /path → 500"
+
+  const prefix = message.slice(0, jsonStart).trim().replace(/[:→-]\s*$/, '');
+  try {
+    const parsed = JSON.parse(message.slice(jsonStart));
+    // Control-plane envelope: { error: { code, message, request_id } }.
+    if (parsed?.error && typeof parsed.error.message === 'string') {
+      const rid = parsed.error.request_id ? ` (request ${parsed.error.request_id})` : '';
+      return `${parsed.error.message}${rid}`;
     }
+    // A plain-string `detail` is a message, not an echo of the request.
+    if (parsed && typeof parsed.detail === 'string') return parsed.detail;
+  } catch {
+    // not JSON
   }
-  return message;
+  // Unrecognised body: say what failed, never what was sent.
+  return prefix || message.slice(0, jsonStart) || 'The server returned an unreadable error.';
 }
 
 /** Imperative helpers usable from mutation handlers and plain functions. */
