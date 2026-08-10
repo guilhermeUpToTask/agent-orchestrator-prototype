@@ -39,14 +39,17 @@ the gap-closing work. See Phase 7 for the reasoning and for what that reorder
 costs.
 
 **Re-scoped again 2026-08-10, after Phase 8 closed.** Phase 9 was a *small peer
-preview*, and it is retired rather than delayed: it assumed an invitation list
+preview*, and it is **deleted, not deferred**: it assumed an invitation list
 that does not exist, and a phase whose entry condition is "find 10–50 strangers"
-is not a plan, it is a wish. The instrument it produced
-(`docs/guides/preview-report.md`) is kept — it costs nothing and becomes useful
-the moment there is an audience — and the preview itself moves to *Deferred*
-with that reason recorded. What replaces it is the work that has to happen
-**before** anyone is invited anyway: the console is the first thing a visitor
-touches, and it is currently the least examined surface in the repository.
+is not a plan, it is a wish. Its feedback template went with it — a survey for
+an audience that does not exist is documentation nobody reads and everybody has
+to keep current. Gathering feedback is a real activity, and it belongs to
+whatever Phase 10B's launch actually produces, designed then against a real
+audience rather than an imagined one.
+
+What replaces it is the work that has to happen **before** anyone is invited
+anyway: the console is the first thing a visitor touches, and it is currently
+the least examined surface in the repository.
 
 Accepted ADRs and current code are authoritative. Domain changes require a
 recorded unfreeze in [the decision log](docs/decisions/decision-log.md).
@@ -853,8 +856,8 @@ that nobody can tell from the evidence document.
 
 ## Phase 9 — the console: refinement, refactor, and browser-proven behaviour ⬜ (current)
 
-**Scoped 2026-08-10**, replacing the small peer preview (retired — see the
-launch-sequence note at the top, and *Deferred* below). Phase 8 made the backend
+**Scoped 2026-08-10**, replacing the small peer preview (deleted — see the
+launch-sequence note at the top). Phase 8 made the backend
 demonstrable and finished by publishing a run somebody can read. The console is
 now the weakest surface in the repository and the first one a visitor touches:
 Phase 5 made it render backend truth instead of rebuilding transition rules,
@@ -1121,8 +1124,11 @@ tools would write it rather than the way engineers imagine marketing works:
   expected to produce, and what result would mean *stop and fix the product
   instead of marketing it harder*. Decide that threshold before launching, not
   after.
-- **The support path** the retired peer preview never built — now with a reason
-  to exist, because there will be people on the other end.
+- **The support path and the feedback loop.** Both were deleted with the peer
+  preview because they had no audience; both become real here, designed against
+  the audience the launch actually produces rather than an imagined one. A
+  support channel with nobody in it is a maintenance cost — build it when the
+  first invitation goes out, not before.
 
 ### Exit criteria
 
@@ -1137,33 +1143,6 @@ tools would write it rather than the way engineers imagine marketing works:
 
 ## Deferred — reconsider only with run or user evidence ⏸
 
-- **the small peer preview** — was Phase 9 until 2026-08-10, and **retired
-  rather than delayed**. Its entry condition was an invitation list of 10–50
-  technical users, and there is nobody to invite: a phase that begins by
-  wishing for an audience is not a plan. Deferred until Phase 10B's launch
-  produces one, which is the correct order — invite people to a named,
-  findable, audited project rather than to a prototype called `aipom`.
-
-  **The instrument survives and is worth keeping**:
-  `docs/guides/preview-report.md`, written 2026-08-02 *before* any invitation
-  existed so its questions were not shaped by what we hoped to hear. It is a
-  decision instrument, not a survey — each complaint maps to exactly one
-  deferred item, so a report naming it promotes that item and nothing else:
-
-  | What an operator reports | What it promotes |
-  |---|---|
-  | "I couldn't find my code" / "I couldn't get it out" | bundle export |
-  | "the diff was too big to review" | ~~per-goal review surface~~ — built, P8.3 |
-  | "the tests passed but the app was broken" | more acceptance-run coverage |
-  | "I want it as a PR like everything else" | ~~forge publication~~ — built, P8.1 |
-  | "it got stuck and I couldn't tell why" | the advisory observer agent |
-
-  Three of those five were built on reasoning rather than reports, which is
-  exactly why **a report that contradicts one is now the most valuable kind**,
-  and why the measurements that matter when the preview does happen are
-  install and time-to-first-cycle, setup/runtime/repo failures, unclear states,
-  recovery, capacity and cost, evidence trust, and Git output. A complaint
-  nobody makes remains the cheapest possible answer to a feature question;
 - stronger sandboxing and pointer-free workspaces;
 - ~~authenticated forge publication and automatic GitHub PR creation~~ —
   **promoted to Phase 8 (P8.1) on 2026-08-02**; see that phase. Automatic

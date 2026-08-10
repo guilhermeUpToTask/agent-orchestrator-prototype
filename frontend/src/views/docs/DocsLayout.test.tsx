@@ -43,7 +43,6 @@ describe('in-console documentation', () => {
       'evidence',
       'tier-1',
       'troubleshooting',
-      'preview-report',
     ]) {
       expect(render(`/docs/${slug}`), slug).not.toContain('No guide called');
     }
