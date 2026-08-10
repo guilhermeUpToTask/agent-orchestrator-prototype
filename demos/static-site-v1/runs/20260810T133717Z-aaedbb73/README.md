@@ -1,7 +1,13 @@
-# static-site-v1 — run 2026-08-10
+# static-site-v1 — run 1, 2026-08-10
 
-The first clean completed run of this demo. Published as-is, green parts and
-red parts together, per [`demos/README.md`](../../../README.md).
+The first completed run of this demo. Published as-is, green parts and red
+parts together, per [`demos/README.md`](../../../README.md).
+
+> **Superseded as the showcase by
+> [`20260810T164908Z-d098aece`](../20260810T164908Z-d098aece/)**, the rerun
+> after this run's finding was fixed — 5 goals, uninterrupted, nothing
+> surfaced. This one is kept because it is the run that *found* something, and
+> a demo directory that only keeps its clean runs is not evidence of anything.
 
 | | |
 |---|---|

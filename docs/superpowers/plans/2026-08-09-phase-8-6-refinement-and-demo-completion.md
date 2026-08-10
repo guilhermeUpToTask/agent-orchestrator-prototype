@@ -188,12 +188,14 @@ paid models, that is the finding, and it is a more valuable one than a green run
 ## Exit criteria — all met 2026-08-10
 
 - ✅ **The demo completes, is captured, and a human has opened the HTML.**
-  4 of 4 goals promoted in 13m37s for $0.013;
-  `demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`. Opening the HTML is
-  what found the duplicated `<h1>` that every automated gate had passed.
+  Twice. Run 1: 4 of 4 goals in 13m37s for $0.013
+  (`runs/20260810T133717Z-aaedbb73/`) — opening the HTML is what found the
+  duplicated `<h1>` that every automated gate had passed. Run 2, after that fix:
+  **5 of 5 goals in 13m03s for $0.0134, uninterrupted, nothing surfaced**
+  (`runs/20260810T164908Z-d098aece/`).
 - ✅ **A second measured run shows the productive share materially above the
-  38% baseline, published rather than asserted** — 78.5% (92.4% excluding one
-  operator pause), 0% wasted, 0 failed attempts of 8, in
+  38% baseline, published rather than asserted** — **92.5%** on the same goal
+  count as the baseline, 0% wasted, 0 failed attempts of 10, in
   [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](../../history/analyses/2026-08-10-cycle-latency-second-measurement.md).
   That document leads with the attribution rather than the number: the free
   tier was removed on both sides, which dominates everything this phase's code

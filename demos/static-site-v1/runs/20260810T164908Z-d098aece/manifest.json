@@ -1,0 +1,78 @@
+{
+  "demo": {
+    "name": "static-site-v1",
+    "seed_commit": "3770500ef9316410c9f1e7887f046583e386a835"
+  },
+  "orchestrator": {
+    "commit": "fe6d54f931068ef696093864bc3f123025f2e091",
+    "working_tree_dirty": false
+  },
+  "run": {
+    "captured_at": "20260810T164908Z",
+    "plan_id": "d098aece-2b29-466e-a202-9699464ee945",
+    "cycle_id": "9768a841-2c78-49bf-8f10-12c0a7a671f9",
+    "project_id": "04ed82f7-6674-4dd1-b658-e7a47e1f913d",
+    "status": "idle",
+    "repository": "/home/dev/.orchestrator/demos/static-site-v1/repo",
+    "wall_clock": "13m03s",
+    "cost_usd": "0.0134"
+  },
+  "pinned_runtime": {
+    "runner_mode": "real",
+    "runner_valid": true,
+    "agents": [
+      {
+        "agent_name": "codex-test",
+        "runtime_type": "codex",
+        "provider_name": "openai-codex",
+        "model_name": "default",
+        "valid": true
+      },
+      {
+        "agent_name": "codex-dev",
+        "runtime_type": "codex",
+        "provider_name": "openai-codex",
+        "model_name": "default",
+        "valid": true
+      }
+    ],
+    "reasoner_mode": "llm",
+    "reasoner_provider": "openrouter",
+    "reasoner_model": "deepseek/deepseek-v4-flash-0731"
+  },
+  "verdicts": {
+    "structural_exit": 0,
+    "acceptance": [
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "passed",
+        "summary": "The application booted and all 6 scenario step(s) succeeded."
+      },
+      {
+        "trigger": "pre_publication",
+        "outcome": "passed",
+        "summary": "The application booted and all 6 scenario step(s) succeeded."
+      }
+    ]
+  }
+}
