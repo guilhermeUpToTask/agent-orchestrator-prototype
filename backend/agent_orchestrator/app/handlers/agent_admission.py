@@ -177,6 +177,26 @@ class AgentAdmission:
         if 0.0 < wait <= self._routing.downgrade_after_seconds:
             return preferred
 
+        alternative = self.free_alternative(task, preferred, uow)
+        # Everything capable is throttled: keep the preferred spec so the existing
+        # circuit/admission checks produce the same wait or block they always did.
+        return alternative or preferred
+
+    def free_alternative(
+        self, task: Task, preferred: AgentSpec, uow: UnitOfWork
+    ) -> AgentSpec | None:
+        """The best-tier interchangeable agent whose provider is free RIGHT NOW.
+
+        Interchangeable means: a different agent, in the same declared role, that
+        satisfies every capability this task requires, in a tier routing allows.
+        Tier order is preference order, so a substitution never reaches past a
+        better model that was also available.
+
+        `None` means there is nowhere to go — which is a real answer and not the
+        same as "no substitution wanted". Callers use it to decide whether
+        waiting is the only option left (P8.6 Task 3), so it must not silently
+        fall back to the preferred spec the way `select_spec` does.
+        """
         required = list(task.required_capabilities)
         candidates = [
             agent
@@ -190,9 +210,7 @@ class AgentAdmission:
         for candidate in candidates:
             if self._spec_wait_seconds(candidate, uow) is None:
                 return candidate
-        # Everything capable is throttled: keep the preferred spec so the existing
-        # circuit/admission checks produce the same wait or block they always did.
-        return preferred
+        return None
 
     def admission_signal(self, spec: AgentSpec, uow: UnitOfWork) -> Signal | None:
         """Refuse to START an attempt that would exceed the provider's in-flight

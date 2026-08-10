@@ -1234,3 +1234,170 @@ def test_the_agent_is_given_the_worktree_it_must_work_in(env_factory):
 
     assert len(env.runner.workspaces) == 1
     assert env.runner.workspaces[0], "the agent was given no worktree path"
+
+
+def _patiently_backing_off(plan: Plan) -> Plan:
+    """The hour-scale curve a real rate limit produces.
+
+    `_two_goal_cycle`'s 10-second backoff is BELOW
+    `RoutingPolicy.downgrade_after_seconds`, where the design deliberately waits
+    rather than degrading output — substituting a weaker model to dodge a
+    ten-second 429 buys nothing. The case P8.6 Task 3 is about is the opposite
+    one, and the only one the 2026-08-09 run actually produced: a wait long
+    enough that routing around it is unambiguously right.
+    """
+    plan.retry_policy = RetryPolicy(
+        max_attempts=6,
+        initial_backoff_seconds=300,
+        max_backoff_seconds=3_600,
+        jitter_ratio=0,
+    )
+    return plan
+
+
+def test_a_capacity_failure_reroutes_on_the_next_tick_instead_of_serving_its_backoff(
+    env_factory,
+):
+    """P8.6 Task 3. Routing existed but could not reach the case it was for.
+
+    `select_spec` reroutes around a busy provider, and every routing test above
+    reaches it because the circuit was open BEFORE the task was picked. The
+    live path is the other one: the task runs, the provider rate-limits it, and
+    the finalizer requeues the task with the PATIENT capacity backoff on the
+    plan's own `retry_not_before`. Navigation gates on that gate before
+    `select_spec` is ever consulted, so the task sleeps out an hour-scale wait
+    bound to the model that refused it while an interchangeable agent on a
+    completely different provider sits idle. Measured as 42% of execution
+    wall-clock in the 2026-08-09 latency analysis.
+
+    The task-level wait is the thing that is wrong, not the circuit: the
+    provider that refused genuinely needs its patient curve, and keeps it. What
+    must not happen is the TASK inheriting that wait when it has somewhere else
+    to run.
+    """
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {
+            "g1t0": DummyBehavior(
+                fail_times=1,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="429 temporarily rate-limited upstream",
+                fail_limit_scope=LimitScope.UNKNOWN_CAPACITY,
+            )
+        },
+        agents=[smart, cheap],
+        default_agent_id="a1",
+    )
+    env.seed(_patiently_backing_off(_two_goal_cycle(env)))
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    # Attempt 1 runs on the bound smart model and is rate-limited.
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+    assert [spec.model_id for spec in env.runner.specs] == ["nemotron"]
+
+    # The circuit for the provider that refused MUST still be armed and patient.
+    with env.uow:
+        circuit = env.uow.executions.get_runtime_circuit(
+            "pi", "openrouter", None
+        ) or env.uow.executions.get_runtime_circuit("pi", "openrouter", "nemotron")
+    assert circuit is not None
+    assert circuit.retry_at > env.clock.now(), "the busy provider keeps its patient wait"
+
+    # Now the point: WITHOUT advancing the clock at all, the next tick must run
+    # the task on the free provider rather than report NOT_READY.
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "continue"
+    )
+    assert [spec.model_id for spec in env.runner.specs] == ["nemotron", "qwen"]
+
+
+def test_the_reroute_leaves_the_persisted_binding_alone(env_factory):
+    """Routing is a per-attempt substitution. The task's stored `agent_id` and
+    `role_agent_ids` record the OPERATOR's preference and belong to the
+    aggregate; rewriting them to whatever was free during one outage would make
+    a transient capacity event permanently change what the plan says it wants."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {
+            "g1t0": DummyBehavior(
+                fail_times=1,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="429 temporarily rate-limited upstream",
+                fail_limit_scope=LimitScope.UNKNOWN_CAPACITY,
+            )
+        },
+        agents=[smart, cheap],
+        default_agent_id="a1",
+    )
+    env.seed(_patiently_backing_off(_two_goal_cycle(env)))
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+
+    stored = env.stored("p1")
+    task = {g.id: g for g in stored.execution_goals}["g1"].tasks[0]
+    assert task.agent_id == "a1", "the reroute rewrote the persisted binding"
+    # What actually ran stays auditable on the attempt ledger instead. Ordered
+    # by the monotonic attempt `number`, not by list order: FakeClock stamps
+    # both attempts with the same `started_at`, and `list_attempts` tiebreaks on
+    # a random uuid, so list order is genuinely undefined here.
+    with env.uow:
+        attempts = sorted(env.uow.executions.list_attempts("p1"), key=lambda a: a.number)
+    assert [a.model_id for a in attempts] == ["nemotron", "qwen"]
+
+
+def test_a_capacity_failure_with_nowhere_to_go_still_waits_patiently(env_factory):
+    """The other half, and the one that must not regress. With no free
+    alternative there is nothing to route to, so dropping the task's backoff
+    would just spin it against a provider that is still refusing. It keeps the
+    patient wait it always had."""
+    smart, _ = _routing_agents()
+    env = env_factory(
+        {
+            "g1t0": DummyBehavior(
+                fail_times=1,
+                fail_kind=FailureKind.RATE_LIMIT,
+                fail_reason="429 temporarily rate-limited upstream",
+                fail_limit_scope=LimitScope.UNKNOWN_CAPACITY,
+            )
+        },
+        agents=[smart],  # a roster of one: nowhere to reroute
+        default_agent_id="a1",
+    )
+    env.seed(_patiently_backing_off(_two_goal_cycle(env)))
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert [spec.model_id for spec in env.runner.specs] == ["nemotron"]  # not re-fired
+
+    stored = env.stored("p1")
+    task = {g.id: g for g in stored.execution_goals}["g1"].tasks[0]
+    assert task.retry_not_before is not None
+    assert task.retry_not_before > env.clock.now()
+
+
+def test_a_non_capacity_failure_still_serves_its_own_backoff(env_factory):
+    """The reroute is scoped to CAPACITY. An agent that failed on its own
+    merits — a tool error, a bad patch — has not been refused by anyone, and
+    handing it straight to a different model would burn a second provider on a
+    task that needs its backoff and its retry budget."""
+    smart, cheap = _routing_agents()
+    env = env_factory(
+        {"g1t0": DummyBehavior(fail_times=1, fail_kind=FailureKind.TOOL_ERROR)},
+        agents=[smart, cheap],
+        default_agent_id="a1",
+    )
+    env.seed(_patiently_backing_off(_two_goal_cycle(env)))
+    execution = ExecutionHandler(env.runner, env.agents, env.ws, env.sink, env.clock)
+
+    asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow))
+    assert asyncio.run(execution.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == (
+        "not_ready"
+    )
+    assert [spec.model_id for spec in env.runner.specs] == ["nemotron"]
