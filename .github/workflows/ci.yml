@@ -138,6 +138,22 @@ jobs:
         run: npm run test:e2e
         env:
           E2E_PYTHON: ${{ github.workspace }}/backend/.venv/bin/python
+
+      # The full-cycle suite: an operator driving a brief all the way to a
+      # published cycle in the browser. Added 2026-08-10 as Phase 9's first
+      # act, and it is the first test in this repository ever to drive the
+      # console through a plan — CLAUDE.md claimed this was "Phase 8" from
+      # Phase 6 onward and Phase 8 came and went without it, so every claim
+      # that the UI worked was inference from unit tests.
+      #
+      # Tier 0 (stub reasoner + dry-run runner), so it is deterministic and
+      # costs nothing: the whole cycle completes in seconds. It is also the
+      # safety net the Phase 9 refactor rests on, which is why it runs here
+      # rather than only on a developer's machine.
+      - name: Full-cycle browser E2E
+        run: npm run test:e2e:cycle
+        env:
+          E2E_PYTHON: ${{ github.workspace }}/backend/.venv/bin/python
           E2E_HOME: ${{ runner.temp }}/aipom-e2e-home
 
       - name: Regenerate API types
