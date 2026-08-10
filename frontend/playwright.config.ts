@@ -32,6 +32,12 @@ const PYTHON = process.env.E2E_PYTHON ?? '../backend/.venv/bin/python';
 
 export default defineConfig({
   testDir: './e2e',
+  // `e2e/cycle/` belongs to playwright.cycle.config.ts, which starts a server
+  // with a WORKER and a seeded catalog. This suite starts one with
+  // `--no-worker` against a wiped state directory on purpose, so running those
+  // specs here would drive a plan nothing can advance — half of them hung and
+  // half passed for the wrong reason before this line existed.
+  testIgnore: '**/cycle/**',
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
