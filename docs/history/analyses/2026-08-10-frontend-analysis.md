@@ -171,6 +171,46 @@ Three query keys bypass the factory as inline literals — `queries.ts:212`
 (`cycleReview`), `:225` (`reviewPatch`), `:672` (`forge`) — against 67 that use
 it. Small, and worth fixing only while touching those lines anyway.
 
+## What task 3 actually did
+
+Recorded after the fact, 2026-08-10, because an analysis whose predictions are
+never checked is a document nobody should trust next time.
+
+| Item | Outcome |
+|---|---|
+| 1. Settle the styling split | **Done.** 119 → 68 inline styles; the 68 left are React Flow's documented exception plus five one-liners. `ChatPanel`, `ConsoleDock` and `PhaseTimeline` have stylesheets and no longer import `tokens`. |
+| 2. Split the legacy gates | **Done.** `GatePanel.tsx` 636 → 432; `LegacyGatePanel.tsx` 243. Pure move, plus five imports that were only reachable from the moved half. |
+| 3. Fix the nested-button control | **Done**, and verified in a live accessibility tree rather than asserted. |
+| 4. Extract the settings-section pattern | **Not done, deliberately** — see below. |
+| 5. Headings and the composer affordance | Deferred to task 4 with their assertions, as planned. |
+
+**Two defects the refactor found that the analysis had missed**, both invisible
+until the code was actually moved:
+
+- `PhaseTimeline.tsx` concatenated hex alpha onto a `var()` reference —
+  `` `${color}14` `` where `color` is `var(--gate)` — producing
+  `var(--gate)14`, which is not a colour. The browser dropped the declaration
+  and **the current-phase highlight never rendered at all**. `tokens.ts:87`
+  warns about exactly this pattern. Legacy-plans-only, and fixed with
+  `color-mix()`.
+- The chat send button and panel toggle had no accessible name, which is why
+  the task-1 e2e suite reached the composer with `press('Enter')` rather than
+  clicking send. Both now labelled.
+
+Neither was findable by reading; both fell out of touching the files. That is
+an argument for the order this phase used — safety net, then analysis, then
+refactor — and against trusting any static reading, including this one.
+
+### Why item 4 was not done
+
+The four settings sections do share a shape. Reading them side by side, they do
+not share it closely enough: each has a different create form, a different
+validation story, and different delete guards. Extracting a common component
+would need a configuration object wide enough to express all four, which is the
+abstraction that is worse than the duplication it replaces. Left as four honest
+forms, and recorded here so the next reader knows it was considered rather than
+missed.
+
 ## What this means for task 3
 
 Ordered by payoff, and deliberately short. The measurement does not support a
