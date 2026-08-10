@@ -32,7 +32,7 @@ from agent_orchestrator.app.testing.fakes import DummyBehavior, InMemoryCapabili
 from agent_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
 from agent_orchestrator.app.use_cases.advance_plan import advance_plan
 from agent_orchestrator.app.use_cases.control import finish_review
-from agent_orchestrator.app.use_cases.pause_resume import (
+from agent_orchestrator.app.use_cases.operator_commands import (
     pause_plan,
     resume_plan,
     retry_planning_stage,

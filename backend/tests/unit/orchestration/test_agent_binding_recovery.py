@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.use_cases.pause_resume import (
+from agent_orchestrator.app.use_cases.operator_commands import (
     rebind_goal_agents,
     retry_planning_stage,
 )
