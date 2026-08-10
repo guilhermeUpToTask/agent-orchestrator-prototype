@@ -1,0 +1,68 @@
+{
+  "demo": {
+    "name": "static-site-v1",
+    "seed_commit": "d89fc275b08a3aefda1806e008e0563e16697024"
+  },
+  "orchestrator": {
+    "commit": "4f3d802ead906531e2554860f295a1c9f18c1d42",
+    "working_tree_dirty": true
+  },
+  "run": {
+    "captured_at": "20260810T133717Z",
+    "plan_id": "aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43",
+    "cycle_id": "a0e0d14c-8b92-41f4-bdd0-73478d13de36",
+    "project_id": "390e2db7-550f-4c05-bbe9-805f82bec2bf",
+    "status": "idle",
+    "repository": "/home/dev/.orchestrator/demos/static-site-v1/repo",
+    "wall_clock": "13m37s (12m17s excluding an operator pause/restart)",
+    "cost_usd": "~0.02"
+  },
+  "pinned_runtime": {
+    "runner_mode": "real",
+    "runner_valid": true,
+    "agents": [
+      {
+        "agent_name": "codex-test",
+        "runtime_type": "codex",
+        "provider_name": "openai-codex",
+        "model_name": "default",
+        "valid": true
+      },
+      {
+        "agent_name": "codex-dev",
+        "runtime_type": "codex",
+        "provider_name": "openai-codex",
+        "model_name": "default",
+        "valid": true
+      }
+    ],
+    "reasoner_mode": "llm",
+    "reasoner_provider": "openrouter",
+    "reasoner_model": "deepseek/deepseek-v4-flash-0731"
+  },
+  "verdicts": {
+    "structural_exit": 0,
+    "acceptance": [
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "failed",
+        "summary": "Scenario step failed: PYTHONPATH=src python -m sitegen.cli build content/ --out /tmp/out"
+      },
+      {
+        "trigger": "goal_merge",
+        "outcome": "passed",
+        "summary": "The application booted and all 5 scenario step(s) succeeded."
+      },
+      {
+        "trigger": "pre_publication",
+        "outcome": "passed",
+        "summary": "The application booted and all 5 scenario step(s) succeeded."
+      }
+    ]
+  }
+}

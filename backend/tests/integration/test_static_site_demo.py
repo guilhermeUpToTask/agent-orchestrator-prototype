@@ -18,6 +18,7 @@ weak test rather than by working code.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,29 @@ def test_the_seed_ships_the_content_the_tool_must_handle():
     assert "[links to other pages](about.md)" in index, "the link-rewriting case"
     assert "**strong**" in index and "*emphasis*" in index
     assert (DEMO / "seed" / "content" / "about.md").exists()
+
+
+def test_the_content_does_not_repeat_its_own_front_matter_title():
+    """The seed must not contradict the brief it is fed with.
+
+    Requirement 3 makes the LAYOUT render the front-matter `title` as a visible
+    heading. A body that also opens with `# <that same title>` therefore asks
+    for the title twice, and a correct implementation of both requirements can
+    only produce two identical `<h1>`s stacked on each other — which is exactly
+    what the first completed run produced, and the first thing a human sees on
+    the page this demo exists to have them open.
+
+    Locked at the source because this is where it is fixable: no amount of
+    agent quality can render contradictory instructions well."""
+    for name in ("index.md", "about.md"):
+        source = (DEMO / "seed" / "content" / name).read_text(encoding="utf-8")
+        _, _, body = source.partition("---\n")[2].partition("---\n")
+        title = re.search(r"^title:\s*(.+)$", source, re.MULTILINE)
+        assert title is not None, f"{name} lost its front-matter title"
+        assert f"# {title.group(1).strip()}" not in body, (
+            f"{name} repeats its front-matter title as a body heading; the "
+            "layout already renders that title as the visible heading"
+        )
 
 
 def test_the_seed_starts_with_no_tests_of_its_own():
@@ -142,6 +166,26 @@ def test_the_structural_checker_asserts_no_goal_count():
 
     assert "decomposes differently" in source
     assert "len(goals) ==" not in source
+
+
+def test_the_checkers_seed_tag_default_is_the_tag_materialize_actually_writes():
+    """P8.6 Task 4.2. `materialize.sh` is what CREATES the tag; `verify_demo.py`
+    is what compares against it. They used to disagree — the checker defaulted
+    to `demo-seed`, which this demo never writes — so following the README
+    worked (it passes the flag) and omitting the flag failed on a missing tag
+    rather than on anything about the run. Two files, one name: pin them
+    together so they cannot drift apart again."""
+    materialize = (DEMO / "scripts" / "materialize.sh").read_text(encoding="utf-8")
+    written_tag = re.search(r'^SEED_TAG="([^"]+)"', materialize, re.MULTILINE)
+    assert written_tag is not None, "materialize.sh no longer declares SEED_TAG"
+
+    checker = (DEMO / "scripts" / "verify_demo.py").read_text(encoding="utf-8")
+    compared_tag = re.search(
+        r'"--seed-tag",.*?default="([^"]+)"', checker, re.DOTALL
+    )
+    assert compared_tag is not None, "verify_demo.py no longer defaults --seed-tag"
+
+    assert compared_tag.group(1) == written_tag.group(1)
 
 
 def test_the_demos_readme_separates_demos_from_fixtures():

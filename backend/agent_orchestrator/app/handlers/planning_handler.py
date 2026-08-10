@@ -23,6 +23,7 @@ human command), writes, and commits state + events atomically via the outbox.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta
 from uuid import uuid4
@@ -75,11 +76,23 @@ from agent_orchestrator.app.ports import (
 log = structlog.get_logger(__name__)
 
 
-def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
-    """First non-terminal, dependency-ready goal (position order) still
-    without tasks — dependency-readiness is required so a goal stuck behind an
-    unmet `depends_on` never starves an independently-ready later goal from
-    being JIT-enriched (goal-parallelism fan-out, ADR-001)."""
+def _unenriched_ready_goals(plan: Plan, now: datetime) -> list[Goal]:
+    """Every non-terminal, dependency-ready goal still without tasks, in
+    position order.
+
+    Dependency-readiness is the whole safety argument: a goal whose
+    `depends_on` is unmet must never be enriched, because freezing its contract
+    against a repository the goal it depends on has not written yet produces a
+    contract nothing can satisfy. `ready_goal_ids` is the ONE rule that decides
+    that — the same one the execution loop honours — and this must not grow a
+    second (goal-parallelism fan-out, ADR-001).
+
+    Returning the whole set rather than its first member is what makes
+    enrichment parallel (P8.6 Task 2). It used to return `min(...)`, so a cycle
+    with five independent goals paid five sequential reasoner sessions — ~25
+    minutes of pure sequencing measured in the 2026-08-09 latency analysis —
+    for work that has no ordering constraint between its members at all.
+    """
     ready_ids = ready_goal_ids(plan.execution_goals, now)
     blocked_goal_ids = {goal_id for goal_id, block in plan.goal_blocks.items() if block.active}
     candidates = [
@@ -87,7 +100,7 @@ def _next_unenriched(plan: Plan, now: datetime) -> Goal | None:
         for goal in plan.execution_goals
         if goal.id in ready_ids and goal.id not in blocked_goal_ids and not goal.tasks
     ]
-    return min(candidates, key=lambda g: g.position, default=None)
+    return sorted(candidates, key=lambda g: g.position)
 
 
 class PlanningHandler:
@@ -99,6 +112,7 @@ class PlanningHandler:
         clock: Clock,
         capacity: ProviderCapacityPolicy | None = None,
         planning_artifacts: PlanningArtifactStore | None = None,
+        max_concurrent_enrichment: int = 4,
     ) -> None:
         self._reasoner = reasoner
         self._agents = agents
@@ -111,6 +125,12 @@ class PlanningHandler:
         # Written OUTSIDE the plan transaction (the ChatStore rule): work kept so
         # a retry can learn from it must survive the failure that produced it.
         self._planning_artifacts = planning_artifacts
+        # How many ready goals may be enriched in one pass. Bounded rather than
+        # unbounded because a fan-out of one provider session per ready goal is
+        # how a cycle trips the very capacity limits P8.6 exists to stop waiting
+        # on. The worker passes its own `max_concurrent_goals` so enrichment and
+        # execution agree on how wide this process goes.
+        self._max_concurrent_enrichment = max(1, max_concurrent_enrichment)
 
     def _record_planning_artifact(
         self,
@@ -356,10 +376,35 @@ class PlanningHandler:
     async def _enrich(self, plan_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         if plan.paused:
             return Signal.PAUSED  # don't spend an LLM call on a paused plan
-        target = _next_unenriched(plan, self._clock.now())
-        if target is not None:
-            return await self._enrich_one(plan_id, target, plan, uow)
-        return await self._bind_and_gate(plan_id, uow)
+        targets = _unenriched_ready_goals(plan, self._clock.now())
+        if not targets:
+            return await self._bind_and_gate(plan_id, uow)
+        targets = targets[: self._max_concurrent_enrichment]
+        if len(targets) == 1:
+            return await self._enrich_one(plan_id, targets[0], plan, uow)
+
+        # Concurrent, on ONE UnitOfWork, which is safe for exactly one reason
+        # and it is worth stating: every `with uow:` block below contains no
+        # `await`, so asyncio cannot interleave two transactions on the shared
+        # connection — each commit runs to completion before another coroutine
+        # is resumed. The only await is the reasoner session itself, held
+        # outside any transaction (the side-effects-outside-transactions rule).
+        # Each goal re-reads the plan inside its own commit, so the second
+        # committer observes the first's version rather than clobbering it. If
+        # anything here ever needs to await inside a transaction, this has to
+        # become one UnitOfWork per goal instead.
+        signals = await asyncio.gather(
+            *(self._enrich_one(plan_id, target, plan, uow) for target in targets)
+        )
+        # Any goal that committed means the plan moved, so the loop ticks again
+        # and picks up whatever this pass did not cover (goals past the bound,
+        # and goals whose dependencies these just satisfied). Only when NOTHING
+        # progressed does the pass inherit a peer's stop signal — otherwise one
+        # rate-limited session would strand the goals that succeeded beside it.
+        for signal in signals:
+            if signal == Signal.CONTINUE:
+                return Signal.CONTINUE
+        return signals[0]
 
     async def _enrich_one(self, plan_id: str, target: Goal, plan: Plan, uow: UnitOfWork) -> Signal:
         """Populate ONE goal's tasks, commit, CONTINUE (the JIT checkpoint)."""

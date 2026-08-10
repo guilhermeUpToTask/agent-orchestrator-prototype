@@ -88,7 +88,7 @@ a paid tier, not a classification change.
 Recorded in `docs/architecture/known-issues.md` under *Failure classification*
 so the reasoning error is not repeated.
 
-## Task 2: enrich ready goals in parallel
+## Task 2: enrich ready goals in parallel — ✅ DONE 2026-08-10
 
 **Why:** the largest structural win, and provider-independent. Enrichment is JIT
 *and* strictly serial — goal 2's session starts the second goal 1's commits — so
@@ -112,7 +112,7 @@ five goals cost ~25 minutes of pure sequencing.
 **Done when** enrichment wall-clock for a five-goal cycle is bounded by the
 slowest session rather than their sum.
 
-## Task 3: route around a busy model instead of waiting on it
+## Task 3: route around a busy model instead of waiting on it — ✅ DONE 2026-08-10
 
 **Why:** the roster carries four implementers across four models; a rate-limited
 task waits on its own binding while three sit idle.
@@ -130,7 +130,7 @@ task waits on its own binding while three sit idle.
 
 **Done when** a capacity failure costs one reroute rather than one backoff.
 
-## Task 4: two cheap wins
+## Task 4: two cheap wins — ✅ DONE (code landed earlier; locked by tests 2026-08-10)
 
 1. **Unbuffer the supervised worker.** `serve` runs the worker as a subprocess
    whose stdout is not a tty, so its log sits frozen at the startup banner while
@@ -141,7 +141,7 @@ task waits on its own binding while three sit idle.
    because it passes the flag explicitly; omitting it fails confusingly. Change
    the default.
 
-## Task 5: diagnose the 31-minute gap
+## Task 5: diagnose the 31-minute gap — ⚠️ NOT REPRODUCED 2026-08-10, left open
 
 Attempt 3 armed `retry_at` 18:45:47; attempt 4 began 19:16:37, with the worker
 holding a live renewing plan lease and logging nothing in between. **Not** the
@@ -152,7 +152,7 @@ diagnosable at all. If it reproduces, it dwarfs Tasks 1–3. If it does not
 reproduce once Task 1 lands, say so and close it — a ghost that cannot be
 reproduced after a related fix should be recorded as such, not left as folklore.
 
-## Task 6: run the demo to completion and capture it
+## Task 6: run the demo to completion and capture it — ✅ DONE 2026-08-10
 
 Only after Tasks 1–4. Tier 1, paid models per the binding above.
 
@@ -170,13 +170,13 @@ Only after Tasks 1–4. Tier 1, paid models per the binding above.
    `SITEGEN_REPO=… uv run pytest demos/static-site-v1/acceptance -q`.
 8. **Then** the structural check: `verify_demo.py --plan-id … --cycle-id …
    --repo … --seed-tag static-site-v1-seed`.
-9. Capture with `fixtures/first-cycle-v1/scripts/capture-run.sh`, recording
+9. Capture with `demos/static-site-v1/scripts/capture-run.sh`, recording
    reasoner model, agent model, orchestrator version, wall-clock and cost.
 
 **Done when** `demos/static-site-v1/runs/<UTC>-…/` exists and a human has opened
 the produced HTML.
 
-## Task 7: the second measured run, and the truth about it
+## Task 7: the second measured run, and the truth about it — ✅ DONE 2026-08-10
 
 Re-measure against the baseline document and write the comparison: phase
 wall-clock, the productive/wasted/idle split, and attempts per successful task.
@@ -185,10 +185,24 @@ wall-clock, the productive/wasted/idle split, and attempts per successful task.
 paid models, that is the finding, and it is a more valuable one than a green run
 — it would mean the cost is in the orchestration rather than the provider.
 
-## Exit criteria
+## Exit criteria — all met 2026-08-10
 
-- The demo completes, is captured, and a human has opened the HTML.
-- A second measured run shows the productive share materially above the 38%
-  baseline, with the numbers published rather than asserted.
-- Every fix above is locked by a regression test; no claim rests on a single
-  observed run.
+- ✅ **The demo completes, is captured, and a human has opened the HTML.**
+  4 of 4 goals promoted in 13m37s for $0.013;
+  `demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`. Opening the HTML is
+  what found the duplicated `<h1>` that every automated gate had passed.
+- ✅ **A second measured run shows the productive share materially above the
+  38% baseline, published rather than asserted** — 78.5% (92.4% excluding one
+  operator pause), 0% wasted, 0 failed attempts of 8, in
+  [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](../../history/analyses/2026-08-10-cycle-latency-second-measurement.md).
+  That document leads with the attribution rather than the number: the free
+  tier was removed on both sides, which dominates everything this phase's code
+  did.
+- ✅ **Every fix is locked by a regression test; no claim rests on a single
+  observed run.** Including the four defects the run itself surfaced. Task 3's
+  routing rests ENTIRELY on its tests — the run never rate-limited once, so it
+  never exercised that path, and the analysis says so.
+
+**One thing is deliberately left open**: Task 5's 31-minute gap did not
+reproduce, but no attempt in this run entered backoff, so the path it lives on
+was never taken. "Not reachable by this run's shape" is not "fixed".

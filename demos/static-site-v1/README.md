@@ -112,7 +112,7 @@ nothing was checked. Those last two must never be conflated.
 ## Capturing the run
 
 ```bash
-./fixtures/first-cycle-v1/scripts/capture-run.sh   # writes runs/<UTC>-…/
+./demos/static-site-v1/scripts/capture-run.sh "$PLAN_ID"   # writes runs/<UTC>-…/
 ```
 
 Record with it: reasoner provider and model, agent runtime and model,

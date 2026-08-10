@@ -108,6 +108,29 @@ def test_headings_render_at_the_right_level(built):
     assert re.search(r"<h2[^>]*>\s*A second heading\s*</h2>", html), html[:800]
 
 
+def test_the_title_appears_as_exactly_one_visible_heading(built):
+    """The eye check, encoded — 2026-08-10.
+
+    The first real completed run produced a page whose title was rendered
+    TWICE, one `<h1>Welcome</h1>` directly above another. Every automated check
+    passed: the layout carried the title as the brief requires, the renderer
+    turned the body's `# Welcome` into a heading as the brief requires, the
+    container acceptance run booted the tool and built the site, and the eleven
+    assertions here were all satisfied because each one asked whether a thing
+    was PRESENT and none asked whether it appeared once.
+
+    The demo's own content was the contradiction: it repeated the front-matter
+    title as an ATX heading in the body, so following both requirements
+    literally could only produce a duplicate. Fixed at the source; locked here
+    too, because this is the file that stands in for a human opening the page,
+    and a doubled title is the first thing that human sees."""
+    html = _index(built)
+
+    assert len(re.findall(r"<h1[^>]*>", html)) == 1, (
+        f"expected exactly one <h1>, found {len(re.findall(r'<h1[^>]*>', html))}"
+    )
+
+
 def test_inline_markup_renders(built):
     html = _index(built)
     assert re.search(r"<em[^>]*>emphasis</em>", html)

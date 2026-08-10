@@ -83,6 +83,9 @@ async def run_worker_forever(
         container.clock,
         container.provider_capacity_policy,
         container.planning_artifacts,
+        # Enrichment fans out exactly as wide as this process drives goals, so
+        # the two halves of one worker cannot disagree about its own budget.
+        max_concurrent_enrichment=max_concurrent_goals,
     )
     runner_mode = validate_agent_runner_mode(container.config_store)
     reconciled = reconcile_stale_attempts(container.new_unit_of_work(), container.clock)

@@ -1429,6 +1429,30 @@ class ExecutionHandler:
                     unit.spec, exc.kind, exc.failure, exc.reason, not_before, uow
                 )
 
+                # ROUTE AROUND A BUSY MODEL RATHER THAN WAITING ON IT (P8.6
+                # Task 3). `not_before` is the PROVIDER's patient curve, and the
+                # circuit written just above keeps it — the endpoint that
+                # refused genuinely needs that wait. What the TASK inherits is a
+                # different question. Requeuing it behind the same timestamp
+                # gates it in `navigation` before `select_spec` is ever
+                # consulted, so it sleeps out an hour-scale wait bound to the
+                # model that refused it while an interchangeable agent on
+                # another provider sits idle: 42% of execution wall-clock in the
+                # 2026-08-09 latency analysis.
+                #
+                # So when this was a capacity refusal AND somewhere else is free
+                # right now, the task becomes eligible immediately and the next
+                # tick's ordinary selection moves it. Nothing is re-bound: the
+                # substitution is `select_spec`'s per-attempt decision, made
+                # from the same circuit facts, and the persisted binding stays
+                # the operator's. With nowhere free this stays None and the
+                # patient wait is served exactly as before — dropping it then
+                # would only spin against a provider that is still refusing.
+                task_retry_at = not_before
+                if capacity.waiting and not_before is not None:
+                    if self._admission.free_alternative(unit.task_snapshot, unit.spec, uow):
+                        task_retry_at = None
+
                 if (
                     exc.failure.retryable
                     and not capacity.latched
@@ -1440,14 +1464,14 @@ class ExecutionHandler:
                         )
                     )
                 ):
-                    plan.requeue_task(unit.goal_id, unit.task_id, not_before)
+                    plan.requeue_task(unit.goal_id, unit.task_id, task_retry_at)
                     self._finish_execution(
                         uow,
                         unit,
                         ExecutionAttemptStatus.FAILED,
                         ExecutionRunStatus.RETRYING,
                         failure=exc.failure,
-                        retry_at=not_before,
+                        retry_at=task_retry_at,
                     )
                     paused_at_boundary = self._settle_requested_pause(plan_id, plan, uow)
                     plan.bump_version()

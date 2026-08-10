@@ -476,8 +476,12 @@ def test_jit_populates_each_taskless_goal_then_binds(env_factory):
 
     signals = asyncio.run(_drive_planning(env, handler(reasoner, env)))
 
-    # one CONTINUE checkpoint per populated goal, then the binding PAUSED
-    assert signals == [Signal.CONTINUE, Signal.CONTINUE, Signal.PAUSED]
+    # ONE CONTINUE checkpoint for the whole taskless set, then the binding
+    # PAUSED. This used to be one checkpoint per goal, because enrichment took
+    # a separate tick per goal — the serial cost P8.6 Task 2 removed. Both
+    # goals now enrich in a single pass, so what the checkpoint count measures
+    # is round trips, and there is one fewer of them.
+    assert signals == [Signal.CONTINUE, Signal.PAUSED]
     assert reasoner.enriched_goal_ids == ["g1", "g3"]  # position order, g2 skipped
     stored = env.stored("p1")
     assert stored.phase == PlanPhase.AWAITING_REVIEW

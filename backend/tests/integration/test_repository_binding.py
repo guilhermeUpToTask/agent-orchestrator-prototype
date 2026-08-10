@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from agent_orchestrator.api import dependencies
 from agent_orchestrator.api.server import create_app
 from agent_orchestrator.infra.container import AppContainer
+from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
 from agent_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
@@ -284,3 +285,101 @@ def test_clone_is_idempotent_and_reports_the_resolved_path(client, tmp_path):
     # A local binding is already materialized: the endpoint reports it rather
     # than copying anything.
     assert first.json()["already_present"] is True
+
+
+class _NoProjects:
+    """A project repository with nothing in it — `_default_branch` and
+    `_materialize_remote` are both static/pure with respect to it."""
+
+    def get(self, project_id):  # pragma: no cover - never reached
+        raise NotImplementedError
+
+    def list(self):
+        return []
+
+
+def _repo_with_branches(path, *branches: str) -> None:
+    """A local repository with no remote — the `binding: "local"` shape."""
+    subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
+    (path / "seed.txt").write_text("seed\n", encoding="utf-8")
+    for args in (
+        ["add", "-A"],
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"],
+    ):
+        subprocess.run(["git", "-C", str(path), *args], check=True)
+    for branch in branches:
+        subprocess.run(["git", "-C", str(path), "branch", branch], check=True)
+
+
+def test_the_default_branch_does_not_follow_whichever_branch_is_checked_out(tmp_path):
+    """P8.6, found during the 2026-08-10 demo run.
+
+    `_default_branch` probed `symbolic-ref HEAD` as its second fallback, which
+    does not answer "what is this repository's default branch" — it answers
+    "what is checked out right now". For a LOCAL project there is no
+    `origin/HEAD` to answer it first, so checking out any branch silently
+    redefined the default one.
+
+    That is not cosmetic. The detected default branch is the ref new cycle
+    branches are cut FROM (`workspace.py`), the ref `checkout -B` targets, and
+    the ref "plan work never touches the default branch" is measured against.
+    The demo's own README tells an operator to `git switch cycle/<id>` to look
+    at the result — and doing so made the next verification report the cycle
+    branch as the default and fail a guarantee that was actually being kept.
+    """
+    repo = tmp_path / "repo"
+    _repo_with_branches(repo, "cycle/abc123")
+    resolver = ProjectWorkspaceResolver(_NoProjects(), tmp_path / "home")
+
+    assert resolver._default_branch(repo) == "main"
+
+    subprocess.run(["git", "-C", str(repo), "switch", "-q", "cycle/abc123"], check=True)
+
+    assert resolver._default_branch(repo) == "main", (
+        "checking out a branch redefined the repository's default branch"
+    )
+
+
+def test_a_conventional_default_is_preferred_over_an_alphabetical_accident(tmp_path):
+    """`cycle/…` and `goal/…` sort before `main`, and a finished cycle leaves
+    plenty of both, so 'first branch' is not a usable rule either."""
+    repo = tmp_path / "repo"
+    _repo_with_branches(repo, "cycle/abc", "goal/def", "task/ghi")
+    resolver = ProjectWorkspaceResolver(_NoProjects(), tmp_path / "home")
+
+    assert resolver._default_branch(repo) == "main"
+
+
+def test_a_master_repository_still_resolves(tmp_path):
+    """Not every repository is `main`, and there is no remote to ask."""
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "master", str(repo)], check=True)
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "seed"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repo), "branch", "cycle/abc"], check=True)
+    subprocess.run(["git", "-C", str(repo), "switch", "-q", "cycle/abc"], check=True)
+    resolver = ProjectWorkspaceResolver(_NoProjects(), tmp_path / "home")
+
+    assert resolver._default_branch(repo) == "master"
+
+
+def test_a_remote_head_still_wins_over_everything(tmp_path):
+    """When `origin/HEAD` exists it is authoritative and must stay first: a
+    fork whose default is `develop` must not be overridden by a local `main`."""
+    origin = tmp_path / "origin"
+    _repo_with_branches(origin, "develop")
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    subprocess.run(
+        ["git", "-C", str(clone), "symbolic-ref",
+         "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"],
+        check=True,
+    )
+    resolver = ProjectWorkspaceResolver(_NoProjects(), tmp_path / "home")
+
+    assert resolver._default_branch(clone) == "develop"

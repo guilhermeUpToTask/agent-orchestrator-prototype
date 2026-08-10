@@ -1,0 +1,13 @@
+
+Demo: static-site-v1   plan=aaedbb73  cycle=a0e0d14c
+Goals: 4   (a real reasoner decomposes differently every run)
+
+  [PASS] every goal was promoted                        4 goals
+  [PASS] every served SHA resolves in git               12 distinct
+  [PASS] default branch is byte-identical to the seed   main @ d89fc275
+  [PASS] no goal merged without accepted evidence     
+  [PASS] disposition recorded with an output reference  retain_branch -> cycle/a0e0d14c-8b92-41f4-bdd0-73478d13de36
+  [PASS] root plan returned to idle                     status=idle
+  [PASS] the review surface split the cycle into units  8 reviewable units
+
+7/7 structural checks passed
