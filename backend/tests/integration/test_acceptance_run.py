@@ -9,6 +9,7 @@ Two properties under test, and the second is the important one:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -335,15 +336,8 @@ def test_a_further_tick_does_not_reopen_or_re_run_anything(tmp_path, monkeypatch
         return await drive_plan(
             walk.plan_id,
             walk.container.new_unit_of_work(),
-            walk.container.agent_runner,
-            walk.container.agent_repo,
-            walk.container.workspace,
-            walk.container.agent_event_sink,
-            walk.container.clock,
+            replace(walk.container.execution_services, environment=environment),
             "worker-2",
-            verifier=walk.container.verification_executor,
-            environment=environment,
-            environment_context=walk.container.environment_context,
         )
 
     signal, progressed = asyncio.run(tick())

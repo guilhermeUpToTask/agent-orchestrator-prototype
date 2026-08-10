@@ -9,6 +9,7 @@ import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
 from agent_orchestrator.app.testing.fakes import FakeClock
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
@@ -32,6 +33,17 @@ class _NoopRegistry:
         return None
 
 
+# The bundle `run_worker_forever` hands to whatever drives a plan or a goal.
+# These tests fake both drivers, so the adapters inside are never called — but
+# the attribute has to exist, because the loop builds the call arguments inside
+# its own "one poisoned plan must not kill the worker" try/except.
+_FAKE_SERVICES = ExecutionServices(
+    runner=object(),  # type: ignore[arg-type]
+    agents=object(),  # type: ignore[arg-type]
+    workspace=object(),  # type: ignore[arg-type]
+    event_sink=object(),  # type: ignore[arg-type]
+    clock=FakeClock(),
+)
 
 
 def plan_with_chain():
@@ -303,6 +315,12 @@ def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
         # loop tests about the loop; WorkerRegistry itself is covered by
         # tests/integration/test_worker_registry.py.
         worker_registry=_NoopRegistry(),
+        # What the loop actually hands its drivers (P8.7 task 4). The adapters
+        # inside are placeholders because both drive functions are faked below;
+        # what matters is that the attribute EXISTS. Without it the loop raises
+        # while building the tick's arguments, and its "one poisoned plan must
+        # not kill the worker" handler retries that forever.
+        execution_services=_FAKE_SERVICES,
     )
 
     async def fake_worker_tick(*args, **kwargs):
@@ -395,6 +413,12 @@ def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
         # loop tests about the loop; WorkerRegistry itself is covered by
         # tests/integration/test_worker_registry.py.
         worker_registry=_NoopRegistry(),
+        # What the loop actually hands its drivers (P8.7 task 4). The adapters
+        # inside are placeholders because both drive functions are faked below;
+        # what matters is that the attribute EXISTS. Without it the loop raises
+        # while building the tick's arguments, and its "one poisoned plan must
+        # not kill the worker" handler retries that forever.
+        execution_services=_FAKE_SERVICES,
     )
 
     async def fake_worker_tick(*args, **kwargs):

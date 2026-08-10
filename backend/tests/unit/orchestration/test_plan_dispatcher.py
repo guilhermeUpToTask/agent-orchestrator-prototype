@@ -48,14 +48,7 @@ def _cyclic_plan(goals: list[Goal], started_at) -> Plan:
 
 
 def _dispatcher(env, planning_handler: RecordingPlanningHandler | None) -> PlanDispatcher:
-    return PlanDispatcher(
-        env.runner,
-        env.agents,
-        env.ws,
-        env.sink,
-        env.clock,
-        planning_handler,
-    )
+    return PlanDispatcher(env.services, planning_handler)
 
 
 def test_ready_later_goal_routes_to_planning_past_blocked_head(env_factory) -> None:

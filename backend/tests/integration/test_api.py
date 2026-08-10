@@ -362,11 +362,7 @@ def _plan_with_enriched_active_goal(client, project_id="project-1") -> str:
         advance_plan(
             plan_id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            container.execution_services,
             handler,
         )
     )
@@ -386,11 +382,7 @@ def _plan_with_enriched_active_goal(client, project_id="project-1") -> str:
         advance_plan(
             plan_id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            container.execution_services,
             handler,
         )
     )

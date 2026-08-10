@@ -23,6 +23,7 @@ from agent_orchestrator.domain.entities.project_definition import ProjectDefinit
 from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.infra.container import AppContainer
 from agent_orchestrator.infra.db.tables import Base
 from agent_orchestrator.infra.environment.no_environment import NoEnvironment
@@ -326,15 +327,18 @@ def test_the_worker_hands_its_drivers_the_environment_the_container_built(
     sentinel = NoEnvironment()
     monkeypatch.setitem(container.__dict__, "environment", sentinel)
 
-    seen: dict[str, dict] = {}
+    # Both drivers take the bundle as their one collaborator argument (P8.7
+    # task 4), so capturing it captures everything the composition root handed
+    # over — which is the property under test.
+    seen: dict[str, ExecutionServices] = {}
     stop = asyncio.Event()
 
-    async def _fake_worker_tick(*args, **kwargs):
-        seen.setdefault("worker_tick", kwargs)
+    async def _fake_worker_tick(_uow, services, *args, **kwargs):
+        seen.setdefault("worker_tick", services)
         return False
 
-    async def _fake_drive_goal(*args, **kwargs):
-        seen.setdefault("drive_goal", kwargs)
+    async def _fake_drive_goal(_plan_id, _goal_id, _uow, services, *args, **kwargs):
+        seen.setdefault("drive_goal", services)
         stop.set()
         return ("paused", 0)
 
@@ -366,11 +370,13 @@ def test_the_worker_hands_its_drivers_the_environment_the_container_built(
 
     for caller in ("worker_tick", "drive_goal"):
         assert caller in seen, f"{caller} was never reached by the worker loop"
-        assert seen[caller].get("environment") is sentinel, (
+        services = seen[caller]
+        assert services is not None, f"{caller} was handed no collaborator bundle"
+        assert services.environment is sentinel, (
             f"{caller} did not receive the container's environment adapter — "
             "the acceptance run is dead code in production"
         )
-        assert seen[caller].get("environment_context") is not None, (
+        assert services.environment_context is not None, (
             f"{caller} received no environment_context, so the adapter it did "
             "get can never resolve a repository to boot"
         )

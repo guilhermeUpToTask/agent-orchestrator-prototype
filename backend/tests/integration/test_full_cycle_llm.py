@@ -20,6 +20,7 @@ from agent_orchestrator.app.testing.fakes import (
 from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
 from agent_orchestrator.app.use_cases.create_plan import create_plan
 from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.use_cases.run_worker import worker_tick
 from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
 from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
@@ -126,11 +127,7 @@ class LLMStack:
         return asyncio.run(
             worker_tick(
                 self.uow,
-                self.runner,
-                self.agents,
-                self.ws,
-                self.sink,
-                self.clock,
+                ExecutionServices(self.runner, self.agents, self.ws, self.sink, self.clock),
                 "w1",
                 60,
                 planning_handler=self.planning,

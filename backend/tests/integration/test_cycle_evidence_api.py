@@ -177,14 +177,9 @@ def replanned_client(tmp_path, monkeypatch):
         return await drive_plan(
             plan_id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            container.execution_services,
             "worker-1",
             planning_handler=planning,
-            verifier=container.verification_executor,
         )
 
     architecture_signal, _ = asyncio.run(drive())

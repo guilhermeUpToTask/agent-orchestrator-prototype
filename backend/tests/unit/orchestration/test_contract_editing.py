@@ -18,6 +18,8 @@ what "correct" MEANS:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent_orchestrator.domain.entities.execution_contracts import (
@@ -442,7 +444,7 @@ def test_a_broken_contract_blocks_then_the_repair_lets_execution_finish(env_fact
     with env.uow:
         env.uow.plans.save(broken)
 
-    handler = ExecutionHandler(*env.args[1:])  # runner, agents, ws, sink, clock
+    handler = ExecutionHandler.from_services(env.services)
     for _ in range(6):  # ceiling is 2 verification attempts, plus backoff ticks
         with env.uow:
             loaded = env.uow.plans.get("p1")
@@ -521,13 +523,12 @@ class _RejectsTheCandidate:
 def _repairing_handler(env, artifacts, paths, runner=None):
     from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 
-    _, agents, ws, sink, clock = env.args[1:6]
     return ExecutionHandler(
         runner or _RejectsTheCandidate(),
-        agents,
-        ws,
-        sink,
-        clock,
+        env.agents,
+        env.ws,
+        env.sink,
+        env.clock,
         repository_reader=_TrackedPaths(paths),
         planning_artifacts=artifacts,
     )
@@ -633,10 +634,10 @@ def test_without_repository_sight_the_behaviour_is_exactly_as_before(env_factory
     plan.cycles[0].goals[0].tasks[0].contract = contract(allowed_scope=["src/happy_path/"])
     env.seed(plan)
 
-    handler = ExecutionHandler(*env.args[1:6])  # no reader, no artifact store  # noqa: F841
-    handler = ExecutionHandler(
-        _RejectsTheCandidate(), *env.args[2:6]
-    )  # same failure, no repair wiring
+    # Same failure, no repair wiring: no repository reader, no artifact store.
+    handler = ExecutionHandler.from_services(
+        replace(env.services, runner=_RejectsTheCandidate())
+    )
     for _ in range(6):
         with env.uow:
             loaded = env.uow.plans.get("p1")
@@ -683,9 +684,8 @@ def _promotion_env(env, workspace, artifacts):
     with env.uow:
         env.uow.plans.save(reserved)
 
-    runner, agents, _ws, sink, clock = env.args[1:6]
-    return ExecutionHandler(
-        runner, agents, workspace, sink, clock, planning_artifacts=artifacts
+    return ExecutionHandler.from_services(
+        replace(env.services, workspace=workspace, planning_artifacts=artifacts)
     )
 
 

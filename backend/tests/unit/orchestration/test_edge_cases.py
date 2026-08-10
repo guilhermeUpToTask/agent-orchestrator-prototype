@@ -15,6 +15,7 @@ from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
 from datetime import datetime, timezone
 from agent_orchestrator.domain.services.navigation import next_action
 
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.use_cases.advance_plan import advance_plan
 from agent_orchestrator.app.use_cases.control import finish_review
 from agent_orchestrator.app.use_cases.run_worker import drive_plan
@@ -64,10 +65,10 @@ def harness(plan, script=None):
 async def drive(repo, uow, runner, agents, ws, sink, clock):
     # model a worker that waits out backoff gates (advance clock on not_ready)
     # and a human who finishes the post-exec REVIEW gate.
-    sig, _ = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
+    sig, _ = await drive_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock), "w1")
     while sig == "not_ready":
         clock.advance(300)
-        sig, _ = await drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1")
+        sig, _ = await drive_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock), "w1")
     if sig == "paused" and repo.get("p1").phase == PlanPhase.REVIEW:
         finish_review("p1", uow)
         sig = "done"
@@ -116,14 +117,14 @@ def test_mix_of_empty_and_populated_goals():
 def test_advance_already_done_plan_returns_done():
     p = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.DONE, goals=[])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
-    sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+    sig = asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
     assert sig == "done"
 
 
 def test_advance_already_failed_plan_returns_failed():
     p = Plan(project_id="project-1", id="p1", brief="b", phase=PlanPhase.FAILED, goals=[])
     repo, uow, runner, agents, ws, sink, clock = harness(p)
-    sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+    sig = asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
     assert sig == "failed"
 
 
@@ -133,7 +134,7 @@ def test_gate_phases_always_pause():
     for phase in (PlanPhase.AWAITING_REVIEW, PlanPhase.REVIEW):
         p = Plan(project_id="project-1", id="p1", brief="b", phase=phase, goals=[])
         repo, uow, runner, agents, ws, sink, clock = harness(p)
-        sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+        sig = asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
         assert sig == "paused"
 
 
@@ -229,7 +230,7 @@ def test_max_steps_prevents_runaway():
     # re-seed with zero-backoff policy
     repo._store["p1"].retry_policy = _RP(max_attempts=10**9, initial_backoff_seconds=0)
     sig, progressed = asyncio.run(
-        drive_plan("p1", uow, runner, agents, ws, sink, clock, "w1", max_steps=5)
+        drive_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock), "w1", max_steps=5)
     )
     assert sig == "continue" and progressed == 5  # stopped at cap, didn't hang
     assert runner.calls["t0"] == 5  # exactly max_steps attempts, then bailed

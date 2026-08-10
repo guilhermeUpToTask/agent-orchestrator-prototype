@@ -8,6 +8,7 @@ A human retry bypasses should_retry and starts a fresh policy cycle for one task
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -520,7 +521,7 @@ def test_human_pause_survives_an_in_flight_terminal_failure(env_factory):
     env = env_factory()
     env.seed(running_plan(retry_max=1))  # one attempt, then terminal
     env.runner = PauseMidRun({"t0": DummyBehavior(always_fail=True, fail_reason="boom")}, env.uow)
-    env.args = (env.uow, env.runner, env.agents, env.ws, env.sink, env.clock)
+    env.args = (env.uow, replace(env.services, runner=env.runner))
 
     sig = asyncio.run(advance_plan("p1", *env.args))
 

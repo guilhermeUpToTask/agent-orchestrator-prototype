@@ -68,6 +68,7 @@ from agent_orchestrator.infra.runtime.factory import build_agent_runner
 from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.forge_port import ForgePort
 from agent_orchestrator.infra.db.secret_ref import SecretRef
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
 from agent_orchestrator.infra.environment.no_environment import NoEnvironment
 from agent_orchestrator.infra.environment.spec import (
@@ -291,6 +292,39 @@ class AppContainer:
     @cached_property
     def verification_executor(self) -> LocalVerificationExecutor:
         return LocalVerificationExecutor(self.clock)
+
+    @property
+    def execution_services(self) -> ExecutionServices:
+        """Every collaborator an execution drive needs, enumerated in ONE place
+        (P8.7 task 4).
+
+        It used to be enumerated at four call sites, and two of them were wrong:
+        the worker never passed `environment`/`environment_context` (so the
+        acceptance run never fired in production) and `PlanDispatcher` never
+        passed `routing`. Adding a collaborator here now reaches every driver,
+        which is the whole point.
+
+        A plain property, NOT cached: `provider_capacity_policy` and
+        `routing_policy` are deliberately re-read per access so
+        `orchestrate config set` applies without a restart, and caching the
+        bundle would pin both to whatever the process started with — quietly
+        undoing the thing those two docstrings promise.
+        """
+        return ExecutionServices(
+            runner=self.agent_runner,
+            agents=self.agent_repo,
+            workspace=self.workspace,
+            event_sink=self.agent_event_sink,
+            clock=self.clock,
+            verifier=self.verification_executor,
+            capacity=self.provider_capacity_policy,
+            providers=self.provider_repo,
+            routing=self.routing_policy,
+            repository_reader=self.repository_reader,
+            planning_artifacts=self.planning_artifacts,
+            environment=self.environment,
+            environment_context=self.environment_context,
+        )
 
     # --- Stage 6: the planning reasoner ---
     @cached_property

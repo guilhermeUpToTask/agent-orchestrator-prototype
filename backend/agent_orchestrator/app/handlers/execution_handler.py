@@ -101,6 +101,7 @@ from agent_orchestrator.app.test_identity import (
     declared_checks,
     existing_checks,
 )
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.handlers.agent_admission import AgentAdmission, CapacityOutcome
 from agent_orchestrator.app.handlers.goal_promotion import GoalPromoter
 from agent_orchestrator.app.handlers.execution_rules import (
@@ -138,6 +139,31 @@ log = structlog.get_logger(__name__)
 
 
 class ExecutionHandler:
+    @classmethod
+    def from_services(cls, services: ExecutionServices) -> ExecutionHandler:
+        """Build from the one bundle the composition root assembles (P8.7 task 4).
+
+        Every driver goes through here, so a collaborator added to
+        `ExecutionServices` reaches all of them at once instead of needing the
+        same argument threaded through four call sites — which is how
+        `environment` and `routing` each went missing from one of them.
+        """
+        return cls(
+            services.runner,
+            services.agents,
+            services.workspace,
+            services.event_sink,
+            services.clock,
+            verifier=services.verifier,
+            capacity=services.capacity,
+            providers=services.providers,
+            routing=services.routing,
+            repository_reader=services.repository_reader,
+            planning_artifacts=services.planning_artifacts,
+            environment=services.environment,
+            environment_context=services.environment_context,
+        )
+
     def __init__(
         self,
         runner: AgentRunner,
