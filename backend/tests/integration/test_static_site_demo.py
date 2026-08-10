@@ -18,6 +18,7 @@ weak test rather than by working code.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -142,6 +143,26 @@ def test_the_structural_checker_asserts_no_goal_count():
 
     assert "decomposes differently" in source
     assert "len(goals) ==" not in source
+
+
+def test_the_checkers_seed_tag_default_is_the_tag_materialize_actually_writes():
+    """P8.6 Task 4.2. `materialize.sh` is what CREATES the tag; `verify_demo.py`
+    is what compares against it. They used to disagree — the checker defaulted
+    to `demo-seed`, which this demo never writes — so following the README
+    worked (it passes the flag) and omitting the flag failed on a missing tag
+    rather than on anything about the run. Two files, one name: pin them
+    together so they cannot drift apart again."""
+    materialize = (DEMO / "scripts" / "materialize.sh").read_text(encoding="utf-8")
+    written_tag = re.search(r'^SEED_TAG="([^"]+)"', materialize, re.MULTILINE)
+    assert written_tag is not None, "materialize.sh no longer declares SEED_TAG"
+
+    checker = (DEMO / "scripts" / "verify_demo.py").read_text(encoding="utf-8")
+    compared_tag = re.search(
+        r'"--seed-tag",.*?default="([^"]+)"', checker, re.DOTALL
+    )
+    assert compared_tag is not None, "verify_demo.py no longer defaults --seed-tag"
+
+    assert compared_tag.group(1) == written_tag.group(1)
 
 
 def test_the_demos_readme_separates_demos_from_fixtures():

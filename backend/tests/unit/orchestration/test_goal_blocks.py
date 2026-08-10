@@ -232,6 +232,14 @@ def test_enrichment_reasoner_failure_blocks_only_its_own_goal(env_factory):
     the failure mode domain unfreeze #14 removed for execution blocks. Only a
     plan-wide reasoner failure (cycle architecture, target_goal_id=None) may
     still use the scalar.
+
+    Since P8.6 Task 2 both ready goals are enriched in ONE pass, so a reasoner
+    that fails every session blocks both of them here rather than one per tick.
+    That is the same property, observed sooner: what is being asserted is that
+    each failure lands on its OWN goal and the plan-wide scalar stays empty —
+    not that a sibling escapes an outage that also hit it. Sibling isolation
+    when only one goal's session fails is locked separately, in
+    `test_parallel_enrichment.py`.
     """
     import asyncio
 
@@ -267,25 +275,24 @@ def test_enrichment_reasoner_failure_blocks_only_its_own_goal(env_factory):
     assert stored.block is None, (
         "a per-goal enrichment failure must not open the plan-wide scalar block"
     )
-    assert "g1" in stored.goal_blocks and stored.goal_blocks["g1"].active
-    assert stored.goal_blocks["g1"].goal_id == "g1"
-    assert "g2" not in stored.goal_blocks
-    assert stored.status == PlanStatus.RUNNING, (
-        "an independent sibling goal must keep the plan claimable"
-    )
+    assert reasoner.goal_ids == ["g1", "g2"]  # both attempted, in position order
+    assert set(stored.goal_blocks) == {"g1", "g2"}
+    for goal_id in ("g1", "g2"):
+        assert stored.goal_blocks[goal_id].active
+        # The whole point: each block names the goal whose session failed. A
+        # block carrying the wrong goal_id (or none) is what routed to the
+        # scalar and took the plan down.
+        assert stored.goal_blocks[goal_id].goal_id == goal_id
+    assert stored.status == PlanStatus.BLOCKED  # every independent goal is now blocked
 
-    # The next planning tick must skip g1's active goal block and attempt g2.
-    # Without that exclusion, it would select g1 again and collide with the
-    # already-open block instead of preserving sibling progress.
+    # And an already-blocked goal is never re-attempted: a further tick must
+    # not select g1 or g2 again and collide with their open blocks.
     with env.uow:
         loaded = env.uow.plans.get("p1")
     asyncio.run(handler.handle("p1", loaded, env.uow))
 
-    stored = env.stored("p1")
     assert reasoner.goal_ids == ["g1", "g2"]
-    assert stored.block is None
-    assert set(stored.goal_blocks) == {"g1", "g2"}
-    assert stored.status == PlanStatus.BLOCKED  # every independent goal is now blocked
+    assert env.stored("p1").block is None
 
 
 def test_capacity_reasoner_failure_keeps_waiting_past_the_attempt_budget(env_factory):
