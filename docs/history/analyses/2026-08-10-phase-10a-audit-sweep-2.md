@@ -5,8 +5,15 @@
 release, under genuine concurrency against real SQLite.
 **Result:** **no defect in the lease.** The mutual-exclusion properties hold
 under every race constructed. What the sweep produced instead is the coverage
-that was missing, one defect in the *test suite* that only appeared once the
-suite was loaded (F7), one recorded asymmetry, and two retractions.
+that was missing, **two defects in the test suite** that only appeared once the
+suite was loaded and run repeatedly (F7, F8), one recorded asymmetry, and three
+retractions.
+
+Both suite defects share a shape worth naming: a test that asserted something
+slightly *stronger* than the behaviour it was written to protect — a fixed
+one-second window instead of "the beat advances", and "the machine is clean"
+instead of "this run cleaned up". Neither over-assertion was visible while the
+suite was quiet.
 
 This was named the head of the queue by sweep 1 and the roadmap's own priority
 list: *"concurrency around the lease and goal-lease interaction under real
@@ -130,48 +137,61 @@ version CAS in `save` (`rowcount == 0` -> `StaleVersionError`) refuses the write
 a displaced worker would go on to attempt. Fencing happens at the write, not at
 the heartbeat.
 
-## Hypothesis — `test_no_container_survives_the_run[podman]` is load-sensitive too
+## F8 — the container leak tests fail on someone else's orphan, forever
 
-**Not a finding.** Observed failing **once**, in a full-suite run made
-deliberately heavy by this sweep's own additions. It has not been reproduced,
-and the failing assertion was not captured, so which of the two it was is
-unknown:
+**Severity:** CI reliability; a false failure that accuses the wrong code.
+**Status:** fixed.
+
+`test_no_container_survives_the_run` and
+`test_a_small_startup_budget_does_not_abort_the_daemon_call` both ended with:
 
 ```python
-assert env.verify(repo, "HEAD", spec).outcome == "failed"   # (a)
-...
-assert "aipom-acceptance-" not in listing                    # (b)
+listing = subprocess.run([binary, "ps", "-a", "--format", "{{.Names}}"], ...).stdout
+assert "aipom-acceptance-" not in listing
 ```
 
-Both have a load-sensitive reading. (a) gives the container
-`startup_timeout_seconds=60` to become healthy, which a saturated disk could
-exceed. (b) lists **every** container on the machine, not only the one this test
-created, and races the teardown it is checking — `podman rm` under I/O pressure
-is not instant.
+That asserts the **whole machine** has no acceptance container — not that *this
+run* cleaned up after itself. Any orphan from any source therefore fails them,
+and keeps failing them, until someone prunes by hand. The failure reads as
+"teardown is broken", which is precisely what is not wrong.
 
-What was **ruled out**: cross-file interference from
+**Proof, and it is unusually complete.** The test failed in runs 1 and 2 of a
+three-run flake check. Inspecting the machine between runs found exactly one
+orphan:
+
+```
+aipom-acceptance-2c3d4265c45d   Exited (137) 9 minutes ago   alpine:3.20
+```
+
+It was removed by hand partway through run 3 — and **run 3 passed**. Cause,
+removal, and recovery all observed.
+
+**Where the orphan came from, and why that part is a retraction.** `Exited
+(137)` is SIGKILL. It was left by an *earlier full-suite run of mine that hit a
+10-minute command timeout and was killed mid-test* — `ContainerEnvironment`'s
+teardown is a `finally`, and no `finally` runs through a `SIGKILL`. So the leak
+was an artifact of how the audit was being run, not a product defect. The
+adapter's teardown is careful and correct: the `finally` is armed **before**
+`_start` precisely because a client-side timeout can still leave a
+daemon-side container, it uses `rm -f`, it is bounded by
+`_TEARDOWN_TIMEOUT_SECONDS`, and it swallows its own exceptions so it cannot
+replace a real verdict. Nothing in it needed changing.
+
+**Fix.** A `no_new_containers` fixture snapshots the acceptance containers
+before the test and asserts no **new** survivor after. Same real assertion —
+this run removed what it created — without the accidental claim about the
+machine. Verified capable of failing: disabling `_teardown` makes all four
+leak-checked cases fail, naming the leaked container.
+
+What was **ruled out** along the way: cross-file interference from
 `test_container_environment_failures.py`, the only other file touching
-`ContainerEnvironment`. Its cases use a missing binary, a refusing daemon and a
+`ContainerEnvironment` — its cases use a missing binary, a refusing daemon and a
 nonsense repo, so it never starts a real container. Docker and podman also
 cannot see each other's containers, so the two parametrizations cannot collide.
 
-**Why it is not being fixed here.** One unreproduced failure with an uncaptured
-assertion is not enough to know what to change, and guessing at a fix for a
-container test is how the next intermittent failure gets introduced. What would
-settle it: run the file in a loop under parallel I/O load with the outcome and
-the full `ps -a` listing printed on failure.
-
-**CI exposure is limited**, which is why this does not block: CI runs
-`pytest -q tests/unit` and `pytest -q tests/integration` as two separate
-invocations, so the contention tests added here (in `tests/unit/orchestration/`,
-following `test_goal_lease_repository.py`'s precedent of an
-`integration`-marked SQLite race living beside its unit tests) never execute
-alongside the container tests there. The interference is a **local** full-suite
-phenomenon.
-
 ## Retracted
 
-Two, both caught by the rule that a measurement is not yet a finding.
+Three, all caught by the rule that a measurement is not yet a finding.
 
 1. **"16 workers can only claim 1 of 8 available plans — the claim path
    collapses under contention."** The measurement was real: 15 workers got
@@ -185,6 +205,13 @@ Two, both caught by the rule that a measurement is not yet a finding.
 
 2. **"`heartbeat` returning `None` means a displaced worker can write stale
    state."** It cannot; the version CAS refuses it. See above.
+
+3. **"`ContainerEnvironment` leaks containers."** A real orphan was found on the
+   machine, which is a real observation. But it was `Exited (137)` — SIGKILL —
+   left by an audit run of mine that was killed by a command timeout, and no
+   `finally` survives a kill. The adapter's teardown is correct on every path
+   Python can observe (see F8). The *test* that reported it was wrong; the code
+   it accused was not.
 
 Both have the same shape as sweep 1's `PRAGMA foreign_keys` retraction and the
 P8.6 Task 1 retraction before it: a true observation, an inference that did not

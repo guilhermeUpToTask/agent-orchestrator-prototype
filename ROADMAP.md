@@ -1140,10 +1140,14 @@ coverage that was missing: the goal lease had a two-thread race, the **plan
 claim had none**, and `test_plan_claim_contention.py` now drives five, each
 verified capable of failing by removing the claim predicate. Plus two
 retractions, one of which ("the claim path collapses under contention") was a
-fixture violating `uq_plans_project_id`, not a bug. It also found one defect in
-the **suite**: adding that load made a heartbeat test that sampled a fixed ~1s
-window fail 2 runs in 4, so it now waits for the beat it needs instead of for a
-clock. **Still unswept: the frontend's error and stale-data states, the reasoner
+fixture violating `uq_plans_project_id`, not a bug. It also found **two defects
+in the suite**, both tests asserting something stronger than the behaviour they
+protect and neither visible while the suite was quiet: a heartbeat test that
+sampled a fixed ~1s window (failed 2 runs in 4 under the added load; now waits
+for the beat it needs), and the container leak tests asserting the whole
+*machine* had no acceptance container rather than that the run cleaned up after
+itself — which one SIGKILLed orphan failed permanently until pruned by hand.
+**Still unswept: the frontend's error and stale-data states, the reasoner
 tool-call surface against hostile model output, and remaining doc/code drift.**
 
 ### 10B — the launch
