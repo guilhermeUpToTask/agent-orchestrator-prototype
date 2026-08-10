@@ -1129,8 +1129,22 @@ The two that matter: the API's own `/api/openapi.json`, `/api/docs` and
 guard's parametrized sweep because FastAPI marks them `include_in_schema=False`
 — and a 422 echoed the **submitted plaintext `api_key`** back to the caller,
 which the console then rendered into a toast. Neither was reachable by the 1472
-green tests. **Still unswept, and now the head of the queue: the lease and
-goal-lease interaction under real contention.**
+green tests.
+
+**Sweep 2 — done 2026-08-10** (the lease and goal-lease under real contention):
+[`docs/history/analyses/2026-08-10-phase-10a-audit-sweep-2.md`](docs/history/analyses/2026-08-10-phase-10a-audit-sweep-2.md).
+**No defects.** Mutual exclusion holds under every race constructed — one plan
+against 16 workers, 8 plans against 16, expired-lease reclaim, live-lease theft,
+and the goal lease — with zero double-claims. What it produced instead is the
+coverage that was missing: the goal lease had a two-thread race, the **plan
+claim had none**, and `test_plan_claim_contention.py` now drives five, each
+verified capable of failing by removing the claim predicate. Plus two
+retractions, one of which ("the claim path collapses under contention") was a
+fixture violating `uq_plans_project_id`, not a bug. It also found one defect in
+the **suite**: adding that load made a heartbeat test that sampled a fixed ~1s
+window fail 2 runs in 4, so it now waits for the beat it needs instead of for a
+clock. **Still unswept: the frontend's error and stale-data states, the reasoner
+tool-call surface against hostile model output, and remaining doc/code drift.**
 
 ### 10B — the launch
 
