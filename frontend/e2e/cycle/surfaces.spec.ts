@@ -60,30 +60,58 @@ test('the goals canvas and the plan tabs are reachable and render the cycle', as
   plan = await planState(page, planId);
   expect(plan.active_cycle.goals.length).toBeGreaterThan(0);
 
-  // Every tab in the plan shell mounts and shows its own surface. These are
-  // links in the lifecycle navigation, so addressing them by name is also an
-  // assertion that the navigation is labelled.
+  // Every tab in the plan shell mounts, shows its own surface, and names
+  // itself. These are links in the lifecycle navigation, so addressing them by
+  // name also asserts the navigation is labelled.
   //
-  // FINDING, recorded here rather than fixed: only `Agents` renders a heading.
-  // `Goals.tsx` has none at all (its only landmark is a `<p role="alert">` for
-  // the empty state) and `Activity.tsx` has none either, so a reader navigating
-  // by headings lands on two of these three tabs with nothing telling them
-  // where they are. This spec therefore pins what is TRUE today — the tab is
-  // reachable and its main region has content — because a safety net that
-  // asserts the behaviour we intend rather than the behaviour we have cannot
-  // catch a refactor breaking the latter. Tighten this to a heading assertion
-  // in Phase 9 task 4, when the headings exist.
+  // Every tab now names itself. `Goals` and `Activity` had NO heading at all
+  // until P9 task 4 — a reader navigating by headings landed on two of three
+  // tabs with nothing telling them where they were. Theirs are visually
+  // hidden, because both views are self-evident to look at and the heading
+  // they were missing is one that need not be seen; `toBeVisible` would
+  // therefore be the wrong assertion, and `toBeAttached` is the right one.
   for (const tab of ['Goals', 'Agents', 'Activity']) {
     await page.getByRole('link', { name: tab, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/plans/${planId}/${tab.toLowerCase()}`));
     await expect(page.getByRole('main')).not.toBeEmpty();
-    if (tab === 'Agents') {
-      // The one tab that does label itself. Asserted while it is on screen —
-      // the loop moves on, and a check after it would silently pass or fail
-      // against whichever tab happened to be last.
-      await expect(page.getByRole('heading', { name: /agents/i }).first()).toBeVisible();
-    }
+    // Case-insensitive on purpose: `Agents` renders its heading as "AGENTS"
+    // while the two added in task 4 are title case. Anchored so "All plans"
+    // and friends cannot match.
+    await expect(
+      page.getByRole('heading', { name: new RegExp(`^${tab}$`, 'i') }),
+      `the ${tab} tab must name itself for a reader navigating by headings`,
+    ).toBeAttached();
   }
+});
+
+test('the composer can create a second project, not only the first', async ({ page }) => {
+  // Regression lock for Finding 5. `Plans.tsx` branched
+  // `projects.length > 0 ? <Select> : <create form>`, so the composer offered
+  // a way to create a project ONLY while there were none — from the second
+  // onward an operator had to already know to go to Settings.
+  const existing = await page.request.get('/api/projects').then((r) => r.json());
+  expect(existing.length, 'this spec needs at least one project to already exist')
+    .toBeGreaterThan(0);
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open project plan' }).click();
+  await expect(page.getByRole('combobox', { name: 'Project' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'New project' }).click();
+  const nameField = page.getByRole('textbox', { name: 'Project', exact: true });
+  await expect(nameField).toBeVisible();
+  await nameField.fill('e2e-second-project');
+  await page.getByRole('button', { name: 'Create project' }).click();
+
+  // Back to the picker, with the new project selected rather than merely added.
+  const picker = page.getByRole('combobox', { name: 'Project' });
+  await expect(picker).toBeVisible();
+  await expect(picker).toHaveValue(
+    await page.request
+      .get('/api/projects')
+      .then((r) => r.json())
+      .then((all) => all.find((p: { name: string }) => p.name === 'e2e-second-project').id),
+  );
 });
 
 test('the settings sections all mount and report real backend state', async ({ page }) => {
@@ -110,6 +138,30 @@ test('the settings sections all mount and report real backend state', async ({ p
   // showing a hopeful default.
   await page.goto('/settings/runner');
   await expect(page.getByText(/dry-run/i).first()).toBeVisible();
+});
+
+test('the console dock exposes three separate controls, not one', async ({ page }) => {
+  // Regression lock for the defect the P9 analysis found (Finding 3). The
+  // toolbar used to be ONE <button> containing two `role="button"` spans:
+  // invalid HTML, and the accessibility tree collapsed it into a single
+  // control named "AGENT EVENTS · 1 FAILED ONLY" — one name covering three
+  // actions. Asserting the names separately is what would have caught it.
+  const planId = await createPlan(page, 'e2e-dock', BRIEF);
+  expect(planId).toBeTruthy();
+
+  const expand = page.getByRole('button', { name: /^AGENT EVENTS/ });
+  const failedOnly = page.getByRole('button', { name: 'FAILED ONLY', exact: true });
+  await expect(expand).toBeVisible();
+  await expect(failedOnly).toBeVisible();
+
+  // The expand control must NOT absorb the filter's label.
+  await expect(expand).not.toHaveAccessibleName(/FAILED ONLY/);
+
+  // And the filter is a toggle, so it has to say whether it is on. A control
+  // that only *looks* pressed is styled, not accessible.
+  await expect(failedOnly).toHaveAttribute('aria-pressed', 'false');
+  await failedOnly.click();
+  await expect(failedOnly).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('the manual renders inside the console', async ({ page }) => {

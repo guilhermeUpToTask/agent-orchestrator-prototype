@@ -4,9 +4,12 @@ import { useParams } from 'react-router-dom';
 import { useAttemptTimeline } from '../lib/queries';
 import { useNow } from '../lib/time';
 import type { ExecutionAttemptRow } from '../lib/api';
-import { tokens } from '../styles/tokens';
 import { usePlannerStore } from '../store/plannerStore';
 import { AttemptLogViewer } from './AttemptLogViewer';
+import styles from './ConsoleDock.module.css';
+
+/** Join the class names that are actually present. */
+const cx = (...names: (string | false | undefined)[]) => names.filter(Boolean).join(' ');
 
 function duration(start: string, end: string | null, now: number): string {
   const milliseconds = Math.max(0, Date.parse(end ?? new Date(now).toISOString()) - Date.parse(start));
@@ -20,12 +23,11 @@ function retryCopy(retryAt: string | null, now: number): string | null {
   return seconds > 0 ? `automatic retry in ${seconds}s` : 'automatic retry is due';
 }
 
-function attemptColor(attempt: ExecutionAttemptRow): string {
-  if (attempt.status === 'failed') return tokens.red;
-  if (attempt.status === 'succeeded') return tokens.green;
-  if (attempt.status === 'abandoned') return tokens.textMuted;
-  return tokens.accent;
-}
+const ATTEMPT_CLASS: Record<string, string | undefined> = {
+  failed: styles.attemptFailed,
+  succeeded: styles.attemptSucceeded,
+  abandoned: styles.attemptAbandoned,
+};
 
 /**
  * Durable operational timeline. HTTP history hydrates before SSE so refreshes
@@ -79,67 +81,53 @@ export function ConsoleDock() {
     if (element && pinnedRef.current) element.scrollTop = element.scrollHeight;
   }, [count, liveRows.length]);
 
-  const toggleStyle = (active: boolean): React.CSSProperties => ({
-    fontSize: 'var(--fs-micro)',
-    fontFamily: tokens.fontMono,
-    letterSpacing: '0.06em',
-    padding: '2px 7px',
-    borderRadius: 'var(--r-2)',
-    border: `1px solid ${tokens.border}`,
-    color: active ? tokens.accent : tokens.textMuted,
-    background: active ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
-  });
+  const height = consoleOpen
+    ? (selectedAttempt ? styles.dockOpenWithLog : styles.dockOpen)
+    : undefined;
 
   return (
-    <div style={{
-      borderTop: `1px solid ${tokens.border}`,
-      background: 'var(--bg-0)',
-      display: 'flex',
-      flexDirection: 'column',
-      flexShrink: 0,
-      height: consoleOpen ? (selectedAttempt ? 430 : 280) : 30,
-      transition: 'height 0.15s ease',
-    }}>
-      <button
-        onClick={toggleConsole}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '6px 14px',
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          color: tokens.textMuted, flexShrink: 0,
-        }}
-        aria-expanded={consoleOpen}
-      >
-        <Terminal size={12} aria-hidden />
-        <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, letterSpacing: '0.1em' }}>
-          AGENT EVENTS {count > 0 && `· ${count}`}
-        </span>
-        <div style={{ flex: 1 }} />
+    <div className={cx(styles.dock, height)}>
+      {/*
+        Three sibling buttons, not one button containing two `role="button"`
+        spans. The old markup nested interactive content inside a <button>,
+        which is invalid and collapsed the accessibility tree into a single
+        control named "AGENT EVENTS · 1 FAILED ONLY" — one name for three
+        actions. The filters are toggles, so they now say so with
+        `aria-pressed` instead of only looking pressed.
+      */}
+      <div className={styles.toolbar}>
+        <button
+          type="button"
+          onClick={toggleConsole}
+          className={styles.expandToggle}
+          aria-expanded={consoleOpen}
+        >
+          <Terminal size={12} aria-hidden />
+          <span className={styles.expandLabel}>
+            AGENT EVENTS {count > 0 && `· ${count}`}
+          </span>
+          {consoleOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronUp size={13} aria-hidden />}
+        </button>
+        <div className={styles.spacer} />
         {selectedTaskId && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(event) => { event.stopPropagation(); setTaskOnly((value) => !value); }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') setTaskOnly((value) => !value);
-            }}
-            style={toggleStyle(taskOnly)}
+          <button
+            type="button"
+            className={styles.filter}
+            aria-pressed={taskOnly}
+            onClick={() => setTaskOnly((value) => !value)}
           >
             SELECTED TASK
-          </span>
+          </button>
         )}
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(event) => { event.stopPropagation(); setFailedOnly((value) => !value); }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') setFailedOnly((value) => !value);
-          }}
-          style={toggleStyle(failedOnly)}
+        <button
+          type="button"
+          className={styles.filter}
+          aria-pressed={failedOnly}
+          onClick={() => setFailedOnly((value) => !value)}
         >
           FAILED ONLY
-        </span>
-        {consoleOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronUp size={13} aria-hidden />}
-      </button>
+        </button>
+      </div>
 
       {consoleOpen && (
         <div
@@ -148,12 +136,15 @@ export function ConsoleDock() {
             const element = scrollRef.current;
             if (element) pinnedRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
           }}
-          style={{ flex: 1, overflowY: 'auto', padding: 'var(--sp-1) 14px 10px', fontFamily: tokens.fontMono }}
+          className={styles.log}
         >
-          {isLoading && <div style={{ color: tokens.textMuted, fontSize: 'var(--fs-micro)' }}>Hydrating attempt history…</div>}
+          {isLoading && <div className={styles.hydrating}>Hydrating attempt history…</div>}
 
           {!failedOnly && timeline?.planning_operations.map((operation) => (
-            <div key={operation.id} style={{ fontSize: 'var(--fs-micro)', lineHeight: 1.7, color: operation.status === 'failed' ? tokens.red : tokens.purple }}>
+            <div
+              key={operation.id}
+              className={cx(styles.planning, operation.status === 'failed' && styles.planningFailed)}
+            >
               planner/{operation.purpose}
               {operation.target_goal_id && ` · goal ${operation.target_goal_id.slice(0, 8)}`}
               {` · ${operation.status} · ${operation.model_request_count} model request(s)`}
@@ -163,20 +154,23 @@ export function ConsoleDock() {
           ))}
 
           {tasks.map((task) => (
-            <div key={`${task.goal_id}:${task.task_id}`} style={{ marginTop: 5 }}>
-              <div style={{ color: tokens.accent, fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
+            <div key={`${task.goal_id}:${task.task_id}`} className={styles.task}>
+              <div className={styles.taskHead}>
                 task {task.task_id.slice(0, 8)} · goal {task.goal_id.slice(0, 8)}
               </div>
               {task.runs.map((run) => (
-                <div key={run.id} style={{ paddingLeft: 'var(--sp-3)' }}>
-                  <div style={{ color: tokens.textSecond, fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
+                <div key={run.id} className={styles.run}>
+                  <div className={styles.runHead}>
                     run {run.id.slice(0, 8)} · {run.status} · {duration(run.started_at, run.completed_at, now)}
                   </div>
                   {run.attempts.map((attempt) => {
                     const retry = retryCopy(attempt.retry_at, now);
                     const provider = [attempt.runtime, attempt.provider_id, attempt.model_id].filter(Boolean).join('/');
                     return (
-                      <div key={attempt.id} style={{ paddingLeft: 'var(--sp-3)', color: attemptColor(attempt), fontSize: 'var(--fs-micro)', lineHeight: 1.7 }}>
+                      <div
+                        key={attempt.id}
+                        className={cx(styles.attempt, ATTEMPT_CLASS[attempt.status])}
+                      >
                         attempt {attempt.number} · {attempt.status} · {duration(attempt.started_at, attempt.completed_at, now)}
                         {provider && ` · ${provider}`}
                         {attempt.failure_kind && ` · ${attempt.failure_kind}`}
@@ -184,27 +178,19 @@ export function ConsoleDock() {
                         {retry && ` · ${retry}`}
                         {attempt.safe_message && ` · ${attempt.safe_message}`}
                         {attempt.status === 'failed' && !attempt.retryable && (
-                          <span style={{ color: tokens.textMuted }}>
+                          <span className={styles.recovery}>
                             {' · '}recovery: switch provider/model, edit the task, or pause
                           </span>
                         )}
                         <button
                           type="button"
                           onClick={() => setSelectedAttempt(attempt)}
-                          style={{
-                            marginLeft: 8,
-                            color: tokens.accent,
-                            background: 'transparent',
-                            border: 'none',
-                            font: 'inherit',
-                            cursor: 'pointer',
-                            textDecoration: 'underline',
-                          }}
+                          className={styles.rawLogButton}
                         >
                           view raw log
                         </button>
                         {(attempt.stdout_tail || attempt.stderr_tail) && (
-                          <div style={{ color: tokens.textDim, whiteSpace: 'pre-wrap', paddingLeft: 'var(--sp-2)' }}>
+                          <div className={styles.tail}>
                             {(attempt.stderr_tail || attempt.stdout_tail).slice(-500)}
                           </div>
                         )}
@@ -217,10 +203,13 @@ export function ConsoleDock() {
           ))}
 
           {liveRows.length > 0 && (
-            <div style={{ marginTop: 7, borderTop: `1px solid ${tokens.border}`, paddingTop: 'var(--sp-1)' }}>
-              <div style={{ fontSize: 'var(--fs-micro)', color: tokens.textMuted }}>LIVE RUNTIME EVENTS</div>
+            <div className={styles.live}>
+              <div className={styles.liveHead}>LIVE RUNTIME EVENTS</div>
               {liveRows.map((row) => (
-                <div key={row.id} style={{ fontSize: 'var(--fs-micro)', lineHeight: 1.7, color: row.type.includes('failed') ? tokens.red : tokens.textSecond }}>
+                <div
+                  key={row.id}
+                  className={cx(styles.liveRow, row.type.includes('failed') && styles.liveRowFailed)}
+                >
                   {new Date(row.at).toLocaleTimeString()} · {row.task_id.slice(0, 8) || 'plan'} · a{row.attempt}#{row.seq} · {row.type} · {row.text}
                 </div>
               ))}
@@ -228,7 +217,7 @@ export function ConsoleDock() {
           )}
 
           {!isLoading && count === 0 && liveRows.length === 0 && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: tokens.textDim, fontSize: 'var(--fs-micro)' }}>
+            <div className={styles.empty}>
               {failedOnly && <AlertTriangle size={11} aria-hidden />}
               {failedOnly ? 'No failed attempts.' : 'No planning or agent attempts yet.'}
             </div>

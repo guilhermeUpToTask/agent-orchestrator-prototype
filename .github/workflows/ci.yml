@@ -154,6 +154,20 @@ jobs:
         run: npm run test:e2e:cycle
         env:
           E2E_PYTHON: ${{ github.workspace }}/backend/.venv/bin/python
+
+      # The suite captures every major surface in both themes (P9 task 5).
+      # `e2e/screenshots/` is git-ignored — they are regenerated, never
+      # hand-made — so this is how a reviewer sees them without running
+      # anything. Uploaded on failure too: a red run's screenshots are the
+      # most useful ones.
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-screenshots
+          path: frontend/e2e/screenshots/
+          if-no-files-found: warn
+          retention-days: 14
           E2E_HOME: ${{ runner.temp }}/aipom-e2e-home
 
       - name: Regenerate API types

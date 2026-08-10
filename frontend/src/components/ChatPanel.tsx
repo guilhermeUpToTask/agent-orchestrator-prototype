@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, ChevronRight, Bot, User, Loader2 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
-import { tokens } from '../styles/tokens';
+import styles from './ChatPanel.module.css';
 import { usePlannerStore } from '../store/plannerStore';
 import { useChat, usePlan, useSendMessage } from '../lib/queries';
 import type { ChatMessageResponse } from '../types/ui';
 import { conversationMode } from '../lib/planTruth';
+
+/** Join the class names that are actually present. */
+const cx = (...names: (string | false | undefined)[]) => names.filter(Boolean).join(' ');
 
 /**
  * The conversation surface for the two chat-driven phases. History is SERVER
@@ -23,58 +26,27 @@ function Bubble({ msg }: { msg: ChatMessageResponse }) {
   });
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      alignItems: isUser ? 'flex-end' : 'flex-start',
-      gap: 3, animation: 'fadein 0.15s ease both',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isUser ? 'row-reverse' : 'row' }}>
-        <div style={{
-          width: 20, height: 20, borderRadius: '50%',
-          background: isUser ? tokens.accentDim : 'var(--bg-3)',
-          border: `1px solid ${isUser ? 'color-mix(in srgb, var(--accent) 27%, transparent)' : tokens.border}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {isUser ? <User size={10} color={tokens.accent} /> : <Bot size={10} color={tokens.purple} />}
+    <div className={cx(styles.bubble, isUser && styles.bubbleUser)}>
+      <div className={styles.bubbleMeta}>
+        <div className={cx(styles.avatar, isUser && styles.avatarUser)}>
+          {isUser ? <User size={10} /> : <Bot size={10} />}
         </div>
-        <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted }}>
+        <span className={styles.byline}>
           {isUser ? 'you' : 'reasoner'} · {time}
         </span>
-        {committed && (
-          <span style={{
-            fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.green,
-            background: tokens.greenDim, padding: '1px 6px', borderRadius: 'var(--r-1)',
-          }}>intent ready for review</span>
-        )}
-        {submittedBrief && isUser && (
-          <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.accent }}>
-            submitted brief
-          </span>
-        )}
+        {committed && <span className={styles.committedChip}>intent ready for review</span>}
+        {submittedBrief && isUser && <span className={styles.briefChip}>submitted brief</span>}
       </div>
-      <div style={{
-        maxWidth: '88%', padding: 'var(--sp-2) var(--sp-3)',
-        background: isUser ? tokens.accentDim : tokens.cardBg,
-        border: `1px solid ${isUser ? 'color-mix(in srgb, var(--accent) 20%, transparent)' : tokens.border}`,
-        borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-        fontSize: 12, color: tokens.textPrimary, fontFamily: tokens.fontSans,
-        lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      }}>{msg.content}</div>
+      <div className={cx(styles.body, isUser && styles.bodyUser)}>{msg.content}</div>
     </div>
   );
 }
 
 function ThinkingBubble({ label }: { label: string }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
-      padding: 'var(--sp-2) var(--sp-3)', background: tokens.cardBg,
-      border: `1px solid ${tokens.border}`,
-      borderRadius: '10px 10px 10px 2px',
-      width: 'fit-content', animation: 'fadein 0.15s ease both',
-    }}>
-      <Loader2 size={12} color={tokens.purple} style={{ animation: 'spin 1s linear infinite' }} />
-      <span style={{ fontSize: 'var(--fs-micro)', color: tokens.textMuted, fontFamily: tokens.fontMono }}>{label}</span>
+    <div className={styles.thinking}>
+      <Loader2 size={12} className={styles.thinkingIcon} />
+      <span className={styles.thinkingLabel}>{label}</span>
     </div>
   );
 }
@@ -125,14 +97,9 @@ export function ChatPanel() {
 
   if (ui.chatPanelCollapsed) {
     return (
-      <div style={{
-        width: 36, background: tokens.panelBg, borderLeft: `1px solid ${tokens.border}`,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 12, cursor: 'pointer',
-      }} onClick={toggleChatPanel}>
-        <ChevronRight size={14} color={tokens.textMuted} />
-        <div style={{ writingMode: 'vertical-rl', marginTop: 12, fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted, letterSpacing: '0.1em' }}>
-          CHAT · REASONER
-        </div>
+      <div className={styles.rail} onClick={toggleChatPanel}>
+        <ChevronRight size={14} />
+        <div className={styles.railLabel}>CHAT · REASONER</div>
       </div>
     );
   }
@@ -142,52 +109,34 @@ export function ChatPanel() {
     : `Current activity is “${humanize(plan?.activity ?? 'loading')}” — chat opens during intent or replan discovery.`;
   const inputLocked = thinking || !inputEnabled;
 
+  const sendDisabled = inputLocked || !input.trim();
+
   return (
-    <div style={{
-      width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column',
-      background: tokens.panelBg, borderLeft: `1px solid ${tokens.border}`,
-    }}>
+    <div className={styles.panel}>
       {/* Header */}
-      <div style={{
-        padding: '10px 14px', borderBottom: `1px solid ${tokens.border}`,
-        display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', background: 'var(--bg-1)', flexShrink: 0,
-      }}>
-        <div style={{
-          width: 7, height: 7, borderRadius: '50%',
-          background: inputEnabled ? tokens.accent : tokens.textMuted,
-          boxShadow: inputEnabled ? `0 0 8px ${tokens.accent}` : undefined,
-        }} />
-        <span style={{ fontFamily: tokens.fontMono, fontSize: 'var(--fs-micro)', color: tokens.textPrimary, letterSpacing: '0.08em' }}>
-          CHAT · REASONER
-        </span>
-        <span style={{
-          fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, padding: '2px 6px', borderRadius: 'var(--r-1)',
-          background: inputEnabled ? tokens.purpleDim : 'var(--bg-3)',
-          color: inputEnabled ? tokens.purple : tokens.textMuted,
-          marginLeft: 4,
-        }}>
+      <div className={styles.header}>
+        <div className={cx(styles.statusDot, inputEnabled && styles.statusDotLive)} />
+        <span className={styles.headerTitle}>CHAT · REASONER</span>
+        <span className={cx(styles.modeChip, inputEnabled && styles.modeChipLive)}>
           {(mode ?? plan?.activity ?? 'loading').toUpperCase()}
         </span>
-        <div style={{ flex: 1 }} />
-        <button onClick={toggleChatPanel} style={{ background: 'transparent', border: 'none', color: tokens.textMuted, cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
+        <div className={styles.spacer} />
+        <button
+          onClick={toggleChatPanel}
+          className={styles.collapseButton}
+          aria-label="Collapse the chat panel"
+        >
           <ChevronRight size={14} />
         </button>
       </div>
 
       {/* Mode hint banner */}
-      <div style={{
-        padding: '6px 14px', borderBottom: `1px solid ${tokens.border}`,
-        background: inputEnabled ? 'transparent' : 'var(--bg-2)',
-        fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, lineHeight: 1.5,
-        color: inputEnabled ? tokens.textMuted : tokens.purple, flexShrink: 0,
-      }}>
-        {hint}
-      </div>
+      <div className={cx(styles.hint, inputEnabled && styles.hintLive)}>{hint}</div>
 
       {/* Messages (server history) */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--sp-3) 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className={styles.messages}>
         {history.length === 0 && !thinking && (
-          <span style={{ fontSize: 'var(--fs-micro)', fontFamily: tokens.fontMono, color: tokens.textMuted, lineHeight: 1.6 }}>
+          <span className={styles.empty}>
             {inputEnabled
               ? 'No messages yet — describe the work to start planning.'
               : 'No conversation for this phase.'}
@@ -199,7 +148,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div style={{ padding: '10px var(--sp-3)', borderTop: `1px solid ${tokens.border}`, display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-end', flexShrink: 0 }}>
+      <div className={styles.composer}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -207,26 +156,15 @@ export function ChatPanel() {
           placeholder={inputEnabled ? 'Message the reasoner… (Enter to send)' : 'Chat is closed in this phase'}
           rows={2}
           disabled={inputLocked}
-          style={{
-            flex: 1, background: tokens.inputBg,
-            border: `1px solid ${tokens.border}`, borderRadius: tokens.r8,
-            padding: 'var(--sp-2) 10px', fontFamily: tokens.fontSans, fontSize: 12,
-            color: tokens.textPrimary, outline: 'none', resize: 'none', lineHeight: 1.5,
-          }}
-          onFocus={(e) => (e.target.style.borderColor = tokens.accent)}
-          onBlur={(e) => (e.target.style.borderColor = tokens.border)}
+          className={styles.input}
         />
         <button
           onClick={() => send(input)}
-          disabled={inputLocked || !input.trim()}
-          style={{
-            width: 36, height: 36, borderRadius: tokens.r8,
-            background: inputLocked || !input.trim() ? 'var(--bg-3)' : tokens.accent,
-            border: 'none', cursor: inputLocked || !input.trim() ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}
+          disabled={sendDisabled}
+          className={styles.send}
+          aria-label="Send message to the reasoner"
         >
-          <Send size={14} color={inputLocked || !input.trim() ? tokens.textMuted : 'var(--accent-text-on)'} />
+          <Send size={14} />
         </button>
       </div>
     </div>

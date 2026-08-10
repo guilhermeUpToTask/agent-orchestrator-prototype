@@ -15,9 +15,14 @@ export function GoalsView() {
   const { planId = '' } = useParams();
   const { data: plan, isLoading, error } = usePlan(planId || null);
 
+  // A visually hidden heading on every branch: the canvas is self-evident to
+  // look at and had no landmark at all for a reader navigating by headings.
+  const heading = <h2 className="sr-only">Goals</h2>;
+
   if (error) {
     return (
       <div className={styles.page}>
+        {heading}
         <p className={styles.empty} role="alert">
           Couldn't load the plan: {(error as Error).message}
         </p>
@@ -28,6 +33,7 @@ export function GoalsView() {
   if (isLoading) {
     return (
       <div className={styles.page} aria-busy="true">
+        {heading}
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="skeleton" style={{ height: 36, marginBottom: 6 }} />
         ))}
@@ -38,6 +44,7 @@ export function GoalsView() {
   if (!plan || currentPlanGoals(plan).length === 0) {
     return (
       <div className={styles.page}>
+        {heading}
         <p className={styles.empty}>
           No goals yet. The roadmap appears once the discovery conversation
           commits it.
@@ -48,6 +55,7 @@ export function GoalsView() {
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
+      {heading}
       <PlanCanvas planId={planId} />
       <DetailPanel />
     </div>

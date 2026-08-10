@@ -1,0 +1,96 @@
+/*
+ * PhaseTimeline — migrated off inline styles, P9 task 3.
+ *
+ * This one also FIXES a silent defect. The current-phase pill did:
+ *
+ *   background: `${color}14`            // color is tokens.yellow = 'var(--gate)'
+ *   border: `1px solid ${color + '55'}` // -> "1px solid var(--gate)55"
+ *
+ * i.e. it concatenated hex alpha onto a `var()` reference, producing
+ * `var(--gate)14` — not a colour, so the browser dropped both declarations and
+ * the highlight never rendered. `tokens.ts` warns about exactly this: "Colors
+ * that feed non-CSS contexts (React Flow edge strokes, minimap fills, hex+alpha
+ * concatenation) must use `raw`."
+ *
+ * `color-mix()` does it properly and follows the theme, which raw hex would
+ * not. 0x14/255 ≈ 8%, 0x55/255 ≈ 33% — the intended values, now actually
+ * applied.
+ *
+ * Rendered only for legacy nine-phase plans (`PlanCanvas.tsx:190` guards on
+ * `isLegacyPlan`), so the blast radius was small — but a highlight that never
+ * appeared is still the difference between reading this timeline and guessing.
+ */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--bg-1) 93%, transparent);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  backdrop-filter: blur(8px);
+  max-width: 640px;
+}
+
+.caption {
+  font-size: 8px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+}
+
+.walk {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.connector {
+  width: 18px;
+  height: 1px;
+  background: var(--border-0);
+  margin: 0 4px;
+}
+
+/* `color` carries the phase's state and everything else derives from it, so a
+   pill cannot have a marker in one colour and a tint in another. */
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+}
+
+.pillPast {
+  color: var(--run);
+}
+
+.pillCurrent {
+  color: var(--ok);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-color: color-mix(in srgb, currentColor 33%, transparent);
+}
+
+.pillCurrentGate {
+  color: var(--gate);
+}
+
+.marker {
+  font-size: 10px;
+}
+
+.label {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+
+.pillCurrent .label {
+  color: var(--text-1);
+}

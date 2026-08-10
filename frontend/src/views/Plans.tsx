@@ -59,6 +59,7 @@ export function PlansView() {
   const [projectId, setProjectId] = useState('');
   const [projectName, setProjectName] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
+  const [addingProject, setAddingProject] = useState(false);
 
   const projectNameFor = (id: string | null) =>
     projects.find((p) => p.id === id)?.name ?? null;
@@ -84,6 +85,8 @@ export function PlansView() {
           setProjectId(project.id);
           setProjectName('');
           setRepoUrl('');
+          // Back to the picker, with the new project selected.
+          setAddingProject(false);
         },
       },
     );
@@ -137,16 +140,27 @@ export function PlansView() {
 
       {composing && (
         <Card title="Open project plan — the brief">
+          {/*
+            The create form appears when there are NO projects, and now also on
+            demand. It used to be the zero-projects branch only, so from the
+            second project onward the composer offered a picker and no way to
+            add to it — an operator had to already know to go to Settings.
+          */}
           <Field label="Project" htmlFor="new-plan-project">
-            {projects.length > 0 ? (
-              <Select
-                id="new-plan-project"
-                value={projectId || projects[0]?.id || ''}
-                onChange={(event) => setProjectId(event.target.value)}
-                options={projects.map((project) => ({ value: project.id, label: project.name }))}
-              />
+            {projects.length > 0 && !addingProject ? (
+              <div className={styles.projectPicker}>
+                <Select
+                  id="new-plan-project"
+                  value={projectId || projects[0]?.id || ''}
+                  onChange={(event) => setProjectId(event.target.value)}
+                  options={projects.map((project) => ({ value: project.id, label: project.name }))}
+                />
+                <Button variant="ghost" onClick={() => setAddingProject(true)}>
+                  New project
+                </Button>
+              </div>
             ) : (
-              <div style={{ display: 'grid', gap: 8 }}>
+              <div className={styles.projectForm}>
                 <Input
                   id="new-plan-project"
                   value={projectName}
@@ -158,13 +172,20 @@ export function PlansView() {
                   onChange={(event) => setRepoUrl(event.target.value)}
                   placeholder="Repository URL (optional)"
                 />
-                <Button
-                  onClick={createProjectInline}
-                  disabled={!projectName.trim()}
-                  pending={createProject.isPending}
-                >
-                  Create project
-                </Button>
+                <div className={styles.projectFormActions}>
+                  <Button
+                    onClick={createProjectInline}
+                    disabled={!projectName.trim()}
+                    pending={createProject.isPending}
+                  >
+                    Create project
+                  </Button>
+                  {projects.length > 0 && (
+                    <Button variant="ghost" onClick={() => setAddingProject(false)}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
                 {createProject.error && (
                   <span className={styles.errorBody} role="alert">
                     {errorDetail(createProject.error)}
@@ -188,7 +209,7 @@ export function PlansView() {
             />
           </Field>
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className={styles.projectFormActions}>
             <Button
               variant="primary"
               onClick={submit}

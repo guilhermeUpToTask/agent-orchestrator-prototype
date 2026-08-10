@@ -1,11 +1,19 @@
 import React from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-import { tokens, STATUS, raw } from '../styles/tokens';
+import { tokens, STATUS, KIND_VARS, raw } from '../styles/tokens';
 import type { GoalGroupData } from '../lib/layout';
 
+/**
+ * `raw` is for the non-CSS contexts React Flow needs (edge strokes, minimap
+ * fills). This value is used as TEXT, and `raw` does not follow the theme —
+ * `raw.ok` is the dark theme's green, which measured 2.19:1 on the light
+ * theme's canvas. `KIND_VARS[...].text` is the readable, theme-following
+ * variant, and tokens.ts says components should style via it "never raw hex".
+ */
 const KIND_COLOR = {
-  idle: raw.idle, run: raw.run, gate: raw.gate, ok: raw.ok, fail: raw.fail,
+  idle: KIND_VARS.idle.text, run: KIND_VARS.run.text, gate: KIND_VARS.gate.text,
+  ok: KIND_VARS.ok.text, fail: KIND_VARS.fail.text,
 } as const;
 
 /**
