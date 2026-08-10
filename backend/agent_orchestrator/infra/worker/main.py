@@ -140,6 +140,8 @@ async def run_worker_forever(
                 routing=container.routing_policy,
                 repository_reader=container.repository_reader,
                 planning_artifacts=container.planning_artifacts,
+                environment=container.environment,
+                environment_context=container.environment_context,
             )
             if result[0] == "lease_lost":
                 log.info(
@@ -233,6 +235,8 @@ async def run_worker_forever(
                 lease_seconds,
                 planning_handler=planning_handler,
                 verifier=container.verification_executor,
+                environment=container.environment,
+                environment_context=container.environment_context,
             )
         except Exception:
             # One poisoned plan must not kill the worker: the tick's finally

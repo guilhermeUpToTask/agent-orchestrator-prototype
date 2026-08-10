@@ -138,6 +138,8 @@ async def worker_tick(
     lease_seconds: int = 60,
     planning_handler: PhaseHandler | None = None,
     verifier: VerificationExecutor | None = None,
+    environment: ProjectEnvironment | None = None,
+    environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
 ) -> bool:
     """One claim-and-drive cycle. Returns True only if actual work ADVANCED —
     not merely because a plan was claimed. A claim that immediately came back
@@ -160,6 +162,8 @@ async def worker_tick(
             planning_handler=planning_handler,
             verifier=verifier,
             lease_seconds=lease_seconds,
+            environment=environment,
+            environment_context=environment_context,
         )
     finally:
         uow.plans.release(plan.id, worker_id)  # free on pause/done/fail/crash
