@@ -38,7 +38,10 @@ def list_planning_artifacts(
     plan_id: str,
     purpose: str = "goal_contract",
     goal_id: str | None = None,
-    limit: int = 20,
+    # Bounded like `tail_lines` below. An unbounded `limit` reaches `LIMIT
+    # :limit` verbatim, and SQLite reads a NEGATIVE limit as "no limit" — so
+    # `?limit=-1` returned the plan's entire history (Phase 10A).
+    limit: int = Query(default=20, ge=1, le=200),
     container: AppContainer = Depends(get_container),
 ) -> list[PlanningArtifactResponse]:
     """What earlier attempts at this artifact established, newest first.
@@ -307,7 +310,7 @@ class AgentEventResponse(BaseModel):
 def agent_events(
     plan_id: str,
     task_id: str | None = None,
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=1000),  # see list_planning_artifacts
     before_id: int | None = None,
     container: AppContainer = Depends(get_container),
 ) -> list[AgentEventResponse]:

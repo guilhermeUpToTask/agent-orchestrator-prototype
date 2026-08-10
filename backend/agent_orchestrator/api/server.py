@@ -26,6 +26,8 @@ from typing import AsyncIterator
 import structlog
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.routing import APIRoute
 
 from agent_orchestrator.api.dependencies import get_container, set_container
@@ -123,9 +125,17 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         # own manual at the same path — and won, because the SPA fallback
         # reserves what the API claims, so the route rendered Swagger instead.
         # Moving these makes the ownership rule true rather than nearly true.
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        #
+        # All three are None here and re-registered BELOW behind the guard.
+        # FastAPI mounts its built-ins on the bare app, where no router
+        # dependency reaches them, and it marks them `include_in_schema=False`
+        # — so they were both unauthenticated AND invisible to
+        # test_control_plane_auth.py, which parametrizes over `openapi()`.
+        # Phase 10A: with a token set, `/api/openapi.json` served the whole
+        # 57-path control-plane schema to an anonymous caller.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     configure_logging()
@@ -167,6 +177,23 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(
         events.router, prefix=_prefix, dependencies=[Depends(require_api_token_or_query)]
     )
+
+    # The API's own documentation, re-registered behind the SAME guard as every
+    # other operation (see `docs_url=None` above). `include_in_schema=False`
+    # keeps them out of the generated client, exactly as FastAPI's built-ins
+    # were — so `test_control_plane_auth.py` still cannot see them, and
+    # `test_api_documentation_is_guarded.py` covers them by name instead.
+    @app.get("/api/openapi.json", include_in_schema=False, dependencies=_guarded)
+    def openapi_schema() -> JSONResponse:
+        return JSONResponse(app.openapi())
+
+    @app.get("/api/docs", include_in_schema=False, dependencies=_guarded)
+    def swagger_ui() -> HTMLResponse:
+        return get_swagger_ui_html(openapi_url="/api/openapi.json", title=f"{app.title} — docs")
+
+    @app.get("/api/redoc", include_in_schema=False, dependencies=_guarded)
+    def redoc_ui() -> HTMLResponse:
+        return get_redoc_html(openapi_url="/api/openapi.json", title=f"{app.title} — redoc")
 
     @app.get(
         "/health",

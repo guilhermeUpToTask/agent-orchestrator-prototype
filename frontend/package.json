@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "preview": "vite preview",
-    "generate:api": "python ../backend/scripts/export_openapi.py openapi.json && openapi-ts",
+    "generate:api": "uv run --project ../backend python ../backend/scripts/export_openapi.py openapi.json && openapi-ts",
     "test:e2e": "playwright test",
     "test:e2e:cycle": "playwright test --config=playwright.cycle.config.ts"
   },

@@ -1120,6 +1120,18 @@ under real contention; migration/upgrade paths on an existing install; secret
 handling and the auth surface; the frontend's error and stale-data states
 (post-Phase-9); and every place a doc and the code could have drifted.
 
+**Sweep 1 — done 2026-08-10** (auth, secrets, validation, migrations):
+[`docs/history/analyses/2026-08-10-phase-10a-audit-sweep-1.md`](docs/history/analyses/2026-08-10-phase-10a-audit-sweep-1.md).
+Five findings, all proven and all fixed with regression tests; three areas
+verified clean; one hypothesis retracted before it reached the findings list.
+The two that matter: the API's own `/api/openapi.json`, `/api/docs` and
+`/api/redoc` answered **anonymously** with a token set — invisible to the
+guard's parametrized sweep because FastAPI marks them `include_in_schema=False`
+— and a 422 echoed the **submitted plaintext `api_key`** back to the caller,
+which the console then rendered into a toast. Neither was reachable by the 1472
+green tests. **Still unswept, and now the head of the queue: the lease and
+goal-lease interaction under real contention.**
+
 ### 10B — the launch
 
 **External capability:** the project is findable, understandable and installable
