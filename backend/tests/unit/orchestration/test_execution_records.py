@@ -1195,3 +1195,42 @@ def test_an_unusable_stored_cap_does_not_wedge_the_plan(env_factory):
         asyncio.run(handler.handle_goal("p1", "g1", env.stored("p1"), env.uow)).value == "continue"
     )
     assert env.runner.calls == {"g1t0": 1}
+
+
+def test_the_workspace_is_told_which_run_and_goal_an_attempt_belongs_to(env_factory):
+    """The git-staging identity must reach the workspace, and be assertable.
+
+    `NoOpWorkspace.begun` records only `(plan_id, task_id, attempt)`. Every
+    other argument — `base_ref`, `cycle_id`, `goal_id`, `run_id` — was accepted
+    and dropped, so a task branch cut from the WRONG base was inexpressible: no
+    test could fail on it however carefully written, because the fake had
+    already thrown the evidence away.
+
+    This asserts against the full call record instead. It is the branch identity
+    the whole rollback story rests on — a failed attempt leaves zero trace only
+    if the attempt was isolated on its own branch in the first place.
+    """
+    env = env_factory()
+    env.seed(_plan())
+
+    assert asyncio.run(advance_plan("p1", *env.args)) == "continue"
+
+    (call,) = env.ws.begin_calls
+    assert call["plan_id"] == "p1"
+    assert call["task_id"] == "t1"
+    assert call["attempt"] == 1
+    # The run id is what makes a task branch unique per attempt-run.
+    assert call["run_id"], "the workspace was not told which run this attempt belongs to"
+
+
+def test_the_agent_is_given_the_worktree_it_must_work_in(env_factory):
+    """`DummyAgentRunner` was handed the workspace handle and discarded it, so
+    "the agent worked outside its worktree" — the isolation that makes
+    discard-on-failure a real rollback — could not be asserted at all."""
+    env = env_factory()
+    env.seed(_plan())
+
+    assert asyncio.run(advance_plan("p1", *env.args)) == "continue"
+
+    assert len(env.runner.workspaces) == 1
+    assert env.runner.workspaces[0], "the agent was given no worktree path"

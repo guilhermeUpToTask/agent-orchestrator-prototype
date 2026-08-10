@@ -433,6 +433,21 @@ class NoOpWorkspace:
         self.begun: list[tuple[str, str, int]] = []
         self.committed: list[str] = []
         self.discarded: list[str] = []
+        # FULL call records. `begun` above keeps its three-tuple shape because
+        # existing tests read it, but it threw away `base_ref`, `cycle_id`,
+        # `goal_id` and `run_id` — which is the whole git-staging invariant. A
+        # task branch cut from the WRONG base was therefore inexpressible: no
+        # test could fail on it, however carefully written. `merge_goal`
+        # recorded nothing at all, so a goal promoted into the wrong cycle
+        # branch was equally invisible.
+        #
+        # A fake that discards an input cannot fail on it. Recording is not a
+        # behaviour change; it is the difference between a test suite that
+        # *could* catch a class of bug and one that could not.
+        self.begin_calls: list[dict[str, object]] = []
+        self.merge_goal_calls: list[dict[str, str]] = []
+        self.snapshotted: list[str] = []
+        self.checkpointed: list[str] = []
 
     async def begin(
         self,
@@ -446,15 +461,31 @@ class NoOpWorkspace:
         base_ref: str | None = None,
     ) -> _Handle:
         self.begun.append((plan_id, task_id, attempt))
+        self.begin_calls.append(
+            {
+                "plan_id": plan_id,
+                "task_id": task_id,
+                "attempt": attempt,
+                "cycle_id": cycle_id,
+                "goal_id": goal_id,
+                "run_id": run_id,
+                "base_ref": base_ref,
+            }
+        )
         return _Handle()
 
     async def snapshot(self, handle: _Handle) -> str:
+        self.snapshotted.append(handle.path)
         return "noop-snapshot"
 
     async def checkpoint(self, handle: _Handle) -> str:
+        self.checkpointed.append(handle.path)
         return "noop-checkpoint"
 
     async def merge_goal(self, plan_id: str, cycle_id: str, goal_id: str) -> str:
+        self.merge_goal_calls.append(
+            {"plan_id": plan_id, "cycle_id": cycle_id, "goal_id": goal_id}
+        )
         return "noop-goal-merge"
 
     async def commit(self, handle: _Handle) -> None:
@@ -532,6 +563,7 @@ class DummyAgentRunner:
         # an input cannot fail on it — keep this recorded.
         self.specs: list[AgentSpec] = []
         self.roles_by_agent: dict[str, str] = {}
+        self.workspaces: list[str] = []
 
     async def run(
         self,
@@ -546,6 +578,10 @@ class DummyAgentRunner:
         self.idempotency_keys.append(idempotency_key)
         self.specs.append(spec)
         self.roles_by_agent[spec.id] = spec.role
+        # WHERE each invocation was told to work. Dropped before 2026-08-10,
+        # which made "the agent worked outside its worktree" — the isolation the
+        # whole discard-on-failure rollback depends on — impossible to assert.
+        self.workspaces.append(workspace.path)
         b = self.script.get(task.id, DummyBehavior())
 
         for i in range(b.emit_events):
