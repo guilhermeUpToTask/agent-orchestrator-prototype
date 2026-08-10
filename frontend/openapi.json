@@ -1767,6 +1767,83 @@
         }
       }
     },
+    "/api/plans/{plan_id}/goals/{goal_id}/rebind-agents": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Rebind Goal Agents Endpoint",
+        "description": "Re-resolve this goal's UNFINISHED tasks against the live agent registry.\n\nThe supported way to move in-flight work to a different runtime. Before it\nexisted the only route was deleting the plan, which throws away the\napproved intent, the frozen contracts and every piece of accepted evidence\nfor what is merely a change of agent.\n\nRequires the plan to be PAUSED (409 otherwise): rebinding a running plan\nwould swap the agent out from under an executing attempt. Finished tasks\nare never rebound \u2014 their evidence belongs to the agent that produced it.",
+        "operationId": "plans-rebind_goal_agents_endpoint",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plans/{plan_id}/retry-policy": {
       "post": {
         "tags": [

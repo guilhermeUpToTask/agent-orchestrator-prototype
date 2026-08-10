@@ -111,7 +111,12 @@ def main() -> int:
     parser.add_argument("--repo", required=True, type=Path)
     parser.add_argument(
         "--seed-tag",
-        default="demo-seed",
+        # Must match SEED_TAG in materialize.sh, which is what actually creates
+        # the tag. The default used to be "demo-seed", which this demo never
+        # writes: following the README worked because it passes the flag, and
+        # omitting it failed on a tag that does not exist rather than on
+        # anything about the run.
+        default="static-site-v1-seed",
         help="the tag the default branch must still equal",
     )
     args = parser.parse_args()

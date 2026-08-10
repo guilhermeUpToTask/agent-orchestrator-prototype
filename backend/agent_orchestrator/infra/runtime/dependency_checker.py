@@ -8,6 +8,7 @@ Checked dependencies:
   runtimes:
     pi     — pi-mono coding agent (`pi` command)
     claude — Claude Code CLI (`claude` command)
+    codex  — Codex CLI (`codex` command; authenticates via `codex login`)
     gemini — Gemini CLI (`gemini` command)
 
 Consumers: `/api/runner/status` reports the results to the settings UI, and
@@ -62,6 +63,10 @@ class DependencyReport:
 RUNTIME_DEFINITIONS: dict[str, tuple[str, str]] = {
     "pi": ("pi", "See pi-mono installation docs — build from source or npm"),
     "claude": ("claude", "npm install -g @anthropic-ai/claude-code"),
+    # Unlike the others, installing codex is only half of it: the runtime
+    # reads a subscription credential from CODEX_HOME, so `codex login` has
+    # to have been run too. The probe can only see the binary.
+    "codex": ("codex", "npm install -g @openai/codex, then run: codex login"),
     "gemini": ("gemini", "npm install -g @google/gemini-cli"),
 }
 

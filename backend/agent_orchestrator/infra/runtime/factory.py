@@ -11,7 +11,7 @@ Two global modes, selected by the config key `agent_runner.mode`
                       ORCHESTRATOR_MASTER_KEY.
   real              — the CatalogAgentRunner: each task resolves through the
                       AGENT REGISTRY — the bound AgentSpec's `runtime_type`
-                      (pi default | claude | gemini | dry-run) picks the CLI
+                      (pi default | claude | codex | gemini | dry-run) picks the CLI
                       runtime, and its `provider_id`/`model_id` rows supply
                       the credentials (api_key_ref -> secret store) and the
                       provider model string. Resolution happens per run, so
@@ -70,6 +70,7 @@ from agent_orchestrator.infra.errors import InfrastructureError
 from agent_orchestrator.infra.runtime.cli_runner import (
     PI_BACKEND_ENV_VAR,
     ClaudeCodeRunner,
+    CodexRunner,
     GeminiRunner,
     PiAgentRunner,
 )
@@ -79,7 +80,7 @@ log = structlog.get_logger(__name__)
 
 AGENT_RUNNER_CONFIG_INVALID = "AGENT_RUNNER_CONFIG_INVALID"
 
-RUNTIME_TYPES = ("pi", "claude", "gemini", "dry-run")
+RUNTIME_TYPES = ("pi", "claude", "codex", "gemini", "dry-run")
 
 _SCOPE = SqliteConfigStore.ORCHESTRATOR_SCOPE
 _DEFAULT_TIMEOUT_SECONDS = 600
@@ -260,8 +261,25 @@ class CatalogAgentRunner:
         provider = binding.provider
         model = binding.model
         assert provider is not None and model is not None  # valid binding carries both
-        api_key = self._secret_store().resolve_plaintext(SecretRef(uri=provider.api_key_ref))
         timeout = self._timeout_seconds()
+        if runtime == "codex":
+            # BEFORE the secret store, deliberately. `codex login` stores a
+            # ChatGPT-subscription credential under CODEX_HOME, so this runtime
+            # has no API key to decrypt — resolving one would fail-closed on a
+            # secret that is legitimately absent, and passing api_key="" would
+            # make a runtime that needs no secret look like one that lost its
+            # secret. The model name still comes from the catalog row.
+            return CodexRunner(
+                model=model.name,
+                timeout_seconds=timeout,
+                provider_id=provider.id,
+                model_id=model.id,
+                orchestrator_home=self._orchestrator_home,
+                observation_repository=self._observation_repository,
+                sandbox=self._sandbox,
+                prior_attempt_feedback=self._prior_attempt_feedback,
+            )
+        api_key = self._secret_store().resolve_plaintext(SecretRef(uri=provider.api_key_ref))
         if runtime == "pi":
             backend = _pi_backend_for(provider)
             assert backend is not None  # validated in the binding check

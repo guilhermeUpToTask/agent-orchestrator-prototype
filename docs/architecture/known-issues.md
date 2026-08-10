@@ -33,27 +33,40 @@ command) stays in Phase 8, where it is scheduled against preview evidence.
   by `PlanStatus` plus open artifacts and active-cycle state, but deleting
   the compatibility surface requires a separately versioned API removal.
 
-## Failure classification
+## Failure classification — RETRACTED 2026-08-09
 
-Found by the first real Tier 1 run of the `static-site-v1` demo on 2026-08-09
-(ROADMAP P8.4, *First run attempt*). Not reachable at Tier 0, where one dummy
-runner answers for every role and never fails on capacity. The run's other
-finding — the implementer role being bound to a test-author agent — was **fixed
-the same day** and is locked by
+This section previously claimed that **an empty completion is classified as
+`rate_limit`, so the plan waits out a limit that does not exist.** That claim
+was **wrong**, and it is kept here rather than deleted because the reasoning
+error is the instructive part.
+
+The evidence that retracts it: every `rate_limit` attempt in both demo runs
+carries a genuine upstream provider code, and none lacks one.
+
+| provider code | n | message |
+|---|---|---|
+| `429` | 3 | `google/gemma-4-31b-it:free is temporarily rate-limited upstream` |
+| `RESOURCE_EXHAUSTED` | 4 | `Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached` |
+
+The classification was correct every time. **How the wrong conclusion was
+reached:** a direct provider probe returned HTTP 200 for
+`nvidia/nemotron-…:free`, and that was compared against a failure produced by
+`google/gemma-4-31b-it:free` — a different model. The `content: []` with
+all-zero token usage seen in the transcript was the *consequence* of a provider
+refusing the request, not an independent misdiagnosis.
+
+**Do not "fix" this.** Making the runtime treat an empty completion as
+non-capacity would make it impatient with real 429s, which is the specific harm
+the patient rate-limit curve exists to avoid. If a genuine
+empty-completion-without-a-provider-code case is ever observed, it needs its own
+evidence — a `execution_attempts` row with `failure_kind='rate_limit'` and
+`provider_code IS NULL` — and none exists today.
+
+The run's other finding — the implementer role bound to a test-author agent —
+was real and **fixed the same day**, locked by
 `test_the_implementer_role_is_never_bound_to_a_test_author` and
-`test_a_contradicting_declared_role_is_the_last_resort_not_the_first_choice`
-in `tests/unit/execution/test_tdd_contracts.py`.
-
-- **An empty completion is classified as `rate_limit`, so the plan waits out a
-  limit that does not exist.** The pi runtime reported `kind=rate_limit` while
-  a direct provider call for the same model at the same moment returned HTTP
-  200; the transcript shows the assistant turn returning `content: []` with
-  all-zero token usage. The plan then settled onto the patient 4× rate-limit
-  backoff. Misreporting "no output" as "capacity" is worse than failing,
-  because capacity is the one failure class the system is designed to wait
-  through rather than surface. **Reproduction:** point a `pi`-runtime agent at
-  a model that returns an empty completion and read `failure_kind` on the
-  resulting `execution_attempts` row.
+`test_a_declared_test_author_is_never_bound_to_the_implementer_role` in
+`tests/unit/execution/test_tdd_contracts.py`.
 
 ## Verification and publication
 

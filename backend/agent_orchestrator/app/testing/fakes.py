@@ -524,6 +524,14 @@ class DummyAgentRunner:
         self.script = script or {}
         self.calls: dict[str, int] = {}
         self.idempotency_keys: list[str] = []
+        # WHICH AGENT each invocation actually ran as, in order. This existed
+        # nowhere before 2026-08-09, and its absence is why 1384 green tests
+        # could not see the implementer stage being handed a test-author agent:
+        # the fake was told the spec and threw it away, so a role mis-binding
+        # was not merely missed, it was inexpressible. Any fake that discards
+        # an input cannot fail on it — keep this recorded.
+        self.specs: list[AgentSpec] = []
+        self.roles_by_agent: dict[str, str] = {}
 
     async def run(
         self,
@@ -536,6 +544,8 @@ class DummyAgentRunner:
     ) -> TaskResult:
         self.calls[task.id] = self.calls.get(task.id, 0) + 1
         self.idempotency_keys.append(idempotency_key)
+        self.specs.append(spec)
+        self.roles_by_agent[spec.id] = spec.role
         b = self.script.get(task.id, DummyBehavior())
 
         for i in range(b.emit_events):

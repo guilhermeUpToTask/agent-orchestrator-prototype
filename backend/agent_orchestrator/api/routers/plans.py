@@ -54,6 +54,7 @@ from agent_orchestrator.app.use_cases.cyclic_planning import (
     submit_cycle_draft as submit_cycle_draft_use_case,
 )
 from agent_orchestrator.app.use_cases.pause_resume import (
+    rebind_goal_agents,
     pause_plan,
     resume_plan,
     retry_planning_stage,
@@ -1305,6 +1306,32 @@ def retry_blocked_planning_stage(
         container.clock,
         container.agent_repo,
         goal_id=body.goal_id if body is not None else None,
+    )
+
+
+@router.post("/{plan_id}/goals/{goal_id}/rebind-agents", status_code=204)
+def rebind_goal_agents_endpoint(
+    plan_id: str,
+    goal_id: str,
+    container: AppContainer = Depends(get_container),
+) -> None:
+    """Re-resolve this goal's UNFINISHED tasks against the live agent registry.
+
+    The supported way to move in-flight work to a different runtime. Before it
+    existed the only route was deleting the plan, which throws away the
+    approved intent, the frozen contracts and every piece of accepted evidence
+    for what is merely a change of agent.
+
+    Requires the plan to be PAUSED (409 otherwise): rebinding a running plan
+    would swap the agent out from under an executing attempt. Finished tasks
+    are never rebound — their evidence belongs to the agent that produced it.
+    """
+    rebind_goal_agents(
+        plan_id,
+        goal_id,
+        container.new_unit_of_work(),
+        container.clock,
+        container.agent_repo,
     )
 
 

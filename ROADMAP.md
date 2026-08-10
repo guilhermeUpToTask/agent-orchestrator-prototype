@@ -1347,14 +1347,19 @@ gap is scoped into the phase rather than deferred past it.
       minutes of pure sequencing. `ready_goal_ids` already computes the
       parallelism-safe set and the execution loop already honours it under
       `max_concurrent_goals`; enrichment simply does not use it.
-   2. **Stop misclassifying an empty completion as `rate_limit`.** Most of the
-      42% idle. `max_backoff_seconds` 900 × `kind_backoff_scale.rate_limit` 4.0
-      is a **one-hour** ceiling per attempt, and it was measured being spent
-      against a model that answered HTTP 200 to a direct call at the same
-      moment. The patience is a feature; spending it on a misdiagnosis is the
-      defect. Tracked in `known-issues.md` under *Failure classification*, and
-      the precedent already exists — a positively identified
-      `REQUEST_CONCURRENCY` refusal opens no circuit and requeues impatiently.
+   2. ~~Stop misclassifying an empty completion as `rate_limit`.~~
+      **RETRACTED 2026-08-09 — there is no such defect.** Every `rate_limit`
+      attempt in both runs carries a genuine upstream code (`429`
+      "temporarily rate-limited upstream", `RESOURCE_EXHAUSTED` "Worker local
+      total request limit reached"); none lacks one. The original claim
+      compared an HTTP 200 probe of `nemotron` against a failure produced by
+      `gemma` — a different model — and read the resulting `content: []` as a
+      misdiagnosis rather than as the consequence of a refusal. **Do not
+      implement this**: making the runtime impatient with real 429s is the
+      specific harm the patient curve exists to avoid. See `known-issues.md`.
+      The 42% idle share is therefore real capacity exhaustion on a free tier,
+      and the answer to it is item 3 (route to a model that is not exhausted)
+      plus paying for a tier that is not.
    3. **Rotate models on a capacity failure rather than waiting on one.**
       Tier-ordered routing to another capability-satisfying agent exists
       (un-freeze #16) but engages through the admission gate and circuits; a
