@@ -1412,8 +1412,8 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
    clean attempt.
 
 7. 🚧 **P8.7 — backend and documentation refactoring. DO THIS BEFORE P8.6.**
-   Tasks 1–2 delivered 2026-08-10, task 3 step 1 delivered; **a session
-   resuming here starts at task 3 step 2 (agent selection + admission)**. Scoped from measurement:
+   Tasks 1–2 delivered 2026-08-10, task 3 steps 1–2 delivered; **a session
+   resuming here starts at task 3 step 3 (goal promotion + acceptance)**. Scoped from measurement:
    [`docs/superpowers/plans/2026-08-10-backend-refactoring.md`](docs/superpowers/plans/2026-08-10-backend-refactoring.md).
 
    **Why it comes first, ahead of the latency work and the demo rerun.** P8.6's
@@ -1458,13 +1458,23 @@ defects arrived. **A session picking this up starts at P8.7 task 1.**
         `@staticmethod` or took `self` without using it, so the move cannot
         change behaviour. **2328 → 2220 lines; the class 2133 → 2050, 44 → 38
         methods.** Test count unchanged at 1413, which is the proof.
-      - ⏭ **Step 2 (NEXT): agent selection + admission.** Extract
-        `_resolve_spec`, `_select_spec`, `_admission_signal`,
-        `_runtime_circuit_signal`, `_provider_metadata`, `_spec_wait_seconds`,
-        `_clear_runtime_circuit` into a collaborator, constructor-injected so
-        existing tests construct the handler unchanged. Cohesive, and the piece
-        most likely to grow next.
-      - ⏭ **Step 3: goal promotion + acceptance** — `_reserve_goal_promotion`,
+      - ✅ **Step 2 (2026-08-10): agent selection + admission** moved to
+        `app/handlers/agent_admission.py` as `AgentAdmission` —
+        `resolve_spec`, `select_spec`, `provider_metadata`, `_spec_wait_seconds`,
+        `admission_signal`, `circuit_signal`, `clear_circuit`. Selection and
+        admission ship together because selection asks "is this provider free?"
+        using the same circuit and in-flight facts admission enforces; splitting
+        them would duplicate the reads and let the answers drift. The
+        collaborator now owns the agent catalog, the provider catalog and the
+        routing policy — **`ExecutionHandler` reads none of the three directly**.
+        It is constructor-injected (optional trailing parameter, built from the
+        existing collaborators when absent), so every caller including the tests
+        that construct the handler positionally is unchanged. `run_role_for`
+        moved to `execution_rules.py`: its two callers now live in different
+        modules and it must stay one definition. **2220 → 1999 lines; the class
+        2050 → 1846, 38 → 31 methods.** Test count unchanged (1436 collected,
+        1429 passed / 7 skipped before and after), which is the proof.
+      - ⏭ **Step 3 (NEXT): goal promotion + acceptance** — `_reserve_goal_promotion`,
         `_promote_goal`, `_retry_promotion`, `_block_on_unpromotable_goal`,
         `_pending_acceptance_cycle`, `_run_acceptance`.
       - ⏭ **Step 4 (LAST, highest risk): the two finalize functions.**
