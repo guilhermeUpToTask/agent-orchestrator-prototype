@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Asserts exactly the six capabilities the devcontainer could not provide.
+# Asserts the capabilities the devcontainer could not provide, plus (since
+# 2026-08-10) the one Phase 9 added: a browser that launches.
 # This script is the artifact P8.5's environment work is judged by.
 #
 # Before concluding the guest is incapable: Ubuntu 24.04 ships
@@ -64,6 +65,28 @@ check "docker runs with a private PID namespace" \
 # 6. Rootless podman with full isolation.
 check "rootless podman runs with full isolation" \
   podman --runtime crun run --rm --userns=auto --network=none docker.io/library/alpine:3.20 /bin/true
+
+# 7. A headless browser actually LAUNCHES. Added 2026-08-10 for Phase 9, whose
+#    first act is a browser test suite. Playwright ships the browser binary but
+#    not the system libraries it links against, so a guest missing them fails at
+#    launch with `libatk-1.0.so.0: cannot open shared object file` — every spec
+#    red, in a way that reads like a broken suite rather than a missing package.
+#    Observed exactly that on a built guest before the cloud-init list gained
+#    them. Skips rather than fails when the browser is not downloaded yet: the
+#    binary is a per-checkout `npm` artifact, not a guest capability, and this
+#    script asserts what the GUEST can do.
+check_browser() {
+  local chromium
+  chromium=$(ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-linux64/headless_shell \
+                   "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
+                   2>/dev/null | head -1)
+  if [[ -z "$chromium" ]]; then
+    echo "      (no chromium downloaded; run: cd frontend && npx playwright install chromium)"
+    return 0
+  fi
+  "$chromium" --headless --no-sandbox --version
+}
+check "a headless browser launches (playwright system libs)" check_browser
 
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

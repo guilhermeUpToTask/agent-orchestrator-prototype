@@ -9,7 +9,7 @@ contain agent-written code, which a container cannot be and a VM is by
 construction. Full setup, lifecycle and threat model: **[`infra/dev-vm/README.md`](infra/dev-vm/README.md)**.
 
 From the host: `make -C infra/dev-vm up | start | ssh | verify | destroy`.
-`make verify` is the capability gate and must return **7 passed, 0 failed**.
+`make verify` is the capability gate and must return **8 passed, 0 failed** (7 until 2026-08-10, when Phase 9 added a headless-browser check).
 
 Inside the guest, four things differ from the commands below and will waste your
 time if you assume otherwise:
@@ -213,7 +213,7 @@ agent-orchestrator/
 ├── infra/dev-vm/           # the aipom-dev libvirt/KVM development guest (replaced
 │                           #   .devcontainer/, retired 2026-08-09): create-vm.sh
 │                           #   (idempotent virt-install), Makefile (up/start/ssh/
-│                           #   verify/destroy), cloud-init/, verify.sh (the 7-check
+│                           #   verify/destroy), cloud-init/, verify.sh (the 8-check
 │                           #   capability gate — the artifact P8.5's environment
 │                           #   work is judged by), seed-agents.py (the free-tier
 │                           #   roster as code), README.md (setup + threat model)
