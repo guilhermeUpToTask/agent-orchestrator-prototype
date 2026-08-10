@@ -46,6 +46,22 @@ class Unit:
     run_role: str
 
 
+def run_role_for(plan: Plan, task: Task) -> str:
+    """Which stage runs next for this task: author the checks, or implement.
+
+    One definition, because `ExecutionHandler._start_unit` and
+    `AgentAdmission.resolve_spec` must agree — they each had their own copy of
+    this expression, and a divergence would resolve an agent for one role while
+    running the other. It lives here rather than in either caller precisely
+    because they now sit in different modules.
+    """
+    if plan.active_cycle is None or task.contract is None:
+        return "implementer"
+    if task.test_bundle is not None and task.test_bundle.validates(task.id, task.revision):
+        return "implementer"
+    return "test_author"
+
+
 def orchestration_failure(reason: str) -> RuntimeFailure:
     """A Class C failure: an orchestration race or missing infrastructure.
 
