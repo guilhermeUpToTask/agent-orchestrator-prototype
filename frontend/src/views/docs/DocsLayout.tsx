@@ -42,11 +42,7 @@ const BY_SLUG: Record<string, string> = Object.fromEntries(
 
 type Page = { slug: string; label: string; Icon: typeof BookOpen };
 
-/**
- * Grouped in reading order rather than alphabetically. `preview-report` is
- * listed even though invitations are Phase 9 — someone running this early
- * should be able to find how to tell us about it.
- */
+/** Grouped in reading order rather than alphabetically. */
 const GROUPS: { title: string; pages: Page[] }[] = [
   {
     title: 'Start here',
@@ -68,7 +64,6 @@ const GROUPS: { title: string; pages: Page[] }[] = [
     pages: [
       { slug: 'tier-1', label: 'Tier 1 — real models', Icon: Sparkles },
       { slug: 'troubleshooting', label: 'Troubleshooting', Icon: LifeBuoy },
-      { slug: 'preview-report', label: 'Reporting a run', Icon: BookOpen },
     ],
   },
 ];

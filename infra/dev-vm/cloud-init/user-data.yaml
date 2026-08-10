@@ -24,6 +24,31 @@ packages:
   - slirp4netns
   - fuse-overlayfs
   - jq
+  # Chromium's shared-library closure, for `npm run test:e2e`. Playwright ships
+  # the browser BINARY but not the system libraries it links against, so a
+  # guest without these fails at launch with
+  # `libatk-1.0.so.0: cannot open shared object file` — which reads like a
+  # broken test suite and is a missing package. Reproduced on a built guest
+  # 2026-08-10, when Phase 9's first browser run went 6-for-6 red.
+  # Kept as an explicit list rather than `npx playwright install-deps` because
+  # that command needs sudo at a point where cloud-init is the only root we
+  # have, and because a named list is reviewable.
+  - libatk1.0-0t64
+  - libatk-bridge2.0-0t64
+  - libcups2t64
+  - libdrm2
+  - libxkbcommon0
+  - libxcomposite1
+  - libxdamage1
+  - libxfixes3
+  - libxrandr2
+  - libgbm1
+  - libpango-1.0-0
+  - libcairo2
+  - libasound2t64
+  - libatspi2.0-0t64
+  - libnspr4
+  - libnss3
 
 write_files:
   - path: /etc/profile.d/aipom.sh

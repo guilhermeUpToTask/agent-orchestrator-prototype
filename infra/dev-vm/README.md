@@ -95,8 +95,16 @@ installs `uv` into `/usr/local/bin`; installs Node 22 and the `claude` and
 make -C infra/dev-vm verify
 ```
 
-`verify.sh` asserts exactly the six capabilities the devcontainer could not
-provide. It is the artifact the environment work is judged by. Expected output:
+`verify.sh` asserts the capabilities the devcontainer could not provide, plus
+one added 2026-08-10 for Phase 9: that a headless browser actually launches.
+Playwright ships the browser binary but not the system libraries it links
+against, so a guest missing them turns every browser spec red with
+`libatk-1.0.so.0: cannot open shared object file` — which reads like a broken
+test suite and is a missing package. That check skips (rather than fails) when
+no browser has been downloaded yet, because the binary is a per-checkout `npm`
+artifact and this script asserts what the GUEST can do.
+
+It is the artifact the environment work is judged by. Expected output:
 
 ```text
 === aipom-dev capability proof ===
@@ -107,7 +115,8 @@ PASS  cgroup2 mounts in a user namespace
 PASS  podman runs with cgroups and a private PID namespace
 PASS  docker runs with a private PID namespace
 PASS  rootless podman runs with full isolation
-=== 7 passed, 0 failed ===
+PASS  a headless browser launches (playwright system libs)
+=== 8 passed, 0 failed ===
 ```
 
 Verified on Ubuntu 24.04.4, kernel **6.8.0-137**, re-run after a kernel upgrade

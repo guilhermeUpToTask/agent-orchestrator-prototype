@@ -9,7 +9,7 @@ contain agent-written code, which a container cannot be and a VM is by
 construction. Full setup, lifecycle and threat model: **[`infra/dev-vm/README.md`](infra/dev-vm/README.md)**.
 
 From the host: `make -C infra/dev-vm up | start | ssh | verify | destroy`.
-`make verify` is the capability gate and must return **7 passed, 0 failed**.
+`make verify` is the capability gate and must return **8 passed, 0 failed** (7 until 2026-08-10, when Phase 9 added a headless-browser check).
 
 Inside the guest, four things differ from the commands below and will waste your
 time if you assume otherwise:
@@ -65,7 +65,7 @@ Environment: `ORCHESTRATOR_HOME` (state dir), `ORCHESTRATOR_MASTER_KEY` (Fernet 
 - **Run Dev**: `npm run dev`
 - **Build**: `npm run build` (tsc + vite)
 - **Stage the UI into the wheel**: `backend/scripts/build_frontend.sh` — builds `frontend/dist` into `backend/agent_orchestrator/api/static/` (git-ignored) so `uv build` ships one artifact. The release workflow runs it BEFORE `uv build` and then verifies the wheel carries both the UI and the migrations.
-- **Browser checks**: `npm run test:e2e` (Playwright, needs the API running with a staged bundle). Light by design — full-cycle browser E2E is Phase 8.
+- **Browser checks**: `npm run test:e2e` (Playwright, needs the API running with a staged bundle). **Two specs only** (`packaged-ui`, `docs-screenshots`) and neither drives a cycle — **no test here has ever driven the console through a plan**. This said "full-cycle browser E2E is Phase 8" from Phase 6 until 2026-08-10; Phase 8 came and went without it, so it is now Phase 9's first task and the label "light by design" has been retired as untrue.
 - **Regenerate API types**: `npm run generate:api` (backend/scripts/export_openapi.py + openapi-ts → `src/types/generated/`). The plan DETAIL read model (the aggregate document) is hand-declared in `src/types/ui.ts` — keep it in sync with the domain.
 
 ## 🏗️ Architectural Invariants (Backend)
@@ -213,7 +213,7 @@ agent-orchestrator/
 ├── infra/dev-vm/           # the aipom-dev libvirt/KVM development guest (replaced
 │                           #   .devcontainer/, retired 2026-08-09): create-vm.sh
 │                           #   (idempotent virt-install), Makefile (up/start/ssh/
-│                           #   verify/destroy), cloud-init/, verify.sh (the 7-check
+│                           #   verify/destroy), cloud-init/, verify.sh (the 8-check
 │                           #   capability gate — the artifact P8.5's environment
 │                           #   work is judged by), seed-agents.py (the free-tier
 │                           #   roster as code), README.md (setup + threat model)
