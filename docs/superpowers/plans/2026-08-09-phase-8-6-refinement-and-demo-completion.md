@@ -88,7 +88,7 @@ a paid tier, not a classification change.
 Recorded in `docs/architecture/known-issues.md` under *Failure classification*
 so the reasoning error is not repeated.
 
-## Task 2: enrich ready goals in parallel
+## Task 2: enrich ready goals in parallel — ✅ DONE 2026-08-10
 
 **Why:** the largest structural win, and provider-independent. Enrichment is JIT
 *and* strictly serial — goal 2's session starts the second goal 1's commits — so
@@ -112,7 +112,7 @@ five goals cost ~25 minutes of pure sequencing.
 **Done when** enrichment wall-clock for a five-goal cycle is bounded by the
 slowest session rather than their sum.
 
-## Task 3: route around a busy model instead of waiting on it
+## Task 3: route around a busy model instead of waiting on it — ✅ DONE 2026-08-10
 
 **Why:** the roster carries four implementers across four models; a rate-limited
 task waits on its own binding while three sit idle.
@@ -130,7 +130,7 @@ task waits on its own binding while three sit idle.
 
 **Done when** a capacity failure costs one reroute rather than one backoff.
 
-## Task 4: two cheap wins
+## Task 4: two cheap wins — ✅ DONE (code landed earlier; locked by tests 2026-08-10)
 
 1. **Unbuffer the supervised worker.** `serve` runs the worker as a subprocess
    whose stdout is not a tty, so its log sits frozen at the startup banner while
@@ -170,7 +170,7 @@ Only after Tasks 1–4. Tier 1, paid models per the binding above.
    `SITEGEN_REPO=… uv run pytest demos/static-site-v1/acceptance -q`.
 8. **Then** the structural check: `verify_demo.py --plan-id … --cycle-id …
    --repo … --seed-tag static-site-v1-seed`.
-9. Capture with `fixtures/first-cycle-v1/scripts/capture-run.sh`, recording
+9. Capture with `demos/static-site-v1/scripts/capture-run.sh`, recording
    reasoner model, agent model, orchestrator version, wall-clock and cost.
 
 **Done when** `demos/static-site-v1/runs/<UTC>-…/` exists and a human has opened
