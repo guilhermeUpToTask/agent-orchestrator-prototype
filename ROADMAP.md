@@ -907,13 +907,28 @@ fail on its real failure modes measures nothing."* The same argument applies
 here with more force, because the console has no equivalent of the dual-backend
 truth test.
 
-1. ⬜ **Install and pin the LLM-driven Playwright tooling, and write the safety
-   net first.** `@playwright/test` 1.62.1 is already a devDependency; what is
-   missing is the agent-driven layer (the Playwright MCP server, or the
-   equivalent CLI) that lets a model open the app, act, and read the DOM back.
-   Install it, pin the version in `package.json`, and record the exact package
-   and version in the plan — an agent-driven test tool that silently updates is
-   a test suite that silently changes meaning.
+1. ⬜ **Pin the agent-driven Playwright tooling, and write the safety net
+   first.** The tool is **`npx playwright cli`** — the terminal-driven browser
+   built into `playwright-core`, which `@playwright/test` 1.62.1 already brings
+   in. It opens a browser, acts on it (`click`, `fill`, `press`, `select`),
+   and returns an accessibility-tree `snapshot` with stable element refs, plus
+   `find`, `eval`, `requests`/`response-body` and `screenshot`. Its own agent
+   skill ships at
+   `node_modules/playwright-core/lib/tools/skills/playwright-cli/SKILL.md`.
+
+   **Deliberately NOT the MCP server.** `playwright mcp` exists as a subcommand
+   and the standalone `@playwright/mcp` package exists too; both were tried and
+   rejected on 2026-08-10. A resident server speaking a protocol is expensive
+   per interaction and slower than a shell command that prints a snapshot and
+   exits. The CLI is the same capability at a fraction of the cost, and it
+   composes with ordinary shell tooling.
+
+   Pin the version **exactly** (no caret) in `package.json` and record it — an
+   agent-driven test tool that silently updates is a test suite that silently
+   changes meaning. Note the CLI defaults to branded Chrome; point it at the
+   bundled chromium with a committed
+   `.playwright/cli.config.json` (`{"browser":{"browserName":"chromium"}}`) so
+   it uses the same browser CI installs rather than requiring a second one.
 
    Then, **before touching a single component**, write the browser tests for
    what exists today. They are the regression net for everything after, and
