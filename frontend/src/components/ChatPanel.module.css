@@ -1,0 +1,304 @@
+/*
+ * ChatPanel — migrated off inline styles, P9 task 3.
+ *
+ * This component had no stylesheet and 25 inline `style={{…}}` sites, half of
+ * them reading `tokens.*` and half reading `var(--*)` — two spellings of the
+ * same CSS variables, sometimes in the same declaration. `tokens.ts` says it
+ * is "a thin typed mirror for the few places React needs raw values (React
+ * Flow edges, minimap colors)"; a chat panel is not one of those places.
+ *
+ * Every value below is the variable the token aliased, so this is a rename
+ * rather than a restyle: `tokens.panelBg` was always `var(--bg-1)`.
+ */
+
+.panel {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-0);
+}
+
+/* ── collapsed rail ─────────────────────────────────────────────────────── */
+
+.rail {
+  width: 36px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 12px;
+  cursor: pointer;
+  color: var(--text-3);
+}
+
+.railLabel {
+  writing-mode: vertical-rl;
+  margin-top: 12px;
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+}
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+
+.header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-0);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.statusDotLive {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.headerTitle {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-1);
+  letter-spacing: 0.08em;
+}
+
+.modeChip {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--r-1);
+  background: var(--bg-3);
+  color: var(--text-3);
+  margin-left: 4px;
+}
+
+.modeChipLive {
+  background: var(--run-bg);
+  color: var(--run);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.collapseButton {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+
+/* ── mode hint ──────────────────────────────────────────────────────────── */
+
+.hint {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-0);
+  background: var(--bg-2);
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  color: var(--run);
+  flex-shrink: 0;
+}
+
+.hintLive {
+  background: transparent;
+  color: var(--text-3);
+}
+
+/* ── message list ───────────────────────────────────────────────────────── */
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* ── one message ────────────────────────────────────────────────────────── */
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  animation: fadein 0.15s ease both;
+}
+
+.bubbleUser {
+  align-items: flex-end;
+}
+
+.bubbleMeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-direction: row;
+}
+
+.bubbleUser .bubbleMeta {
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The lucide icons default to currentColor, so the container owns the hue
+     instead of each call site passing a `color` prop. */
+  color: var(--run);
+}
+
+.avatarUser {
+  background: var(--run-bg);
+  border-color: color-mix(in srgb, var(--accent) 27%, transparent);
+  color: var(--accent);
+}
+
+.byline {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.committedChip {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  color: var(--ok);
+  background: var(--ok-bg);
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+}
+
+.briefChip {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.body {
+  max-width: 88%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-0);
+  border-radius: 10px 10px 10px 2px;
+  font-size: 12px;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bodyUser {
+  background: var(--run-bg);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-radius: 10px 10px 2px 10px;
+}
+
+/* ── thinking ───────────────────────────────────────────────────────────── */
+
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-0);
+  border-radius: 10px 10px 10px 2px;
+  width: fit-content;
+  animation: fadein 0.15s ease both;
+}
+
+.thinkingIcon {
+  animation: spin 1s linear infinite;
+  color: var(--run);
+}
+
+.thinkingLabel {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+/* ── composer ───────────────────────────────────────────────────────────── */
+
+.composer {
+  padding: 10px var(--sp-3);
+  border-top: 1px solid var(--border-0);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.input {
+  flex: 1;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: var(--r-2);
+  padding: var(--sp-2) 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-1);
+  outline: none;
+  resize: none;
+  line-height: 1.5;
+}
+
+/* Was two inline handlers writing `e.target.style.borderColor` on focus and
+   blur. A pseudo-class does it without touching the DOM, and unlike the
+   handlers it survives focus arriving by keyboard. */
+.input:focus {
+  border-color: var(--accent);
+}
+
+.send {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-2);
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent-text-on);
+}
+
+.send:disabled {
+  background: var(--bg-3);
+  cursor: default;
+  color: var(--text-3);
+}
