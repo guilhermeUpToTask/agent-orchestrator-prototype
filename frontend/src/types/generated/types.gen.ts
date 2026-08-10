@@ -3997,6 +3997,50 @@ export type PlansRetryBlockedPlanningStageResponses = {
 
 export type PlansRetryBlockedPlanningStageResponse = PlansRetryBlockedPlanningStageResponses[keyof PlansRetryBlockedPlanningStageResponses];
 
+export type PlansRebindGoalAgentsEndpointData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+        /**
+         * Goal Id
+         */
+        goal_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/goals/{goal_id}/rebind-agents';
+};
+
+export type PlansRebindGoalAgentsEndpointErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansRebindGoalAgentsEndpointError = PlansRebindGoalAgentsEndpointErrors[keyof PlansRebindGoalAgentsEndpointErrors];
+
+export type PlansRebindGoalAgentsEndpointResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansRebindGoalAgentsEndpointResponse = PlansRebindGoalAgentsEndpointResponses[keyof PlansRebindGoalAgentsEndpointResponses];
+
 export type PlansUpdateRetryPolicyRouteData = {
     body: RetryPolicyUpdateRequest;
     headers?: {
