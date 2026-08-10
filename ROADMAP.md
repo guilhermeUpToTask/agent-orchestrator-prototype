@@ -132,9 +132,9 @@ purpose: a five-goal cycle sat at 61 minutes with nothing promoted. A showcase
 nobody will sit through does not demonstrate anything, so closing the latency
 gap is scoped into the phase rather than deferred past it.
 
-**Extended again 2026-08-10 with P8.7 — refactoring, which ran BEFORE P8.6 and
-is now delivered.** The remaining execution order is **P8.6 → P8.4's rerun**,
-and a session picking this up starts at **P8.6**. The reason P8.7 went first was
+**Extended again 2026-08-10 with P8.7 — refactoring, which ran BEFORE P8.6.
+Both are now delivered, and P8.4's rerun with them: the phase is complete.**
+The execution order was **P8.7 → P8.6 → P8.4's rerun**. The reason P8.7 went first was
 not tidiness: P8.6's two largest targets both land inside what was a 2,133-line
 class with 44 methods, and the three defects that cost 2026-08-09 escaped 1400
 green tests because they were *inexpressible* in the fakes rather than missed.
@@ -161,7 +161,12 @@ function 195 lines, and the fakes can express what they used to discard.
    hunk-level accept/reject: half-accepting a candidate invalidates the
    revision-bound evidence that makes it trustworthy. A garbage-collected SHA
    degrades ONE unit with a stated reason rather than failing the document.
-4. 🚧 **P8.4 — the showcase, and it is a DEMO rather than a fixture.** Decided
+4. ✅ **P8.4 — the showcase, and it is a DEMO rather than a fixture.
+   COMPLETED 2026-08-10** with the first clean run, captured in
+   [`demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`](demos/static-site-v1/runs/)
+   and measured in
+   [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).
+   Decided
    2026-08-02. The roadmap already said this artifact "cannot be locked in CI
    the way Tier 0 fixtures are", so filing it under `fixtures/` beside six
    deterministic, checkable, partly CI-locked walkthroughs was a category
@@ -261,13 +266,29 @@ function 195 lines, and the fakes can express what they used to discard.
    Selected by `environment.mode=container`, with `environment.container_binary`
    choosing the runtime; validated against real docker AND real podman, not a
    scripted fake. `NoEnvironment` stays the permanent fallback.
-6. ⏳ **P8.6 — refining: make a cycle finish in a time somebody will wait for.**
-   **Sequenced AFTER P8.7 — see the ordering note under it.** Scoped 2026-08-09 from measured evidence rather
+6. ✅ **P8.6 — refining: make a cycle finish in a time somebody will wait for.
+   DELIVERED 2026-08-10, and with it P8.4's rerun.** Scoped 2026-08-09 from measured evidence rather
    than from intuition — see
    [`docs/history/analyses/2026-08-09-cycle-latency-analysis.md`](docs/history/analyses/2026-08-09-cycle-latency-analysis.md).
    A five-goal cycle sat at **61 minutes with zero goals promoted**, never
    blocked, and **62% of execution wall-clock produced nothing** (38%
    productive, 20% burned on failed attempts, 42% idle in backoff).
+
+   **The second measured run:
+   [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).**
+   The cycle **completed** — 4 of 4 goals promoted, publication gate reached,
+   disposition recorded, root back to IDLE — in **13m 37s** for **$0.013**,
+   with **8 attempts and zero failures**, 78.5% productive (92.4% excluding one
+   operator pause) and effectively no idle. Against 61 minutes and zero goals.
+
+   **Read the attribution before the numbers.** The dominant term is the one
+   the plan predicted and it is not this phase's code: the free tier was
+   removed on both sides at once (paid reasoner, `codex` agents on a
+   subscription). What is genuinely attributable is narrower — parallel
+   enrichment fired and is visible in the ledger (two independent goals, one
+   pass, 8s apart), unbuffered logs carried every diagnosis in the session, and
+   **capacity routing was never exercised at all** because nothing was ever
+   rate-limited. It is locked by tests, not by this run.
 
    This is a demonstrability problem, not just an ergonomics one: P8.4's
    showcase is the artifact an invitation points at, and nobody watches an hour
@@ -303,9 +324,14 @@ function 195 lines, and the fakes can express what they used to discard.
       second half and bought nothing here, because everything was pinned to
       similar-latency free models.
    5. **Diagnose the 31-minute gap between an armed `retry_at` and the
-      attempt**, with a live renewing lease and no log in between. Undiagnosed;
-      if it is real and general it dwarfs items 1–4, which is why it is scoped
-      here rather than left in the analysis.
+      attempt**, with a live renewing lease and no log in between.
+      **NOT REPRODUCED 2026-08-10, and deliberately not closed.** The complete
+      set of gaps in the second run was `0.0s 18.7s 102.7s 0.6s 0.3s 24.7s
+      0.0s` — the 102.7s an operator pause, the other two the JIT enrichment
+      sessions for the next goal. But no attempt in that run ever entered
+      backoff, so the code path the ghost lives on was never taken: this is
+      "not reachable by that run's shape", not "fixed". Look again the next
+      time a run actually backs off.
    6. **Unbuffer the supervised worker's logs.** `serve` runs the worker as a
       subprocess whose stdout is not a tty, so the log sits frozen at the
       startup banner while attempts run. This cost real diagnosis time in the
@@ -322,7 +348,11 @@ function 195 lines, and the fakes can express what they used to discard.
    five-goal cycle at roughly **$0.06–$0.12**, so a dollar buys 8–17 complete
    runs. Budget is not the constraint — reliability is, because a failed run
    costs an hour of wall-clock and a rerun. Pick the most reliable tool-caller
-   in the cheap tier, not the cheapest model.
+   in the cheap tier, not the cheapest model. **Confirmed and then some,
+   2026-08-10: the completed run cost $0.013 — 77 runs per dollar — on
+   `deepseek/deepseek-v4-flash-0731`.** The plan's price table is stale for
+   `z-ai/glm-5.2`, which it recommends as the reasoner at $0.07/$0.22 per Mtok;
+   the live price is $0.76/$2.42, 10x, which would make it ~$0.25 a run.
 
    Plan: [`docs/superpowers/plans/2026-08-09-phase-8-6-refinement-and-demo-completion.md`](docs/superpowers/plans/2026-08-09-phase-8-6-refinement-and-demo-completion.md),
    which also carries the model comparison and the demo-completion checklist.
@@ -331,11 +361,19 @@ function 195 lines, and the fakes can express what they used to discard.
    2026-08-09 runs.** Three defects sat in the path — the implementer role bound
    to an agent instructed not to implement, planning unable to submit at all,
    and empty completions misclassified as capacity limits — and the first two
-   were only fixed at the end of that session. The demo has not yet had one
-   clean attempt.
+   were only fixed at the end of that session. ~~The demo has not yet had one
+   clean attempt.~~ **It has now: 2026-08-10, captured in
+   [`demos/static-site-v1/runs/20260810T133717Z-aaedbb73/`](demos/static-site-v1/runs/).**
+   Four defects surfaced during it and were fixed in flight with regression
+   tests — none in the orchestration core, and the one worth remembering is
+   that the demo's own content contradicted its own brief, producing a visibly
+   duplicated `<h1>` that the container acceptance run, the 7/7 structural
+   checks and all eleven out-of-repo acceptance assertions **all passed**. The
+   eye check found it, exactly as `demos/README.md` promises it would. It is
+   now encoded so the next run does not need eyes.
 
 7. ✅ **P8.7 — backend and documentation refactoring. DELIVERED 2026-08-10.**
-   All six tasks complete; the next session starts at **P8.6**. Scoped from measurement:
+   All six tasks complete. Scoped from measurement:
    [`docs/history/planning/2026-08-10-backend-refactoring.md`](docs/history/planning/2026-08-10-backend-refactoring.md).
 
    **Why it comes first, ahead of the latency work and the demo rerun.** P8.6's

@@ -143,9 +143,13 @@ jq -n \
       # `//` treats false as empty, so a boolean must never use it: a red run
       # reporting `valid: null` instead of `valid: false` is unreadable evidence.
       runner_valid: (if $runner == null then null else $runner.valid end),
-      agents: [($runner.agents? // [])[] | {agent_name, runtime_type, provider_id, model_id, valid}],
+      agents: [($runner.agents? // [])[] | {agent_name, runtime_type, provider_name, model_name, valid}],
       reasoner_mode: ($reasoner.mode? // null),
-      reasoner_model: ($reasoner.model? // $reasoner.model_id? // null)
+      # The NAME, not the id. "A result nobody can situate is an anecdote", and
+      # a catalog uuid situates nothing — the ids are server-generated per
+      # install, so the same row is a different uuid on the next machine.
+      reasoner_provider: ($reasoner.provider_name? // $reasoner.provider_id? // null),
+      reasoner_model: ($reasoner.model_name? // $reasoner.model_id? // null)
     },
     verdicts: {
       structural_exit: ($structural_exit | tonumber),
