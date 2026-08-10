@@ -48,8 +48,12 @@ _SUFFIXES = (".py", ".md", ".sh", ".ts", ".tsx", ".yaml", ".yml", ".toml", ".jso
 
 # Build outputs: real paths that exist only after a build step, and are
 # git-ignored by design. Naming them in a doc is correct; asserting they are
-# present in a fresh checkout is not.
-_GENERATED = {"backend/agent_orchestrator/api/static"}
+# present in a fresh checkout is not — this test first went red in CI and not
+# locally for exactly that reason, because a developer machine has built once.
+_GENERATED = {
+    "backend/agent_orchestrator/api/static",  # the staged UI, built into the wheel
+    "frontend/dist",  # vite build output
+}
 
 _BACKTICKED = re.compile(r"`([^`\n]+)`")
 

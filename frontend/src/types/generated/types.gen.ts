@@ -3267,150 +3267,6 @@ export type PlansGetPlanResponses = {
 
 export type PlansGetPlanResponse = PlansGetPlanResponses[keyof PlansGetPlanResponses];
 
-export type PlansClearPlanningArtifactsData = {
-    body?: never;
-    headers?: {
-        /**
-         * Authorization
-         */
-        authorization?: string | null;
-        /**
-         * X-Api-Token
-         */
-        'x-api-token'?: string | null;
-    };
-    path: {
-        /**
-         * Plan Id
-         */
-        plan_id: string;
-    };
-    query?: {
-        /**
-         * Purpose
-         */
-        purpose?: string;
-        /**
-         * Goal Id
-         */
-        goal_id?: string | null;
-    };
-    url: '/api/plans/{plan_id}/planning-artifacts';
-};
-
-export type PlansClearPlanningArtifactsErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlansClearPlanningArtifactsError = PlansClearPlanningArtifactsErrors[keyof PlansClearPlanningArtifactsErrors];
-
-export type PlansClearPlanningArtifactsResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
-};
-
-export type PlansClearPlanningArtifactsResponse = PlansClearPlanningArtifactsResponses[keyof PlansClearPlanningArtifactsResponses];
-
-export type PlansListPlanningArtifactsData = {
-    body?: never;
-    headers?: {
-        /**
-         * Authorization
-         */
-        authorization?: string | null;
-        /**
-         * X-Api-Token
-         */
-        'x-api-token'?: string | null;
-    };
-    path: {
-        /**
-         * Plan Id
-         */
-        plan_id: string;
-    };
-    query?: {
-        /**
-         * Purpose
-         */
-        purpose?: string;
-        /**
-         * Goal Id
-         */
-        goal_id?: string | null;
-        /**
-         * Limit
-         */
-        limit?: number;
-    };
-    url: '/api/plans/{plan_id}/planning-artifacts';
-};
-
-export type PlansListPlanningArtifactsErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlansListPlanningArtifactsError = PlansListPlanningArtifactsErrors[keyof PlansListPlanningArtifactsErrors];
-
-export type PlansListPlanningArtifactsResponses = {
-    /**
-     * Response Plans-List Planning Artifacts
-     *
-     * Successful Response
-     */
-    200: Array<PlanningArtifactResponse>;
-};
-
-export type PlansListPlanningArtifactsResponse = PlansListPlanningArtifactsResponses[keyof PlansListPlanningArtifactsResponses];
-
-export type PlansAttemptTimelineData = {
-    body?: never;
-    headers?: {
-        /**
-         * Authorization
-         */
-        authorization?: string | null;
-        /**
-         * X-Api-Token
-         */
-        'x-api-token'?: string | null;
-    };
-    path: {
-        /**
-         * Plan Id
-         */
-        plan_id: string;
-    };
-    query?: never;
-    url: '/api/plans/{plan_id}/attempts';
-};
-
-export type PlansAttemptTimelineErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlansAttemptTimelineError = PlansAttemptTimelineErrors[keyof PlansAttemptTimelineErrors];
-
-export type PlansAttemptTimelineResponses = {
-    /**
-     * Successful Response
-     */
-    200: AttemptTimelineResponse;
-};
-
-export type PlansAttemptTimelineResponse = PlansAttemptTimelineResponses[keyof PlansAttemptTimelineResponses];
-
 export type PlansCancelIntentRouteData = {
     body?: never;
     headers?: {
@@ -4361,6 +4217,192 @@ export type PlansReplanningResponses = {
 
 export type PlansReplanningResponse = PlansReplanningResponses[keyof PlansReplanningResponses];
 
+export type PlansChatHistoryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/chat';
+};
+
+export type PlansChatHistoryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansChatHistoryError = PlansChatHistoryErrors[keyof PlansChatHistoryErrors];
+
+export type PlansChatHistoryResponses = {
+    /**
+     * Response Plans-Chat History
+     *
+     * Successful Response
+     */
+    200: Array<ChatMessageResponse>;
+};
+
+export type PlansChatHistoryResponse = PlansChatHistoryResponses[keyof PlansChatHistoryResponses];
+
+export type PlansClearPlanningArtifactsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: {
+        /**
+         * Purpose
+         */
+        purpose?: string;
+        /**
+         * Goal Id
+         */
+        goal_id?: string | null;
+    };
+    url: '/api/plans/{plan_id}/planning-artifacts';
+};
+
+export type PlansClearPlanningArtifactsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansClearPlanningArtifactsError = PlansClearPlanningArtifactsErrors[keyof PlansClearPlanningArtifactsErrors];
+
+export type PlansClearPlanningArtifactsResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type PlansClearPlanningArtifactsResponse = PlansClearPlanningArtifactsResponses[keyof PlansClearPlanningArtifactsResponses];
+
+export type PlansListPlanningArtifactsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: {
+        /**
+         * Purpose
+         */
+        purpose?: string;
+        /**
+         * Goal Id
+         */
+        goal_id?: string | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/api/plans/{plan_id}/planning-artifacts';
+};
+
+export type PlansListPlanningArtifactsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansListPlanningArtifactsError = PlansListPlanningArtifactsErrors[keyof PlansListPlanningArtifactsErrors];
+
+export type PlansListPlanningArtifactsResponses = {
+    /**
+     * Response Plans-List Planning Artifacts
+     *
+     * Successful Response
+     */
+    200: Array<PlanningArtifactResponse>;
+};
+
+export type PlansListPlanningArtifactsResponse = PlansListPlanningArtifactsResponses[keyof PlansListPlanningArtifactsResponses];
+
+export type PlansAttemptTimelineData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Token
+         */
+        'x-api-token'?: string | null;
+    };
+    path: {
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/plans/{plan_id}/attempts';
+};
+
+export type PlansAttemptTimelineErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PlansAttemptTimelineError = PlansAttemptTimelineErrors[keyof PlansAttemptTimelineErrors];
+
+export type PlansAttemptTimelineResponses = {
+    /**
+     * Successful Response
+     */
+    200: AttemptTimelineResponse;
+};
+
+export type PlansAttemptTimelineResponse = PlansAttemptTimelineResponses[keyof PlansAttemptTimelineResponses];
+
 export type PlansAttemptLogData = {
     body?: never;
     headers?: {
@@ -4511,48 +4553,6 @@ export type PlansAgentEventsResponses = {
 };
 
 export type PlansAgentEventsResponse = PlansAgentEventsResponses[keyof PlansAgentEventsResponses];
-
-export type PlansChatHistoryData = {
-    body?: never;
-    headers?: {
-        /**
-         * Authorization
-         */
-        authorization?: string | null;
-        /**
-         * X-Api-Token
-         */
-        'x-api-token'?: string | null;
-    };
-    path: {
-        /**
-         * Plan Id
-         */
-        plan_id: string;
-    };
-    query?: never;
-    url: '/api/plans/{plan_id}/chat';
-};
-
-export type PlansChatHistoryErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type PlansChatHistoryError = PlansChatHistoryErrors[keyof PlansChatHistoryErrors];
-
-export type PlansChatHistoryResponses = {
-    /**
-     * Response Plans-Chat History
-     *
-     * Successful Response
-     */
-    200: Array<ChatMessageResponse>;
-};
-
-export type PlansChatHistoryResponse = PlansChatHistoryResponses[keyof PlansChatHistoryResponses];
 
 export type ReferenceListCapabilitiesData = {
     body?: never;
