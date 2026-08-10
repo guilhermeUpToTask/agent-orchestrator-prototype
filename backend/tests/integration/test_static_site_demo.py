@@ -65,6 +65,29 @@ def test_the_seed_ships_the_content_the_tool_must_handle():
     assert (DEMO / "seed" / "content" / "about.md").exists()
 
 
+def test_the_content_does_not_repeat_its_own_front_matter_title():
+    """The seed must not contradict the brief it is fed with.
+
+    Requirement 3 makes the LAYOUT render the front-matter `title` as a visible
+    heading. A body that also opens with `# <that same title>` therefore asks
+    for the title twice, and a correct implementation of both requirements can
+    only produce two identical `<h1>`s stacked on each other — which is exactly
+    what the first completed run produced, and the first thing a human sees on
+    the page this demo exists to have them open.
+
+    Locked at the source because this is where it is fixable: no amount of
+    agent quality can render contradictory instructions well."""
+    for name in ("index.md", "about.md"):
+        source = (DEMO / "seed" / "content" / name).read_text(encoding="utf-8")
+        _, _, body = source.partition("---\n")[2].partition("---\n")
+        title = re.search(r"^title:\s*(.+)$", source, re.MULTILINE)
+        assert title is not None, f"{name} lost its front-matter title"
+        assert f"# {title.group(1).strip()}" not in body, (
+            f"{name} repeats its front-matter title as a body heading; the "
+            "layout already renders that title as the visible heading"
+        )
+
+
 def test_the_seed_starts_with_no_tests_of_its_own():
     """Every task must author its own checks. A pre-existing test suite would
     hand the agent a baseline it did not earn."""

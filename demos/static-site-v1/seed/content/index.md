@@ -3,8 +3,6 @@ title: Welcome
 layout: page
 ---
 
-# Welcome
-
 This site was generated from markdown by an agent orchestrator.
 
 Some things it has to get right:

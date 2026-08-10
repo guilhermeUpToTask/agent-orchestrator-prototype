@@ -67,22 +67,43 @@ class ProjectWorkspaceResolver:
             workspaces.append((project.id, cached.workspace))
         return workspaces
 
+    # Names a repository's trunk is conventionally called, best first. Consulted
+    # only when there is no remote to ask — see `_default_branch`.
+    _CONVENTIONAL_DEFAULTS = ("main", "master", "trunk", "development", "develop")
+
     @staticmethod
     def _default_branch(repo: Path) -> str:
+        """This repository's DEFAULT branch — never merely its current one.
+
+        What this answers is load-bearing: it is the ref new cycle branches are
+        cut from, the ref `checkout -B` targets, and the ref the "plan work
+        never touches the default branch" guarantee is measured against.
+
+        `symbolic-ref HEAD` used to be the second probe, and it answers a
+        different question — "what is checked out right now". A LOCAL project
+        has no `origin/HEAD` to answer first, so any checkout in the project
+        repository silently redefined its default branch. The demo's own README
+        tells an operator to `git switch cycle/<id>` to look at the result, and
+        doing so made the next verification report the cycle branch as the
+        default and fail a guarantee that was in fact being kept (2026-08-10).
+
+        Order: the remote's declared HEAD (authoritative — a fork whose default
+        is `develop` must not be overridden by a local `main`), then a
+        conventional trunk name among the local branches, then a lone branch.
+        Deliberately no fallback to "whatever is checked out" and none to "the
+        first branch alphabetically": a finished cycle leaves `cycle/…`,
+        `goal/…` and `task/…` refs, all of which sort before `main`.
+        """
         if not (repo / ".git").exists():
             return "main"
-        probes = (
-            ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-            ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        remote_head = subprocess.run(
+            ["git", "-C", str(repo), "symbolic-ref", "--quiet", "--short",
+             "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
         )
-        for args in probes:
-            result = subprocess.run(
-                ["git", "-C", str(repo), *args],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().removeprefix("origin/")
+        if remote_head.returncode == 0 and remote_head.stdout.strip():
+            return remote_head.stdout.strip().removeprefix("origin/")
         branches = subprocess.run(
             [
                 "git",
@@ -95,7 +116,10 @@ class ProjectWorkspaceResolver:
             check=True,
             capture_output=True,
             text=True,
-        ).stdout.splitlines()
+        ).stdout.split()
+        for candidate in ProjectWorkspaceResolver._CONVENTIONAL_DEFAULTS:
+            if candidate in branches:
+                return candidate
         if len(branches) == 1:
             return branches[0]
         raise ValueError(f"cannot determine default branch for repository {repo}")

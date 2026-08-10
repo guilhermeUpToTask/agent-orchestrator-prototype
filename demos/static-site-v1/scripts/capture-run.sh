@@ -85,7 +85,9 @@ fi
 [[ -n "$CYCLE_ID" && "$CYCLE_ID" != "null" ]] || note "warning: no cycle id resolved"
 
 if [[ -n "$CYCLE_ID" && "$CYCLE_ID" != "null" ]]; then
-  capture acceptance.json GET "/api/plans/$PLAN_ID/cycles/$CYCLE_ID/acceptance"
+  # The acceptance verdicts ride on the cycle evidence document; there is no
+  # separate acceptance endpoint.
+  capture evidence.json GET "/api/plans/$PLAN_ID/cycles/$CYCLE_ID/evidence"
 fi
 
 note "structural checks"
@@ -122,7 +124,7 @@ jq -n \
   --argjson plan "$(read_json plan-detail.json)" \
   --argjson runner "$(read_json runner-status.json)" \
   --argjson reasoner "$(read_json reasoner-status.json)" \
-  --argjson acceptance "$(read_json acceptance.json)" \
+  --argjson evidence "$(read_json evidence.json)" \
   '{
     demo: {name: "static-site-v1", seed_commit: $seed_sha},
     orchestrator: {commit: $orchestrator_sha, working_tree_dirty: $orchestrator_dirty},
@@ -147,7 +149,7 @@ jq -n \
     },
     verdicts: {
       structural_exit: ($structural_exit | tonumber),
-      acceptance: [($acceptance.runs? // $acceptance? // [])[]?
+      acceptance: [($evidence.acceptance_runs? // [])[]?
                    | {trigger, outcome, summary}]
     }
   }' >"$RUN_DIR/manifest.json"
