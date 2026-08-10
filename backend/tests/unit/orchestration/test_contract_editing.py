@@ -705,7 +705,7 @@ def test_a_transient_merge_failure_releases_and_retries_instead_of_blocking(env_
     handler = _promotion_env(env, workspace, artifacts)
 
     signal = asyncio.run(
-        handler._promote_goal("p1", ("res-1", "cycle-1", "g1"), env.uow)
+        handler._promoter.promote("p1", ("res-1", "cycle-1", "g1"), env.uow)
     )
 
     assert signal == Signal.NOT_READY  # worker sleeps and re-attempts
@@ -729,7 +729,7 @@ def test_a_merge_conflict_still_blocks_immediately(env_factory):
     workspace = _FlakyMerge(1, "CONFLICT (content): Merge conflict in src/happy_path/greeter.py")
     handler = _promotion_env(env, workspace, artifacts)
 
-    asyncio.run(handler._promote_goal("p1", ("res-1", "cycle-1", "g1"), env.uow))
+    asyncio.run(handler._promoter.promote("p1", ("res-1", "cycle-1", "g1"), env.uow))
 
     blocked = env.stored("p1")
     assert blocked.goal_blocks.get("g1") is not None
@@ -763,6 +763,6 @@ def test_promotion_retries_are_bounded(env_factory):
     workspace = _FlakyMerge(5, "fatal: Unable to create '/repo/.git/index.lock': File exists.")
     handler = _promotion_env(env, workspace, artifacts)
 
-    asyncio.run(handler._promote_goal("p1", ("res-1", "cycle-1", "g1"), env.uow))
+    asyncio.run(handler._promoter.promote("p1", ("res-1", "cycle-1", "g1"), env.uow))
 
     assert env.stored("p1").goal_blocks.get("g1") is not None  # the backstop holds
