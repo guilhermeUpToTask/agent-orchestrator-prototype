@@ -1211,6 +1211,15 @@ purpose: a five-goal cycle sat at 61 minutes with nothing promoted. A showcase
 nobody will sit through does not demonstrate anything, so closing the latency
 gap is scoped into the phase rather than deferred past it.
 
+**Extended again 2026-08-10 with P8.7 — refactoring, and it runs BEFORE P8.6.**
+The remaining execution order is therefore **P8.7 → P8.6 → P8.4's rerun**. The
+reason is not tidiness: P8.6's two largest targets both land inside a 2,133-line
+class with 44 methods, and the three defects that cost 2026-08-09 escaped 1400
+green tests because they were *inexpressible* in the fakes rather than missed.
+Optimising a system whose tests cannot fail on its real failure modes measures
+nothing, and changing behaviour inside code that cannot be read is how those
+defects arrived. **A session picking this up starts at P8.7 task 1.**
+
 1. ✅ **P8.1 — the repository-choice wizard** (plus authenticated forge
    publication, promoted into it).
 2. ✅ **P8.2 — the `ProjectEnvironment` port and the acceptance-run machinery**,
@@ -1330,7 +1339,7 @@ gap is scoped into the phase rather than deferred past it.
    choosing the runtime; validated against real docker AND real podman, not a
    scripted fake. `NoEnvironment` stays the permanent fallback.
 6. ⏳ **P8.6 — refining: make a cycle finish in a time somebody will wait for.**
-   The closing item of Phase 8, scoped 2026-08-09 from measured evidence rather
+   **Sequenced AFTER P8.7 — see the ordering note under it.** Scoped 2026-08-09 from measured evidence rather
    than from intuition — see
    [`docs/history/analyses/2026-08-09-cycle-latency-analysis.md`](docs/history/analyses/2026-08-09-cycle-latency-analysis.md).
    A five-goal cycle sat at **61 minutes with zero goals promoted**, never
@@ -1401,6 +1410,56 @@ gap is scoped into the phase rather than deferred past it.
    and empty completions misclassified as capacity limits — and the first two
    were only fixed at the end of that session. The demo has not yet had one
    clean attempt.
+
+7. 🚧 **P8.7 — backend and documentation refactoring. DO THIS BEFORE P8.6.**
+   Scoped 2026-08-10 from measurement:
+   [`docs/superpowers/plans/2026-08-10-backend-refactoring.md`](docs/superpowers/plans/2026-08-10-backend-refactoring.md).
+
+   **Why it comes first, ahead of the latency work and the demo rerun.** P8.6's
+   targets (parallel enrichment, capacity routing) both land inside
+   `ExecutionHandler` — a **2,133-line class with 44 methods** holding the two
+   longest functions in the tree (303 and 288 lines). Changing behaviour there
+   before it can be read is how the last three defects happened. And every one
+   of those defects escaped 1400 green tests not through carelessness but
+   because it was **inexpressible**: each fake was handed the input that
+   mattered and discarded it. Optimising a system whose tests cannot fail on its
+   real failure modes measures nothing.
+
+   The ordered tasks (full detail in the plan):
+
+   1. **Adversarial fakes.** Not cosmetic and cheapest first — the only item
+      that changes whether the NEXT bug is caught. A fake that discards an input
+      cannot fail on it. Opt-in modes so existing tests are untouched, plus one
+      regression test per 2026-08-09 defect.
+   2. **A runtime registry.** Fixes the OCP finding (adding `codex` required
+      edits in four files) and the largest DRY cluster in one move. Keep codex's
+      no-API-key path visible — it is a real difference, not an inconvenience.
+   3. **Split `ExecutionHandler`** in risk order: pure helpers, then agent
+      selection/admission, then goal promotion/acceptance, and the two finalize
+      functions LAST, once the file is readable. Public surface unchanged.
+   4. **Parameter objects** for the worker drive path (`drive_goal` takes
+      **20** parameters, 11 of them optional collaborators).
+   5. **Router split and the remaining DRY clusters** — `plans.py` is 1626
+      lines; route paths stay identical, so `test_capability_matrix.py` makes
+      the refactor self-verifying.
+   6. **Documentation.** 182 files, 30,796 lines, with the slop concentrated:
+      **7,031 lines of already-executed plans in a live directory** and a
+      1,917-line ROADMAP carrying delivery narrative. Move executed plans to the
+      archive, compress delivered-phase detail here, and test-lock the
+      mechanically checkable claims. `docs/history/` is immutable and stays —
+      size is not a defect for an archive.
+
+   **What is already right and must not be "improved":** the dependency rule
+   holds exactly (domain importing outward **0**, app importing infra **0**);
+   the permanent null adapters are correct Null Object usage; ISP is not a
+   problem and the ports must not be split for symmetry.
+
+   **Out of scope:** the FROZEN aggregate (1270 lines, but "long" is not a
+   capability gap), `openai_reasoner.py` (cohesive, and not while the execution
+   path is moving), and performance — P8.6 owns that against its own baseline,
+   and a refactor that also claims a speedup can prove neither. This is
+   **behaviour-preserving in independently-green steps**; a bug found on the way
+   gets its own commit, never one shared with a refactor.
 
 ### Two blockers parked, both environmental — BOTH resolved by 2026-08-09
 
@@ -1708,6 +1767,9 @@ that nobody can tell from the evidence document.
   it.
 - Someone who did not run it can look at the captured result and say what was
   built and why they should believe it.
+- **The refactor (P8.7) is behaviour-preserving and provable**: no route, public
+  API or config-key change, and each 2026-08-09 defect locked by a test that
+  fails if its fix is reverted. Measured, not asserted.
 - **That completion happens in a time somebody will actually wait for**, shown
   by a second measured run against the same fixture as
   `docs/history/analyses/2026-08-09-cycle-latency-analysis.md`. The baseline to
