@@ -15,7 +15,7 @@ Status markers:
 
 - ✅ Completed — verified in the repository
 - 🚧 In progress — foundation exists; graduation work remains
-- ⬜ Planned — required for the first peer preview
+- ⬜ Planned — required before launch
 - ⏸ Deferred — reconsider only with run or user evidence
 
 The launch sequence is:
@@ -30,12 +30,23 @@ reproducible fixture
 → onboarding, packaging, documentation, and demo
 → in-product understanding
 → closing the demonstrability gaps
-→ small peer preview
+→ frontend refinement, refactor and browser-proven behaviour
+→ repository audit, then launch
 ```
 
 The last three were reordered on 2026-08-02: the preview used to come before
 the gap-closing work. See Phase 7 for the reasoning and for what that reorder
 costs.
+
+**Re-scoped again 2026-08-10, after Phase 8 closed.** Phase 9 was a *small peer
+preview*, and it is retired rather than delayed: it assumed an invitation list
+that does not exist, and a phase whose entry condition is "find 10–50 strangers"
+is not a plan, it is a wish. The instrument it produced
+(`docs/guides/preview-report.md`) is kept — it costs nothing and becomes useful
+the moment there is an audience — and the preview itself moves to *Deferred*
+with that reason recorded. What replaces it is the work that has to happen
+**before** anyone is invited anyway: the console is the first thing a visitor
+touches, and it is currently the least examined surface in the repository.
 
 Accepted ADRs and current code are authoritative. Domain changes require a
 recorded unfreeze in [the decision log](docs/decisions/decision-log.md).
@@ -111,7 +122,17 @@ It moved there on 2026-08-10 because this file's job is what is NOT yet built.
 | 6 — public-preview productization | One installable artifact: `orchestrate serve`, the packaged UI in the wheel, onboarding and packaging | 2026-08-02 |
 | 7 — in-product understanding | The in-console manual rendering the repository's own `docs/guides/*.md`, so there is exactly one copy of every guide | 2026-08-02 |
 
-## Phase 8 — closing the demonstrability gaps 🚧 (current)
+## Phase 8 — closing the demonstrability gaps ✅ (complete 2026-08-10)
+
+**All seven items delivered.** The phase ended the way it was supposed to: with
+a demo that completes and is published rather than asserted — 5 of 5 goals in
+**13m 03s** for **$0.0134**, 10 attempts and zero failures, against a baseline
+that reached 61 minutes with zero goals promoted. Runs in
+[`demos/static-site-v1/runs/`](demos/static-site-v1/runs/); measurement and
+attribution in
+[`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).
+Kept below rather than archived because it is recent and its reasoning is still
+load-bearing; it moves to `docs/history/` when Phase 9 closes.
 
 **Re-scoped 2026-08-02** from "evidence-driven hardening" to committed work.
 The trigger changed: these were deferred pending preview evidence, and the
@@ -830,56 +851,319 @@ that nobody can tell from the evidence document.
   producing nothing. A cycle that is correct but unwatchable fails the phase's
   own purpose, because the artifact is meant to be *shown to someone*.
 
-## Phase 9 — small peer preview ⏸
+## Phase 9 — the console: refinement, refactor, and browser-proven behaviour ⬜ (current)
 
-**External capability:** a narrow group can use the orchestrator on disposable
-or personal repos and provide comparable evidence.
+**Scoped 2026-08-10**, replacing the small peer preview (retired — see the
+launch-sequence note at the top, and *Deferred* below). Phase 8 made the backend
+demonstrable and finished by publishing a run somebody can read. The console is
+now the weakest surface in the repository and the first one a visitor touches:
+Phase 5 made it render backend truth instead of rebuilding transition rules,
+and nothing has examined it since.
 
-Was Phase 7 until 2026-08-02; see that phase for why it moved rather than why it
-waits. Nothing here is blocked on design — the instrument exists — it is blocked
-on having something worth a person's one attempt.
+**External capability:** an operator can drive a complete cycle through the
+browser, understand what the system is doing at a glance, and the console's
+behaviour is proven by tests that drive a real browser rather than asserted by
+unit tests around it.
 
-- Invite approximately 10–50 technical users familiar with local CLIs and Git.
-- Point the invitation at the Phase 8 showcase result, not at a slug fixture.
-- Start with canonical Tier 0/Tier 1 before treating larger projects as evidence.
-- Provide an explicit support/issue path. **Not yet built**, and deliberately:
-  a support channel with nobody in it is a maintenance cost, and the right
-  channel depends on how the invitations go out.
-- Measure install/time-to-first-cycle, setup/runtime/repo failures, unclear
-  states/actions, recovery, capacity/cost, evidence trust, Git output, and
-  missing controls.
-- Avoid speculative architecture work while collecting evidence.
+### What is actually there — the starting evidence, not the conclusion
 
-### The instrument
+Measured 2026-08-10, so the analysis in task 1 starts from facts rather than
+from a blank page. **These are observations, not yet findings** — task 1 exists
+to decide which of them matter.
 
-`docs/guides/preview-report.md` is the feedback template, written 2026-08-02
-before any invitation existed, so its questions were not shaped by what we hoped
-to hear. It is a decision instrument rather than a survey: each complaint below
-maps to exactly one deferred item, so a report that names it promotes that item
-and nothing else.
-
-| What an operator reports | What it promotes |
+| | |
 |---|---|
-| "I couldn't find my code" / "I couldn't get it out" | bundle export (the wizard is Phase 8) |
-| "the diff was too big to review" | the per-goal review surface |
-| "the tests passed but the app was broken" | more acceptance-run coverage |
-| "I want it as a PR like everything else" | authenticated forge publication |
-| "it got stuck and I couldn't tell why" | the advisory observer agent |
+| Hand-written source | ~14,700 lines (plus 6,145 generated `types.gen.ts`) |
+| Largest modules | `lib/api.ts` 906, `lib/queries.ts` 904, `GatePanel.tsx` 636, `Overview.tsx` 564 |
+| Settings sections | four files of 436–513 lines each |
+| Styling | 23 CSS modules + `styles/tokens.ts` + `global.css` — **and 119 inline `style={{…}}` sites** |
+| Primitives | `components/ui/` already has Button, Card, Dialog, Field, Input, Select, ErrorState, ConfirmAction, CountChip, AttentionItem |
+| State | `zustand` store + 35 `react-query` hooks |
+| Accessibility | 182 `aria-*`/`role=` usages — awareness exists, coverage unmeasured |
+| Component tests | 9 files, mostly `lib/` |
+| **Browser tests** | **2 specs** — `packaged-ui`, `docs-screenshots`. Neither drives a cycle. |
 
-A complaint nobody makes is the cheapest possible answer to a feature question.
-This table is weaker than it was when the preview came first — Phase 8 builds
-several of these on reasoning rather than reports — so a report that
-*contradicts* one is now the most valuable kind, and the template's last
-question is written to invite exactly that.
+The last row is the one that matters. `CLAUDE.md` has said *"Light by design —
+full-cycle browser E2E is Phase 8"* since Phase 6, and Phase 8 came and went
+without it. **No test in this repository has ever driven the console through a
+plan.** Every claim about whether the UI works is currently inference from unit
+tests and from a human clicking around.
+
+The 119 inline styles beside a token file and 23 CSS modules is the second: it
+means there are at least two styling systems in use, and a design pass that does
+not first pick one will produce a third.
+
+### The order, and why it is this order
+
+Analysis before refactor, refactor before redesign, and **browser tests before
+any of it lands**. A refactor with no browser coverage is indistinguishable from
+a rewrite with unknown regressions, and this is exactly the mistake P8.7's
+scoping note warns about: *"changing behaviour inside code that cannot be read
+is how those defects arrived"*, and *"optimising a system whose tests cannot
+fail on its real failure modes measures nothing."* The same argument applies
+here with more force, because the console has no equivalent of the dual-backend
+truth test.
+
+1. ⬜ **Install and pin the LLM-driven Playwright tooling, and write the safety
+   net first.** `@playwright/test` 1.62.1 is already a devDependency; what is
+   missing is the agent-driven layer (the Playwright MCP server, or the
+   equivalent CLI) that lets a model open the app, act, and read the DOM back.
+   Install it, pin the version in `package.json`, and record the exact package
+   and version in the plan — an agent-driven test tool that silently updates is
+   a test suite that silently changes meaning.
+
+   Then, **before touching a single component**, write the browser tests for
+   what exists today. They are the regression net for everything after, and
+   writing them first is the only way to know they test the current behaviour
+   rather than the behaviour we are about to write.
+
+   Coverage must include, at minimum, the flows an operator cannot avoid:
+   - the plan list and the composer — creating a project and a plan;
+   - the intent gate: read the proposal, approve, edit, cancel;
+   - the cycle-draft gate, including the goals canvas;
+   - execution in flight — the SSE feed updating status without a reload;
+   - the per-goal review surface and its diff view;
+   - the publication gate and each of the four dispositions;
+   - block resolution, and the settings flows for providers, agents and runner.
+
+   These run against a real API with a staged bundle, at **Tier 0 (stub + dry
+   run)** so they are deterministic and CI-lockable. A browser test that needs a
+   paid model is a demo, not a test — that distinction is `demos/README.md`'s
+   and it applies here unchanged.
+
+2. ⬜ **Full frontend analysis, written down before anything changes.** Produce
+   an analysis document the way P8.6 and P8.7 were scoped — from measurement,
+   naming files and line numbers, so the refactor plan is derived rather than
+   asserted. It must cover:
+   - **Responsibility boundaries.** Where do data fetching, view state, domain
+     interpretation and presentation currently live, and where do they leak into
+     each other? `lib/planTruth.ts` and `lib/setupPlan.ts` suggest the seam
+     already exists in places; the 500-line settings sections suggest it does not
+     everywhere.
+   - **SOLID, concretely.** Single responsibility is the one with teeth here
+     (636-line `GatePanel` handling three different gate subjects; 14 `useState`
+     in one settings section). Dependency inversion matters at the API boundary —
+     components should depend on a typed port, not on `fetch` shapes. Interface
+     segregation matters for prop objects that carry a whole plan into a leaf.
+     **Do not apply the acronym decoratively**: each finding must name the file,
+     the concrete cost, and what breaks today because of it.
+   - **DRY, honestly.** Real duplication (the same gate-approval POST shape
+     written four times) is worth removing; incidental similarity is not.
+     Premature deduplication is how a 500-line component becomes a 500-line
+     component with an unusable abstraction on top.
+   - **Which design patterns actually fit.** Candidates to evaluate, not to
+     adopt on sight: compound components for the gate/dialog family, a
+     reducer or state machine for multi-step forms, container/presenter for the
+     views, a single query-key factory for the 35 react-query hooks, and one
+     styling system with the inline styles migrated into it. **Reject any
+     pattern that does not remove a named problem from the analysis.**
+   - **The generated-types boundary.** `types/generated/` is regenerated from
+     OpenAPI, and `types/ui.ts` hand-declares the plan detail read model. That
+     split is deliberate; the analysis should confirm it is still holding rather
+     than quietly drifting.
+
+3. ⬜ **A refactoring plan, then execute it in reviewable steps.** Same shape as
+   P8.7, which is the precedent: behaviour-preserving, provably so, and split so
+   each step is separately reviewable. No route, no visible behaviour, and no
+   API contract changes in this task — the browser tests from task 1 are the
+   proof, and they must stay green at every step rather than only at the end.
+
+4. ⬜ **UI/UX refinement: layout and design.** Only now, on code that can be
+   read and behaviour that is pinned. Grounded in the ordinary practices rather
+   than in taste:
+   - **One visual system.** A single source of spacing, type scale, colour and
+     elevation, with the 119 inline styles migrated into it. Light and dark
+     both, since the console already ships a theme.
+   - **Visual hierarchy that matches the domain.** The most important question
+     an operator has is *what is this plan waiting for and what can I do about
+     it* — the backend already answers it with `status`, `status_reason`,
+     `activity` and `legal_actions`, and the layout should make that answer the
+     loudest thing on the page.
+   - **States are designed, not defaulted.** Empty, loading, error, partial and
+     stale each get a designed treatment. `ErrorState` exists; whether every
+     surface uses it is an open question.
+   - **Accessibility as a requirement.** Keyboard paths for every gate action,
+     visible focus, labelled controls, sufficient contrast, and correct roles on
+     the dialogs and the canvas. 182 `aria-*` usages is a starting point, not a
+     result — measure it.
+   - **Responsive down to a laptop viewport**, which is the machine this runs on.
+   - **Latency and feedback.** Long actions are the norm here; optimistic states
+     and progress must not claim more than the backend has said.
+
+5. ⬜ **Meticulous browser E2E, driven by the agent tooling, with screenshots.**
+   Extend task 1's net into the full matrix, and use screenshots as *evidence*
+   rather than decoration: capture each major surface in both themes, attach
+   them to the run, and diff them across the refactor so a visual regression is
+   caught rather than argued about. Screenshots also give the model doing the
+   work visual feedback it cannot get from the DOM alone — which is the point of
+   using the LLM-driven tooling at all.
+
+   **A screenshot is not a passing test.** Every screenshot must sit beside an
+   assertion that would fail on its own; otherwise a broken page produces a
+   tidy picture of a broken page.
 
 ### Exit criteria
 
-- Reports include fixture/version/runtime evidence rather than anecdotes alone.
-- Blockers are ranked by frequency, severity, and workflow.
-- The next hardening work is selected from repeated user evidence.
+- The LLM-driven Playwright tooling is installed, **version-pinned**, and its
+  package and version recorded.
+- Browser tests drive every flow listed in task 1, at Tier 0, and run in CI.
+- The analysis document exists and names files and line numbers; the refactor
+  plan is derived from it and cites it.
+- The refactor is behaviour-preserving, and the browser tests were green at
+  every step rather than only at the end.
+- One styling system; the inline-style count is driven to approximately zero or
+  each survivor has a stated reason.
+- Accessibility is measured before and after, not asserted.
+- Screenshots of every major surface in both themes, captured by the suite,
+  each beside a real assertion.
+
+### What this phase must not do
+
+- **No backend changes.** If the console needs something the API does not
+  serve, that is a finding for Phase 10, not a licence to widen the API here.
+- **No domain un-freeze.** Nothing in a UI refactor justifies one.
+- **No new features.** Refinement of what exists. A missing capability is
+  Phase 10's evidence to collect.
+- **No redesign before the tests.** Stated three times on purpose.
+
+## Phase 10 — repository audit, then launch ⬜
+
+**Scoped 2026-08-10.** Two halves that look unrelated and are not: nobody should
+launch a system they have not audited, and an audit with no launch behind it is
+procrastination. Do them in this order.
+
+### 10A — audit the whole repository, and prove every claim
+
+**External capability:** a written, evidence-backed account of what is actually
+wrong with this system, which is the thing you need before inviting anyone.
+
+Sweep the repository for design flaws, gaps, edge cases and bugs — backend,
+frontend, infra, fixtures, docs. The single rule, and it is not negotiable:
+
+> **A finding is only a finding with concrete proof. Never an assumption.**
+
+Proof means one of: a failing test that passes after the fix; a reproduction
+with the exact commands and observed output; a log or ledger row from a real
+run; or a citation of the code path with the specific inputs that reach it. A
+plausible-sounding reading of the code is a *hypothesis*, and hypotheses go in a
+separate list from findings.
+
+**The precedent is already in this repository, and it is the standard to
+meet.** P8.6's Task 1 — "an empty completion is misclassified as a rate limit" —
+was scoped, written down, and then **retracted before implementation** because
+the evidence turned out to compare two different models. Implementing it would
+have made the runtime impatient with genuine 429s, which is the exact harm the
+patient curve exists to prevent. That retraction is worth more than the fix
+would have been, and this phase should expect to produce several like it.
+
+- Findings go to `docs/architecture/known-issues.md` **with their proof**, which
+  is what that file already requires; fixing one means deleting the entry and
+  adding the regression test that locks it.
+- Hypotheses that cannot be proven get recorded as hypotheses, with what
+  evidence would settle them — the P8.6 Task 5 treatment ("not reproduced, and
+  not reachable by that run's shape", deliberately left open) rather than
+  silent deletion.
+- Expect the audit to produce more retractions than fixes. That is a healthy
+  result, not a failed phase.
+
+Areas that have never been swept, in rough priority: error paths and edge cases
+in the API surface; concurrency around the lease and goal-lease interaction
+under real contention; migration/upgrade paths on an existing install; secret
+handling and the auth surface; the frontend's error and stale-data states
+(post-Phase-9); and every place a doc and the code could have drifted.
+
+### 10B — the launch
+
+**External capability:** the project is findable, understandable and installable
+by someone who has never heard of it, under a name that does not need
+explaining.
+
+**The rename comes first, because everything else bakes it in.** `aipom` is a
+Pokémon, which is charming and unsearchable, collides with an existing name, and
+tells a visitor nothing. Choose a replacement deliberately:
+
+- Check availability across **PyPI, npm, GitHub org, and the domain**, and check
+  for trademark collision. A name available in three places out of four is not
+  available.
+- Prefer something that says what it does. The positioning at the top of this
+  file — *local-first, human-gated, verified multi-agent coding orchestrator* —
+  is the brief.
+- **Scope the rename honestly before committing to it.** It touches the Python
+  package `agent_orchestrator`, the CLI entry point `orchestrate`, the dev guest
+  `aipom-dev` and `infra/dev-vm/`, the acceptance container prefix
+  `aipom-acceptance-*`, the state directory `~/.orchestrator` and
+  `ORCHESTRATOR_*` environment variables, the docs, and every fixture. Some of
+  those are user-visible state on existing installs and need a migration or a
+  compatibility alias, not a `sed`.
+
+Then the campaign, written the way a marketing team that has shipped developer
+tools would write it rather than the way engineers imagine marketing works:
+
+- **Positioning and message.** One sentence a developer repeats correctly after
+  hearing it once. The honest differentiator is already in this repository and
+  is unusual: *the orchestrator records the boundary between the test proven RED
+  and the implementation that made it GREEN, and nothing else does.* Lead with
+  the verification story, because "AI writes code" is not a claim anyone is
+  short of.
+- **Audience and channel.** Who specifically — developers running agents on
+  their own repositories who do not trust the output. Where they actually are.
+  What each channel's norms are; a launch post that reads as an ad on a forum
+  that hates ads is worse than no post.
+- **The assets.** Landing page, README as a sales page (it is the real landing
+  page for a developer tool), a short demo video built from the
+  `static-site-v1` run, the Phase 9 screenshots, and the evidence documents —
+  which are a genuine asset almost nobody else has, because they show a red run
+  published rather than retried.
+- **Proof over promises.** Point at `demos/static-site-v1/runs/`. A published
+  run with its failures visible is more persuasive to this audience than any
+  claim, and it is already written.
+- **Sequencing and metrics.** What ships in what order, what each channel is
+  expected to produce, and what result would mean *stop and fix the product
+  instead of marketing it harder*. Decide that threshold before launching, not
+  after.
+- **The support path** the retired peer preview never built — now with a reason
+  to exist, because there will be people on the other end.
+
+### Exit criteria
+
+- Every audit finding carries proof; every hypothesis is labelled as one.
+- `known-issues.md` reflects the audit, and every fix landed with a regression
+  test.
+- A name is chosen, verified available across all four surfaces, and the rename
+  is scoped with a migration path for existing installs.
+- A written launch plan with positioning, channels, assets, sequencing, metrics,
+  and a pre-agreed "stop and fix the product" threshold.
+- The support path exists before the first invitation goes out.
 
 ## Deferred — reconsider only with run or user evidence ⏸
 
+- **the small peer preview** — was Phase 9 until 2026-08-10, and **retired
+  rather than delayed**. Its entry condition was an invitation list of 10–50
+  technical users, and there is nobody to invite: a phase that begins by
+  wishing for an audience is not a plan. Deferred until Phase 10B's launch
+  produces one, which is the correct order — invite people to a named,
+  findable, audited project rather than to a prototype called `aipom`.
+
+  **The instrument survives and is worth keeping**:
+  `docs/guides/preview-report.md`, written 2026-08-02 *before* any invitation
+  existed so its questions were not shaped by what we hoped to hear. It is a
+  decision instrument, not a survey — each complaint maps to exactly one
+  deferred item, so a report naming it promotes that item and nothing else:
+
+  | What an operator reports | What it promotes |
+  |---|---|
+  | "I couldn't find my code" / "I couldn't get it out" | bundle export |
+  | "the diff was too big to review" | ~~per-goal review surface~~ — built, P8.3 |
+  | "the tests passed but the app was broken" | more acceptance-run coverage |
+  | "I want it as a PR like everything else" | ~~forge publication~~ — built, P8.1 |
+  | "it got stuck and I couldn't tell why" | the advisory observer agent |
+
+  Three of those five were built on reasoning rather than reports, which is
+  exactly why **a report that contradicts one is now the most valuable kind**,
+  and why the measurements that matter when the preview does happen are
+  install and time-to-first-cycle, setup/runtime/repo failures, unclear states,
+  recovery, capacity and cost, evidence trust, and Git output. A complaint
+  nobody makes remains the cheapest possible answer to a feature question;
 - stronger sandboxing and pointer-free workspaces;
 - ~~authenticated forge publication and automatic GitHub PR creation~~ —
   **promoted to Phase 8 (P8.1) on 2026-08-02**; see that phase. Automatic

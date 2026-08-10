@@ -65,7 +65,7 @@ Environment: `ORCHESTRATOR_HOME` (state dir), `ORCHESTRATOR_MASTER_KEY` (Fernet 
 - **Run Dev**: `npm run dev`
 - **Build**: `npm run build` (tsc + vite)
 - **Stage the UI into the wheel**: `backend/scripts/build_frontend.sh` — builds `frontend/dist` into `backend/agent_orchestrator/api/static/` (git-ignored) so `uv build` ships one artifact. The release workflow runs it BEFORE `uv build` and then verifies the wheel carries both the UI and the migrations.
-- **Browser checks**: `npm run test:e2e` (Playwright, needs the API running with a staged bundle). Light by design — full-cycle browser E2E is Phase 8.
+- **Browser checks**: `npm run test:e2e` (Playwright, needs the API running with a staged bundle). **Two specs only** (`packaged-ui`, `docs-screenshots`) and neither drives a cycle — **no test here has ever driven the console through a plan**. This said "full-cycle browser E2E is Phase 8" from Phase 6 until 2026-08-10; Phase 8 came and went without it, so it is now Phase 9's first task and the label "light by design" has been retired as untrue.
 - **Regenerate API types**: `npm run generate:api` (backend/scripts/export_openapi.py + openapi-ts → `src/types/generated/`). The plan DETAIL read model (the aggregate document) is hand-declared in `src/types/ui.ts` — keep it in sync with the domain.
 
 ## 🏗️ Architectural Invariants (Backend)
