@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from agent_orchestrator.app.execution_records import ExecutionAttempt
 from agent_orchestrator.app.ports import CommandExecution, TaskFailed, UnitOfWork
+from agent_orchestrator.app.provider_capacity import capacity_backoff_seconds
 from agent_orchestrator.app.runtime_failures import RuntimeFailure
 from agent_orchestrator.app.verification import test_author_path_allowed
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
@@ -133,6 +134,35 @@ def unit_task(plan: Plan, unit: Unit) -> Task:
 def jitter_unit(attempt_id: str) -> float:
     digest = hashlib.sha256(attempt_id.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") / float(2**64 - 1)
+
+
+def retry_delay_seconds(unit: Unit, kind: FailureKind | None, failure: RuntimeFailure) -> float:
+    """How long before this failed attempt may run again. 0 means immediately.
+
+    Three rules, in order of who knows best: the plan's own backoff curve, then
+    an explicit `Retry-After` from the provider (never shorten what upstream
+    asked for), then a floor for a daily quota that arrived without one — a
+    quota resets on a clock, and retrying it on a seconds-scale curve just burns
+    attempts against a door that opens tomorrow.
+    """
+    delay = capacity_backoff_seconds(
+        unit.retry_policy,
+        unit.policy_attempt + 1,
+        jitter_unit=jitter_unit(unit.execution.id),
+        kind=kind,
+        # A concurrency refusal does not escalate like an exhausted
+        # allowance; every other scope keeps the patient curve.
+        limit_scope=failure.limit_scope,
+    )
+    if failure.retry_after_seconds is not None:
+        delay = max(delay, failure.retry_after_seconds)
+    if (
+        failure.limit_scope is not None
+        and failure.limit_scope.value == "daily_quota"
+        and failure.retry_after_seconds is None
+    ):
+        delay = max(delay, 3_600.0)
+    return delay
 
 
 def attempts_against_budget(

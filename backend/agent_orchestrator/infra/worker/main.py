@@ -127,19 +127,9 @@ async def run_worker_forever(
                 plan_id,
                 goal_id,
                 goal_uow,
-                container.agent_runner,
-                container.agent_repo,
-                container.workspace,
-                container.agent_event_sink,
-                container.clock,
+                container.execution_services,
                 worker_id,
                 lease_seconds=lease_seconds,
-                verifier=container.verification_executor,
-                capacity=container.provider_capacity_policy,
-                providers=container.provider_repo,
-                routing=container.routing_policy,
-                repository_reader=container.repository_reader,
-                planning_artifacts=container.planning_artifacts,
             )
             if result[0] == "lease_lost":
                 log.info(
@@ -224,15 +214,10 @@ async def run_worker_forever(
         try:
             progressed = await worker_tick(
                 uow,
-                container.agent_runner,
-                container.agent_repo,
-                container.workspace,
-                container.agent_event_sink,
-                container.clock,
+                container.execution_services,
                 worker_id,
                 lease_seconds,
                 planning_handler=planning_handler,
-                verifier=container.verification_executor,
             )
         except Exception:
             # One poisoned plan must not kill the worker: the tick's finally

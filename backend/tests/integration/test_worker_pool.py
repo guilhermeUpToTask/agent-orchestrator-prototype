@@ -23,8 +23,10 @@ from agent_orchestrator.domain.entities.project_definition import ProjectDefinit
 from agent_orchestrator.domain.entities.task import Task
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 from agent_orchestrator.infra.cli.main import cli
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.infra.container import AppContainer
 from agent_orchestrator.infra.db.tables import Base
+from agent_orchestrator.infra.environment.no_environment import NoEnvironment
 from agent_orchestrator.infra.worker.main import run_worker_forever
 
 pytestmark = pytest.mark.integration
@@ -259,3 +261,122 @@ def test_a_worker_keeps_beating_while_a_goal_is_running(tmp_path, monkeypatch) -
         "last_seen_at never advanced while a goal was running — the heartbeat is "
         f"tied to the coordinator loop, which parks in asyncio.wait(): {set(seen)}"
     )
+
+
+def test_the_worker_hands_its_drivers_the_environment_the_container_built(
+    tmp_path, monkeypatch
+) -> None:
+    """The composition root must actually pass what it composed.
+
+    `AppContainer.environment` and `.environment_context` were fully
+    implemented and NOTHING in the worker ever passed them, so
+    `environment.mode = container` booted nothing in production: the P8.2/P8.5
+    acceptance run only ever fired in tests, because every test harness wired
+    the environment by hand into its own `drive_plan`/`drive_goal` call. This
+    drives the REAL entrypoint and captures what the drivers were handed.
+    """
+    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+    container = AppContainer(orchestrator_home=tmp_path)
+    Base.metadata.create_all(container.engine)
+    seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])
+    assert seeded.exit_code == 0, seeded.output
+
+    repo = tmp_path / "project"
+    _init_trunk_repo(repo)
+    container.project_repo.add(ProjectDefinition(id="project-1", name="Project", repo_url=str(repo)))
+
+    plan = Plan(
+        id="plan-1",
+        project_id="project-1",
+        brief="one goal",
+        phase=PlanPhase.RUNNING,
+        status=PlanStatus.RUNNING,
+        cycles=[
+            Cycle(
+                id="cycle-1",
+                intent_proposal_id="intent-1",
+                draft_id="draft-1",
+                status=CycleStatus.ACTIVE,
+                started_at=NOW,
+                goals=[
+                    Goal(
+                        id="g1",
+                        name="g1",
+                        position=0,
+                        description="",
+                        tasks=[
+                            Task(
+                                id="g1-t",
+                                name="g1-t",
+                                position=0,
+                                description="",
+                                agent_id="dev-agent",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    with container.new_unit_of_work() as uow:
+        uow.plans.save(plan)
+
+    # A sentinel adapter, installed where the container caches the real one, so
+    # the assertion is identity: whatever the container built is what the
+    # drivers receive.
+    sentinel = NoEnvironment()
+    monkeypatch.setitem(container.__dict__, "environment", sentinel)
+
+    # Both drivers take the bundle as their one collaborator argument (P8.7
+    # task 4), so capturing it captures everything the composition root handed
+    # over — which is the property under test.
+    seen: dict[str, ExecutionServices] = {}
+    stop = asyncio.Event()
+
+    async def _fake_worker_tick(_uow, services, *args, **kwargs):
+        seen.setdefault("worker_tick", services)
+        return False
+
+    async def _fake_drive_goal(_plan_id, _goal_id, _uow, services, *args, **kwargs):
+        seen.setdefault("drive_goal", services)
+        stop.set()
+        return ("paused", 0)
+
+    monkeypatch.setattr(
+        "agent_orchestrator.app.use_cases.run_worker.worker_tick", _fake_worker_tick
+    )
+    monkeypatch.setattr(
+        "agent_orchestrator.app.use_cases.run_worker.drive_goal", _fake_drive_goal
+    )
+
+    async def scenario() -> None:
+        worker = asyncio.ensure_future(
+            run_worker_forever(
+                container,
+                worker_id="wiring-worker",
+                poll_seconds=0.05,
+                lease_seconds=30,
+                stop=stop,
+                max_concurrent_goals=1,
+            )
+        )
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=10)
+        finally:
+            stop.set()
+            await worker
+
+    asyncio.run(scenario())
+
+    for caller in ("worker_tick", "drive_goal"):
+        assert caller in seen, f"{caller} was never reached by the worker loop"
+        services = seen[caller]
+        assert services is not None, f"{caller} was handed no collaborator bundle"
+        assert services.environment is sentinel, (
+            f"{caller} did not receive the container's environment adapter — "
+            "the acceptance run is dead code in production"
+        )
+        assert services.environment_context is not None, (
+            f"{caller} received no environment_context, so the adapter it did "
+            "get can never resolve a repository to boot"
+        )

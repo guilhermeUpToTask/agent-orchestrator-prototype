@@ -170,11 +170,11 @@ Serves **J9**.
 
 | Capability | App entry | Route | Frontend | Tests | Status | Priority |
 |---|---|---|---|---|---|---|
-| Graceful pause | `pause_resume.pause_plan` | `POST /api/plans/{plan_id}/pause` | `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
-| Resume (manual pause only) | `pause_resume.resume_plan` | `POST /api/plans/{plan_id}/resume` | `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
-| Retry one named failed task | `pause_resume.retry_task` | `POST /api/plans/{plan_id}/retry` | `DetailPanel`, `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
-| Retry a blocked planning stage | `pause_resume.retry_planning_stage` | `POST /api/plans/{plan_id}/retry-stage` | `LifecycleRail` | `test_api.py`, `test_agent_binding_recovery.py` | full | critical |
-| Move unfinished work to different agents (paused only) | `pause_resume.rebind_goal_agents` | `POST /api/plans/{plan_id}/goals/{goal_id}/rebind-agents` | — | `test_agent_binding_recovery.py` | api-only | critical |
+| Graceful pause | `operator_commands.pause_plan` | `POST /api/plans/{plan_id}/pause` | `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
+| Resume (manual pause only) | `operator_commands.resume_plan` | `POST /api/plans/{plan_id}/resume` | `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
+| Retry one named failed task | `operator_commands.retry_task` | `POST /api/plans/{plan_id}/retry` | `DetailPanel`, `LifecycleRail` | `test_api.py`, `test_pause_resume.py` | full | critical |
+| Retry a blocked planning stage | `operator_commands.retry_planning_stage` | `POST /api/plans/{plan_id}/retry-stage` | `LifecycleRail` | `test_api.py`, `test_agent_binding_recovery.py` | full | critical |
+| Move unfinished work to different agents (paused only) | `operator_commands.rebind_goal_agents` | `POST /api/plans/{plan_id}/goals/{goal_id}/rebind-agents` | — | `test_agent_binding_recovery.py` | api-only | critical |
 | Surgical structural edit | `apply_edit.apply_edit` | `POST /api/plans/{plan_id}/edits` | `DetailPanel`, including contract repair | `test_api.py`, `test_contract_editing.py`, `api.phase5.test.ts` | full | critical |
 | Holistic replan | `request_replan.request_replan` | `POST /api/plans/{plan_id}/replan` | `queries` (`replanMidRunning`) | `test_api.py`, `test_replan_loop.py` | full | critical |
 | Change the retry budget | `update_retry_policy.update_retry_policy` | `POST /api/plans/{plan_id}/retry-policy` | — | `test_retry_policy_update.py`, `test_api.py` | api-only | critical |

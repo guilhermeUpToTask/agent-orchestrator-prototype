@@ -17,6 +17,7 @@ from agent_orchestrator.domain.services.navigation import next_action
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.use_cases.advance_plan import advance_plan
 from agent_orchestrator.app.use_cases.control import review_replan
 from agent_orchestrator.app.use_cases.request_replan import request_replan
@@ -221,7 +222,7 @@ def test_late_failure_terminal_skips_never_requeues():
     runner = _ReplanDuringRun(
         {"t0": DummyBehavior(always_fail=True, fail_reason="late boom")}, uow, "t0"
     )
-    sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+    sig = asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
     assert sig == "paused"  # plan is in REPLANNING now
     saved = repo.get("p1")
     assert saved.goals[0].tasks[0].status == Status.SKIPPED  # terminal-skip
@@ -232,7 +233,7 @@ def test_late_failure_terminal_skips_never_requeues():
 def test_late_success_is_rejected_and_abandoned():
     repo, outbox, uow, _, agents, ws, sink, clock = harness(_one_task_running_plan())
     runner = _ReplanDuringRun({"t0": DummyBehavior(output="late ok")}, uow, "t0")
-    asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+    asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
     saved = repo.get("p1")
     assert saved.phase == PlanPhase.REPLANNING
     assert saved.goals[0].tasks[0].status == Status.SKIPPED
@@ -257,7 +258,7 @@ def test_late_success_after_finalize_abandon_is_dropped():
             return await DummyAgentRunner.run(self, task, spec, **kw)
 
     runner = _ReplanAndCommit({"t0": DummyBehavior(output="too late")}, uow, "t0")
-    sig = asyncio.run(advance_plan("p1", uow, runner, agents, ws, sink, clock))
+    sig = asyncio.run(advance_plan("p1", uow, ExecutionServices(runner, agents, ws, sink, clock)))
     assert sig == "paused"
     saved = repo.get("p1")
     assert saved.goals[0].tasks[0].status == Status.SKIPPED  # stays closed

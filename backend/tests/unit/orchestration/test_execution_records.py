@@ -20,7 +20,7 @@ from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
 from agent_orchestrator.app.runtime_failures import LimitScope
 from agent_orchestrator.app.testing.fakes import DummyBehavior
 from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-from agent_orchestrator.app.use_cases.pause_resume import resume_plan, retry_task
+from agent_orchestrator.app.use_cases.operator_commands import resume_plan, retry_task
 from agent_orchestrator.app.use_cases.reconcile_runtime import reconcile_stale_attempts
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from agent_orchestrator.domain.entities.goal import Goal

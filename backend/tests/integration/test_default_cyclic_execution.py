@@ -146,14 +146,9 @@ def test_cyclic_task_success_clears_the_runtime_circuit(tmp_path, monkeypatch) -
         return await drive_plan(
             plan.id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            container.execution_services,
             "worker-1",
             planning_handler=planning,
-            verifier=container.verification_executor,
         )
 
     asyncio.run(drive())
@@ -196,13 +191,8 @@ def test_cyclic_task_success_clears_the_runtime_circuit(tmp_path, monkeypatch) -
             plan.id,
             goal_id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            container.execution_services,
             "worker-1",
-            verifier=container.verification_executor,
         )
     )
 

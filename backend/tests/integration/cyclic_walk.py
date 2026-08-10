@@ -9,6 +9,7 @@ runner.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,16 +146,9 @@ def drive_cycle_to_publication(
         return await drive_plan(
             plan.id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            replace(container.execution_services, environment=environment),
             "worker-1",
             planning_handler=planning,
-            verifier=container.verification_executor,
-            environment=environment,
-            environment_context=container.environment_context,
         )
 
     architecture_signal, _ = asyncio.run(drive())
@@ -196,15 +190,8 @@ def drive_cycle_to_publication(
             plan.id,
             goal_id,
             container.new_unit_of_work(),
-            container.agent_runner,
-            container.agent_repo,
-            container.workspace,
-            container.agent_event_sink,
-            container.clock,
+            replace(container.execution_services, environment=environment),
             "worker-1",
-            verifier=container.verification_executor,
-            environment=environment,
-            environment_context=container.environment_context,
         )
 
     goal_signal, goal_progressed = asyncio.run(drive_goal_())

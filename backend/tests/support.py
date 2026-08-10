@@ -22,6 +22,7 @@ from typing import Callable, Protocol
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.ports import UnitOfWork
 from agent_orchestrator.app.testing.fakes import (
     CollectingEventSink,
@@ -75,11 +76,23 @@ class Env:
     seed: Callable[[Plan], None]
     stored: Callable[[str], Plan]
     outbox_types: Callable[[], list[str]]
+    services: ExecutionServices = field(init=False)
     args: tuple = field(init=False)
 
     def __post_init__(self) -> None:
-        # positional collaborators of advance_plan/drive_plan/worker_tick
-        self.args = (self.uow, self.runner, self.agents, self.ws, self.sink, self.clock)
+        # P8.7 task 4: the drivers take ONE collaborator bundle, so the five
+        # adapters a test builds travel together here too — a test that forgets
+        # one is exactly the production bug ExecutionServices exists to prevent.
+        self.services = ExecutionServices(
+            runner=self.runner,
+            agents=self.agents,
+            workspace=self.ws,
+            event_sink=self.sink,
+            clock=self.clock,
+        )
+        # positional arguments of advance_plan/drive_plan/worker_tick, minus the
+        # per-call identity (plan id, goal id, worker id) each caller supplies.
+        self.args = (self.uow, self.services)
 
 
 def make_memory_env(

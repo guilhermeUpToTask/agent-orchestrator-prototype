@@ -51,7 +51,7 @@ DTO. It carries the human-reviewed objective, scope, constraints, exclusions,
 proposal kind (`initial` | `replan`), `base_plan_version`, optional replan
 `source_cycle_id`, and a `revision` counter. The plan detail response field
 `intent_proposal` on `PlanDetailResponse`
-(`backend/agent_orchestrator/api/routers/plans.py`) surfaces this domain model directly as
+(`backend/agent_orchestrator/api/routers/plans/`) surfaces this domain model directly as
 the OpenAPI schema.
 
 `revision` **starts at 1**. The Plan aggregate is the only mutator

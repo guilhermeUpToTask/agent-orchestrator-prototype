@@ -18,11 +18,18 @@ The collaborator owns the agent catalog, the provider catalog and the routing
 policy — after the move `ExecutionHandler` reads none of the three directly.
 Every method takes the `UnitOfWork` as an argument: the caller owns the
 transaction, exactly as it did when these were handler methods.
+
+It also owns the WRITE side of the `RuntimeCircuit` rows it reads
+(`record_capacity_failure`, `clear_circuit`, added in step 4). A circuit that is
+opened by one module and consulted by another is how the two drift; keeping the
+half-open probe's claim, release and rewrite in one file is what makes
+single-flight probing checkable at all.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
 from agent_orchestrator.domain.entities.agent_spec import AgentSpec
@@ -36,17 +43,39 @@ from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.repositories.model_provider_repo import ModelProviderRepository
 
 from agent_orchestrator.app.block_policy import resolutions_for
+from agent_orchestrator.app.execution_records import RuntimeCircuit
 from agent_orchestrator.app.handlers.base import Signal
 from agent_orchestrator.app.handlers.execution_rules import run_role_for
 from agent_orchestrator.app.ports import Clock, UnitOfWork
 from agent_orchestrator.app.provider_capacity import (
+    CAPACITY_KINDS,
     CapacityScope,
     ProviderCapacityPolicy,
     RoutingPolicy,
+    circuit_model_id,
     circuit_ref,
     resolve_capacity_scope,
     resolve_max_inflight,
 )
+from agent_orchestrator.app.runtime_failures import LimitScope, RuntimeFailure
+from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+
+
+@dataclass(frozen=True)
+class CapacityOutcome:
+    """What recording a failure against the provider's circuit decided.
+
+    `latched` — the outage has run past its wall-clock ceiling and now needs a
+    human; it vetoes the retry. `waiting` — a capacity failure inside the
+    ceiling, which BYPASSES the per-task retry budget, because the budget counts
+    the agent's mistakes and there was no room upstream to make one. `ref` names
+    the circuit row that was actually written, so a block's evidence points at a
+    row that exists.
+    """
+
+    latched: bool = False
+    waiting: bool = False
+    ref: str | None = None
 
 
 class AgentAdmission:
@@ -254,6 +283,115 @@ class AgentAdmission:
         ):
             return Signal.NOT_READY
         return None
+
+    def record_capacity_failure(
+        self,
+        spec: AgentSpec,
+        kind: FailureKind,
+        failure: RuntimeFailure,
+        safe_message: str,
+        not_before: datetime | None,
+        uow: UnitOfWork,
+    ) -> CapacityOutcome:
+        """Record a failed attempt against this provider's circuit.
+
+        The write side of the rows `circuit_signal` and `_spec_wait_seconds`
+        read — which is why it lives here rather than in the finalizer that
+        calls it. Runs INSIDE the caller's open transaction, exactly as it did
+        when it was inline: it opens none of its own.
+        """
+        if (
+            # CONNECTION_ERROR is capacity too: an unreachable or
+            # overloaded endpoint is not a defect in this task, and
+            # exhausting the per-task budget against it used to open a
+            # goal block for something no human edit could fix. Safe to
+            # widen only now that the ceiling above bounds the wait --
+            # doing it while the attempt-count latch was live would have
+            # escalated after five shared failures instead.
+            kind in CAPACITY_KINDS
+            and spec.provider_id
+            and spec.model_id
+            and not_before is not None
+            # A CONCURRENCY cap is not an outage: the provider served
+            # every other in-flight request successfully and refused only
+            # the one over the ceiling. The remedy is "send fewer at
+            # once", so this attempt requeues on its own short backoff and
+            # NO circuit opens -- opening one would halt a provider that
+            # is working, and stall the siblings that are mid-run.
+            # The failure is still recorded on the attempt for telemetry.
+            and failure.limit_scope is not LimitScope.REQUEST_CONCURRENCY
+        ):
+            # Account-level limits key provider-wide; upstream-level ones
+            # key per model. Routing to a sibling model escapes the second
+            # but never the first.
+            _, capacity_scope = self.provider_metadata(spec)
+            circuit_model = circuit_model_id(spec.model_id, failure.limit_scope, capacity_scope)
+            capacity_ref = circuit_ref(spec.runtime_type, spec.provider_id, circuit_model)
+            existing = uow.executions.get_runtime_circuit(
+                spec.runtime_type,
+                spec.provider_id,
+                circuit_model,
+            )
+            failure_count = (existing.failure_count if existing else 0) + 1
+            # The START of the outage, preserved across updates within one
+            # outage (restamping every failure would peg the age at ~0 and
+            # make the ceiling unreachable) but RESET when the previous
+            # circuit has been quiet long enough to count as a past outage.
+            # A row abandoned by an earlier session would otherwise pre-age
+            # a fresh outage straight past its ceiling — observed live
+            # against a circuit left behind three days earlier.
+            scope_value = failure.limit_scope.value if failure.limit_scope is not None else None
+            opened_at = self._capacity.outage_start(
+                existing.opened_at if existing else None,
+                existing.retry_at if existing else None,
+                self._clock.now(),
+                scope_value,
+            )
+            # ESCALATE ON DURATION, NOT ON A COUNT. The old rule compared
+            # this provider-global `failure_count` against a PER-TASK
+            # attempt budget -- different units of measure. It latched
+            # after a handful of failures shared across concurrent goals
+            # while each task had barely retried, and it ignored the
+            # operator's raised `retry_max_attempts` entirely (see
+            # RetryPolicy.should_retry, which deliberately treats that key
+            # as a floor). `failure_count` is kept for telemetry only.
+            latched = self._capacity.outage_exceeded(opened_at, self._clock.now(), scope_value)
+            uow.executions.upsert_runtime_circuit(
+                RuntimeCircuit(
+                    runtime=spec.runtime_type,
+                    provider_id=spec.provider_id,
+                    model_id=circuit_model,
+                    failure_count=failure_count,
+                    opened_at=opened_at,
+                    retry_at=not_before,
+                    last_failure_kind=kind.value,
+                    safe_message=safe_message,
+                    manual_intervention=latched,
+                    limit_scope=scope_value,
+                    # probe_holder/probe_started_at default to None, so
+                    # rewriting the row RELEASES this attempt's probe --
+                    # load-bearing, and the reason the next window is
+                    # probeable at all.
+                )
+            )
+            # Inside the ceiling a capacity failure must ALSO bypass the
+            # per-task retry budget. Removing only the circuit latch would
+            # have changed nothing: the task still exhausted
+            # kind_max_attempts and reached fail_task, opening the same
+            # goal block a few attempts later. Waiting is bounded by the
+            # ceiling above, which is the whole point of the redesign.
+            return CapacityOutcome(latched=latched, waiting=not latched, ref=capacity_ref)
+        if spec.provider_id and spec.model_id:
+            # This attempt may have held the half-open probe and then
+            # failed for a NON-capacity reason (the provider answered; the
+            # run failed on its own merits). Release the probe explicitly
+            # so the next window is probeable immediately instead of
+            # waiting out the stale timeout.
+            for probe_key in (spec.model_id, None):
+                uow.executions.release_circuit_probe(
+                    spec.runtime_type, spec.provider_id, probe_key
+                )
+        return CapacityOutcome()
 
     @staticmethod
     def clear_circuit(uow: UnitOfWork, spec: AgentSpec) -> None:

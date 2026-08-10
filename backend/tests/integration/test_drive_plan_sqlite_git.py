@@ -17,6 +17,7 @@ from agent_orchestrator.app.testing.fakes import (
     FakeClock,
     InMemoryAgentRepository,
 )
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.use_cases.run_worker import drive_plan
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 from agent_orchestrator.domain.entities.goal import Goal
@@ -92,7 +93,7 @@ def test_full_stack_drive_success_and_rollback(tmp_path):
     async def drive_until_gate():
         signal = "continue"
         while signal in ("continue", "not_ready"):
-            signal, _ = await drive_plan("p1", uow, runner, agents, workspace, sink, clock, "w1")
+            signal, _ = await drive_plan("p1", uow, ExecutionServices(runner, agents, workspace, sink, clock), "w1")
             if signal == "not_ready":
                 clock.advance(120)  # wait out the backoff gate
         return signal

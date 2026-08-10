@@ -1,4 +1,12 @@
-"""Manual availability controls and targeted retry."""
+"""Operator commands against a live plan.
+
+Renamed from `pause_resume.py` (P8.7 task 5): it had accumulated five use cases
+— `pause_plan`, `resume_plan`, `retry_task`, `retry_planning_stage` and
+`rebind_goal_agents` — and only the first two were in its name, so three of them
+lived somewhere nobody would look. They belong together because they are one
+category: the explicit, human-issued interventions on a plan that is already
+running. `api/routers/plans/control.py` is the surface that serves them.
+"""
 
 from __future__ import annotations
 

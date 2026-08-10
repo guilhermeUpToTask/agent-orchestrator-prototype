@@ -16,28 +16,16 @@ loop and existing tests call it unchanged; it builds the dispatcher and delegate
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable
 
 from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.services.navigation import ready_goal_ids
 
-from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
-from agent_orchestrator.domain.repositories.model_provider_repo import ModelProviderRepository
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.handlers.base import PhaseHandler, Signal
 from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
 from agent_orchestrator.app.handlers.gate_handler import GateHandler
-from agent_orchestrator.app.environment_port import EnvironmentSpec, ProjectEnvironment
 from agent_orchestrator.app.ports import (
-    PlanningArtifactStore,
-    RepositoryReader,
-    AgentEventSink,
-    AgentRunner,
-    Clock,
     UnitOfWork,
-    Workspace,
-    VerificationExecutor,
 )
 
 # Phase groups -> which handler owns them.
@@ -58,37 +46,16 @@ class PlanDispatcher:
 
     def __init__(
         self,
-        runner: AgentRunner,
-        agents: AgentRepository,
-        workspace: Workspace,
-        event_sink: AgentEventSink,
-        clock: Clock,
+        services: ExecutionServices,
         planning_handler: PhaseHandler | None = None,
-        verifier: VerificationExecutor | None = None,
-        capacity: ProviderCapacityPolicy | None = None,
-        providers: ModelProviderRepository | None = None,
-        repository_reader: RepositoryReader | None = None,
-        planning_artifacts: PlanningArtifactStore | None = None,
-        environment: ProjectEnvironment | None = None,
-        environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
     ) -> None:
-        self._execution = ExecutionHandler(
-            runner,
-            agents,
-            workspace,
-            event_sink,
-            clock,
-            verifier,
-            capacity,
-            providers,
-            repository_reader=repository_reader,
-            planning_artifacts=planning_artifacts,
-            environment=environment,
-            environment_context=environment_context,
-        )
+        # One bundle, one construction site (P8.7 task 4). The hand-listed
+        # version of this call silently dropped `routing`, so a configured
+        # routing policy never reached the plan path's execution handler.
+        self._execution = ExecutionHandler.from_services(services)
         self._gate = GateHandler()
         self._planning = planning_handler  # injected when the reasoner exists (Phase 2.5)
-        self._clock = clock
+        self._clock = services.clock
 
     async def advance(self, plan_id: str, uow: UnitOfWork) -> Signal:
         with uow:
@@ -174,30 +141,13 @@ class PlanDispatcher:
 async def advance_plan(
     plan_id: str,
     uow: UnitOfWork,
-    runner: AgentRunner,
-    agents: AgentRepository,
-    workspace: Workspace,
-    event_sink: AgentEventSink,
-    clock: Clock,
+    services: ExecutionServices,
     planning_handler: PhaseHandler | None = None,
-    verifier: VerificationExecutor | None = None,
-    environment: ProjectEnvironment | None = None,
-    environment_context: Callable[[str], tuple[Path, EnvironmentSpec | None]] | None = None,
 ) -> str:
-    """Backwards-compatible entry point. Builds a dispatcher and delegates. Returns
-    the Signal's string value (so existing callers comparing to "continue"/"done"/
+    """Functional entry point. Builds a dispatcher and delegates. Returns the
+    Signal's string value (so existing callers comparing to "continue"/"done"/
     etc. keep working). Pass `planning_handler` (the reasoner-driven
     PlanningHandler) so ARCHITECTURE/ENRICHING advance instead of pausing."""
-    dispatcher = PlanDispatcher(
-        runner,
-        agents,
-        workspace,
-        event_sink,
-        clock,
-        planning_handler,
-        verifier,
-        environment=environment,
-        environment_context=environment_context,
-    )
+    dispatcher = PlanDispatcher(services, planning_handler)
     signal = await dispatcher.advance(plan_id, uow)
     return signal.value

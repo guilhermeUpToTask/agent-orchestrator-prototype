@@ -54,38 +54,29 @@ from agent_orchestrator.domain.events.outbox import (
 from agent_orchestrator.domain.factories.identity import new_id
 from agent_orchestrator.domain.repositories.agent_repo import AgentRepository
 from agent_orchestrator.domain.repositories.model_provider_repo import ModelProviderRepository
-from agent_orchestrator.domain.services.lookups import find_goal
-from agent_orchestrator.domain.services.navigation import NOT_READY, can_promote_goal
+from agent_orchestrator.domain.services.navigation import NOT_READY
 from agent_orchestrator.domain.value_objects.lifecycle import Status
 from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 from agent_orchestrator.app.block_policy import resolutions_for
-from agent_orchestrator.app.acceptance_records import AcceptanceRun
-from agent_orchestrator.app.branch_names import cycle_branch, goal_branch
 from agent_orchestrator.app.environment_port import (
-    AcceptanceTrigger,
     EnvironmentSpec,
     ProjectEnvironment,
 )
-from agent_orchestrator.app.promotion_records import GoalPromotion
 from agent_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
-    RuntimeCircuit,
 )
 from agent_orchestrator.app.ports import PlanningArtifact, PlanningArtifactStore, RepositoryReader
 from agent_orchestrator.app.provider_capacity import (
     CAPACITY_KINDS,
     ProviderCapacityPolicy,
     RoutingPolicy,
-    capacity_backoff_seconds,
-    circuit_model_id,
-    circuit_ref,
 )
-from agent_orchestrator.app.runtime_failures import LimitScope, RuntimeFailure, safe_runtime_tail
+from agent_orchestrator.app.runtime_failures import RuntimeFailure, safe_runtime_tail
 from agent_orchestrator.app.handlers.base import Signal
 from agent_orchestrator.app.ports import (
     AgentEventSink,
@@ -103,7 +94,6 @@ import structlog
 
 from agent_orchestrator.app.agent_feedback import split_reasons
 from agent_orchestrator.app.contract_repair import propose_repair
-from agent_orchestrator.app.promotion_failures import is_transient_merge_failure
 from agent_orchestrator.domain.services.edit_service import resync_goal_contract
 from agent_orchestrator.app.test_identity import (
     DeclaredChecks,
@@ -111,14 +101,16 @@ from agent_orchestrator.app.test_identity import (
     declared_checks,
     existing_checks,
 )
-from agent_orchestrator.app.handlers.agent_admission import AgentAdmission
+from agent_orchestrator.app.execution_services import ExecutionServices
+from agent_orchestrator.app.handlers.agent_admission import AgentAdmission, CapacityOutcome
+from agent_orchestrator.app.handlers.goal_promotion import GoalPromoter
 from agent_orchestrator.app.handlers.execution_rules import (
     Unit,
     attempts_against_budget,
-    jitter_unit,
     main_repo_failure,
     orchestration_failure,
     raise_on_infrastructure_exit,
+    retry_delay_seconds,
     run_role_for,
     unit_task,
 )
@@ -138,11 +130,6 @@ _T = TypeVar("_T")
 # contract, so a clock-based bound would only spin.
 MAX_CONTRACT_REPAIRS = 2
 
-# Re-attempts of a goal->cycle merge that failed for an ENVIRONMENTAL reason. The
-# merge is cheap; if two re-attempts do not clear it, the condition is not
-# momentary and a human should see it.
-MAX_PROMOTION_RETRIES = 2
-
 log = structlog.get_logger(__name__)
 
 
@@ -152,6 +139,31 @@ log = structlog.get_logger(__name__)
 
 
 class ExecutionHandler:
+    @classmethod
+    def from_services(cls, services: ExecutionServices) -> ExecutionHandler:
+        """Build from the one bundle the composition root assembles (P8.7 task 4).
+
+        Every driver goes through here, so a collaborator added to
+        `ExecutionServices` reaches all of them at once instead of needing the
+        same argument threaded through four call sites — which is how
+        `environment` and `routing` each went missing from one of them.
+        """
+        return cls(
+            services.runner,
+            services.agents,
+            services.workspace,
+            services.event_sink,
+            services.clock,
+            verifier=services.verifier,
+            capacity=services.capacity,
+            providers=services.providers,
+            routing=services.routing,
+            repository_reader=services.repository_reader,
+            planning_artifacts=services.planning_artifacts,
+            environment=services.environment,
+            environment_context=services.environment_context,
+        )
+
     def __init__(
         self,
         runner: AgentRunner,
@@ -176,6 +188,10 @@ class ExecutionHandler:
         # including the tests that construct this handler positionally — is
         # unchanged.
         admission: AgentAdmission | None = None,
+        # Goal promotion + the acceptance run (P8.7 task 3, step 3). Same
+        # optional-trailing-parameter shape as `admission` above, and the same
+        # reason for it.
+        promoter: GoalPromoter | None = None,
     ) -> None:
         self._runner = runner
         self._workspace = workspace
@@ -206,12 +222,17 @@ class ExecutionHandler:
         # waiting for the plan connection. `busy_timeout` and the `run_in_session`
         # retry budget cannot break it, because the caller IS the holder.
         self._pending_artifacts: list[PlanningArtifact] = []
-        # The cycle acceptance run (P8.2). Optional: without an adapter the
-        # orchestrator behaves exactly as it did, which is why NoEnvironment is
-        # the permanent fallback rather than a placeholder. The verdict is
-        # ADVISORY — it is recorded beside the cycle and gates nothing.
-        self._environment = environment
-        self._environment_context = environment_context
+        self._promoter = promoter or GoalPromoter(
+            workspace=workspace,
+            clock=clock,
+            planning_artifacts=planning_artifacts,
+            # The cycle acceptance run (P8.2). Optional: without an adapter the
+            # orchestrator behaves exactly as it did, which is why NoEnvironment
+            # is the permanent fallback rather than a placeholder. The verdict
+            # is ADVISORY — it is recorded beside the cycle and gates nothing.
+            environment=environment,
+            environment_context=environment_context,
+        )
 
     async def handle_goal(self, plan_id: str, goal_id: str, plan: Plan, uow: UnitOfWork) -> Signal:
         """Goal-level parallelism (ADR-001, domain unfreeze #13): the caller is
@@ -258,7 +279,7 @@ class ExecutionHandler:
                 # Every goal is terminal. Before the publication gate opens,
                 # the cycle acceptance run gets its turn — see
                 # `_pending_acceptance_cycle` for why the order matters.
-                pending = self._pending_acceptance_cycle(plan_id, plan, uow)
+                pending = self._promoter.pending_acceptance_cycle(plan_id, plan, uow)
                 if pending is not None:
                     acceptance_cycle_id = pending
                 else:
@@ -271,14 +292,14 @@ class ExecutionHandler:
                     if plan.active_cycle is None:
                         return self._complete_legacy_goal(plan_id, plan, goal, uow)
                     try:
-                        goal_promotion = self._reserve_goal_promotion(plan, goal, uow)
+                        goal_promotion = self._promoter.reserve(plan, goal, uow)
                     except TaskFailed as failure:
                         # Navigation selected this goal to close, but a task is not
                         # DONE-with-accepted-evidence (e.g. a legacy/replan artifact).
                         # Open a recoverable block — never let this escape to the
                         # worker loop, which re-runs the reservation and hot-loops the
                         # same TaskFailed every tick.
-                        return self._block_on_unpromotable_goal(plan_id, plan, goal, failure, uow)
+                        return self._promoter.block_unpromotable(plan_id, plan, goal, failure, uow)
                 else:
                     if second == "GOAL_FAILED":
                         return self._pause_on_failed_goal(plan_id, plan, goal, uow)
@@ -307,7 +328,7 @@ class ExecutionHandler:
             # a side effect. The gate has NOT opened yet, so the plan reports
             # `cycle_verification` for exactly this window, and nobody can
             # publish against a verdict that does not exist.
-            self._run_acceptance(
+            self._promoter.run_acceptance(
                 plan_id, acceptance_cycle_id, None, "pre_publication", uow
             )
             # Then open the gate, in the SAME tick. Deliberately not "return
@@ -326,7 +347,7 @@ class ExecutionHandler:
             return review_signal
 
         if goal_promotion is not None:
-            return await self._promote_goal(plan_id, goal_promotion, uow)
+            return await self._promoter.promote(plan_id, goal_promotion, uow)
         assert unit is not None
 
         # ---- side effect OUTSIDE any transaction. Runner just executes — no policy. ----
@@ -432,59 +453,6 @@ class ExecutionHandler:
         stray_paths = await self._main_repo_stray_paths(before)
         if stray_paths:
             raise main_repo_failure(stray_paths)
-
-    def _retry_promotion(
-        self,
-        plan_id: str,
-        goal_id: str,
-        reservation: str,
-        exc: Exception,
-        uow: UnitOfWork,
-    ) -> bool:
-        """Release the reservation and let a later tick re-attempt the merge.
-
-        Only for environmental failures, and only a bounded number of times. The
-        reservation MUST be released either way — holding it would block the very
-        retry this exists to allow, and `assert_lifecycle_mutation_allowed`
-        refuses every edit while one is open.
-
-        Bounded by attempts rather than wall clock: the merge is cheap, so if two
-        re-attempts do not clear it the condition is not momentary, and a human
-        should see it.
-        """
-        if self._planning_artifacts is None:
-            return False  # nowhere to count, so no unbounded loop is possible
-        if not is_transient_merge_failure(str(exc)):
-            return False
-
-        prior = self._planning_artifacts.latest(
-            plan_id, "goal_promotion_retry", goal_id=goal_id, limit=MAX_PROMOTION_RETRIES + 1
-        )
-        if len(prior) >= MAX_PROMOTION_RETRIES:
-            return False
-
-        with uow:
-            plan = uow.plans.get(plan_id)
-            if plan.goal_promotion_reservations.get(goal_id) != reservation:
-                return False  # someone else owns it now; do not touch their state
-            plan.release_promotion(goal_id, reservation)
-            plan.bump_version()
-            uow.plans.save(plan)
-
-        self._planning_artifacts.append(
-            PlanningArtifact(
-                plan_id=plan_id,
-                goal_id=goal_id,
-                purpose="goal_promotion_retry",
-                sequence=0,
-                input_fingerprint=goal_id,
-                outcome="abandoned",
-                rejection_reasons=(str(exc)[:500],),
-                created_at=self._clock.now(),
-            )
-        )
-        log.info("promotion.retrying", plan_id=plan_id, goal_id=goal_id, error=str(exc)[:200])
-        return True
 
     def _flush_pending_artifacts(self) -> None:
         """Write everything queued during a now-closed plan transaction.
@@ -1160,278 +1128,6 @@ class ExecutionHandler:
         uow.plans.save(plan)
         return Signal.CONTINUE
 
-    def _block_on_unpromotable_goal(
-        self, plan_id: str, plan: Plan, goal: Goal, failure: TaskFailed, uow: UnitOfWork
-    ) -> Signal:
-        """A goal navigation selected to close but that cannot merge (a task is
-        not DONE or has no accepted evidence — typically a legacy/replan artifact)
-        opens a structured block, mirroring `_pause_on_failed_goal`. Without this
-        the reservation's TaskFailed escapes `handle()` to the worker loop, which
-        re-dispatches and re-raises it every tick (a 1Hz poisoned-plan storm)."""
-        offending = next(
-            task
-            for task in goal.tasks
-            if task.status != Status.DONE or not task.verification_evidence
-        )
-        # Only advertise resolutions that can actually repair this block. `retry`
-        # requires a FAILED task (Task.retry rejects skipped/cancelled/terminal ->
-        # pending), so a goal wedged by a SKIPPED/evidence-less-DONE task is
-        # recoverable only via edit_task or start_replan — offering retry_stage
-        # there is a nominal-only resolution that 422s when the operator tries it.
-        #
-        # Domain unfreeze #14: each goal opens its OWN block now
-        # (`Plan.goal_blocks[goal.id]`) -- a different goal's block never
-        # collides here (separate dict entries), and `claim_ready_goal`'s
-        # candidate scan excludes any goal with an active block from ever
-        # being re-selected, so this goal's own block can't collide with
-        # itself on a later tick either. No pre-check needed; open_block's
-        # "already active" guard is a genuine-bug detector now, not routine.
-        resolutions = resolutions_for(
-            "execution_failure", task_retryable=offending.status == Status.FAILED
-        )
-        block = PlanBlock(
-            id=new_id(),
-            kind="execution_failure",
-            explanation=str(failure),
-            stage=offending.tdd_stage,
-            goal_id=goal.id,
-            task_id=offending.id,
-            task_revision=offending.revision,
-            legal_resolutions=resolutions,
-            created_at=self._clock.now(),
-        )
-        plan.open_block(block)
-        uow.outbox.add(
-            PlanBlocked(
-                plan_id=plan_id,
-                block_id=block.id,
-                stage=block.stage,
-                goal_id=goal.id,
-                task_id=offending.id,
-                task_revision=offending.revision,
-            )
-        )
-        plan.bump_version()
-        uow.plans.save(plan)
-        return Signal.PAUSED
-
-    def _reserve_goal_promotion(
-        self,
-        plan: Plan,
-        goal: Goal,
-        uow: UnitOfWork,
-    ) -> tuple[str, str, str]:
-        cycle = plan.active_cycle
-        assert cycle is not None
-        if not can_promote_goal(goal):
-            raise TaskFailed(
-                "goal cannot merge without accepted task evidence",
-                # Class C (a promotion-time state check, not the agent's work). Un-freeze #17 made VERIFICATION_ERROR
-                # retryable for candidate rejections; this is not one, so it
-                # keeps the independent `retryable` veto.
-                failure=orchestration_failure("goal cannot merge without accepted task evidence"),
-            )
-        reservation = f"goal:{cycle.id}:{goal.id}"
-        plan.reserve_promotion(goal.id, reservation)
-        plan.bump_version()
-        uow.plans.save(plan)
-        return reservation, cycle.id, goal.id
-
-    def _pending_acceptance_cycle(
-        self, plan_id: str, plan: Plan, uow: UnitOfWork
-    ) -> str | None:
-        """The cycle owing a pre-publication acceptance run, or None.
-
-        WHY THIS RUNS BEFORE THE GATE OPENS, and why that removes any reason to
-        put the acceptance run in the domain:
-
-        * `Plan.activity` checks `review_gate` BEFORE it falls through to
-          `cycle_verification`, so a run started after the gate opened reports
-          `review:cycle_completion` and leaves `cycle_verification` naming an
-          empty slot forever. Run it here and the existing DERIVATION produces
-          `cycle_verification` on its own — no new field, no un-freeze.
-        * A gate open while the run is still executing is a race: booting an
-          application takes minutes, and an operator (or a fixture script) can
-          record a disposition before the verdict they were meant to read
-          exists. Opening the gate only once a verdict is recorded closes it.
-
-        Idempotency lives in the ledger rather than in plan state: one
-        `pre_publication` row per cycle means done. A worker that dies mid-run
-        leaves no row, so the next tick simply runs it again — which is the
-        correct behaviour for a fresh observation, and needs nothing persisted
-        in the aggregate.
-        """
-        if self._environment is None or self._environment_context is None:
-            return None
-        cycle = plan.active_cycle
-        if cycle is None:
-            return None
-        already = any(
-            run.trigger == "pre_publication"
-            for run in uow.acceptance_runs.list_for_cycle(plan_id, cycle.id)
-        )
-        return None if already else cycle.id
-
-    def _run_acceptance(
-        self,
-        plan_id: str,
-        cycle_id: str,
-        goal_id: str | None,
-        trigger: AcceptanceTrigger,
-        uow: UnitOfWork,
-    ) -> None:
-        """Boot the assembled tree and record what happened. ADVISORY ONLY.
-
-        Called at the two points where the cycle branch has just changed
-        meaning: after a goal merges (early signal, so a broken application is
-        found at goal 2 rather than at publication) and before the publication
-        gate opens (the verdict an operator actually decides on).
-
-        Every failure mode here is swallowed on purpose. An acceptance run
-        observes; it must never be able to fail a promotion that passed
-        verification, or stop a publication gate from opening. `verify()` is
-        already contracted not to raise — this is the belt to that adapter's
-        braces, because a third-party adapter is exactly the thing that will.
-        """
-        if self._environment is None or self._environment_context is None:
-            return
-        ref = cycle_branch(cycle_id)
-        try:
-            repo, spec = self._environment_context(plan_id)
-            verdict = self._environment.verify(repo, ref, spec)
-        except Exception as exc:  # noqa: BLE001 - see the docstring
-            log.warning("acceptance.adapter_raised", plan_id=plan_id, error=str(exc))
-            return
-        if not verdict.is_signal:
-            # Nothing configured. Recording a row per goal merge saying "nobody
-            # asked" is noise, not evidence.
-            return
-        try:
-            with uow:
-                uow.acceptance_runs.add(
-                    AcceptanceRun(
-                        id=new_id(),
-                        plan_id=plan_id,
-                        cycle_id=cycle_id,
-                        goal_id=goal_id,
-                        trigger=trigger,
-                        ref=ref,
-                        outcome=verdict.outcome,
-                        summary=verdict.summary,
-                        detail=verdict.detail,
-                        duration_seconds=verdict.duration_seconds,
-                        created_at=self._clock.now(),
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001 - see the docstring
-            log.warning("acceptance.record_failed", plan_id=plan_id, error=str(exc))
-            return
-        log.info(
-            "acceptance.recorded",
-            plan_id=plan_id,
-            cycle_id=cycle_id,
-            trigger=trigger,
-            outcome=verdict.outcome,
-        )
-
-    async def _promote_goal(
-        self,
-        plan_id: str,
-        promotion: tuple[str, str, str],
-        uow: UnitOfWork,
-    ) -> Signal:
-        reservation, cycle_id, goal_id = promotion
-        try:
-            commit_sha = await self._workspace.merge_goal(plan_id, cycle_id, goal_id)
-        except Exception as exc:
-            # A verified goal must not be thrown away because the repository was
-            # momentarily unusable. A stale worktree registration or a held index
-            # lock clears on its own; a CONFLICT never does.
-            if self._retry_promotion(plan_id, goal_id, reservation, exc, uow):
-                return Signal.NOT_READY
-            with uow:
-                plan = uow.plans.get(plan_id)
-                if plan.goal_promotion_reservations.get(goal_id) != reservation:
-                    return Signal.PAUSED
-                plan.release_promotion(goal_id, reservation)
-                block = PlanBlock(
-                    id=new_id(),
-                    kind="goal_promotion_failure",
-                    explanation=f"goal Git promotion failed: {exc}",
-                    stage="merge",
-                    goal_id=goal_id,
-                    legal_resolutions=resolutions_for("goal_promotion_failure"),
-                    created_at=self._clock.now(),
-                )
-                plan.open_block(block)
-                plan.bump_version()
-                uow.outbox.add(
-                    PlanBlocked(
-                        plan_id=plan_id,
-                        block_id=block.id,
-                        stage=block.stage,
-                        goal_id=goal_id,
-                    )
-                )
-                uow.plans.save(plan)
-            return Signal.PAUSED
-
-        with uow:
-            plan = uow.plans.get(plan_id)
-            if plan.goal_promotion_reservations.get(goal_id) != reservation:
-                return Signal.PAUSED
-            cycle = next(
-                (item for item in plan.cycles if item.id == cycle_id),
-                None,
-            )
-            if cycle is None or plan.active_cycle is None or plan.active_cycle.id != cycle_id:
-                raise TaskFailed(
-                    "goal promotion targets a superseded cycle",
-                    # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
-                    # retryable for candidate rejections; this is not one, so it
-                    # keeps the independent `retryable` veto.
-                    failure=orchestration_failure("goal promotion targets a superseded cycle"),
-                )
-            goal = find_goal(cycle.goals, goal_id)
-            if any(
-                task.status != Status.DONE or not task.verification_evidence for task in goal.tasks
-            ):
-                raise TaskFailed(
-                    "goal evidence changed during promotion",
-                    # Class C (a promotion race; the agent has nothing to repair). Un-freeze #17 made VERIFICATION_ERROR
-                    # retryable for candidate rejections; this is not one, so it
-                    # keeps the independent `retryable` veto.
-                    failure=orchestration_failure("goal evidence changed during promotion"),
-                )
-            cycle.evidence_refs.append(f"git:{commit_sha}")
-            # Recorded HERE, not at the merge call: everything above this line
-            # in the transaction has already re-guarded the promotion
-            # reservation, so a promotion that lost its reservation returned
-            # PAUSED without leaving a phantom row. The refs come from the same
-            # module the workspace adapter builds its branches from.
-            uow.promotions.add(
-                GoalPromotion(
-                    id=new_id(),
-                    plan_id=plan_id,
-                    cycle_id=cycle_id,
-                    goal_id=goal_id,
-                    from_ref=goal_branch(goal_id),
-                    into_ref=cycle_branch(cycle_id),
-                    merge_sha=commit_sha,
-                    promoted_at=self._clock.now(),
-                )
-            )
-            plan.complete_goal(goal_id)
-            plan.release_promotion(goal_id, reservation)
-            plan.bump_version()
-            uow.outbox.add(GoalCompleted(plan_id=plan_id, goal_id=goal_id))
-            uow.plans.save(plan)
-        # AFTER the transaction closes: booting an application is a side effect,
-        # and invariant #5 keeps those out of transactions. Advisory, so a
-        # verdict of any kind leaves the promotion above untouched.
-        self._run_acceptance(plan_id, cycle_id, goal_id, "goal_merge", uow)
-        return Signal.CONTINUE
-
     def _pause_on_failed_goal(
         self, plan_id: str, plan: Plan, goal: Goal, uow: UnitOfWork
     ) -> Signal:
@@ -1612,6 +1308,103 @@ class ExecutionHandler:
         uow.outbox.add(PlanPaused(plan_id=plan_id, reason=reason, auto=False))
         return True
 
+    def _abandon_late_failure(
+        self, plan_id: str, plan: Plan, unit: Unit, exc: TaskFailed, uow: UnitOfWork
+    ) -> bool:
+        """The iteration was abandoned while this attempt ran — close the attempt
+        and, if the task is still live, abandon it too. True means handled.
+
+        The load-bearing half is what it does NOT do: a late failure must never
+        requeue into the abandoned iteration. That is the resurrection bug, and
+        it is why this branch precedes every backoff and retry decision below.
+        """
+        abandoned = self._abandoned_task_status(plan, unit)
+        if abandoned is None:
+            return False
+        self._finish_execution(
+            uow,
+            unit,
+            ExecutionAttemptStatus.ABANDONED,
+            ExecutionRunStatus.ABANDONED,
+        )
+        if not abandoned.is_terminal:
+            plan.abandon_execution_task(
+                unit.cycle_id,
+                unit.goal_id,
+                unit.task_id,
+            )
+            plan.bump_version()
+            uow.outbox.add(
+                TaskAbandoned(
+                    plan_id=plan_id,
+                    goal_id=unit.goal_id,
+                    task_id=unit.task_id,
+                    reason=exc.reason,
+                )
+            )
+            uow.plans.save(plan)
+        return True
+
+    def _open_execution_block(
+        self,
+        plan_id: str,
+        plan: Plan,
+        unit: Unit,
+        reason: str,
+        exc: TaskFailed,
+        capacity: CapacityOutcome,
+        uow: UnitOfWork,
+    ) -> None:
+        """Open the goal's block for a terminal task failure.
+
+        Domain unfreeze #14: this goal opens its own `goal_blocks` entry -- a
+        different goal's concurrently opened block never collides here (separate
+        dict entries; before #13 this branch had to no-op and drop this goal's
+        own failure reason when ANY block was already active anywhere in the
+        plan).
+        """
+        # Any capacity kind that latched, not just RATE_LIMIT: a
+        # CONNECTION_ERROR outage past the ceiling is equally a
+        # provider problem, and labelling it execution_failure would
+        # advertise retry_stage instead of wait_and_retry, leaving the
+        # operator no way to clear the circuit.
+        provider_capacity = capacity.latched and exc.kind in CAPACITY_KINDS
+        kind = "provider_capacity" if provider_capacity else "execution_failure"
+        block = PlanBlock(
+            id=new_id(),
+            kind=kind,
+            explanation=reason,
+            stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
+            goal_id=unit.goal_id,
+            task_id=unit.task_id,
+            task_revision=unit.task_revision,
+            run_id=unit.execution.run_id,
+            legal_resolutions=resolutions_for(kind),
+            evidence_refs=(
+                # MUST name the circuit that was actually written --
+                # which for an account-level limit is the PROVIDER-WIDE
+                # key, not this model's. Hand-building it from
+                # spec.model_id pointed wait_and_retry at a row that
+                # does not exist, so the real circuit stayed latched.
+                [f"execution-attempt://{unit.execution.id}", capacity.ref]
+                if provider_capacity and capacity.ref is not None
+                else [f"execution-attempt://{unit.execution.id}"]
+            ),
+            created_at=self._clock.now(),
+        )
+        plan.open_block(block)
+        uow.outbox.add(
+            PlanBlocked(
+                plan_id=plan_id,
+                block_id=block.id,
+                stage=block.stage,
+                goal_id=unit.goal_id,
+                task_id=unit.task_id,
+                task_revision=unit.task_revision,
+                run_id=unit.execution.run_id,
+            )
+        )
+
     def _finalize_failure(
         self, plan_id: str, unit: Unit, exc: TaskFailed, uow: UnitOfWork
     ) -> Signal:
@@ -1626,166 +1419,21 @@ class ExecutionHandler:
                 # TOLERANT FINALIZE: the iteration was abandoned while we ran — a late
                 # failure terminal-skips; it must NEVER requeue into the abandoned
                 # iteration (the resurrection bug).
-                abandoned = self._abandoned_task_status(plan, unit)
-                if abandoned is not None:
-                    self._finish_execution(
-                        uow,
-                        unit,
-                        ExecutionAttemptStatus.ABANDONED,
-                        ExecutionRunStatus.ABANDONED,
-                    )
-                    if not abandoned.is_terminal:
-                        plan.abandon_execution_task(
-                            unit.cycle_id,
-                            unit.goal_id,
-                            unit.task_id,
-                        )
-                        plan.bump_version()
-                        uow.outbox.add(
-                            TaskAbandoned(
-                                plan_id=plan_id,
-                                goal_id=unit.goal_id,
-                                task_id=unit.task_id,
-                                reason=exc.reason,
-                            )
-                        )
-                        uow.plans.save(plan)
+                if self._abandon_late_failure(plan_id, plan, unit, exc, uow):
                     return Signal.PAUSED
 
-                delay = capacity_backoff_seconds(
-                    unit.retry_policy,
-                    unit.policy_attempt + 1,
-                    jitter_unit=jitter_unit(unit.execution.id),
-                    kind=exc.kind,
-                    # A concurrency refusal does not escalate like an exhausted
-                    # allowance; every other scope keeps the patient curve.
-                    limit_scope=exc.failure.limit_scope,
-                )
-                if exc.failure.retry_after_seconds is not None:
-                    delay = max(delay, exc.failure.retry_after_seconds)
-                if (
-                    exc.failure.limit_scope is not None
-                    and exc.failure.limit_scope.value == "daily_quota"
-                    and exc.failure.retry_after_seconds is None
-                ):
-                    delay = max(delay, 3_600.0)
+                delay = retry_delay_seconds(unit, exc.kind, exc.failure)
                 not_before = self._clock.now() + timedelta(seconds=delay) if delay > 0 else None
 
-                circuit_manual = False
-                # True only while a capacity outage is being ridden out on
-                # automatic waiting; a REQUEST_CONCURRENCY refusal opens no
-                # circuit and so keeps its ordinary per-task budget as the bound.
-                capacity_wait = False
-                # The circuit this failure was recorded against, if any -- carried
-                # to the block below so its evidence ref names the row that exists.
-                capacity_ref: str | None = None
-                if (
-                    # CONNECTION_ERROR is capacity too: an unreachable or
-                    # overloaded endpoint is not a defect in this task, and
-                    # exhausting the per-task budget against it used to open a
-                    # goal block for something no human edit could fix. Safe to
-                    # widen only now that the ceiling above bounds the wait --
-                    # doing it while the attempt-count latch was live would have
-                    # escalated after five shared failures instead.
-                    exc.kind in CAPACITY_KINDS
-                    and unit.spec.provider_id
-                    and unit.spec.model_id
-                    and not_before is not None
-                    # A CONCURRENCY cap is not an outage: the provider served
-                    # every other in-flight request successfully and refused only
-                    # the one over the ceiling. The remedy is "send fewer at
-                    # once", so this attempt requeues on its own short backoff and
-                    # NO circuit opens -- opening one would halt a provider that
-                    # is working, and stall the siblings that are mid-run.
-                    # The failure is still recorded on the attempt for telemetry.
-                    and exc.failure.limit_scope is not LimitScope.REQUEST_CONCURRENCY
-                ):
-                    # Account-level limits key provider-wide; upstream-level ones
-                    # key per model. Routing to a sibling model escapes the second
-                    # but never the first.
-                    _, capacity_scope = self._admission.provider_metadata(unit.spec)
-                    circuit_model = circuit_model_id(
-                        unit.spec.model_id, exc.failure.limit_scope, capacity_scope
-                    )
-                    capacity_ref = circuit_ref(
-                        unit.spec.runtime_type, unit.spec.provider_id, circuit_model
-                    )
-                    existing = uow.executions.get_runtime_circuit(
-                        unit.spec.runtime_type,
-                        unit.spec.provider_id,
-                        circuit_model,
-                    )
-                    failure_count = (existing.failure_count if existing else 0) + 1
-                    # The START of the outage, preserved across updates within one
-                    # outage (restamping every failure would peg the age at ~0 and
-                    # make the ceiling unreachable) but RESET when the previous
-                    # circuit has been quiet long enough to count as a past outage.
-                    # A row abandoned by an earlier session would otherwise pre-age
-                    # a fresh outage straight past its ceiling — observed live
-                    # against a circuit left behind three days earlier.
-                    scope_value = (
-                        exc.failure.limit_scope.value
-                        if exc.failure.limit_scope is not None
-                        else None
-                    )
-                    opened_at = self._capacity.outage_start(
-                        existing.opened_at if existing else None,
-                        existing.retry_at if existing else None,
-                        self._clock.now(),
-                        scope_value,
-                    )
-                    # ESCALATE ON DURATION, NOT ON A COUNT. The old rule compared
-                    # this provider-global `failure_count` against a PER-TASK
-                    # attempt budget -- different units of measure. It latched
-                    # after a handful of failures shared across concurrent goals
-                    # while each task had barely retried, and it ignored the
-                    # operator's raised `retry_max_attempts` entirely (see
-                    # RetryPolicy.should_retry, which deliberately treats that key
-                    # as a floor). `failure_count` is kept for telemetry only.
-                    circuit_manual = self._capacity.outage_exceeded(
-                        opened_at, self._clock.now(), scope_value
-                    )
-                    uow.executions.upsert_runtime_circuit(
-                        RuntimeCircuit(
-                            runtime=unit.spec.runtime_type,
-                            provider_id=unit.spec.provider_id,
-                            model_id=circuit_model,
-                            failure_count=failure_count,
-                            opened_at=opened_at,
-                            retry_at=not_before,
-                            last_failure_kind=exc.kind.value,
-                            safe_message=exc.reason,
-                            manual_intervention=circuit_manual,
-                            limit_scope=scope_value,
-                            # probe_holder/probe_started_at default to None, so
-                            # rewriting the row RELEASES this attempt's probe --
-                            # load-bearing, and the reason the next window is
-                            # probeable at all.
-                        )
-                    )
-                    # Inside the ceiling a capacity failure must ALSO bypass the
-                    # per-task retry budget. Removing only the circuit latch would
-                    # have changed nothing: the task still exhausted
-                    # kind_max_attempts and reached fail_task, opening the same
-                    # goal block a few attempts later. Waiting is bounded by the
-                    # ceiling above, which is the whole point of the redesign.
-                    capacity_wait = not circuit_manual
-                elif unit.spec.provider_id and unit.spec.model_id:
-                    # This attempt may have held the half-open probe and then
-                    # failed for a NON-capacity reason (the provider answered; the
-                    # run failed on its own merits). Release the probe explicitly
-                    # so the next window is probeable immediately instead of
-                    # waiting out the stale timeout.
-                    for probe_key in (unit.spec.model_id, None):
-                        uow.executions.release_circuit_probe(
-                            unit.spec.runtime_type, unit.spec.provider_id, probe_key
-                        )
+                capacity = self._admission.record_capacity_failure(
+                    unit.spec, exc.kind, exc.failure, exc.reason, not_before, uow
+                )
 
                 if (
                     exc.failure.retryable
-                    and not circuit_manual
+                    and not capacity.latched
                     and (
-                        capacity_wait
+                        capacity.waiting
                         or unit.retry_policy.should_retry(
                             attempts_against_budget(plan_id, unit, exc.kind, uow),
                             exc.kind,
@@ -1846,54 +1494,7 @@ class ExecutionHandler:
                     )
                 )
                 if plan.active_cycle is not None:
-                    # Domain unfreeze #14: this goal opens its own
-                    # goal_blocks entry -- a different goal's concurrently
-                    # opened block never collides here (separate dict
-                    # entries; before #13 this branch had to no-op and drop
-                    # this goal's own failure reason when ANY block was
-                    # already active anywhere in the plan).
-                    # Any capacity kind that latched, not just RATE_LIMIT: a
-                    # CONNECTION_ERROR outage past the ceiling is equally a
-                    # provider problem, and labelling it execution_failure would
-                    # advertise retry_stage instead of wait_and_retry, leaving the
-                    # operator no way to clear the circuit.
-                    provider_capacity = circuit_manual and exc.kind in CAPACITY_KINDS
-                    block = PlanBlock(
-                        id=new_id(),
-                        kind=("provider_capacity" if provider_capacity else "execution_failure"),
-                        explanation=reason,
-                        stage=plan._task(plan._goal(unit.goal_id), unit.task_id).tdd_stage,
-                        goal_id=unit.goal_id,
-                        task_id=unit.task_id,
-                        task_revision=unit.task_revision,
-                        run_id=unit.execution.run_id,
-                        legal_resolutions=resolutions_for(
-                            "provider_capacity" if provider_capacity else "execution_failure"
-                        ),
-                        evidence_refs=(
-                            # MUST name the circuit that was actually written --
-                            # which for an account-level limit is the PROVIDER-WIDE
-                            # key, not this model's. Hand-building it from
-                            # spec.model_id pointed wait_and_retry at a row that
-                            # does not exist, so the real circuit stayed latched.
-                            [f"execution-attempt://{unit.execution.id}", capacity_ref]
-                            if provider_capacity and capacity_ref is not None
-                            else [f"execution-attempt://{unit.execution.id}"]
-                        ),
-                        created_at=self._clock.now(),
-                    )
-                    plan.open_block(block)
-                    uow.outbox.add(
-                        PlanBlocked(
-                            plan_id=plan_id,
-                            block_id=block.id,
-                            stage=block.stage,
-                            goal_id=unit.goal_id,
-                            task_id=unit.task_id,
-                            task_revision=unit.task_revision,
-                            run_id=unit.execution.run_id,
-                        )
-                    )
+                    self._open_execution_block(plan_id, plan, unit, reason, exc, capacity, uow)
                 # A human pause landing during a legacy in-flight attempt keeps its
                 # manual semantics. Cyclic failures instead become explicit blocks.
                 elif plan.pause_requested:

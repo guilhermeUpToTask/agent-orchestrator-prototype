@@ -34,8 +34,9 @@ from agent_orchestrator.app.use_cases.control import (
 )
 from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
 from agent_orchestrator.app.use_cases.create_plan import create_plan
-from agent_orchestrator.app.use_cases.pause_resume import pause_plan, resume_plan
+from agent_orchestrator.app.use_cases.operator_commands import pause_plan, resume_plan
 from agent_orchestrator.app.use_cases.request_replan import request_replan
+from agent_orchestrator.app.execution_services import ExecutionServices
 from agent_orchestrator.app.use_cases.run_worker import worker_tick
 from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
 from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
@@ -90,11 +91,7 @@ class Stack:
         return asyncio.run(
             worker_tick(
                 self.uow,
-                self.runner,
-                self.agents,
-                self.ws,
-                self.sink,
-                self.clock,
+                ExecutionServices(self.runner, self.agents, self.ws, self.sink, self.clock),
                 worker_id,
                 60,
                 planning_handler=self.planning,
