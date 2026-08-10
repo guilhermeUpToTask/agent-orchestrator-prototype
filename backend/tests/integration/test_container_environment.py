@@ -30,6 +30,38 @@ def binary(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
+def acceptance_containers(binary: str) -> set[str]:
+    """Every `aipom-acceptance-*` container currently on the MACHINE."""
+    listing = subprocess.run(
+        [binary, "ps", "-a", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {n for n in listing.split() if n.startswith("aipom-acceptance-")}
+
+
+@pytest.fixture
+def no_new_containers(binary: str):
+    """Assert THIS test leaked nothing — not that the machine is pristine.
+
+    Phase 10A: both leak tests asserted `"aipom-acceptance-" not in listing`
+    against the global list, so a single orphan from any other source failed
+    them *permanently* and pointed at teardown, which was not what was wrong.
+    Reproduced: an `Exited (137)` container left behind when a test run was
+    SIGKILLed mid-flight (the `finally` that removes it cannot run through a
+    kill) made `test_no_container_survives_the_run[podman]` fail 2 runs out of
+    2 until it was pruned by hand.
+
+    Diffing against a before-snapshot keeps the real assertion — this run
+    removed what it created — and drops the accidental one about the machine.
+    """
+    before = acceptance_containers(binary)
+    yield
+    survivors = acceptance_containers(binary) - before
+    assert not survivors, f"the run leaked {sorted(survivors)}"
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """A real git repo with one commit, so `ref` means something."""
@@ -124,7 +156,7 @@ def test_the_run_sees_the_ref_not_the_working_tree(binary: str, repo: Path) -> N
 
 
 def test_a_small_startup_budget_does_not_abort_the_daemon_call(
-    binary: str, repo: Path
+    binary: str, repo: Path, no_new_containers
 ) -> None:
     """`startup_timeout_seconds` budgets the APPLICATION, not the daemon.
 
@@ -144,16 +176,9 @@ def test_a_small_startup_budget_does_not_abort_the_daemon_call(
     )
     verdict = env.verify(repo, "HEAD", spec)
     assert verdict.outcome == "failed", verdict.summary
-    listing = subprocess.run(
-        [binary, "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert "aipom-acceptance-" not in listing
 
 
-def test_no_container_survives_the_run(binary: str, repo: Path) -> None:
+def test_no_container_survives_the_run(binary: str, repo: Path, no_new_containers) -> None:
     """Teardown happens on the failure path too."""
     env = ContainerEnvironment(binary=binary)
     spec = EnvironmentSpec(
@@ -163,10 +188,3 @@ def test_no_container_survives_the_run(binary: str, repo: Path) -> None:
         startup_timeout_seconds=60,
     )
     assert env.verify(repo, "HEAD", spec).outcome == "failed"
-    listing = subprocess.run(
-        [binary, "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert "aipom-acceptance-" not in listing

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -244,10 +245,25 @@ def test_a_worker_keeps_beating_while_a_goal_is_running(tmp_path, monkeypatch) -
         )
         try:
             await asyncio.wait_for(running.wait(), timeout=10)
-            for _ in range(20):  # ~1s of held goal, >> the 0.05s beat
+            # Sample until the beat is SEEN to advance, not for a fixed wall
+            # clock. The assertion needs two distinct `last_seen_at` values, and
+            # at a 0.05s beat ~20 are expected in a second — but this samples a
+            # real event loop that shares a machine with the rest of the suite,
+            # and a loaded runner can starve it past any fixed window. Phase 10A
+            # reproduced that: the fixed ~1s loop failed 2 runs in 4 once the
+            # suite also had to service the plan-claim contention tests, whose
+            # `synchronous=FULL` writes are heavy on the same disk.
+            #
+            # Deliberately NOT weaker: waiting longer for the SECOND beat still
+            # fails against the design this test exists to catch, where the beat
+            # is tied to the coordinator loop and never advances at all.
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
                 rows = container.worker_registry.list_workers()
                 if rows:
                     seen.append(rows[0].last_seen_at.isoformat())
+                if len(set(seen)) > 1:
+                    break
                 await asyncio.sleep(0.05)
         finally:
             release.set()
