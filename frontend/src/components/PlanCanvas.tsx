@@ -197,13 +197,18 @@ export function PlanCanvas({ planId }: { planId: string }) {
 
         <MiniMap
           style={{ bottom: 20, right: ui.detailPanelOpen ? 336 : 20 }}
+          // SVG fills, so they cannot be CSS classes — but they CAN be
+          // variables, and they must be: `'#1c2030'` and a hardcoded dark rgba
+          // left the minimap rendering a dark navy block behind a dark mask on
+          // a light-themed panel. Caught by looking at the task 5 screenshots,
+          // which is the entire argument for taking them.
           nodeColor={(n) => {
-            if (n.type === 'goalGroup') return '#1c2030';
+            if (n.type === 'goalGroup') return 'var(--bg-2)';
             const data = (n as Node<TaskNodeData>).data;
             const meta = STATUS[data?.task?.status ?? 'pending'];
             return meta ? KIND_STROKE[meta.kind] : raw.border0;
           }}
-          maskColor="rgba(11,13,18,0.7)"
+          maskColor="color-mix(in srgb, var(--bg-0) 70%, transparent)"
           nodeStrokeWidth={0}
         />
 

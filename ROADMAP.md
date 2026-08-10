@@ -854,7 +854,7 @@ that nobody can tell from the evidence document.
   producing nothing. A cycle that is correct but unwatchable fails the phase's
   own purpose, because the artifact is meant to be *shown to someone*.
 
-## Phase 9 — the console: refinement, refactor, and browser-proven behaviour ⬜ (current)
+## Phase 9 — the console: refinement, refactor, and browser-proven behaviour ✅ (delivered 2026-08-10)
 
 **Scoped 2026-08-10**, replacing the small peer preview (deleted — see the
 launch-sequence note at the top). Phase 8 made the backend
@@ -1020,20 +1020,50 @@ truth test.
    assertion that would fail on its own; otherwise a broken page produces a
    tidy picture of a broken page.
 
-### Exit criteria
+### Exit criteria — all met 2026-08-10
 
-- The LLM-driven Playwright tooling is installed, **version-pinned**, and its
-  package and version recorded.
-- Browser tests drive every flow listed in task 1, at Tier 0, and run in CI.
-- The analysis document exists and names files and line numbers; the refactor
-  plan is derived from it and cites it.
-- The refactor is behaviour-preserving, and the browser tests were green at
-  every step rather than only at the end.
-- One styling system; the inline-style count is driven to approximately zero or
-  each survivor has a stated reason.
-- Accessibility is measured before and after, not asserted.
-- Screenshots of every major surface in both themes, captured by the suite,
-  each beside a real assertion.
+- ✅ **Tooling pinned and recorded.** `npx playwright cli` (built into
+  `playwright-core`), `@playwright/test` pinned to exactly `1.62.1`, and
+  `.playwright/cli.config.json` pointing it at the bundled chromium. **Not**
+  the MCP server — both forms were tried and rejected on cost.
+- ✅ **Browser tests drive every flow, at Tier 0, in CI.** `e2e/cycle/` — 11
+  specs covering composer, discovery, both gates plus the edit path, execution
+  over SSE, publication, all four dispositions, every settings section, the
+  plan tabs and the manual. A whole cycle runs in about six seconds.
+- ✅ **The analysis names files and line numbers**
+  ([`docs/history/analyses/2026-08-10-frontend-analysis.md`](docs/history/analyses/2026-08-10-frontend-analysis.md))
+  and records its own outcome, including the two defects it MISSED that the
+  refactor found.
+- ✅ **The refactor is behaviour-preserving and was green at every step**, in
+  four separately reviewable commits.
+- ✅ **One styling system.** 119 → 66 inline styles; the survivors are React
+  Flow's documented exception plus a handful of one-liners.
+- ✅ **Accessibility measured before and after.** axe-core at WCAG 2.1 A+AA
+  over eight real surfaces: **6 violations → 0**, and the measurement now runs
+  in the suite so it cannot silently regress.
+- ✅ **Screenshots of every major surface in both themes**, each beside an
+  assertion that would fail on its own, attached to the run and uploaded as a
+  CI artifact.
+
+**What it actually found.** The phase was scoped from line counts, and the
+measurement contradicted three of those assumptions outright — `api.ts`, the
+query-key factory and `GatePanel` were all fine, and the analysis says so
+rather than refactoring them anyway. What was genuinely wrong was invisible
+from a line count and mostly invisible from reading:
+
+- a `<button>` containing two `role="button"` spans, whose accessibility tree
+  collapsed to one control named `"AGENT EVENTS · 1 FAILED ONLY"`;
+- **six WCAG failures, every one in the light theme** — the theme nobody had
+  been looking at — including a goals canvas that floated a hardcoded DARK
+  panel under theme-following light text at **1.54:1**;
+- a phase-timeline highlight that never rendered at all, because it
+  concatenated hex alpha onto a `var()`;
+- a minimap still painted dark in light mode, caught by *looking at the task 5
+  screenshots* — which is the entire argument for taking them;
+- two plan tabs with no heading, and a composer that could only ever create the
+  FIRST project.
+
+Every one is locked by a test.
 
 ### What this phase must not do
 
@@ -1044,7 +1074,7 @@ truth test.
   Phase 10's evidence to collect.
 - **No redesign before the tests.** Stated three times on purpose.
 
-## Phase 10 — repository audit, then launch ⬜
+## Phase 10 — repository audit, then launch ⬜ (current)
 
 **Scoped 2026-08-10.** Two halves that look unrelated and are not: nobody should
 launch a system they have not audited, and an audit with no launch behind it is
