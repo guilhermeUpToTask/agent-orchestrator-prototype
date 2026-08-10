@@ -364,3 +364,32 @@
   .planActivity { display: none; }
   .readinessBanner { align-items: flex-start; flex-direction: column; }
 }
+
+/* ── Plan composer: project picker ───────────────────────────────────────── */
+
+/*
+ * The picker and its "New project" escape hatch. Added P9 task 4: the create
+ * form used to appear only when there were zero projects, so from the second
+ * project onward the composer offered no way to add one.
+ */
+.projectPicker {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.projectPicker > :first-child {
+  flex: 1;
+}
+
+/* Was `style={{ display: 'grid', gap: 8 }}` inline. */
+.projectForm {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.projectFormActions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}

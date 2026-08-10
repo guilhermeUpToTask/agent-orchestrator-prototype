@@ -156,6 +156,9 @@ export function ActivityView() {
 
   return (
     <div className={styles.page}>
+      {/* Visually hidden: the timeline reads clearly on screen but offered a
+          reader navigating by headings no landmark at all. */}
+      <h2 className="sr-only">Activity</h2>
       <MetricsStrip planId={planId} />
       <div className={styles.toolbar}>
         <input
