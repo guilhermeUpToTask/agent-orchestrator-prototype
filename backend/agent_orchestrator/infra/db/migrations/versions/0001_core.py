@@ -2,7 +2,7 @@
 agent_events, secrets.
 
 Fresh migration chain (clean break — the pre-refactor schema and its data were
-discarded; see docs/DESIGN_NOTES.md and the integration plan).
+discarded; the pre-refactor design set is archived in `docs/history/pre-refactor/`).
 
 Revision ID: 0001_core
 Revises:

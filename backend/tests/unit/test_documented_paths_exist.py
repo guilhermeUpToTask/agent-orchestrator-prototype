@@ -93,6 +93,92 @@ def test_every_documented_path_exists(document: Path) -> None:
     )
 
 
+# --- the same claim, made in code -------------------------------------------
+#
+# A comment that cites a repository path makes exactly the claim the documents
+# above make, and nothing was checking it. Phase 10A found two live ones:
+# `frontend/src/lib/api.ts` pointing at `backend/src/api/security.py` (the
+# never-existed layout this file's own docstring is about, still being repeated
+# in current code two refactors later), and migration `0001_core` citing a
+# `docs/DESIGN_NOTES.md` that was never committed at all.
+#
+# Scope is the SHIPPED source only. `tests/` is excluded deliberately: test
+# bodies carry synthetic paths as fixture data (`docs/x.md`), and this file
+# itself must keep naming `backend/src/domain/` to describe the defect. A check
+# that has to be taught about fixture strings is one that gets deleted.
+_SOURCE_ROOTS = [
+    REPO / "backend" / "agent_orchestrator",
+    REPO / "frontend" / "src",
+]
+_SOURCE_SUFFIXES = {".py", ".ts", ".tsx"}
+
+# Paths in comments are rarely backticked, so the token is taken raw — but only
+# from a line that already contains a root, keeping this linear over the tree.
+_TOKEN = re.compile(r"[\w./-]+")
+
+
+def _source_files() -> list[Path]:
+    return sorted(
+        f
+        for root in _SOURCE_ROOTS
+        for f in root.rglob("*")
+        if f.suffix in _SOURCE_SUFFIXES
+        and "node_modules" not in f.parts
+        and "__pycache__" not in f.parts
+    )
+
+
+def _code_claims(source: Path) -> set[str]:
+    text = source.read_text(encoding="utf-8", errors="replace")
+    if not any(root in text for root in _ROOTS):
+        return set()
+    found: set[str] = set()
+    for token in _TOKEN.findall(text):
+        candidate = token.rstrip(_TRAILING).rstrip("/")
+        if not candidate.startswith(_ROOTS):
+            continue
+        if "*" in candidate:
+            continue
+        tail = candidate.rsplit("/", 1)[-1]
+        if "." in tail and not candidate.endswith(_SUFFIXES):
+            continue  # `module.function`, not a file
+        found.add(candidate)
+    return found
+
+
+def test_no_source_comment_cites_a_path_that_does_not_exist() -> None:
+    missing: list[str] = []
+    for source in _source_files():
+        for claim in sorted(_code_claims(source) - _GENERATED):
+            if not (REPO / claim).exists():
+                missing.append(f"{source.relative_to(REPO)} -> {claim}")
+
+    assert missing == [], (
+        "source comments name paths that do not exist. Fix the comment in the "
+        f"same change that moved them: {missing}"
+    )
+
+
+def test_the_code_extractor_sees_an_unbackticked_path(tmp_path: Path) -> None:
+    """The comment form is not backticked, so the document extractor would have
+    missed every one of these. Without this, the check above could silently
+    stop recognising claims and still pass."""
+    source = tmp_path / "sample.py"
+    source.write_text(
+        "# see backend/src/api/security.py::require_api_token_or_query\n"
+        "# and backend/agent_orchestrator/api/server.py for the mount.\n"
+        "# Resolution happens in infra/forge/binding.py (package-relative).\n"
+    )
+
+    claims = _code_claims(source)
+
+    assert "backend/src/api/security.py" in claims, "the wrong claim must still be seen"
+    assert "backend/agent_orchestrator/api/server.py" in claims
+    assert not any(claim.startswith("infra/") for claim in claims), (
+        "the package-relative `infra/` prefix stays excluded — see _ROOTS"
+    )
+
+
 def test_the_extractor_catches_the_defect_it_exists_for(tmp_path: Path) -> None:
     """The historical failure, against a synthetic document.
 
