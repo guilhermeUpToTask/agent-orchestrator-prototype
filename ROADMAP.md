@@ -1228,6 +1228,31 @@ tells a visitor nothing. Choose a replacement deliberately:
   those are user-visible state on existing installs and need a migration or a
   compatibility alias, not a `sed`.
 
+**Launch plan written 2026-08-11:**
+[`docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md`](docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md)
+— positioning, audience and channels with their norms, the asset inventory
+(most of it already exists), the numbers that may be quoted, metrics with the
+pre-agreed stop-and-fix threshold, and the support path.
+
+**It opens by correcting the headline proposed below, and that correction is a
+Phase 10 finding rather than a wording preference.** Checked against
+`demos/static-site-v1/runs/20260810T164908Z-d098aece/evidence.json`, the
+*boundary* is provable — `test_bundle.state: "frozen"`, `test_commit_sha` ≠
+`candidate_commit_sha` on every task, `protected_file_hashes` proving the
+implementer could not edit the tests, plus `exact_command`, `exit_code` and a
+hash of the output. **"Proven RED" is not.** All five tasks carry
+`exit_code: 0` and `rejected_evidence_count: 0`; no failing verification run is
+recorded in the published artifacts. Launching on a claim a reader can ask for
+and we cannot produce would undo every honest number beside it, because
+verifiability *is* the pitch.
+
+So there is a piece of product work with a launch consequence: **record and
+export the RED run** — the test-authoring stage's own verification, showing the
+frozen tests failing against the pre-implementation tree. Most of the machinery
+exists; `run_kind` is in the orchestration path but not yet a dedicated ledger
+column (see known-issues). Ship it and the headline gets shorter and stronger;
+skip it and the launch uses the longer, fully-supported version.
+
 Then the campaign, written the way a marketing team that has shipped developer
 tools would write it rather than the way engineers imagine marketing works:
 
