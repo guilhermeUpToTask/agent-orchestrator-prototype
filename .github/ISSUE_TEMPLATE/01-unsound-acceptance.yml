@@ -1,0 +1,72 @@
+name: It accepted something it shouldn't have
+description: >-
+  The orchestrator merged, promoted or published work that was not actually
+  verified. This is the highest-priority report this project can receive.
+title: "unsound acceptance: "
+labels: ["unsound-acceptance", "priority"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Thank you — this is the report that matters most.**
+
+        The one invariant this whole system rests on is that *only
+        independently verified work moves upward*. If it moved something it
+        should not have, that is a correctness defect at the centre of the
+        product, not an edge case.
+
+        It has its own template because it arrives looking like an ordinary
+        bug, and it must not be triaged as one.
+
+        Every fix for this class lands with a regression test that locks it.
+  - type: textarea
+    id: what-was-accepted
+    attributes:
+      label: What was accepted that should not have been?
+      description: >-
+        The task, goal or cycle, and what was wrong with it — tests that did not
+        actually pass, work outside the declared scope, edited protected tests,
+        a merge without accepted evidence.
+      placeholder: |
+        Goal "add frontmatter parsing" promoted with task t2 marked DONE, but
+        tests/frontmatter_test.py had been rewritten by the implementing agent.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: The evidence the orchestrator recorded
+      description: >-
+        `GET /api/plans/{plan_id}/cycles/{cycle_id}/evidence` — the accepted
+        evidence for the task in question. Redact anything private; the fields
+        that matter are `test_commit_sha`, `candidate_commit_sha`,
+        `protected_file_hashes`, `exact_command` and `exit_code`.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened instead?
+      placeholder: >-
+        The candidate should have been rejected and the task retried, or a block
+        opened.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `orchestrate --version`, or the commit you are running.
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which tier was this?
+      options:
+        - "Tier 0 — stub reasoner + dry-run runtime"
+        - "Tier 1 — real provider + real agent runtime"
+        - "Mixed / not sure"
+    validations:
+      required: true

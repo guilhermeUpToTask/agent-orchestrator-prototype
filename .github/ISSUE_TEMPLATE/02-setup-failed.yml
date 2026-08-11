@@ -1,0 +1,76 @@
+name: Setup failed / I can't complete a cycle
+description: >-
+  Install, configuration, provider or first-run problems. Prioritised over
+  feature requests.
+title: "setup: "
+labels: ["setup"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Setup failures are prioritised over feature requests**, and the same
+        one reported twice is treated as a product defect rather than two
+        support requests.
+
+        Every run this project has published was on its own development guest,
+        by its author. The first mile has barely been walked by anyone else, so
+        a report here is genuinely useful rather than an inconvenience.
+
+        Before filing, `orchestrate serve` and the readiness panel
+        (`GET /api/readiness`) between them cover most first-run problems — but
+        if the readiness check itself is what is confusing, that is a report
+        worth making.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it stop?
+      options:
+        - "Install — pip / uv"
+        - "orchestrate serve — the server would not start"
+        - "The console loaded but nothing worked"
+        - "Provider or agent configuration"
+        - "A plan was created but the worker never picked it up"
+        - "The cycle started but never finished"
+        - "Publication / opening a PR"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What did you run, and what happened?
+      description: The exact commands and the output. Redact keys and tokens.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: readiness
+    attributes:
+      label: Readiness output
+      description: >-
+        `curl -s localhost:8000/api/readiness | jq` — this usually contains the
+        answer. Redact anything private.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Python version
+      placeholder: "Ubuntu 24.04, Python 3.12"
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which tier were you trying?
+      options:
+        - "Tier 0 — stub reasoner + dry-run runtime (free, no API key)"
+        - "Tier 1 — real provider + real agent runtime"
+    validations:
+      required: true

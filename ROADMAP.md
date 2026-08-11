@@ -1283,17 +1283,53 @@ tools would write it rather than the way engineers imagine marketing works:
   the audience the launch actually produces rather than an imagined one. A
   support channel with nobody in it is a maintenance cost — build it when the
   first invitation goes out, not before.
+  **Built 2026-08-11:** `.github/ISSUE_TEMPLATE/` — three templates and a
+  Discussions contact link, deliberately not a Discord (a channel implying a
+  response time one maintainer cannot hold, and unsearchable besides). The first
+  template is *"it accepted something it shouldn't have"*, which exists
+  separately because it is the highest-signal report this product can receive
+  and it arrives looking like an ordinary bug; triaging it as one would miss a
+  defect at the centre of the invariant everything else rests on. The second is
+  setup failure, prioritised over feature requests, because every published run
+  to date was on the dev guest by its author and the first mile is the largest
+  untested exposure. **Still to do by hand:** enable Discussions in repository
+  settings — the contact link points at it.
 
 ### Exit criteria
 
-- Every audit finding carries proof; every hypothesis is labelled as one.
-- `known-issues.md` reflects the audit, and every fix landed with a regression
-  test.
-- A name is chosen, verified available across all four surfaces, and the rename
-  is scoped with a migration path for existing installs.
-- A written launch plan with positioning, channels, assets, sequencing, metrics,
-  and a pre-agreed "stop and fix the product" threshold.
-- The support path exists before the first invitation goes out.
+- ✅ **Every audit finding carries proof; every hypothesis is labelled as one.**
+  Four sweeps, 11 findings each reproduced before being written down, 4
+  retractions, and 2 open observations kept as hypotheses with the measurement
+  that would settle them.
+- ✅ **`known-issues.md` reflects the audit, and every fix landed with a
+  regression test.** All 11 fixed, so none became entries — what the file gained
+  is the record of the sweep, what it cleared, and what it deliberately did not
+  file.
+- ✅ **A name is chosen, verified available across all four surfaces, and the
+  rename is scoped with a migration path for existing installs.**
+  `praxis-orchestrator`, free on all five (both TLDs);
+  [scope](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md) separates
+  the mechanical rename from the state that needs adopt-in-place and
+  read-both-prefer-new aliases. **Provisional pending trademark clearance.**
+- ✅ **A written launch plan** with positioning, channels, assets, sequencing,
+  metrics and the pre-agreed stop-and-fix threshold
+  ([plan](docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md)) — which
+  opens by correcting this file's own proposed headline, because "proven RED" is
+  not supported by the published evidence.
+- ✅ **The support path exists before the first invitation goes out.**
+  `.github/ISSUE_TEMPLATE/`. Discussions still needs enabling by hand.
+
+**Remaining before the phase can close — all owner decisions, not work:**
+
+1. **Trademark clearance** for `praxis-orchestrator` (USPTO/EUIPO, classes 9
+   and 42; `Praxis Framework` specifically). Blocks the rename, which blocks the
+   launch.
+2. **The RED-run gap** — build it for the shorter headline, or launch with the
+   longer fully-supported claim.
+3. **Git history and recorded evidence** — whether to scrub `aipom` from history
+   (recommended: no) and whether to re-run the demo on the renamed guest rather
+   than edit hostnames inside published evidence (recommended: yes).
+4. **Enable GitHub Discussions**, which the issue-template contact link expects.
 
 ## Deferred — reconsider only with run or user evidence ⏸
 

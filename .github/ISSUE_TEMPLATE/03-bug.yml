@@ -1,0 +1,66 @@
+name: Bug
+description: Something behaves incorrectly, and it is not a setup problem or an unsound acceptance.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the orchestrator **accepted work it should not have**, use the
+        *unsound acceptance* template instead — that is a different severity.
+
+        If you **cannot get it running**, use the *setup failed* template.
+
+        A reproduction is worth more than a description here: this project's own
+        rule is that a finding without proof is a hypothesis, and it applies to
+        reports as much as to its own audits.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >-
+        Exact commands, or the API calls. A failing test is ideal. If you cannot
+        reproduce it, say so — an unreproduced report is still worth filing, and
+        will be recorded as a hypothesis rather than silently dropped.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        The worker or API log around the failure. Structured JSON lines are
+        ideal. Redact keys and tokens — the orchestrator never logs secrets, but
+        your own environment might.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which tier?
+      options:
+        - "Tier 0 — stub reasoner + dry-run runtime"
+        - "Tier 1 — real provider + real agent runtime"
+        - "Not applicable"
+    validations:
+      required: true
