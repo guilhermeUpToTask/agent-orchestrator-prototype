@@ -2235,7 +2235,7 @@
           "plans"
         ],
         "summary": "List Planning Artifacts",
-        "description": "What earlier attempts at this artifact established, newest first.\n\nThe payload itself is deliberately NOT served \u2014 it is model working state,\ncan be large, and an operator needs to know an attempt happened and why it\nwas refused, not to re-read the draft.",
+        "description": "What earlier attempts at this artifact established, newest first.\n\nThe payload itself is deliberately NOT served \u2014 it is model working state,\ncan be large, and an operator needs to know an attempt happened and why it\nwas refused, not to re-read the draft.\n\n**Omitting `goal_id` means EVERY goal, not \"the plan-wide ones\".** It used to\nmean the latter, because the store matches `goal_id IS :goal_id` and NULL\ntherefore selects only plan-wide rows \u2014 so asking for a goal-scoped purpose\nwithout naming a goal returned `[]` while rows existed, and the honest\nreading of that empty list was \"this was never recorded\". Found in Phase 10B\nagainst `verification_baseline`, which is written per goal and looked\nentirely absent. Naming a `goal_id` still scopes to that goal.",
         "operationId": "plans-list_planning_artifacts",
         "parameters": [
           {
@@ -6228,6 +6228,44 @@
           "tasks"
         ],
         "title": "AttemptTimelineResponse"
+      },
+      "BaselineResponse": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "commands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Commands"
+          },
+          "exit_codes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Exit Codes"
+          },
+          "checks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict",
+          "commands",
+          "exit_codes",
+          "checks"
+        ],
+        "title": "BaselineResponse",
+        "description": "What the checks did BEFORE the implementation existed.\n\nThe single fact that decides whether the green afterwards means anything: a\ncheck that already passed proves nothing about this task, because the green\nafter the work would be the same green as before it. The orchestrator\nalready ran this and already refused to proceed without it \u2014 `tdd` and\n`executable_check` both require a FAILING baseline\n(`app/verification.py::baseline_outcome`) \u2014 but the verdict lived only in a\n`verification_baseline` planning artifact, off to one side of the evidence\ndocument anyone actually reads.\n\nSo the run was red, provably, and the published evidence could not say so.\nSurfaced here (Phase 10B) because \"the tests were proven failing first\" is\nthe claim this product rests on, and a claim a reader cannot check from the\nevidence bundle is one we should not be making."
       },
       "BlockResponse": {
         "properties": {
@@ -10793,13 +10831,32 @@
           "verification_strategy": {
             "type": "string",
             "title": "Verification Strategy"
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseline_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Baseline Evidence Refs"
           }
         },
         "type": "object",
         "required": [
           "test_commit_sha",
           "state",
-          "verification_strategy"
+          "verification_strategy",
+          "baseline",
+          "baseline_evidence_refs"
         ],
         "title": "TestBundleResponse"
       },

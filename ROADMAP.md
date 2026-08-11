@@ -1237,24 +1237,31 @@ which `praxis-orchestrator` was chosen against:
 (most of it already exists), the numbers that may be quoted, metrics with the
 pre-agreed stop-and-fix threshold, and the support path.
 
-**It opens by correcting the headline proposed below, and that correction is a
-Phase 10 finding rather than a wording preference.** Checked against
-`demos/static-site-v1/runs/20260810T164908Z-d098aece/evidence.json`, the
-*boundary* is provable — `test_bundle.state: "frozen"`, `test_commit_sha` ≠
-`candidate_commit_sha` on every task, `protected_file_hashes` proving the
-implementer could not edit the tests, plus `exact_command`, `exit_code` and a
-hash of the output. **"Proven RED" is not.** All five tasks carry
-`exit_code: 0` and `rejected_evidence_count: 0`; no failing verification run is
-recorded in the published artifacts. Launching on a claim a reader can ask for
-and we cannot produce would undo every honest number beside it, because
-verifiability *is* the pitch.
+**The headline below stands, and the story of getting there is worth keeping.**
+An initial pass concluded that "proven RED" was unsupported, because the
+published `evidence.json` showed `exit_code: 0` and nothing else for every task.
+**That was wrong** — inferred from the export without reading the execution
+path. The orchestrator runs the checks after the test-authoring stage, and
+`app/verification.py::baseline_outcome` **requires the baseline to fail** for
+`tdd` and `executable_check`: a green baseline raises `TaskFailed("test bundle
+did not establish a failing baseline")`, so no task can reach a frozen bundle
+without a proven failure first.
 
-So there is a piece of product work with a launch consequence: **record and
-export the RED run** — the test-authoring stage's own verification, showing the
-frozen tests failing against the pre-implementation tree. Most of the machinery
-exists; `run_kind` is in the orchestration path but not yet a dedicated ledger
-column (see known-issues). Ship it and the headline gets shorter and stronger;
-skip it and the launch uses the longer, fully-supported version.
+What was actually missing was visibility, plus a defect underneath it: the
+verdict was recorded as a `verification_baseline` planning artifact, and that
+artifact was **unreachable** — the store matches `goal_id IS :goal_id`, so a
+query without a goal id asked for the plan-wide rows and returned `[]` for a
+per-goal purpose. It looked like it had never been written.
+
+Both fixed 2026-08-11. `GET …/cycles/{id}/evidence` now serves
+`test_bundle.baseline` (verdict, commands, exit codes) beside the accepted
+green, and `GET …/planning-artifacts` without a `goal_id` now spans every goal.
+**The only thing left before the short headline can be used is a demo re-run, so
+a published `evidence.json` carries the field.**
+
+The lesson cuts both ways: an absence in an export is not an absence in the
+system, and retracting a true claim on incomplete evidence is the same error as
+asserting a false one.
 
 Then the campaign, written the way a marketing team that has shipped developer
 tools would write it rather than the way engineers imagine marketing works:
@@ -1327,8 +1334,10 @@ tools would write it rather than the way engineers imagine marketing works:
 1. **Trademark clearance** for `praxis-orchestrator` (USPTO/EUIPO, classes 9
    and 42; `Praxis Framework` specifically). Blocks the rename, which blocks the
    launch.
-2. **The RED-run gap** — build it for the shorter headline, or launch with the
-   longer fully-supported claim.
+2. ~~**The RED-run gap**~~ — **closed 2026-08-11.** The run was always proven
+   red and enforced; the verdict is now in the cycle evidence document and the
+   artifact is reachable. Needs only a demo re-run so a published
+   `evidence.json` carries it.
 3. **Git history and recorded evidence** — whether to scrub `praxis` from history
    (recommended: no) and whether to re-run the demo on the renamed guest rather
    than edit hostnames inside published evidence (recommended: yes).

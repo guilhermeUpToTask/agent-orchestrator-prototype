@@ -340,6 +340,19 @@ class PlanningArtifactStore(Protocol):
         self, plan_id: str, purpose: str, *, goal_id: str | None = None, limit: int = 5
     ) -> list[PlanningArtifact]: ...
 
+    def latest_across_goals(
+        self, plan_id: str, purpose: str, *, limit: int = 5
+    ) -> list[PlanningArtifact]:
+        """Every goal's artifacts for `purpose`, newest first.
+
+        `latest(goal_id=None)` does NOT mean this. It matches `goal_id IS NULL`
+        — the plan-wide artifacts — which is correct for a plan-wide purpose and
+        returns nothing for a goal-scoped one. There was no way to ask the
+        question this answers, which is why a goal-scoped purpose looked like it
+        had never been written (Phase 10B, `verification_baseline`).
+        """
+        ...
+
     def clear(self, plan_id: str, purpose: str, *, goal_id: str | None = None) -> None: ...
 
 

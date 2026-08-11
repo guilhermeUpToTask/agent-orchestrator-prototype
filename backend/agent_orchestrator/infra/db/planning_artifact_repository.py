@@ -47,6 +47,22 @@ _SELECT_SQL = text(
     """
 )
 
+# Deliberately without the `goal_id` predicate: `_SELECT_SQL` uses
+# `goal_id IS :goal_id`, so passing NULL asks for the PLAN-WIDE artifacts, not
+# for all of them. A goal-scoped purpose was therefore unreachable without
+# knowing every goal id up front.
+_SELECT_ACROSS_GOALS_SQL = text(
+    """
+    SELECT id, plan_id, goal_id, purpose, operation_id, sequence,
+           input_fingerprint, outcome, payload_json, rejection_reasons_json,
+           turns_used, created_at
+    FROM planning_artifacts
+    WHERE plan_id = :plan_id AND purpose = :purpose
+    ORDER BY sequence DESC, created_at DESC
+    LIMIT :limit
+    """
+)
+
 _NEXT_SEQUENCE_SQL = text(
     """
     SELECT COALESCE(MAX(sequence), 0) + 1
@@ -125,6 +141,16 @@ class SqlitePlanningArtifactRepository:
             rows = session.execute(
                 _SELECT_SQL,
                 {"plan_id": plan_id, "purpose": purpose, "goal_id": goal_id, "limit": limit},
+            ).all()
+        return [_row_to_artifact(row) for row in rows]
+
+    def latest_across_goals(
+        self, plan_id: str, purpose: str, *, limit: int = 5
+    ) -> list[PlanningArtifact]:
+        with self._sf() as session:
+            rows = session.execute(
+                _SELECT_ACROSS_GOALS_SQL,
+                {"plan_id": plan_id, "purpose": purpose, "limit": limit},
             ).all()
         return [_row_to_artifact(row) for row in rows]
 

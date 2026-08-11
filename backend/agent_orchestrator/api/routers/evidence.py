@@ -34,6 +34,12 @@ from agent_orchestrator.infra.git.repository_binding import (
 
 router = APIRouter(prefix="/plans", tags=["evidence"])
 
+# How many `verification_baseline` artifacts to read per request. One is written
+# per task-attempt that reached a frozen bundle, so this covers a large cycle
+# plus its retries; past it the oldest baselines fall off and their tasks report
+# `baseline: null` rather than the endpoint growing without bound.
+_BASELINE_SCAN_LIMIT = 200
+
 
 class PromotionResponse(BaseModel):
     from_ref: str
@@ -52,10 +58,41 @@ class ProtectedScopeResponse(BaseModel):
     criterion_to_tests: dict[str, list[str]]
 
 
+class BaselineResponse(BaseModel):
+    """What the checks did BEFORE the implementation existed.
+
+    The single fact that decides whether the green afterwards means anything: a
+    check that already passed proves nothing about this task, because the green
+    after the work would be the same green as before it. The orchestrator
+    already ran this and already refused to proceed without it — `tdd` and
+    `executable_check` both require a FAILING baseline
+    (`app/verification.py::baseline_outcome`) — but the verdict lived only in a
+    `verification_baseline` planning artifact, off to one side of the evidence
+    document anyone actually reads.
+
+    So the run was red, provably, and the published evidence could not say so.
+    Surfaced here (Phase 10B) because "the tests were proven failing first" is
+    the claim this product rests on, and a claim a reader cannot check from the
+    evidence bundle is one we should not be making.
+    """
+
+    verdict: str  # "red" | "green"
+    commands: list[str]
+    exit_codes: list[int]
+    checks: list[str]
+
+
 class TestBundleResponse(BaseModel):
     test_commit_sha: str
     state: str
     verification_strategy: str
+    # Empty only for a bundle frozen before this was recorded, or if the
+    # best-effort artifact write was lost — never a signal that no baseline ran,
+    # because a task cannot reach `frozen` without an accepted one.
+    baseline: BaselineResponse | None
+    # sha256 of the baseline run's output. Proves the command ran and what it
+    # printed; `baseline` above is what it decided.
+    baseline_evidence_refs: list[str]
 
 
 class EvidenceResponse(BaseModel):
@@ -150,7 +187,64 @@ class CycleEvidenceResponse(BaseModel):
     acceptance_runs: list[AcceptanceRunResponse]
 
 
-def _task_evidence(task: Task) -> TaskEvidenceResponse:
+def _baselines_by_task(
+    container: AppContainer, plan_id: str
+) -> dict[str, BaselineResponse]:
+    """The `verification_baseline` artifacts, keyed by `task_id:revision`.
+
+    Read once per request rather than per task — a cycle has as many tasks as it
+    has work, and this is a second store outside the plan document.
+
+    Best-effort on purpose: the baseline is written on its own short transaction
+    (`ExecutionHandler._record_baseline`) precisely so losing it can never fail a
+    run that succeeded, so a missing artifact must degrade this endpoint to
+    `baseline: null` rather than take it down.
+    """
+    artifacts = container.planning_artifacts
+    if artifacts is None:
+        return {}
+    try:
+        # `latest(goal_id=None)` would ask for the PLAN-WIDE artifacts and return
+        # nothing: the baseline is written per goal.
+        rows = artifacts.latest_across_goals(
+            plan_id, "verification_baseline", limit=_BASELINE_SCAN_LIMIT
+        )
+    except Exception:  # pragma: no cover - a read-model extra must not 500
+        return {}
+
+    found: dict[str, BaselineResponse] = {}
+    for row in rows:
+        payload = row.payload or {}
+        key = row.input_fingerprint or f"{payload.get('task_id')}:{payload.get('task_revision')}"
+        # `latest` is newest-first, so the first hit for a key is the current one
+        # and a retried task's older baselines are correctly ignored.
+        if key in found:
+            continue
+        verdict = payload.get("verdict")
+        if not isinstance(verdict, str):
+            continue
+
+        def _strings(name: str) -> list[str]:
+            value = payload.get(name)
+            return [str(item) for item in value] if isinstance(value, list) else []
+
+        codes = payload.get("exit_codes")
+        found[key] = BaselineResponse(
+            verdict=verdict,
+            commands=_strings("commands"),
+            exit_codes=(
+                [int(item) for item in codes if isinstance(item, int)]
+                if isinstance(codes, list)
+                else []
+            ),
+            checks=_strings("checks"),
+        )
+    return found
+
+
+def _task_evidence(
+    task: Task, baselines: dict[str, BaselineResponse] | None = None
+) -> TaskEvidenceResponse:
     # Evidence bound to a superseded revision is NOT accepted evidence for the
     # current contract: `edit_task` invalidates revision-bound evidence, so
     # serving it as accepted is precisely the lie this endpoint exists to avoid.
@@ -193,6 +287,8 @@ def _task_evidence(task: Task) -> TaskEvidenceResponse:
                 test_commit_sha=bundle.test_commit_sha,
                 state=bundle.state.value,
                 verification_strategy=bundle.verification_strategy.value,
+                baseline=(baselines or {}).get(f"{task.id}:{task.revision}"),
+                baseline_evidence_refs=list(bundle.red_or_baseline_evidence_refs),
             )
         ),
         accepted_evidence=[
@@ -276,6 +372,10 @@ def get_cycle_evidence(
     if cycle is None:
         raise CycleNotFoundError(plan_id, cycle_id)
 
+    # After the cycle is resolved, so an unknown id still 404s without touching
+    # a second store.
+    baselines = _baselines_by_task(container, plan_id)
+
     by_goal = {item.goal_id: item for item in promotions}
     return CycleEvidenceResponse(
         plan_id=plan_id,
@@ -308,7 +408,7 @@ def get_cycle_evidence(
                         promoted_at=by_goal[goal.id].promoted_at,
                     )
                 ),
-                tasks=[_task_evidence(task) for task in goal.tasks],
+                tasks=[_task_evidence(task, baselines) for task in goal.tasks],
             )
             for goal in cycle.goals
         ],

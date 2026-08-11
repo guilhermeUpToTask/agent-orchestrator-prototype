@@ -49,9 +49,19 @@ def list_planning_artifacts(
     The payload itself is deliberately NOT served — it is model working state,
     can be large, and an operator needs to know an attempt happened and why it
     was refused, not to re-read the draft.
+
+    **Omitting `goal_id` means EVERY goal, not "the plan-wide ones".** It used to
+    mean the latter, because the store matches `goal_id IS :goal_id` and NULL
+    therefore selects only plan-wide rows — so asking for a goal-scoped purpose
+    without naming a goal returned `[]` while rows existed, and the honest
+    reading of that empty list was "this was never recorded". Found in Phase 10B
+    against `verification_baseline`, which is written per goal and looked
+    entirely absent. Naming a `goal_id` still scopes to that goal.
     """
-    artifacts = container.planning_artifacts.latest(
-        plan_id, purpose, goal_id=goal_id, limit=limit
+    artifacts = (
+        container.planning_artifacts.latest(plan_id, purpose, goal_id=goal_id, limit=limit)
+        if goal_id is not None
+        else container.planning_artifacts.latest_across_goals(plan_id, purpose, limit=limit)
     )
     return [
         PlanningArtifactResponse(
