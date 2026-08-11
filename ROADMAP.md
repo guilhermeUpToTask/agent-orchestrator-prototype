@@ -1185,6 +1185,31 @@ the exit criteria below.
 by someone who has never heard of it, under a name that does not need
 explaining.
 
+**Name chosen 2026-08-11: `praxis-orchestrator`** (CLI `praxis`), free on all
+five surfaces — PyPI, npm, GitHub org, `.dev` and `.com`. Scope, migration
+design and open items:
+[`docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
+**Provisional until trademark clearance** — registry availability is not freedom
+to operate, and `Praxis Framework` is an adjacent programme-management
+methodology that needs a real search (USPTO/EUIPO, classes 9 and 42). That is
+the one thing blocking the rename starting.
+
+Two things the scoping found that this section did not know:
+
+- **`agent-orchestrator` on PyPI belongs to someone else** — version 2.0.0, an
+  *"Orquestrador de Agentes de IA para Desenvolvimento de Software"*. The same
+  category. This project has never published (release-please attaches a wheel to
+  a GitHub Release and never touches PyPI), so `pip install agent-orchestrator`
+  installs a stranger's tool and the first publish attempt would have failed.
+  The current distribution name is not merely bad, it is unusable.
+- **`aipom` is a Nintendo / Game Freak mark**, so removing it is legal hygiene
+  rather than branding, and it comes out completely — 47 tracked files, having
+  spread from the guest hostname into the npm package name (`aipom-planner`),
+  the acceptance-container prefix, the frontend build cache and the e2e
+  artefacts. `tests/unit/test_no_third_party_marks.py` is the ratchet that keeps
+  it out: a strict `xfail` today, which turns into a hard failure the moment the
+  tree is clean, forcing the marker off.
+
 **The rename comes first, because everything else bakes it in.** `aipom` is a
 Pokémon, which is charming and unsearchable, collides with an existing name, and
 tells a visitor nothing. Choose a replacement deliberately:
