@@ -608,7 +608,7 @@ CLI-compatible.
 
 **Decision 63 (2026-08-09) — the development environment moves from a hardened
 devcontainer to a libvirt/KVM guest. No unfreeze; nothing here touches the
-domain.** `.devcontainer/` is deleted; `infra/dev-vm/` provisions `aipom-dev`
+domain.** `.devcontainer/` is deleted; `infra/dev-vm/` provisions `praxis-dev`
 (Ubuntu 24.04 on `qemu:///system`, cloud-init, `make up|start|ssh|verify|destroy`).
 
 **The reason is that the requirement is self-contradictory for a container.**
@@ -652,7 +652,7 @@ guest (`733 passed, 1 skipped`). P8.5 is unparked.
 `unshare` from a plain shell while podman and docker pass on their own AppArmor
 profiles — a guest that runs PID-isolated containers perfectly while several
 checks fail exactly like a kernel wall. Cloud-init disables it
-(`/etc/sysctl.d/60-aipom-userns.conf`). That is sound *here and only here*: the
+(`/etc/sysctl.d/60-praxis-userns.conf`). That is sound *here and only here*: the
 VM boundary — **not bubblewrap** — is now what contains agent-written code, the
 host kernel is untouched, and the guest is cattle (`make destroy && make up`)
 rather than a pet. All durable state lives in `~/.orchestrator`. See

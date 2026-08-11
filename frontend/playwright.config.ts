@@ -27,7 +27,7 @@ const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
  * on Tier 0), so leftover state is the one thing that would make them lie. The
  * worker is what the API-only fixtures exercise; a browser adds nothing to it.
  */
-const E2E_HOME = process.env.E2E_HOME ?? '/tmp/aipom-e2e-home';
+const E2E_HOME = process.env.E2E_HOME ?? '/tmp/praxis-e2e-home';
 const PYTHON = process.env.E2E_PYTHON ?? '../backend/.venv/bin/python';
 
 export default defineConfig({
@@ -43,7 +43,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  outputDir: '/tmp/aipom-playwright',
+  outputDir: '/tmp/praxis-playwright',
   use: {
     baseURL: BASE_URL,
     screenshot: 'only-on-failure',

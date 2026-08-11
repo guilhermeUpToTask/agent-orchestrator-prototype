@@ -147,7 +147,7 @@ the heartbeat.
 
 ```python
 listing = subprocess.run([binary, "ps", "-a", "--format", "{{.Names}}"], ...).stdout
-assert "aipom-acceptance-" not in listing
+assert "praxis-acceptance-" not in listing
 ```
 
 That asserts the **whole machine** has no acceptance container — not that *this
@@ -160,7 +160,7 @@ three-run flake check. Inspecting the machine between runs found exactly one
 orphan:
 
 ```
-aipom-acceptance-2c3d4265c45d   Exited (137) 9 minutes ago   alpine:3.20
+praxis-acceptance-2c3d4265c45d   Exited (137) 9 minutes ago   alpine:3.20
 ```
 
 It was removed by hand partway through run 3 — and **run 3 passed**. Cause,

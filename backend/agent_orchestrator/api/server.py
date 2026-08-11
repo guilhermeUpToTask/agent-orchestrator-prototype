@@ -106,10 +106,10 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         log.info("api.stopped")
 
     app = FastAPI(
-        title="AIPOM Orchestrator API",
+        title="Praxis Orchestrator API",
         version=_API_VERSION,
         description=(
-            "RESTful API for the AIPOM AI project orchestrator: the cyclic "
+            "RESTful API for the Praxis project orchestrator: the cyclic "
             "project-plan lifecycle (intent, cycle architecture, JIT goal "
             "enrichment, execution, publication) behind human review gates, "
             "reference-data catalogs, two-tier config, readiness reads, and the "

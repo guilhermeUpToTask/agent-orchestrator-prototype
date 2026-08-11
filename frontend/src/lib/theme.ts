@@ -8,7 +8,7 @@
 
 export type Theme = 'dark' | 'light';
 
-const STORAGE_KEY = 'aipom.theme';
+const STORAGE_KEY = 'praxis.theme';
 
 export function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);

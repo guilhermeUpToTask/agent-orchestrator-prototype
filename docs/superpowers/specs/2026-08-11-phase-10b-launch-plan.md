@@ -183,7 +183,7 @@ Decided now, before launching, as the roadmap requires.
 Rationale: every other number measures whether the message travelled. That one
 measures whether the thing works for someone who is not us. It is also the
 failure this project is most exposed to — every run to date has been on the
-`aipom-dev` guest, by its author. The first-mile has never been walked by a
+`praxis-dev` guest, by its author. The first-mile has never been walked by a
 stranger.
 
 Two supporting tripwires:

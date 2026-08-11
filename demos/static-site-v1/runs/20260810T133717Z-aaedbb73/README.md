@@ -83,3 +83,11 @@ script not existing at the path the README named.
 
 Measurement and comparison against the 61-minute baseline:
 [`docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md`](../../../../docs/history/analyses/2026-08-10-cycle-latency-second-measurement.md).
+
+---
+
+> **Note on hostnames (added 2026-08-11).** This run executed before the
+> project was renamed. The guest hostname and the `*-acceptance-*` container
+> names in `worker-log.txt` were **substituted** during the rename to remove a
+> third party's trademark from the working tree. Nothing else was altered —
+> timings, exit codes, commit SHAs and command lines are exactly as recorded.

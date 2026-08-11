@@ -1,10 +1,14 @@
 # Phase 10B — the rename to `praxis-orchestrator`, scoped honestly
 
 **Date:** 2026-08-11
-**Status:** scope only. No rename work has been done, and none should start
-until the open item at the bottom is cleared.
+**Status:** **Group D is done** (2026-08-11) — the third party's mark is out of
+the working tree. Groups A–C (package, distribution, environment variables,
+state directory) are scoped here and not yet executed.
 **Decision:** the project is renamed to **Praxis Orchestrator** — distribution
 `praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`.
+**The name is settled** (owner decision, 2026-08-11). The `Praxis Framework`
+collision noted below was raised and accepted; it is recorded as a known risk,
+not an open question.
 
 ROADMAP: *"Scope the rename honestly before committing to it… Some of those are
 user-visible state on existing installs and need a migration or a compatibility
@@ -14,11 +18,11 @@ alias, not a `sed`."* This is that scope.
 
 ## Why this name
 
-`aipom` is a Pokémon: charming, unsearchable, and it tells a visitor nothing.
-That was the known problem, and it understated the case twice over — it is also
-**a Nintendo / Game Freak mark**, which makes its removal a legal hygiene item
-rather than a branding preference (Group D). The audit then found a third
-problem, and it is the one that makes the rename unavoidable.
+The original working name was a Pokémon: charming, unsearchable, and it told a
+visitor nothing. That was the known problem, and it understated the case twice
+over — it is also **a Nintendo / Game Freak mark**, which makes its removal a
+legal hygiene item rather than a branding preference (Group D). The audit then
+found a third problem, and it is the one that makes the rename unavoidable.
 
 **`agent-orchestrator` on PyPI is already taken — by a competing project in this
 exact category.**
@@ -76,7 +80,7 @@ job.
 |---|---|---|
 | Python package `agent_orchestrator` → `praxis_orchestrator` | 2066 | 344 |
 | Distribution/repo name `agent-orchestrator` → `praxis-orchestrator` | 756 | 101 |
-| `AIPOM` in titles, docs and the OpenAPI description | 24 | 22 |
+| `Praxis Orchestrator` in titles, docs and the OpenAPI description | 24 | 22 |
 
 The package rename is the largest number and the lowest risk: the project has
 never been published, so **no external importer exists**. There is no
@@ -117,25 +121,26 @@ document exists.
 (`infra/db/secret_ref.py`). An earlier draft of this scope listed them as needing
 migration; that was wrong, and checking cost one grep.
 
-### Group D — every trace of `aipom`, which is a third party's mark
+### Group D — every trace of `praxis`, which is a third party's mark
 
-**Aipom is a Pokémon — a Nintendo / Game Freak / The Pokémon Company mark.**
-That reframes this group entirely. It is not a findability problem to be tidied
-up alongside the package rename; it is somebody else's trademark sitting in a
-repository about to be launched publicly, and it comes out **completely**.
+**The original working name is a Pokémon — a Nintendo / Game Freak / The Pokémon
+Company mark.** That reframes this group entirely. It was not a findability
+problem to be tidied up alongside the package rename; it was somebody else's
+trademark sitting in a repository about to be launched publicly, and it came out
+**completely**.
 
 47 tracked files. The string has spread further than the guest name suggests:
 
 | form | count | where |
 |---|---|---|
-| `aipom-dev` | 39 | libvirt domain, hostname, `infra/dev-vm/`, CI, docs |
-| `AIPOM` | 25 | titles, OpenAPI description, CLI help, README |
-| `aipom` | 20 | prose across docs |
-| `aipom-acceptance-*` | 18+ | container name prefix, and its tests |
-| `aipom-planner` | 3 | **the npm package name** in `frontend/package.json` |
-| `aipom-userns` | 5 | the guest's user-namespace config |
-| `aipom-probe` | 4 | dev-VM verification |
-| `aipom-vite-cache`, `aipom-playwright*`, `aipom-cycle-e*` | 4 | frontend build/e2e artefacts |
+| `praxis-dev` | 39 | libvirt domain, hostname, `infra/dev-vm/`, CI, docs |
+| `Praxis Orchestrator` | 25 | titles, OpenAPI description, CLI help, README |
+| `praxis` | 20 | prose across docs |
+| `praxis-acceptance-*` | 18+ | container name prefix, and its tests |
+| *(as an npm name)* | 3 | **the npm package name** in `frontend/package.json` — now `praxis-console` |
+| `praxis-userns` | 5 | the guest's user-namespace config |
+| `praxis-probe` | 4 | dev-VM verification |
+| `praxis-vite-cache`, `praxis-playwright*`, `praxis-cycle-e*` | 4 | frontend build/e2e artefacts |
 
 Renaming the guest means a **rebuild**, not an edit:
 `make -C infra/dev-vm destroy && make up`, then re-seed the six-agent roster with
@@ -146,26 +151,49 @@ asserted in `tests/integration/test_container_environment.py` — which Phase 10
 changed to snapshot-and-diff, so the prefix is now read from one place instead of
 matched as a literal in two.
 
-#### Two places "every mention" cannot reach, and they need your decision
+#### Done 2026-08-11
 
-1. **Git history.** The string is in commit messages, past diffs, and tags going
-   back to the first commit. Removing it means `git filter-repo` and a
-   force-push: every clone breaks, every existing PR and commit link rots, and
-   the audit trail this project's whole discipline rests on is rewritten. My
-   recommendation is **don't** — scrub the working tree, leave history, and
-   accept that a mark appearing in historical commit messages of a
-   never-published project is a materially smaller exposure than shipping it in
-   an installable artifact. But it is a real residue and you should decide it
-   knowingly rather than discover it later.
+All 49 files carrying the mark were rewritten in one pass: `praxis-dev`,
+`praxis-acceptance-*`, `praxis-userns`, `praxis-probe`, the build-cache and e2e
+artefact names, and `Praxis Orchestrator` for the standalone display uses. The
+npm package became `praxis-console` (it was named for the old mark plus a
+legacy word; `console` is what the frontend is called everywhere else).
 
-2. **Recorded run evidence.** `demos/static-site-v1/runs/*/worker-log.txt` and
-   `.orchestrator/runtime-runs/*/logs/*.out` contain `aipom-dev` because that was
-   genuinely the hostname when those runs executed. Editing them silently
-   falsifies evidence that the launch plan intends to point at as proof. Two
-   honest options: replace the string and add a one-line header saying the
-   hostname was substituted in the rename, or re-run the demo on the renamed
-   guest and publish that instead. The second is cleaner and the demo takes 13
-   minutes.
+`tests/unit/test_no_third_party_marks.py` scans the **whole working tree** — not
+a curated subset, because the mark had already escaped into a package name, a
+container prefix and a build-cache directory before anyone counted. Its
+`xfail` ratchet is gone; it is now a plain passing guard.
+
+**Still outstanding, and it cannot be done from inside the guest:** the running
+VM still answers `hostname` as the old name. The configuration is renamed
+(`VM_NAME`, `local-hostname`, `create-vm.sh`, the Makefile), but the live domain
+keeps its identity until it is rebuilt **from the host**:
+`make -C infra/dev-vm destroy && make -C infra/dev-vm up`, then re-seed the
+roster with `seed-agents.py` and confirm `make verify` returns 8 of 8.
+
+#### The decision taken on history and evidence
+
+1. **Git history — the mark stays there.** Decided 2026-08-11: out of the
+   working tree, left in history. Scrubbing it means `git filter-repo` and a
+   force-push, which breaks every clone, rots every existing PR and commit link,
+   and rewrites the audit trail this project's discipline rests on — a
+   disproportionate remedy for a string in the commit log of a project that was
+   never published.
+
+2. **Recorded run evidence — substituted, and said so here.**
+   `demos/static-site-v1/runs/*/worker-log.txt` and
+   `.orchestrator/runtime-runs/*/logs/*.out` contained the old hostname and
+   container names because that is genuinely what those runs saw. They were
+   rewritten in the same pass, so **the hostnames and `*-acceptance-*` container
+   names in those files are substitutions, not the literal strings the run
+   emitted.** Nothing else in them was touched: timings, exit codes, commit SHAs
+   and command lines are as recorded.
+
+   This is the one place the rename knowingly edits a record, and it is written
+   down rather than left for a reader to discover. The cleaner fix is to re-run
+   `static-site-v1` on the rebuilt guest and publish that instead — 13 minutes,
+   and it refreshes the launch numbers at the same time. Recommended before the
+   demo is used as launch proof.
 
 ---
 

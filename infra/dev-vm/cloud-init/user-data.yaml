@@ -51,10 +51,10 @@ packages:
   - libnss3
 
 write_files:
-  - path: /etc/profile.d/aipom.sh
+  - path: /etc/profile.d/praxis.sh
     content: |
       export ORCHESTRATOR_HOME="$HOME/.orchestrator"
-  - path: /etc/sysctl.d/60-aipom-userns.conf
+  - path: /etc/sysctl.d/60-praxis-userns.conf
     content: |
       # Ubuntu 24.04 ships kernel.apparmor_restrict_unprivileged_userns=1, which
       # stops bwrap and unshare creating an unprivileged user namespace from a

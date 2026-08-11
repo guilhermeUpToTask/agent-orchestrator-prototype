@@ -168,7 +168,7 @@ jobs:
           path: frontend/e2e/screenshots/
           if-no-files-found: warn
           retention-days: 14
-          E2E_HOME: ${{ runner.temp }}/aipom-e2e-home
+          E2E_HOME: ${{ runner.temp }}/praxis-e2e-home
 
       - name: Regenerate API types
         run: |

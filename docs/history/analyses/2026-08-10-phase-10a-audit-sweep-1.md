@@ -36,7 +36,7 @@ With `ORCHESTRATOR_API_TOKEN` set, `/api/openapi.json`, `/api/docs` and
 **Proof.** A `TestClient` against `create_app()` with the token set:
 
 ```
-GET /api/openapi.json  without token -> 200   (57 paths, title "AIPOM Orchestrator API")
+GET /api/openapi.json  without token -> 200   (57 paths, title "Praxis Orchestrator API")
 GET /api/docs          without token -> 200
 GET /api/redoc         without token -> 200
 GET /api/providers     without token -> 401
@@ -171,7 +171,7 @@ mistake.
 **Status:** fixed.
 
 CLAUDE.md documents `npm run generate:api` as the way to regenerate API types,
-and separately warns that inside the `aipom-dev` guest **every** python command
+and separately warns that inside the `praxis-dev` guest **every** python command
 needs a `uv run` prefix. The script hardcoded bare `python`:
 
 ```

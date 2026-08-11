@@ -1,6 +1,6 @@
-# CLAUDE.md - AIPOM / Agent Orchestrator
+# CLAUDE.md - Praxis Orchestrator
 
-## 💻 Development environment — the `aipom-dev` guest
+## 💻 Development environment — the `praxis-dev` guest
 
 Development happens **inside a libvirt/KVM guest**, not a devcontainer. The
 `.devcontainer/` was retired on 2026-08-09 (decision 63): the environment must
@@ -214,7 +214,7 @@ agent-orchestrator/
 │                           #   repaired in place — a run that must FAIL first).
 │                           #   Never mix modes: Tier 0 = stub + dry-run,
 │                           #   Tier 1 = llm + real.
-├── infra/dev-vm/           # the aipom-dev libvirt/KVM development guest (replaced
+├── infra/dev-vm/           # the praxis-dev libvirt/KVM development guest (replaced
 │                           #   .devcontainer/, retired 2026-08-09): create-vm.sh
 │                           #   (idempotent virt-install), Makefile (up/start/ssh/
 │                           #   verify/destroy), cloud-init/, verify.sh (the 8-check

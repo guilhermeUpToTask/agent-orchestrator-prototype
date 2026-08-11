@@ -51,31 +51,31 @@ AttributeError: 'ProjectBrief' object has no attribute 'model_dump'
 
 got that after trying to pass torght the project brief in the chat ui. here the history:
 
-AIPOM connected. Plan status: discovery · 0 goals · 0 tasks. Discovery is active. Answer questions to build the project brief.
-aipom · 09:15 AM
+Praxis Orchestrator connected. Plan status: discovery · 0 goals · 0 tasks. Discovery is active. Answer questions to build the project brief.
+praxis · 09:15 AM
 What is the main problem this Python/Redis developer-tooling project should solve, and who is the primary user or team it is for?
 you · 09:16 AM
 for now should only be a simple fastapi server with few endpoints
-aipom · 09:16 AM
+praxis · 09:16 AM
 Which endpoints should the FastAPI server include, and what should each endpoint do? For example: health check, Redis read/write, test status, etc.
 you · 09:16 AM
 for now only helth checks
-aipom · 09:16 AM
+praxis · 09:16 AM
 Should the health check endpoint only report that the API is running, or should it also verify Redis connectivity?
 you · 09:16 AM
 only api running
-aipom · 09:16 AM
+praxis · 09:16 AM
 What should count as done for the first version? For example: a runnable FastAPI app with `/health` returning API status, basic project structure, and no Redis integration yet.
 you · 09:17 AM
 yes thats sound great
-aipom · 09:17 AM
+praxis · 09:17 AM
 Error communicating with backend: 'ProjectBrief' object has no attribute 'model_dump'
 
 error fixed by claude, its was incorrect use of model_dump() in a non Pydantic class.
 
 you · 09:23 AM
 continue
-aipom · 09:23 AM
+praxis · 09:23 AM
 No discovery session is running. Use "Start Discovery" first.
 
 
@@ -84,7 +84,7 @@ ctritical bug found in the frontend, if a project brief does not generate on the
 this happened after the previous happened
 you · 09:23 AM
 continue
-aipom · 09:23 AM
+praxis · 09:23 AM
 No discovery session is running. Use "Start Discovery" first.
 
 
@@ -134,7 +134,7 @@ a bug in the frontende:
 Connected. Discovery is active — answer questions here to build the project brief.
 you · 10:09 AM
 okay
-aipom · 10:09 AM
+praxis · 10:09 AM
 No discovery session is running. Use "Start Discovery" first
 
 how its not running if discovery is active?
@@ -146,9 +146,9 @@ see this example:
 Connected. Discovery is active — answer questions here to build the project brief.
 you · 10:09 AM
 okay
-aipom · 10:09 AM
+praxis · 10:09 AM
 No discovery session is running. Use "Start Discovery" first.
-aipom · 10:10 AM
+praxis · 10:10 AM
 What specific aspects of the REST API would you like to test? For example:
 - Unit tests for individual endpoints
 - Integration tests covering full request/response flows
@@ -156,7 +156,7 @@ What specific aspects of the REST API would you like to test? For example:
 - All of the above?
 you · 10:11 AM
 unit tests for now using pytest, and uv dependency package
-aipom · 10:11 AM
+praxis · 10:11 AM
 How many endpoints does your todo API have, and what are they? For example:
 - GET /todos
 - POST /todos
@@ -165,7 +165,7 @@ How many endpoints does your todo API have, and what are they? For example:
 - DELETE /todos/{id}
 you · 10:11 AM
 all the crud ones
-aipom · 10:11 AM
+praxis · 10:11 AM
 What testing approach would you prefer for the unit tests?
 - Testing each endpoint individually with mocked Redis responses
 - Testing Pydantic schema validation

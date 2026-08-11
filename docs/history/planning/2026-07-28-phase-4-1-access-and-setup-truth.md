@@ -1114,7 +1114,7 @@ In `backend/src/api/server.py`, replace the `description=` argument:
 
 ```python
         description=(
-            "RESTful API for the AIPOM orchestrator: the cyclic project-plan "
+            "RESTful API for the Praxis Orchestrator: the cyclic project-plan "
             "lifecycle (intent, cycle architecture, JIT goal enrichment, "
             "execution, publication) behind human review gates, reference-data "
             "catalogs, two-tier config, readiness reads, and the live SSE "

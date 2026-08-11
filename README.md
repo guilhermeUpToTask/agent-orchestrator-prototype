@@ -1,4 +1,4 @@
-# AIPOM — Agent Orchestrator
+# Praxis Orchestrator
 
 **A local-first orchestrator that turns a project brief into an executed plan, with a human approving every consequential step.**
 
