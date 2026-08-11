@@ -1147,8 +1147,20 @@ sampled a fixed ~1s window (failed 2 runs in 4 under the added load; now waits
 for the beat it needs), and the container leak tests asserting the whole
 *machine* had no acceptance container rather than that the run cleaned up after
 itself — which one SIGKILLed orphan failed permanently until pruned by hand.
-**Still unswept: the frontend's error and stale-data states, the reasoner
-tool-call surface against hostile model output, and remaining doc/code drift.**
+
+**Sweep 3 — done 2026-08-11** (the reasoner tool surface against hostile model
+output):
+[`docs/history/analyses/2026-08-11-phase-10a-audit-sweep-3.md`](docs/history/analyses/2026-08-11-phase-10a-audit-sweep-3.md).
+Sweep 2 left this area *unproven* rather than clean; exercising it found two.
+The package already treats model output as untrusted for CONTENT
+(`_validate_submission`), but nothing checked output hostile in SHAPE: a single
+turn's tool-call fan-out was **unbounded** (500 calls in one turn ran 500
+handlers against the repository reader and grew the transcript by 500 messages),
+and a handler's raw exception text — absolute paths included — was returned as a
+tool result and therefore **sent to the provider** on the next request. Both
+fixed; the fan-out excess is refused rather than dropped, because these
+providers require a tool message per `tool_call_id`. **Still unswept: the
+frontend's error and stale-data states, and remaining doc/code drift.**
 
 ### 10B — the launch
 

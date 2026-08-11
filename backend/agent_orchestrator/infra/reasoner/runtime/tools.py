@@ -15,7 +15,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import structlog
 from pydantic import BaseModel
+
+log = structlog.get_logger(__name__)
 
 
 class ToolCall(BaseModel):
@@ -52,7 +55,24 @@ def execute_tool_call(tools: list[ToolSpec], tool_call: ToolCall) -> ToolResult:
         try:
             result_str = handler(tool_call.arguments)
         except Exception as exc:
-            result_str = json.dumps({"error": str(exc)})
+            # A handler REJECTS through its own return value —
+            # `{"accepted": false, "errors": [...]}` (`openai_reasoner._rejected`).
+            # Reaching here means something unexpected broke, and `str(exc)` on an
+            # unexpected exception is internal detail: Phase 10A confirmed a
+            # handler's message travelling verbatim into the NEXT provider request
+            # (an absolute `~/.orchestrator` path, in the reproduction). The model
+            # still needs to know the call failed so it can adapt, so it is told
+            # that and nothing more; the detail goes to the local log, which is
+            # where an operator debugging a tool actually looks.
+            log.warning(
+                "reasoner.tool_handler_failed",
+                tool=tool_call.name,
+                error=str(exc),
+                exc_info=exc,
+            )
+            result_str = json.dumps(
+                {"error": f"The {tool_call.name} tool failed to run. Try a different call."}
+            )
 
     return ToolResult(
         tool_call_id=tool_call.id,

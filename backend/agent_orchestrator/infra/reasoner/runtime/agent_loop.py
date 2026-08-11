@@ -20,12 +20,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, ConfigDict
 
 from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
 from agent_orchestrator.infra.reasoner.runtime.errors import ReasonerError
 from agent_orchestrator.infra.reasoner.runtime.llm_client import LLMClient
 from agent_orchestrator.infra.reasoner.runtime.tools import ToolResult, ToolSpec, execute_tool_call
+
+log = structlog.get_logger(__name__)
 
 
 class SessionResult(BaseModel):
@@ -44,6 +47,25 @@ class SessionResult(BaseModel):
 # every read turn already paid for. Bounded so a model that genuinely cannot call
 # tools still surfaces instead of looping to the ceiling.
 _MAX_PLAIN_REPLY_NUDGES = 2
+
+# How many tool calls from ONE assistant turn are actually executed.
+#
+# There was no bound at all (Phase 10A): a turn carrying 500 tool calls ran all
+# 500 handlers and appended 500 tool messages to the transcript, which the next
+# request then carries upstream. Read handlers hit the repository reader, so
+# "however many the model asked for" is real work driven entirely by untrusted
+# model output — the same output this package already refuses to trust for
+# schema enforcement.
+#
+# Every call is still ANSWERED. Dropping one is not an option: the providers
+# this speaks to require a tool message for every `tool_call_id` in the
+# assistant message, so a silent drop would make the NEXT request malformed and
+# turn a bounded overrun into a hard failure. The excess is answered with a
+# refusal instead, which is protocol-legal and tells the model what happened.
+#
+# 16 is far above legitimate use — the widest profile offers a handful of read
+# tools — and far below the cost of an unbounded fan-out.
+_MAX_TOOL_CALLS_PER_TURN = 16
 
 
 def _payload_in_prose(text: str) -> str | None:
@@ -172,7 +194,31 @@ async def run_tool_session(
 
         submitted_args: dict[str, Any] | None = None
         results: list[ToolResult] = []
-        for tool_call in turn.tool_calls:
+        if len(turn.tool_calls) > _MAX_TOOL_CALLS_PER_TURN:
+            log.warning(
+                "reasoner.tool_call_fan_out_capped",
+                requested=len(turn.tool_calls),
+                executed=_MAX_TOOL_CALLS_PER_TURN,
+            )
+        for index, tool_call in enumerate(turn.tool_calls):
+            if index >= _MAX_TOOL_CALLS_PER_TURN:
+                results.append(
+                    ToolResult(
+                        tool_call_id=tool_call.id,
+                        tool_name=tool_call.name,
+                        result_str=json.dumps(
+                            {
+                                "error": (
+                                    "Not executed: this turn asked for "
+                                    f"{len(turn.tool_calls)} tool calls and at most "
+                                    f"{_MAX_TOOL_CALLS_PER_TURN} run per turn. "
+                                    "Ask for fewer."
+                                )
+                            }
+                        ),
+                    )
+                )
+                continue
             result = execute_tool_call(tools, tool_call)
             results.append(result)
             if tool_call.name in terminal_names and submitted_args is None:
