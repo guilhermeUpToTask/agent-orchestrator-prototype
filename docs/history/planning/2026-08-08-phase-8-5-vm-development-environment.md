@@ -64,13 +64,13 @@ ROADMAP.md and as decision 63.
 
 ## 🚦 THE GATE IS GREEN — 2026-08-08
 
-`make -C infra/dev-vm verify` on the maintainer's host, guest `aipom-dev`
+`make -C infra/dev-vm verify` on the maintainer's host, guest `praxis-dev`
 (Ubuntu 24.04.4, kernel **6.8.0-137**), re-run **after a kernel upgrade and a
 full power cycle** — so the sysctl is proven to apply at boot rather than only
 in a session where it was set by hand:
 
 ```text
-=== aipom-dev capability proof ===
+=== praxis-dev capability proof ===
 PASS  bwrap mounts a fresh /proc
 PASS  fresh procfs in a private PID namespace
 PASS  cgroup2 is writable
@@ -116,7 +116,7 @@ both the script and this plan.
    blocked every `bwrap`/`unshare` check while podman and docker passed via
    their own AppArmor profiles — a guest that ran PID-isolated containers
    perfectly while three checks failed like a kernel wall. Now shipped as
-   `/etc/sysctl.d/60-aipom-userns.conf` in cloud-init.
+   `/etc/sysctl.d/60-praxis-userns.conf` in cloud-init.
 8. `verify.sh` check 4 used `unshare -Urm`, which leaves the process in the
    INITIAL cgroup namespace; mounting cgroup2 from a non-initial userns needs
    `CAP_SYS_ADMIN` over the cgroup namespace's owning userns, so it returned
@@ -150,7 +150,7 @@ them.
 
 ### Carried findings — triage at the final whole-branch review
 
-- **Minor, deferred:** `/etc/profile.d/aipom.sh` sets `ORCHESTRATOR_HOME` only
+- **Minor, deferred:** `/etc/profile.d/praxis.sh` sets `ORCHESTRATOR_HOME` only
   for login shells. A non-interactive `ssh host 'cmd'` will not see it. Revisit
   if a Stage 2 step runs remote commands non-interactively.
 - **Minor, deferred:** `verify.sh`'s AppArmor comment lists checks 1/2/4/7 as
@@ -184,8 +184,8 @@ like a capability wall.
 `infra/dev-vm/cloud-init/meta-data.yaml`:
 
 ```yaml
-instance-id: aipom-dev-01
-local-hostname: aipom-dev
+instance-id: praxis-dev-01
+local-hostname: praxis-dev
 ```
 
 - [ ] **Step 2: Create the user-data file**
@@ -221,10 +221,10 @@ packages:
   - jq
 
 write_files:
-  - path: /etc/profile.d/aipom.sh
+  - path: /etc/profile.d/praxis.sh
     content: |
       export ORCHESTRATOR_HOME="$HOME/.orchestrator"
-  - path: /etc/sysctl.d/60-aipom-userns.conf
+  - path: /etc/sysctl.d/60-praxis-userns.conf
     content: |
       # Ubuntu 24.04 ships kernel.apparmor_restrict_unprivileged_userns=1, which
       # stops bwrap and unshare creating an unprivileged user namespace from a
@@ -269,7 +269,7 @@ Expected: `YAML OK`
 
 ```bash
 git add infra/dev-vm/cloud-init/
-git commit -m "feat(dev-vm): cloud-init definition for the aipom-dev guest"
+git commit -m "feat(dev-vm): cloud-init definition for the praxis-dev guest"
 ```
 
 ---
@@ -282,7 +282,7 @@ git commit -m "feat(dev-vm): cloud-init definition for the aipom-dev guest"
 
 **Interfaces:**
 - Consumes: `cloud-init/user-data.yaml`, `cloud-init/meta-data.yaml` (Task 1).
-- Produces: a libvirt domain named `aipom-dev`. `make ssh` opens a shell as `dev`. Consumed by Task 4.
+- Produces: a libvirt domain named `praxis-dev`. `make ssh` opens a shell as `dev`. Consumed by Task 4.
 
 - [ ] **Step 1: Write create-vm.sh**
 
@@ -290,11 +290,11 @@ git commit -m "feat(dev-vm): cloud-init definition for the aipom-dev guest"
 
 ```bash
 #!/usr/bin/env bash
-# Idempotent provisioning of the aipom-dev guest. Re-running when the domain
+# Idempotent provisioning of the praxis-dev guest. Re-running when the domain
 # already exists is a no-op, not an error.
 set -euo pipefail
 
-VM_NAME="${VM_NAME:-aipom-dev}"
+VM_NAME="${VM_NAME:-praxis-dev}"
 VM_VCPUS="${VM_VCPUS:-4}"
 VM_MEMORY_MB="${VM_MEMORY_MB:-8192}"
 VM_DISK_GB="${VM_DISK_GB:-40}"
@@ -375,7 +375,7 @@ echo "Provisioned $VM_NAME. Wait for cloud-init, then: make -C infra/dev-vm ssh"
 `infra/dev-vm/Makefile`:
 
 ```make
-VM_NAME ?= aipom-dev
+VM_NAME ?= praxis-dev
 VIRSH := virsh --connect qemu:///system
 
 # Resolve the guest address WITHOUT a recursive $(MAKE). `make -C` implies -w
@@ -500,7 +500,7 @@ check() {
   fi
 }
 
-echo "=== aipom-dev capability proof ==="
+echo "=== praxis-dev capability proof ==="
 
 # 1. Bubblewrap with a fresh procfs — the exact call that failed in the devcontainer.
 check "bwrap mounts a fresh /proc" \
@@ -515,7 +515,7 @@ check "fresh procfs in a private PID namespace" \
 #    run as root (via the dev user's NOPASSWD sudo) to test the capability
 #    the devcontainer's read-only mount actually denies — not permissions.
 check "cgroup2 is writable" \
-  bash -c 'sudo mkdir -p /sys/fs/cgroup/aipom-probe && sudo rmdir /sys/fs/cgroup/aipom-probe'
+  bash -c 'sudo mkdir -p /sys/fs/cgroup/praxis-probe && sudo rmdir /sys/fs/cgroup/praxis-probe'
 # -C (unshare the cgroup namespace) is load-bearing, not decoration. Mounting
 # cgroup2 from a non-initial user namespace needs CAP_SYS_ADMIN over the cgroup
 # namespace's OWNING user namespace. Without -C the process stays in the initial
@@ -602,7 +602,7 @@ sudo virsh net-autostart default
 - [ ] **Step 3: Provision**
 
 Run: `make -C infra/dev-vm up`
-Expected: `Provisioned aipom-dev`. Then wait for cloud-init: `make -C infra/dev-vm ssh` and run `cloud-init status --wait`.
+Expected: `Provisioned praxis-dev`. Then wait for cloud-init: `make -C infra/dev-vm ssh` and run `cloud-init status --wait`.
 
 - [ ] **Step 4: Run the gate**
 
@@ -645,7 +645,7 @@ rather than a pet, and that all durable state lives in `~/.orchestrator`.
 
 ```bash
 git add infra/dev-vm/README.md
-git commit -m "docs(dev-vm): setup, lifecycle and threat model for the aipom-dev guest"
+git commit -m "docs(dev-vm): setup, lifecycle and threat model for the praxis-dev guest"
 ```
 
 ---
@@ -967,7 +967,7 @@ class ContainerEnvironment:
                 duration_seconds=time.monotonic() - started,
             )
 
-        name = f"aipom-acceptance-{uuid.uuid4().hex[:12]}"
+        name = f"praxis-acceptance-{uuid.uuid4().hex[:12]}"
         with _checkout(repo, ref, self._workspace_root) as tree:
             try:
                 self._start(name, tree, spec)
@@ -1175,7 +1175,7 @@ def test_no_container_survives_the_run(binary: str, repo: Path) -> None:
         [binary, "ps", "-a", "--format", "{{.Names}}"],
         capture_output=True, text=True, check=True,
     ).stdout
-    assert "aipom-acceptance-" not in listing
+    assert "praxis-acceptance-" not in listing
 ```
 
 - [ ] **Step 2: Run them**

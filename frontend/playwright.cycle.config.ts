@@ -19,7 +19,7 @@ import { defineConfig } from '@playwright/test';
  */
 const PORT = 8310;
 const BASE_URL = process.env.E2E_CYCLE_BASE_URL ?? `http://127.0.0.1:${PORT}`;
-const E2E_HOME = process.env.E2E_CYCLE_HOME ?? '/tmp/aipom-cycle-e2e-home';
+const E2E_HOME = process.env.E2E_CYCLE_HOME ?? '/tmp/praxis-cycle-e2e-home';
 const PYTHON = process.env.E2E_PYTHON ?? '../backend/.venv/bin/python';
 const CLI = `${PYTHON} -m agent_orchestrator.infra.cli.main`;
 
@@ -34,7 +34,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  outputDir: '/tmp/aipom-playwright-cycle',
+  outputDir: '/tmp/praxis-playwright-cycle',
   use: {
     baseURL: BASE_URL,
     screenshot: 'only-on-failure',

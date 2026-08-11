@@ -25,7 +25,7 @@ const SHOTS = 'e2e/screenshots/cycle';
 /** Set the theme BEFORE the app boots, so nothing is captured mid-repaint. */
 async function useTheme(page: Page, theme: Theme) {
   await page.addInitScript((value) => {
-    window.localStorage.setItem('aipom.theme', value as string);
+    window.localStorage.setItem('praxis.theme', value as string);
   }, theme);
 }
 

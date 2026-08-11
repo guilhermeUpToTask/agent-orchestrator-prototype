@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "AIPOM Orchestrator API",
-    "description": "RESTful API for the AIPOM AI project orchestrator: the cyclic project-plan lifecycle (intent, cycle architecture, JIT goal enrichment, execution, publication) behind human review gates, reference-data catalogs, two-tier config, readiness reads, and the live SSE event stream. A project owns exactly one long-lived plan whose root is never terminal; the nine-phase `phase` field is a compatibility projection for migrated plans and is never the authority for a plan with an active cycle.",
+    "title": "Praxis Orchestrator API",
+    "description": "RESTful API for the Praxis project orchestrator: the cyclic project-plan lifecycle (intent, cycle architecture, JIT goal enrichment, execution, publication) behind human review gates, reference-data catalogs, two-tier config, readiness reads, and the live SSE event stream. A project owns exactly one long-lived plan whose root is never terminal; the nine-phase `phase` field is a compatibility projection for migrated plans and is never the authority for a plan with an active cycle.",
     "version": "0.3.0"
   },
   "paths": {

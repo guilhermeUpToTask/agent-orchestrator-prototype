@@ -11,13 +11,14 @@ someone reintroduces from memory. That is not hypothetical: it had spread from
 the guest hostname into the npm package name, the frontend build cache, the
 e2e artefacts and the acceptance-container prefix before anyone counted.
 
-**Deliberately NOT repository-wide.** Git history, archived run evidence
-(`demos/*/runs/*`, `.orchestrator/runtime-runs/*`) and this file are out of
-scope by decision, not oversight — see
-`docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md`. Rewriting recorded
-machine output falsifies the evidence the launch is meant to point at, and
-scrubbing history means a force-push that breaks every clone. What this locks is
-the tree that actually ships.
+**Git history is deliberately out of scope**, by decision on 2026-08-11: the
+mark may remain in history, but not in the working tree. Scrubbing history means
+`git filter-repo` and a force-push, which breaks every clone and rewrites the
+audit trail this project's discipline rests on — a disproportionate remedy for a
+string in the commit log of a never-published project.
+
+Only this file is excluded from the scan, because it has to name the mark in
+order to forbid it.
 """
 
 from __future__ import annotations
@@ -31,70 +32,49 @@ REPO = Path(__file__).resolve().parents[3]
 # The marks that must not appear. Lowercased comparison, so `AIPOM` is covered.
 FORBIDDEN = ("aipom",)
 
-# What "the shipped tree" means: source, configuration, and the documents a
-# reader is pointed at. Not history, not recorded evidence.
-SEARCH_ROOTS = [
-    REPO / "backend" / "agent_orchestrator",
-    REPO / "backend" / "tests",
-    REPO / "backend" / "scripts",
-    REPO / "frontend" / "src",
-    REPO / "frontend" / "e2e",
-    REPO / "infra",
-    REPO / "fixtures",
-    REPO / "docs" / "architecture",
-    REPO / "docs" / "decisions",
-    REPO / "docs" / "guides",
-]
-ROOT_FILES = [
-    REPO / "README.md",
-    REPO / "CLAUDE.md",
-    REPO / "ROADMAP.md",
-    REPO / ".env.example",
-    REPO / "backend" / "env.example",
-    REPO / "backend" / "pyproject.toml",
-    # `aipom-planner` is the npm package NAME — the mark shipped as an
-    # identifier, not just as prose.
-    REPO / "frontend" / "package.json",
-    *sorted((REPO / ".github" / "workflows").glob("*.yml")),
-]
-
-SUFFIXES = {
-    ".py", ".ts", ".tsx", ".js", ".json", ".md", ".sh", ".yaml", ".yml",
-    ".toml", ".css", ".html", ".cfg", ".example",
+# The WHOLE working tree, not a curated subset. The mark had spread from the
+# guest hostname into an npm package name, a container prefix, a build-cache
+# directory and e2e artefacts before anyone counted, so a scan that only looked
+# where it was expected would have missed most of it.
+EXCLUDED_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "static",  # the built UI staged into the wheel; git-ignored
 }
 
-EXCLUDED_DIRS = {"node_modules", "__pycache__", ".venv", "dist", "static"}
+# Text formats only — a binary match would be a false positive we cannot read.
+SUFFIXES = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".sh", ".bash",
+    ".yaml", ".yml", ".toml", ".cfg", ".ini", ".css", ".html", ".txt",
+    ".example", ".env", ".out", ".log", ".sql", ".xml",
+}
 
 # This file names the mark in order to forbid it.
 EXCLUDED_FILES = {Path(__file__).resolve()}
 
 
 def _candidates() -> list[Path]:
-    files = [f for f in ROOT_FILES if f.exists()]
-    for root in SEARCH_ROOTS:
-        if not root.exists():
+    files: list[Path] = []
+    for f in REPO.rglob("*"):
+        if not f.is_file():
             continue
-        for f in root.rglob("*"):
-            if not f.is_file() or f.suffix not in SUFFIXES:
-                continue
-            if EXCLUDED_DIRS & set(f.parts):
-                continue
-            files.append(f)
+        if EXCLUDED_DIRS & set(f.parts):
+            continue
+        # Extensionless files at the root (LICENSE, Makefile) are worth reading.
+        if f.suffix not in SUFFIXES and f.suffix != "":
+            continue
+        if f.suffix == "" and f.parent != REPO and f.parent.name != "dev-vm":
+            continue
+        files.append(f)
     return sorted(set(files) - EXCLUDED_FILES)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 10B has not renamed yet — the rename is blocked on trademark "
-        "clearance for the replacement name, so the mark is still present in "
-        "~18 shipped files. This is a RATCHET, not a suppression: strict=True "
-        "means the moment the rename lands and this passes, pytest reports "
-        "XPASS as a FAILURE, forcing whoever finishes the rename to delete this "
-        "marker and turn the guard on permanently. Do not remove the marker "
-        "before the tree is clean; do not leave it after."
-    ),
-)
 @pytest.mark.parametrize("mark", FORBIDDEN)
 def test_no_third_party_mark_in_the_shipped_tree(mark: str) -> None:
     offenders: list[str] = []

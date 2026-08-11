@@ -1,4 +1,4 @@
-# Frontend — the AIPOM dashboard
+# Frontend — the Praxis Orchestrator console
 
 React 18 + Vite + TypeScript (strict, no `any`). A thin live view over the backend API: **React Query owns server state, one SSE bridge keeps it fresh, zustand holds only UI/ephemeral state.** The full architecture write-up (with diagrams) is [`../docs/architecture/frontend.md`](../docs/architecture/frontend.md).
 

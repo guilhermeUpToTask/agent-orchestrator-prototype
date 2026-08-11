@@ -1,4 +1,4 @@
-# `aipom-dev` — the development guest
+# `praxis-dev` — the development guest
 
 A libvirt/KVM virtual machine that replaces the old `.devcontainer/`. It exists
 because the development environment has to be two things at once: **privileged
@@ -43,7 +43,7 @@ traversing your home directory — the domain would fail to start *after* a
 
 | Variable | Default | Notes |
 |---|---|---|
-| `VM_NAME` | `aipom-dev` | Also the guest hostname. |
+| `VM_NAME` | `praxis-dev` | Also the guest hostname. |
 | `VM_VCPUS` | `4` | |
 | `VM_MEMORY_MB` | `8192` | |
 | `VM_DISK_GB` | `40` | Sparse ceiling. |
@@ -107,7 +107,7 @@ artifact and this script asserts what the GUEST can do.
 It is the artifact the environment work is judged by. Expected output:
 
 ```text
-=== aipom-dev capability proof ===
+=== praxis-dev capability proof ===
 PASS  bwrap mounts a fresh /proc
 PASS  fresh procfs in a private PID namespace
 PASS  cgroup2 is writable
@@ -138,7 +138,7 @@ cd ~/agent-orchestrator/backend
 ```
 
 Cloud-init installs git but configures no identity, and the guest's default
-(`dev@aipom-dev.(none)`) is not auto-detectable — the first `git commit` fails
+(`dev@praxis-dev.(none)`) is not auto-detectable — the first `git commit` fails
 with `Author identity unknown`. Set it before you need it:
 
 ```bash
@@ -243,7 +243,7 @@ belong in `~/.orchestrator-env` (mode 600), exported by the shell that launches
 the process. A session that cannot see `ORCHESTRATOR_MASTER_KEY` will generate a
 second one and silently orphan the encrypted secret store.
 
-The same applies to `/etc/profile.d/aipom.sh`, which sets `ORCHESTRATOR_HOME`
+The same applies to `/etc/profile.d/praxis.sh`, which sets `ORCHESTRATOR_HOME`
 for **login** shells only. A non-interactive remote command will not see it.
 
 **3. Catalog IDs are server-generated UUIDs.** Only `seed demo` writes
@@ -260,7 +260,7 @@ duplicate provider; clean up with `DELETE /api/providers/<id>` or
 `DELETE /api/agents/<id>`.
 
 **5. `kernel.apparmor_restrict_unprivileged_userns` is disabled**, via
-`/etc/sysctl.d/60-aipom-userns.conf` shipped in cloud-init. Ubuntu 24.04 ships
+`/etc/sysctl.d/60-praxis-userns.conf` shipped in cloud-init. Ubuntu 24.04 ships
 it *enabled*, which stops `bwrap` and `unshare` creating an unprivileged user
 namespace from a plain shell while podman and docker sail through on their own
 AppArmor profiles. The symptom is a guest that runs PID-isolated containers

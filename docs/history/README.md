@@ -21,7 +21,7 @@
 | 2026-07-28 | [P4.2 — operational truth](planning/2026-07-28-phase-4-2-operational-truth.md) | Making a running system legible while it runs | Executed (Phase 4.2) |
 | 2026-07-28 | [P4.3 — evidence truth](planning/2026-07-28-phase-4-3-evidence-truth.md) | Evidence an operator can actually check, end to end | Executed (Phase 4.3) |
 | 2026-08-02 | [P8.1 — repository choice and forge publication](planning/2026-08-02-phase-8-1-repository-choice-and-forge-publication.md) | `open_pr` really opening one: the forge port, the GitHub adapter, `NoForge` | Executed — decision 61 |
-| 2026-08-08 | [P8.5 — VM development environment](planning/2026-08-08-phase-8-5-vm-development-environment.md) | The `aipom-dev` libvirt/KVM guest and the container acceptance run | Executed — decision 63; the devcontainer was retired |
+| 2026-08-08 | [P8.5 — VM development environment](planning/2026-08-08-phase-8-5-vm-development-environment.md) | The `praxis-dev` libvirt/KVM guest and the container acceptance run | Executed — decision 63; the devcontainer was retired |
 | 2026-08-10 | [P8.7 — backend and documentation refactoring](planning/2026-08-10-backend-refactoring.md) | Scoped from measurement rather than taste: adversarial fakes, a runtime registry, splitting `ExecutionHandler`, parameter objects, the router split, and the documentation | Executed — and it found a live defect on the way: the acceptance run had never fired in production |
 
 ## analyses/ — raw debugging sessions (old backend)

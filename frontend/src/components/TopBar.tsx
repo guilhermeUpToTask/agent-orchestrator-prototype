@@ -80,7 +80,7 @@ export function TopBar() {
     <header className={styles.bar}>
       <div className={styles.brand}>
         <span className={styles.brandMark} aria-hidden>A</span>
-        <span className={styles.brandName}>AIPOM</span>
+        <span className={styles.brandName}>Praxis Orchestrator</span>
       </div>
 
       <div className={styles.planIdentity}>

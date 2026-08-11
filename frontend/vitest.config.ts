@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  cacheDir: '/tmp/aipom-vite-cache',
+  cacheDir: '/tmp/praxis-vite-cache',
   test: {
     // jsdom, so tests can CLICK. Server-rendered markup proves what a
     // component renders for given props; it cannot prove a button is wired to

@@ -1,4 +1,4 @@
-VM_NAME ?= aipom-dev
+VM_NAME ?= praxis-dev
 VIRSH := virsh --connect qemu:///system
 
 # Resolve the guest address WITHOUT a recursive $(MAKE). `make -C` implies -w

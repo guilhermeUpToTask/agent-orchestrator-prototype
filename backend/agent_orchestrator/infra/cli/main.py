@@ -26,7 +26,7 @@ from agent_orchestrator.infra.cli.error_handler import catch_domain_errors, ok
 
 @click.group()
 def cli() -> None:
-    """AIPOM agent orchestrator."""
+    """Praxis Orchestrator."""
 
 
 # ---------------------------------------------------------------------------

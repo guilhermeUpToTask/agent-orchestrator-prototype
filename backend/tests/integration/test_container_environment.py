@@ -31,21 +31,21 @@ def binary(request: pytest.FixtureRequest) -> str:
 
 
 def acceptance_containers(binary: str) -> set[str]:
-    """Every `aipom-acceptance-*` container currently on the MACHINE."""
+    """Every `praxis-acceptance-*` container currently on the MACHINE."""
     listing = subprocess.run(
         [binary, "ps", "-a", "--format", "{{.Names}}"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    return {n for n in listing.split() if n.startswith("aipom-acceptance-")}
+    return {n for n in listing.split() if n.startswith("praxis-acceptance-")}
 
 
 @pytest.fixture
 def no_new_containers(binary: str):
     """Assert THIS test leaked nothing — not that the machine is pristine.
 
-    Phase 10A: both leak tests asserted `"aipom-acceptance-" not in listing`
+    Phase 10A: both leak tests asserted `"praxis-acceptance-" not in listing`
     against the global list, so a single orphan from any other source failed
     them *permanently* and pointed at teardown, which was not what was wrong.
     Reproduced: an `Exited (137)` container left behind when a test run was

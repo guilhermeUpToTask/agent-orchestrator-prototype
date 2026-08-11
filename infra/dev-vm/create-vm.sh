@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Idempotent provisioning of the aipom-dev guest. Re-running when the domain
+# Idempotent provisioning of the praxis-dev guest. Re-running when the domain
 # already exists is a no-op, not an error.
 set -euo pipefail
 
-VM_NAME="${VM_NAME:-aipom-dev}"
+VM_NAME="${VM_NAME:-praxis-dev}"
 VM_VCPUS="${VM_VCPUS:-4}"
 VM_MEMORY_MB="${VM_MEMORY_MB:-8192}"
 VM_DISK_GB="${VM_DISK_GB:-40}"

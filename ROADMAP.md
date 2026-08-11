@@ -146,7 +146,7 @@ are scoped here and the rest stay deferred.
 be able to run containers *with isolation* (see *Containerization was
 unavailable* below). `DockerEnvironment` moved from third to **last**, because
 it was then the only item in the phase that could not be validated where the
-work happens. **That constraint lifted on 2026-08-08** with the `aipom-dev`
+work happens. **That constraint lifted on 2026-08-08** with the `praxis-dev`
 guest; the ordering stands because the other items are further along, not
 because P8.5 is still blocked.
 
@@ -222,7 +222,7 @@ function 195 lines, and the fakes can express what they used to discard.
      eleven errors instead of a clear skip.
    - **Remaining: run it.** Tier 1, real models, captured — and whatever it
      finds gets published. The 2026-08-02 `ORCHESTRATOR_MASTER_KEY` blocker is
-     **resolved** (the `aipom-dev` guest has one). **First real attempt made
+     **resolved** (the `praxis-dev` guest has one). **First real attempt made
      2026-08-09; it did not reach publication, and what it found is below.**
 
    #### First run attempt, 2026-08-09 — reached execution, stopped there
@@ -285,7 +285,7 @@ function 195 lines, and the fakes can express what they used to discard.
    across a worker restart, and the failed planning sessions recorded
    `abandoned` artifacts rather than silently vanishing.
 5. ✅ **P8.5 — the `ContainerEnvironment` adapter.** Delivered 2026-08-09, after
-   the environment blocker was retired by the `aipom-dev` libvirt/KVM guest
+   the environment blocker was retired by the `praxis-dev` libvirt/KVM guest
    (`infra/dev-vm/`, gate 7/7 — see *Containerization was unavailable* below).
    Selected by `environment.mode=container`, with `environment.container_binary`
    choosing the runtime; validated against real docker AND real podman, not a
@@ -542,11 +542,11 @@ function 195 lines, and the fakes can express what they used to discard.
 
 Neither was a design problem and neither blocked the other phases. Both needed
 the maintainer's own machine, so they are recorded here rather than worked
-around. **Both are now resolved by the `aipom-dev` guest**; what remains under
+around. **Both are now resolved by the `praxis-dev` guest**; what remains under
 P8.4 is a rerun, not a blocker.
 
 **1. ~~The P8.4 demo run needs `ORCHESTRATOR_MASTER_KEY`~~ — RESOLVED
-2026-08-09.** The `aipom-dev` guest has one, readiness is fully green there, and
+2026-08-09.** The `praxis-dev` guest has one, readiness is fully green there, and
 the run was attempted; see *First run attempt* above for what it found. The
 original entry is kept below because its reasoning about the master key is
 still the operative warning for anyone rebuilding the guest.
@@ -576,12 +576,12 @@ cause and the two consumers that need it, instead of a run dying twenty minutes
 in on a decrypt error. That is Phase 5's first-mile work doing its job.
 
 **2. ~~P8.5 needs a container-capable host~~ — RESOLVED 2026-08-08.** The
-`aipom-dev` guest is that host. See *Containerization was unavailable* below:
+`praxis-dev` guest is that host. See *Containerization was unavailable* below:
 the blocker is retired, and the finding it rested on is corrected there.
 
 ### Containerization was unavailable in the devcontainer — RESOLVED 2026-08-08 ✅
 
-**Superseded.** The development environment is now the `aipom-dev` libvirt/KVM
+**Superseded.** The development environment is now the `praxis-dev` libvirt/KVM
 guest (`infra/dev-vm/`), which runs nested containers. The capability gate
 `make -C infra/dev-vm verify` returns **7 passed, 0 failed** on Ubuntu 24.04.4,
 kernel 6.8.0-137, re-run after a kernel upgrade and a full power cycle:
@@ -682,7 +682,7 @@ that nobody can tell from the evidence document.
   in the deferred list below. This is the one that closes the gap above. The
   port, the ledger and both trigger points shipped in **P8.2**; the
   `ContainerEnvironment` adapter is **P8.5**, unparked 2026-08-08 now that the
-  `aipom-dev` guest provides a container-capable environment.
+  `praxis-dev` guest provides a container-capable environment.
 - **A showcase fixture** — one realistic, multi-goal project driven end to end
   on Tier 1, with captured evidence, as the artifact an invitation points at.
   Deliberately NOT a fixture that exercises every capability: several paths
@@ -795,7 +795,7 @@ that nobody can tell from the evidence document.
   - Design: `docs/superpowers/specs/2026-08-08-phase-8-5-vm-development-environment-design.md`
   - Plan: `docs/history/planning/2026-08-08-phase-8-5-vm-development-environment.md`
   - **The environment came first, and it had to.** `.devcontainer/` was retired
-    for the `aipom-dev` libvirt/KVM guest (`infra/dev-vm/`, decision 63,
+    for the `praxis-dev` libvirt/KVM guest (`infra/dev-vm/`, decision 63,
     capability gate 7/7): the adapter cannot be validated where containers
     cannot run isolated. See *Containerization was unavailable* above for the
     corrected finding — two walls deadlocking each other, not one kernel wall.
@@ -1189,10 +1189,9 @@ explaining.
 five surfaces — PyPI, npm, GitHub org, `.dev` and `.com`. Scope, migration
 design and open items:
 [`docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
-**Provisional until trademark clearance** — registry availability is not freedom
-to operate, and `Praxis Framework` is an adjacent programme-management
-methodology that needs a real search (USPTO/EUIPO, classes 9 and 42). That is
-the one thing blocking the rename starting.
+**Settled 2026-08-11 by owner decision.** The `Praxis Framework` collision was
+raised and accepted; it is recorded as a known risk rather than an open
+question, and nothing downstream treats the name as provisional.
 
 Two things the scoping found that this section did not know:
 
@@ -1202,17 +1201,21 @@ Two things the scoping found that this section did not know:
   a GitHub Release and never touches PyPI), so `pip install agent-orchestrator`
   installs a stranger's tool and the first publish attempt would have failed.
   The current distribution name is not merely bad, it is unusable.
-- **`aipom` is a Nintendo / Game Freak mark**, so removing it is legal hygiene
-  rather than branding, and it comes out completely — 47 tracked files, having
-  spread from the guest hostname into the npm package name (`aipom-planner`),
-  the acceptance-container prefix, the frontend build cache and the e2e
-  artefacts. `tests/unit/test_no_third_party_marks.py` is the ratchet that keeps
-  it out: a strict `xfail` today, which turns into a hard failure the moment the
-  tree is clean, forcing the marker off.
+- **The old working name was a Nintendo / Game Freak mark**, so removing it was
+  legal hygiene rather than branding. **Done 2026-08-11:** 49 files rewritten —
+  it had spread from the guest hostname into the npm package name, the
+  acceptance-container prefix, the frontend build cache and the e2e artefacts.
+  `tests/unit/test_no_third_party_marks.py` now scans the **whole working tree**
+  and passes; the `xfail` ratchet is gone. **Decided:** the mark stays in git
+  history — scrubbing means a force-push that breaks every clone, for a string
+  in the log of a project that was never published — and comes out of the
+  working tree. Recorded run evidence was substituted rather than re-run, and
+  each demo run's README now says so.
 
-**The rename comes first, because everything else bakes it in.** `aipom` is a
-Pokémon, which is charming and unsearchable, collides with an existing name, and
-tells a visitor nothing. Choose a replacement deliberately:
+**The rename comes first, because everything else bakes it in.** The original
+working name was a Pokémon: charming, unsearchable, colliding with an existing
+name, and telling a visitor nothing. The criteria a replacement had to meet, and
+which `praxis-orchestrator` was chosen against:
 
 - Check availability across **PyPI, npm, GitHub org, and the domain**, and check
   for trademark collision. A name available in three places out of four is not
@@ -1222,8 +1225,8 @@ tells a visitor nothing. Choose a replacement deliberately:
   is the brief.
 - **Scope the rename honestly before committing to it.** It touches the Python
   package `agent_orchestrator`, the CLI entry point `orchestrate`, the dev guest
-  `aipom-dev` and `infra/dev-vm/`, the acceptance container prefix
-  `aipom-acceptance-*`, the state directory `~/.orchestrator` and
+  `praxis-dev` and `infra/dev-vm/`, the acceptance container prefix
+  `praxis-acceptance-*`, the state directory `~/.orchestrator` and
   `ORCHESTRATOR_*` environment variables, the docs, and every fixture. Some of
   those are user-visible state on existing installs and need a migration or a
   compatibility alias, not a `sed`.
@@ -1326,7 +1329,7 @@ tools would write it rather than the way engineers imagine marketing works:
    launch.
 2. **The RED-run gap** — build it for the shorter headline, or launch with the
    longer fully-supported claim.
-3. **Git history and recorded evidence** — whether to scrub `aipom` from history
+3. **Git history and recorded evidence** — whether to scrub `praxis` from history
    (recommended: no) and whether to re-run the demo on the renamed guest rather
    than edit hostnames inside published evidence (recommended: yes).
 4. **Enable GitHub Discussions**, which the issue-template contact link expects.

@@ -84,7 +84,7 @@ routing around either.
 
 ```
 Host: Ubuntu 24.04, bare metal, Intel i3-10100F (VT-x present), 15 GiB RAM
-└── libvirt/KVM guest "aipom-dev" — Ubuntu 24.04 cloud image
+└── libvirt/KVM guest "praxis-dev" — Ubuntu 24.04 cloud image
     ├── full guest kernel: CAP_SYS_ADMIN, unmasked /proc, writable cgroup2
     ├── repo + ~/.orchestrator on native ext4
     ├── podman AND docker

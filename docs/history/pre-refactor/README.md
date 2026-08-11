@@ -1,4 +1,4 @@
-# AIPOM / Agent Orchestrator
+# Praxis Orchestrator
 
 A local Python system for **plan-driven software execution**. The center of the project is the planning layer: the `plan` workflow discovers requirements, proposes architecture, dispatches phase goals, and advances the project through review gates. Tasks, goals, workers, specs, and runtime adapters all exist to support that higher-level project plan. A React dashboard (in `frontend/`) visualizes the plan and streams execution progress live.
 

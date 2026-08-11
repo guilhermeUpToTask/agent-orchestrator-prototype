@@ -1,7 +1,7 @@
 # Where a cycle's wall-clock actually goes
 
 **2026-08-09.** Measured against the first two real Tier 1 runs of
-`demos/static-site-v1` in the `aipom-dev` guest, on free OpenRouter models
+`demos/static-site-v1` in the `praxis-dev` guest, on free OpenRouter models
 (`poolside/laguna-s-2.1:free` planning, `impl-gemma-4-31b-it` implementing).
 
 This is a **latency** analysis, not a benchmark. One run on one pin against a

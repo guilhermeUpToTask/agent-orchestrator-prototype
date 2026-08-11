@@ -39,7 +39,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 2026-08-10 13:21:12 [info     ] runtime.process_observation    kind=process.exited payload={'stdout_bytes': 15263, 'stderr_bytes': 39, 'exit_code': 0, 'duration_seconds': 71.126557, 'log_path': '/home/dev/.orchestrator/runtime-logs/c6a31d95-8621-493a-a806-347092302c10.jsonl'} source=process
 2026-08-10 13:21:12 [info     ] codex.finished                 exit_code=0 log_path=/home/dev/.orchestrator/runtime-logs/c6a31d95-8621-493a-a806-347092302c10.jsonl
 2026-08-10 13:21:13 [info     ] workspace.committed            plan_branch=goal/5414e50b-579c-4893-9e2d-f9676c5fddae task_branch=task/b20a9f13-9167-4fc9-95a7-b899c5ee01ff/45077d28-d67f-4826-99ea-7682479c4fff
-2026-08-10 13:21:13 [info     ] acceptance.container_started   container=aipom-acceptance-222bb39749ac image=python:3.12-slim
+2026-08-10 13:21:13 [info     ] acceptance.container_started   container=praxis-acceptance-222bb39749ac image=python:3.12-slim
 2026-08-10 13:21:13 [info     ] acceptance.recorded            cycle_id=a0e0d14c-8b92-41f4-bdd0-73478d13de36 outcome=failed plan_id=aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43 trigger=goal_merge
 2026-08-10 13:21:13 [info     ] workspace.begun                attempt=1 plan_id=aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43 task_id=439b35f7-2d7c-4144-9f67-5fdf6a6d199a worktree=/tmp/task-439b35f7-2d7c-4144-9f67-5fdf6a6d199a-a1-r64_5kqk
 2026-08-10 13:21:13 [info     ] agent_runner.resolved          agent_id=45cccc7c-7741-4193-9abd-994ae86e7cd8 model_id=e58d3fc1-23b3-4758-82db-a90dd8f4dfac provider_id=48081160-ff73-44d7-b881-dbfd8ff13456 runtime_type=codex
@@ -84,7 +84,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 2026-08-10 13:23:02 [info     ] runtime.process_observation    kind=process.exited payload={'stdout_bytes': 39689, 'stderr_bytes': 39, 'exit_code': 0, 'duration_seconds': 29.624888, 'log_path': '/home/dev/.orchestrator/runtime-logs/46ee1099-a782-44dc-9820-3fe041ec10c9.jsonl'} source=process
 2026-08-10 13:23:02 [info     ] codex.finished                 exit_code=0 log_path=/home/dev/.orchestrator/runtime-logs/46ee1099-a782-44dc-9820-3fe041ec10c9.jsonl
 2026-08-10 13:23:02 [info     ] workspace.committed            plan_branch=goal/51744588-fcd4-4fa6-baf3-acf7531ec865 task_branch=task/439b35f7-2d7c-4144-9f67-5fdf6a6d199a/1ddbeac5-5e21-48f0-a015-26d0167a184d
-2026-08-10 13:23:02 [info     ] acceptance.container_started   container=aipom-acceptance-f220ef832f61 image=python:3.12-slim
+2026-08-10 13:23:02 [info     ] acceptance.container_started   container=praxis-acceptance-f220ef832f61 image=python:3.12-slim
 2026-08-10 13:23:03 [info     ] acceptance.recorded            cycle_id=a0e0d14c-8b92-41f4-bdd0-73478d13de36 outcome=failed plan_id=aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43 trigger=goal_merge
 {"request_id": "b5671298ff9e4acaaa16bdfb71afe605", "method": "GET", "path": "/api/plans/aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43", "client_ip": "127.0.0.1", "event": "request_started", "level": "info", "timestamp": "2026-08-10T13:23:08.846271Z"}
 {"request_id": "b5671298ff9e4acaaa16bdfb71afe605", "status_code": 200, "duration_ms": 14.36, "event": "request_finished", "level": "info", "timestamp": "2026-08-10T13:23:08.860554Z"}
@@ -129,9 +129,9 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 2026-08-10 13:25:24 [info     ] runtime.process_observation    kind=process.exited payload={'stdout_bytes': 24175, 'stderr_bytes': 39, 'exit_code': 0, 'duration_seconds': 49.528242, 'log_path': '/home/dev/.orchestrator/runtime-logs/e89d375a-00a3-47af-9a89-78da9fed1bbd.jsonl'} source=process
 2026-08-10 13:25:24 [info     ] codex.finished                 exit_code=0 log_path=/home/dev/.orchestrator/runtime-logs/e89d375a-00a3-47af-9a89-78da9fed1bbd.jsonl
 2026-08-10 13:25:25 [info     ] workspace.committed            plan_branch=goal/3cb111c0-3157-4971-bf03-8e209557bd82 task_branch=task/1f34ecc7-d326-431d-9313-be05145e2375/23361b05-2c12-4a04-b0ea-572b9450deaa
-2026-08-10 13:25:25 [info     ] acceptance.container_started   container=aipom-acceptance-4bb39ca654b8 image=python:3.12-slim
+2026-08-10 13:25:25 [info     ] acceptance.container_started   container=praxis-acceptance-4bb39ca654b8 image=python:3.12-slim
 2026-08-10 13:25:26 [info     ] acceptance.recorded            cycle_id=a0e0d14c-8b92-41f4-bdd0-73478d13de36 outcome=passed plan_id=aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43 trigger=goal_merge
-2026-08-10 13:25:26 [info     ] acceptance.container_started   container=aipom-acceptance-0ec7cc865ae9 image=python:3.12-slim
+2026-08-10 13:25:26 [info     ] acceptance.container_started   container=praxis-acceptance-0ec7cc865ae9 image=python:3.12-slim
 2026-08-10 13:25:27 [info     ] acceptance.recorded            cycle_id=a0e0d14c-8b92-41f4-bdd0-73478d13de36 outcome=passed plan_id=aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43 trigger=pre_publication
 {"request_id": "58e341e8d4ab48bf8be43e7a96a85674", "method": "GET", "path": "/api/plans/aaedbb73-d3a5-4cd4-a37f-c0e846aa9f43", "client_ip": "127.0.0.1", "event": "request_started", "level": "info", "timestamp": "2026-08-10T13:25:36.873600Z"}
 {"request_id": "58e341e8d4ab48bf8be43e7a96a85674", "status_code": 200, "duration_ms": 4.43, "event": "request_finished", "level": "info", "timestamp": "2026-08-10T13:25:36.878005Z"}

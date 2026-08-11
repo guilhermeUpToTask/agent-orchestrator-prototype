@@ -25,7 +25,7 @@ check() {
   fi
 }
 
-echo "=== aipom-dev capability proof ==="
+echo "=== praxis-dev capability proof ==="
 
 # 1. Bubblewrap with a fresh procfs — the exact call that failed in the devcontainer.
 check "bwrap mounts a fresh /proc" \
@@ -40,7 +40,7 @@ check "fresh procfs in a private PID namespace" \
 #    run as root (via the dev user's NOPASSWD sudo) to test the capability
 #    the devcontainer's read-only mount actually denies — not permissions.
 check "cgroup2 is writable" \
-  bash -c 'sudo mkdir -p /sys/fs/cgroup/aipom-probe && sudo rmdir /sys/fs/cgroup/aipom-probe'
+  bash -c 'sudo mkdir -p /sys/fs/cgroup/praxis-probe && sudo rmdir /sys/fs/cgroup/praxis-probe'
 # -C (unshare the cgroup namespace) is load-bearing, not decoration. Mounting
 # cgroup2 from a non-initial user namespace needs CAP_SYS_ADMIN over the cgroup
 # namespace's OWNING user namespace. Without -C the process stays in the initial

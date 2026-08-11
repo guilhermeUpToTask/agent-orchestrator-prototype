@@ -130,7 +130,7 @@ class ContainerEnvironment:
                 duration_seconds=time.monotonic() - started,
             )
 
-        name = f"aipom-acceptance-{uuid.uuid4().hex[:12]}"
+        name = f"praxis-acceptance-{uuid.uuid4().hex[:12]}"
         with _checkout(repo, ref, self._workspace_root) as tree:
             # The teardown `finally` must be armed BEFORE the start, not after
             # it succeeds: a create that fails or times out on the client side
