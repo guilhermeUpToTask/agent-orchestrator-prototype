@@ -1185,6 +1185,31 @@ the exit criteria below.
 by someone who has never heard of it, under a name that does not need
 explaining.
 
+**Name chosen 2026-08-11: `praxis-orchestrator`** (CLI `praxis`), free on all
+five surfaces — PyPI, npm, GitHub org, `.dev` and `.com`. Scope, migration
+design and open items:
+[`docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
+**Provisional until trademark clearance** — registry availability is not freedom
+to operate, and `Praxis Framework` is an adjacent programme-management
+methodology that needs a real search (USPTO/EUIPO, classes 9 and 42). That is
+the one thing blocking the rename starting.
+
+Two things the scoping found that this section did not know:
+
+- **`agent-orchestrator` on PyPI belongs to someone else** — version 2.0.0, an
+  *"Orquestrador de Agentes de IA para Desenvolvimento de Software"*. The same
+  category. This project has never published (release-please attaches a wheel to
+  a GitHub Release and never touches PyPI), so `pip install agent-orchestrator`
+  installs a stranger's tool and the first publish attempt would have failed.
+  The current distribution name is not merely bad, it is unusable.
+- **`aipom` is a Nintendo / Game Freak mark**, so removing it is legal hygiene
+  rather than branding, and it comes out completely — 47 tracked files, having
+  spread from the guest hostname into the npm package name (`aipom-planner`),
+  the acceptance-container prefix, the frontend build cache and the e2e
+  artefacts. `tests/unit/test_no_third_party_marks.py` is the ratchet that keeps
+  it out: a strict `xfail` today, which turns into a hard failure the moment the
+  tree is clean, forcing the marker off.
+
 **The rename comes first, because everything else bakes it in.** `aipom` is a
 Pokémon, which is charming and unsearchable, collides with an existing name, and
 tells a visitor nothing. Choose a replacement deliberately:
@@ -1202,6 +1227,31 @@ tells a visitor nothing. Choose a replacement deliberately:
   `ORCHESTRATOR_*` environment variables, the docs, and every fixture. Some of
   those are user-visible state on existing installs and need a migration or a
   compatibility alias, not a `sed`.
+
+**Launch plan written 2026-08-11:**
+[`docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md`](docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md)
+— positioning, audience and channels with their norms, the asset inventory
+(most of it already exists), the numbers that may be quoted, metrics with the
+pre-agreed stop-and-fix threshold, and the support path.
+
+**It opens by correcting the headline proposed below, and that correction is a
+Phase 10 finding rather than a wording preference.** Checked against
+`demos/static-site-v1/runs/20260810T164908Z-d098aece/evidence.json`, the
+*boundary* is provable — `test_bundle.state: "frozen"`, `test_commit_sha` ≠
+`candidate_commit_sha` on every task, `protected_file_hashes` proving the
+implementer could not edit the tests, plus `exact_command`, `exit_code` and a
+hash of the output. **"Proven RED" is not.** All five tasks carry
+`exit_code: 0` and `rejected_evidence_count: 0`; no failing verification run is
+recorded in the published artifacts. Launching on a claim a reader can ask for
+and we cannot produce would undo every honest number beside it, because
+verifiability *is* the pitch.
+
+So there is a piece of product work with a launch consequence: **record and
+export the RED run** — the test-authoring stage's own verification, showing the
+frozen tests failing against the pre-implementation tree. Most of the machinery
+exists; `run_kind` is in the orchestration path but not yet a dedicated ledger
+column (see known-issues). Ship it and the headline gets shorter and stronger;
+skip it and the launch uses the longer, fully-supported version.
 
 Then the campaign, written the way a marketing team that has shipped developer
 tools would write it rather than the way engineers imagine marketing works:
@@ -1233,17 +1283,53 @@ tools would write it rather than the way engineers imagine marketing works:
   the audience the launch actually produces rather than an imagined one. A
   support channel with nobody in it is a maintenance cost — build it when the
   first invitation goes out, not before.
+  **Built 2026-08-11:** `.github/ISSUE_TEMPLATE/` — three templates and a
+  Discussions contact link, deliberately not a Discord (a channel implying a
+  response time one maintainer cannot hold, and unsearchable besides). The first
+  template is *"it accepted something it shouldn't have"*, which exists
+  separately because it is the highest-signal report this product can receive
+  and it arrives looking like an ordinary bug; triaging it as one would miss a
+  defect at the centre of the invariant everything else rests on. The second is
+  setup failure, prioritised over feature requests, because every published run
+  to date was on the dev guest by its author and the first mile is the largest
+  untested exposure. **Still to do by hand:** enable Discussions in repository
+  settings — the contact link points at it.
 
 ### Exit criteria
 
-- Every audit finding carries proof; every hypothesis is labelled as one.
-- `known-issues.md` reflects the audit, and every fix landed with a regression
-  test.
-- A name is chosen, verified available across all four surfaces, and the rename
-  is scoped with a migration path for existing installs.
-- A written launch plan with positioning, channels, assets, sequencing, metrics,
-  and a pre-agreed "stop and fix the product" threshold.
-- The support path exists before the first invitation goes out.
+- ✅ **Every audit finding carries proof; every hypothesis is labelled as one.**
+  Four sweeps, 11 findings each reproduced before being written down, 4
+  retractions, and 2 open observations kept as hypotheses with the measurement
+  that would settle them.
+- ✅ **`known-issues.md` reflects the audit, and every fix landed with a
+  regression test.** All 11 fixed, so none became entries — what the file gained
+  is the record of the sweep, what it cleared, and what it deliberately did not
+  file.
+- ✅ **A name is chosen, verified available across all four surfaces, and the
+  rename is scoped with a migration path for existing installs.**
+  `praxis-orchestrator`, free on all five (both TLDs);
+  [scope](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md) separates
+  the mechanical rename from the state that needs adopt-in-place and
+  read-both-prefer-new aliases. **Provisional pending trademark clearance.**
+- ✅ **A written launch plan** with positioning, channels, assets, sequencing,
+  metrics and the pre-agreed stop-and-fix threshold
+  ([plan](docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md)) — which
+  opens by correcting this file's own proposed headline, because "proven RED" is
+  not supported by the published evidence.
+- ✅ **The support path exists before the first invitation goes out.**
+  `.github/ISSUE_TEMPLATE/`. Discussions still needs enabling by hand.
+
+**Remaining before the phase can close — all owner decisions, not work:**
+
+1. **Trademark clearance** for `praxis-orchestrator` (USPTO/EUIPO, classes 9
+   and 42; `Praxis Framework` specifically). Blocks the rename, which blocks the
+   launch.
+2. **The RED-run gap** — build it for the shorter headline, or launch with the
+   longer fully-supported claim.
+3. **Git history and recorded evidence** — whether to scrub `aipom` from history
+   (recommended: no) and whether to re-run the demo on the renamed guest rather
+   than edit hostnames inside published evidence (recommended: yes).
+4. **Enable GitHub Discussions**, which the issue-template contact link expects.
 
 ## Deferred — reconsider only with run or user evidence ⏸
 
