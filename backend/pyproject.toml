@@ -1,6 +1,6 @@
 [project]
 name = "agent-orchestrator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first, human-gated, verified multi-agent coding orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
