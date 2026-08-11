@@ -1159,8 +1159,25 @@ handlers against the repository reader and grew the transcript by 500 messages),
 and a handler's raw exception text — absolute paths included — was returned as a
 tool result and therefore **sent to the provider** on the next request. Both
 fixed; the fan-out excess is refused rather than dropped, because these
-providers require a tool message per `tool_call_id`. **Still unswept: the
-frontend's error and stale-data states, and remaining doc/code drift.**
+providers require a tool message per `tool_call_id`.
+
+**Sweep 4 — done 2026-08-11** (the console's error and stale-data states, and
+doc/code drift):
+[`docs/history/analyses/2026-08-11-phase-10a-audit-sweep-4.md`](docs/history/analyses/2026-08-11-phase-10a-audit-sweep-4.md).
+**The console came out clean on every property checked** — the backend's 29
+domain events and the client's listener list match exactly in both directions
+(a name with no listener is silently dropped, so this is the one that would rot
+invisibly), every listened event reaches a cache invalidation, the reconnect gap
+resyncs, and the views branch on `error` with a retry. The drift half found the
+last one: two source comments naming paths that do not exist, one of them
+`backend/src/api/security.py` — the never-existed layout
+`test_documented_paths_exist.py` was written about, still repeated in current
+code two refactors later. That test now covers source comments too.
+
+**10A's area list is complete: 11 findings, all proven and all fixed with a
+regression test; 4 retractions; nothing on the original list unswept.** What
+remains before the phase closes is a judgement call rather than a sweep — see
+the exit criteria below.
 
 ### 10B — the launch
 
