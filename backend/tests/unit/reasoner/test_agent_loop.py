@@ -265,8 +265,15 @@ def test_unknown_tool_and_handler_crash_become_error_results():
 
     assert result.submitted is True  # the loop survived both bad calls
     tool_messages = [m["content"] for m in messages if m["role"] == "tool"]
+    # An unknown NAME is the model's own mistake and carries no internal detail,
+    # so it is named back precisely.
     assert any("Unknown tool: nonexistent" in c for c in tool_messages)
-    assert any("boom" in c for c in tool_messages)
+    # A handler CRASH is reported without its exception text: `str(exc)` on an
+    # unexpected error is internal detail and these messages are sent to the
+    # provider (Phase 10A — see test_hostile_model_output.py). The model is told
+    # which tool failed, which is what it needs to adapt.
+    assert any("fragile" in c and "failed" in c for c in tool_messages)
+    assert not any("boom" in c for c in tool_messages)
 
 
 def test_non_terminal_tool_result_feeds_back_and_loop_continues():
