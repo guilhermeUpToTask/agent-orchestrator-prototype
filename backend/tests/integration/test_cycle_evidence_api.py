@@ -465,3 +465,64 @@ def test_superseded_cycle_still_serves_its_evidence(replanned_client) -> None:
         for goal in body["goals"]
         for task in goal["tasks"]
     ), "the source cycle's accepted evidence survives the replan"
+
+
+def test_the_evidence_says_the_tests_were_proven_failing_first(evidence_client) -> None:
+    """The claim the product rests on, in the document a sceptic reads.
+
+    The orchestrator already ran the checks after the test-authoring stage and
+    already REFUSED to freeze a bundle whose baseline was not failing
+    (`app/verification.py::baseline_outcome`; `tdd` and `executable_check` both
+    require red). But the verdict lived only in a `verification_baseline`
+    planning artifact, so the cycle evidence — the thing published in
+    `demos/*/runs/*/evidence.json` — could show `exit_code: 0` for every task and
+    say nothing about the failure that came first.
+
+    That made "the tests were proven failing before the implementation" a claim
+    a reader could ask for and we could not produce from the evidence. Phase 10B
+    surfaced it here.
+    """
+    client, plan_id, cycle_id = evidence_client
+
+    body = client.get(f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence").json()
+    bundles = [
+        task["test_bundle"]
+        for goal in body["goals"]
+        for task in goal["tasks"]
+        if task["test_bundle"] is not None
+    ]
+    assert bundles, "a completed cycle froze at least one test bundle"
+
+    for bundle in bundles:
+        baseline = bundle["baseline"]
+        assert baseline is not None, "a frozen bundle carries the baseline it was accepted on"
+        assert baseline["verdict"] == "red", (
+            "the checks must have FAILED before the implementation existed — a "
+            f"green baseline means the later green proves nothing: {baseline}"
+        )
+        assert baseline["commands"], "the baseline names the command it ran"
+        assert any(code != 0 for code in baseline["exit_codes"]), (
+            f"a red verdict needs a non-zero exit code behind it: {baseline}"
+        )
+
+
+def test_the_baseline_and_the_pass_are_both_readable_from_one_document(
+    evidence_client,
+) -> None:
+    """Both halves, side by side: red before, green after, on the same task."""
+    client, plan_id, cycle_id = evidence_client
+
+    body = client.get(f"/api/plans/{plan_id}/cycles/{cycle_id}/evidence").json()
+    task = next(
+        task
+        for goal in body["goals"]
+        for task in goal["tasks"]
+        if task["test_bundle"] is not None and task["accepted_evidence"]
+    )
+
+    assert task["test_bundle"]["baseline"]["verdict"] == "red"
+    assert all(item["exit_code"] == 0 for item in task["accepted_evidence"])
+    # And the two are distinct commits, which is what makes the pair meaningful.
+    assert task["test_bundle"]["test_commit_sha"] != (
+        task["accepted_evidence"][0]["candidate_commit_sha"]
+    )

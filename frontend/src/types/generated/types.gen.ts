@@ -300,6 +300,44 @@ export type AttemptTimelineResponse = {
 };
 
 /**
+ * BaselineResponse
+ *
+ * What the checks did BEFORE the implementation existed.
+ *
+ * The single fact that decides whether the green afterwards means anything: a
+ * check that already passed proves nothing about this task, because the green
+ * after the work would be the same green as before it. The orchestrator
+ * already ran this and already refused to proceed without it — `tdd` and
+ * `executable_check` both require a FAILING baseline
+ * (`app/verification.py::baseline_outcome`) — but the verdict lived only in a
+ * `verification_baseline` planning artifact, off to one side of the evidence
+ * document anyone actually reads.
+ *
+ * So the run was red, provably, and the published evidence could not say so.
+ * Surfaced here (Phase 10B) because "the tests were proven failing first" is
+ * the claim this product rests on, and a claim a reader cannot check from the
+ * evidence bundle is one we should not be making.
+ */
+export type BaselineResponse = {
+    /**
+     * Verdict
+     */
+    verdict: string;
+    /**
+     * Commands
+     */
+    commands: Array<string>;
+    /**
+     * Exit Codes
+     */
+    exit_codes: Array<number>;
+    /**
+     * Checks
+     */
+    checks: Array<string>;
+};
+
+/**
  * BlockResponse
  *
  * The domain `PlanBlock` plus the one fact only `block_policy` knows.
@@ -2837,6 +2875,11 @@ export type TestBundleResponse = {
      * Verification Strategy
      */
     verification_strategy: string;
+    baseline: BaselineResponse | null;
+    /**
+     * Baseline Evidence Refs
+     */
+    baseline_evidence_refs: Array<string>;
 };
 
 /**

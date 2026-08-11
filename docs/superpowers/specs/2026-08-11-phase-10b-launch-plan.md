@@ -17,7 +17,53 @@ Which is why this plan opens by correcting the headline the roadmap proposed.
 
 ---
 
-## 0. The headline claim, corrected before it ships
+## 0. The headline claim — CORRECTED TWICE. Read this second correction first.
+
+**Update, later on 2026-08-11: the section below was itself wrong, and the
+original roadmap headline was right.**
+
+It concluded that "the test proven RED" was unsupported. That was inferred from
+the *exported evidence* — every task showing `exit_code: 0` — without checking
+the execution path. The execution path does prove it:
+
+- After the test-authoring stage the orchestrator **runs the checks**
+  (`ExecutionHandler`, the `test_authoring` branch).
+- `app/verification.py::baseline_outcome` computes the verdict and, for `tdd`
+  and `executable_check`, **requires it to be red**. A green baseline raises
+  `TaskFailed("test bundle did not establish a failing baseline")`, so a task
+  cannot reach a frozen bundle without a proven failure first.
+- The verdict, the commands and the exit codes were recorded as a
+  `verification_baseline` planning artifact.
+
+So the system had always proven RED and refused to continue without it. What was
+missing was only that **the published evidence document did not say so** — and,
+underneath that, that the artifact was unreachable: the store matches
+`goal_id IS :goal_id`, so a query without a goal id selected the *plan-wide*
+rows and returned nothing for a per-goal purpose.
+
+Both are fixed. `GET …/cycles/{id}/evidence` now carries
+`test_bundle.baseline` — verdict, commands, exit codes — beside the accepted
+green, and `GET …/planning-artifacts` without a `goal_id` now spans every goal.
+Locked by `test_the_evidence_says_the_tests_were_proven_failing_first` and
+`test_the_baseline_and_the_pass_are_both_readable_from_one_document`.
+
+**So the roadmap's short headline is available after all**, once a demo is
+re-run so a published `evidence.json` carries the field:
+
+> *the orchestrator records the boundary between the test proven RED and the
+> implementation that made it GREEN.*
+
+The lesson is the one this phase keeps re-learning, and it cuts both ways: an
+absence in an export is not an absence in the system. I retracted a true claim
+on incomplete evidence, which is the same error as asserting a false one.
+
+The original analysis is kept below unedited, because the reasoning error is the
+instructive part — the same treatment the `known-issues.md` failure-
+classification retraction gets.
+
+---
+
+## 0b. The original (WRONG) analysis, kept for the record
 
 ROADMAP proposes leading with:
 

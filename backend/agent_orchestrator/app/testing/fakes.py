@@ -364,6 +364,22 @@ class InMemoryPlanningArtifactStore:
         bucket = self._artifacts.get(self._key(plan_id, purpose, goal_id), [])
         return sorted(bucket, key=lambda a: a.sequence, reverse=True)[:limit]
 
+    def latest_across_goals(
+        self, plan_id: str, purpose: str, *, limit: int = 5
+    ) -> list[PlanningArtifact]:
+        """Every goal's bucket, not the `goal_id IS NULL` one — see the port.
+
+        The fake must have the same blind spot the real adapter had, or a test
+        against it would pass while production returned nothing.
+        """
+        merged = [
+            artifact
+            for (a_plan, a_purpose, _goal), bucket in self._artifacts.items()
+            if a_plan == plan_id and a_purpose == purpose
+            for artifact in bucket
+        ]
+        return sorted(merged, key=lambda a: a.sequence, reverse=True)[:limit]
+
     def clear(self, plan_id: str, purpose: str, *, goal_id: str | None = None) -> None:
         self._artifacts.pop(self._key(plan_id, purpose, goal_id), None)
 

@@ -106,3 +106,47 @@ def test_planning_artifacts_refuses_an_out_of_range_limit(client, plan_with_even
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_planning_artifacts_without_a_goal_id_spans_every_goal(client, plan_with_events) -> None:
+    """Omitting `goal_id` must mean EVERY goal, not "the plan-wide ones".
+
+    The store matches `goal_id IS :goal_id`, so a NULL selected only plan-wide
+    rows. A goal-scoped purpose — `verification_baseline` is written per goal —
+    therefore answered `[]` while rows existed, and an operator reading that
+    empty list would reasonably conclude the baseline was never recorded
+    (Phase 10B).
+    """
+    from datetime import datetime, timezone
+
+    from agent_orchestrator.app.ports import PlanningArtifact
+
+    container = client.container  # type: ignore[attr-defined]
+    for index, goal_id in enumerate(("goal-a", "goal-b")):
+        container.planning_artifacts.append(
+            PlanningArtifact(
+                plan_id=plan_with_events,
+                goal_id=goal_id,
+                purpose="verification_baseline",
+                operation_id=f"op-{index}",
+                sequence=0,
+                input_fingerprint=f"task-{index}:1",
+                outcome="committed",
+                created_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
+                payload={"verdict": "red"},
+            )
+        )
+
+    everything = client.get(
+        f"/api/plans/{plan_with_events}/planning-artifacts",
+        params={"purpose": "verification_baseline"},
+    )
+    assert everything.status_code == 200
+    assert len(everything.json()) == 2, "both goals' baselines must be reachable"
+
+    scoped = client.get(
+        f"/api/plans/{plan_with_events}/planning-artifacts",
+        params={"purpose": "verification_baseline", "goal_id": "goal-a"},
+    )
+    assert scoped.status_code == 200
+    assert len(scoped.json()) == 1, "naming a goal still scopes to that goal"
