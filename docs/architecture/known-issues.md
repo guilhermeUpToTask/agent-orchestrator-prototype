@@ -26,6 +26,50 @@ What did NOT move: work that is a missing *feature* rather than a defect
 (forge publication, `ProjectSpec`, sandboxing, an operator skip/abandon
 command) stays in Phase 8, where it is scheduled against preview evidence.
 
+## The Phase 10A audit (2026-08-10/11) — what it changed here
+
+Four sweeps, run under one rule: *a finding is only a finding with concrete
+proof, never an assumption.* **Eleven findings, every one reproduced before it
+was written down and every one fixed with the regression test that locks it** —
+so, by this file's own convention, none of them are entries below. The records,
+with the reproductions:
+[sweep 1](../history/analyses/2026-08-10-phase-10a-audit-sweep-1.md) (auth,
+secrets, validation, migrations),
+[sweep 2](../history/analyses/2026-08-10-phase-10a-audit-sweep-2.md) (the lease
+under contention),
+[sweep 3](../history/analyses/2026-08-11-phase-10a-audit-sweep-3.md) (the
+reasoner tool surface),
+[sweep 4](../history/analyses/2026-08-11-phase-10a-audit-sweep-4.md) (the
+console, and doc/code drift).
+
+**Four areas were checked and found clean**, which is recorded so the next
+audit does not re-derive it: the alembic chain does not drift from the ORM
+metadata (22 tables, 0 discrepancies), all 11 plan-scoped tables cascade, the
+plan claim holds mutual exclusion under every race constructed, and the client's
+SSE listener list matches the backend's emitted events exactly in both
+directions.
+
+**Four claims were retracted before becoming entries.** Two were measurement
+errors in the audit's own fixtures (`INSERT OR IGNORE` against
+`uq_plans_project_id`; a bare `create_engine` reading `PRAGMA foreign_keys=0`),
+one blamed `ContainerEnvironment` for a container leaked by a SIGKILLed test
+run, and one inferred that a `None`-returning heartbeat lets a displaced worker
+write stale state, which the version CAS refuses. The pattern in all four is a
+true observation with an inference that did not follow from it.
+
+**Two open observations that are deliberately NOT defect entries**, because
+neither has a reproduction showing harm — they live in the sweep records with
+what would settle them:
+
+- The **plan** heartbeat renews an already-expired lease while the **goal**
+  heartbeat refuses to (`lease_expires_at >= :now_epoch`). Proven, but mutual
+  exclusion is never violated by it: once another worker has claimed, the
+  displaced holder's heartbeat is refused.
+- Token comparison in `api/security.py` uses `!=` rather than
+  `hmac.compare_digest`. The short-circuit is real; a remote timing attack
+  against this stack is not demonstrated. Recorded as a hypothesis with the
+  measurement that would settle it.
+
 ## Lifecycle compatibility
 
 - `PlanPhase`, the legacy conversation/control routes, and root `goals`
@@ -147,6 +191,18 @@ back to a working one
 (`tests/unit/test_provider_capacity.py`,
 `tests/unit/test_provider_capacity_factory.py`, and
 `test_an_unusable_stored_cap_does_not_wedge_the_plan` on both backends).
+
+**Phase 10A found three more instances of this class and closed them**
+(sweep 1): a provider `api_key` of `""` was accepted and stored `201`, deferring
+the failure to the first real run as an `AUTH_ERROR` far from the form that
+caused it (`min_length=1` on name/base_url/api_key, create and update); and two
+telemetry reads declared a bare `limit: int` that reaches `LIMIT :limit`
+verbatim, where **SQLite treats a negative limit as no limit** — `?limit=-1`
+returned a plan's entire agent-event history, 750 rows of 750, while
+`tail_lines` in the same module was already bounded correctly. Both are now
+`Query(..., ge=1, le=N)`, locked by `tests/integration/test_telemetry_read_bounds.py`.
+The class keeps producing instances because the bound lives on each DTO; there
+is no repository-wide mechanism that would have caught these.
 
 One entry from the same review remains recorded here rather than open:
 
