@@ -28,18 +28,18 @@ import pytest
 import uvicorn
 from cryptography.fernet import Fernet
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.app.execution_records import (
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
 )
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.runtime.process_supervisor import attempt_log_path
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.runtime.process_supervisor import attempt_log_path
 
 pytestmark = pytest.mark.integration
 
@@ -57,11 +57,11 @@ def api_token() -> str | None:
 def live_server(tmp_path, monkeypatch, api_token):
     """A real API process (uvicorn, in-thread) with the outbox relay running,
     reachable over an actual loopback socket."""
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     if api_token:
-        monkeypatch.setenv("ORCHESTRATOR_API_TOKEN", api_token)
+        monkeypatch.setenv("PRAXIS_API_TOKEN", api_token)
     else:
-        monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+        monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(ProjectDefinition(id="project-1", name="Test project", repo_url=None))
@@ -156,8 +156,8 @@ def live_stack(tmp_path, monkeypatch):
     """Same real-uvicorn stack as `live_server`, but also hands back the
     container so a test can seed execution rows and write runtime-log files the
     API will then read/stream."""
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(ProjectDefinition(id="project-1", name="Test project", repo_url=None))

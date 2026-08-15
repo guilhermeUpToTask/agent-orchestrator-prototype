@@ -36,7 +36,7 @@ DOCUMENTS = [REPO / "CLAUDE.md", *sorted((REPO / "docs" / "architecture").glob("
 # module names and `a/b` prose fragments.
 #
 # `infra/` is deliberately absent even though the repository has one: the docs
-# use that prefix for the BACKEND package (`backend/agent_orchestrator/infra/`),
+# use that prefix for the BACKEND package (`backend/praxis_orchestrator/infra/`),
 # while the top-level `infra/` is the dev-VM. Checking it here would report a
 # real ambiguity as a missing file over and over; the honest fix for those
 # references is to write them out in full, which this test then checks.
@@ -51,7 +51,7 @@ _SUFFIXES = (".py", ".md", ".sh", ".ts", ".tsx", ".yaml", ".yml", ".toml", ".jso
 # present in a fresh checkout is not — this test first went red in CI and not
 # locally for exactly that reason, because a developer machine has built once.
 _GENERATED = {
-    "backend/agent_orchestrator/api/static",  # the staged UI, built into the wheel
+    "backend/praxis_orchestrator/api/static",  # the staged UI, built into the wheel
     "frontend/dist",  # vite build output
 }
 
@@ -107,7 +107,7 @@ def test_every_documented_path_exists(document: Path) -> None:
 # itself must keep naming `backend/src/domain/` to describe the defect. A check
 # that has to be taught about fixture strings is one that gets deleted.
 _SOURCE_ROOTS = [
-    REPO / "backend" / "agent_orchestrator",
+    REPO / "backend" / "praxis_orchestrator",
     REPO / "frontend" / "src",
 ]
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx"}
@@ -166,14 +166,14 @@ def test_the_code_extractor_sees_an_unbackticked_path(tmp_path: Path) -> None:
     source = tmp_path / "sample.py"
     source.write_text(
         "# see backend/src/api/security.py::require_api_token_or_query\n"
-        "# and backend/agent_orchestrator/api/server.py for the mount.\n"
+        "# and backend/praxis_orchestrator/api/server.py for the mount.\n"
         "# Resolution happens in infra/forge/binding.py (package-relative).\n"
     )
 
     claims = _code_claims(source)
 
     assert "backend/src/api/security.py" in claims, "the wrong claim must still be seen"
-    assert "backend/agent_orchestrator/api/server.py" in claims
+    assert "backend/praxis_orchestrator/api/server.py" in claims
     assert not any(claim.startswith("infra/") for claim in claims), (
         "the package-relative `infra/` prefix stays excluded — see _ROOTS"
     )
@@ -190,7 +190,7 @@ def test_the_extractor_catches_the_defect_it_exists_for(tmp_path: Path) -> None:
     document = tmp_path / "sample.md"
     document.write_text(
         "The package lives at `backend/src/domain/` and the loop at\n"
-        "`backend/agent_orchestrator/app/use_cases/run_worker.py`.\n"
+        "`backend/praxis_orchestrator/app/use_cases/run_worker.py`.\n"
         "Resolution happens in `infra/forge/binding.read_binding`, and the\n"
         "route is `POST /api/plans/{plan_id}/pause`.\n"
     )
@@ -198,7 +198,7 @@ def test_the_extractor_catches_the_defect_it_exists_for(tmp_path: Path) -> None:
     claims = _claims(document)
 
     assert "backend/src/domain" in claims, "the wrong claim must still be seen"
-    assert "backend/agent_orchestrator/app/use_cases/run_worker.py" in claims
+    assert "backend/praxis_orchestrator/app/use_cases/run_worker.py" in claims
     assert not any("read_binding" in claim for claim in claims), "module.function is not a path"
     assert not any("{plan_id}" in claim for claim in claims), "a route template is not a path"
 

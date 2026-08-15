@@ -21,7 +21,7 @@ const PORT = 8310;
 const BASE_URL = process.env.E2E_CYCLE_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 const E2E_HOME = process.env.E2E_CYCLE_HOME ?? '/tmp/praxis-cycle-e2e-home';
 const PYTHON = process.env.E2E_PYTHON ?? '../backend/.venv/bin/python';
-const CLI = `${PYTHON} -m agent_orchestrator.infra.cli.main`;
+const CLI = `${PYTHON} -m praxis_orchestrator.infra.cli.main`;
 
 export default defineConfig({
   testDir: './e2e/cycle',
@@ -57,6 +57,6 @@ export default defineConfig({
         reuseExistingServer: false,
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ORCHESTRATOR_HOME: E2E_HOME },
+        env: { PRAXIS_HOME: E2E_HOME },
       },
 });

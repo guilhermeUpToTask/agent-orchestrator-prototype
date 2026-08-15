@@ -8,7 +8,7 @@ FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SEED_DIR="$FIXTURE_DIR/seed"
 SEED_TAG="first-cycle-v1-seed"
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${FIRST_CYCLE_REPO:-$ORCH_HOME/first-cycle-v1/repo}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }
@@ -53,7 +53,7 @@ fi
 git -C "$TARGET" tag -f "$SEED_TAG"
 note "tagged $SEED_TAG at $(git -C "$TARGET" rev-parse --short HEAD)"
 # NOT PROJECT_REPO_DIR: AppContainer does not read it here. A project created
-# without `repo_url` gets a fresh empty repo auto-seeded under ORCHESTRATOR_HOME,
+# without `repo_url` gets a fresh empty repo auto-seeded under PRAXIS_HOME,
 # and the run then "passes" against a tree the checker never looks at.
 note "bind this repo by creating the project WITH repo_url:"
 note "  POST /api/projects {\"name\":\"first-cycle-v1\",\"repo_url\":\"$TARGET\"}"

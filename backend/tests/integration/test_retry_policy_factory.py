@@ -7,18 +7,18 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.policies.retry_policy_factory import build_retry_policy
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.policies.retry_policy_factory import build_retry_policy
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def container(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     c = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(c.engine)
     return c
@@ -71,8 +71,8 @@ def test_container_default_retry_policy_rereads_config_live(container):
 
 
 def test_created_plan_uses_the_container_configured_retry_policy(container):
-    from agent_orchestrator.app.use_cases.create_plan import open_project_plan
-    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from praxis_orchestrator.app.use_cases.create_plan import open_project_plan
+    from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
 
     scope = container.config_store.ORCHESTRATOR_SCOPE
     container.config_store.set(scope, "execution.retry_max_attempts", "25")
@@ -100,9 +100,9 @@ def test_retry_policy_endpoint_partially_updates_an_existing_plan(container):
     """POST /{plan_id}/retry-policy (un-freeze #12) is a DIFFERENT lever from
     execution.retry_* config: config only seeds a NEW plan at creation; this
     endpoint retunes one ALREADY-persisted plan, live, without a replan."""
-    from agent_orchestrator.api.routers.plans import RetryPolicyUpdateRequest, update_retry_policy_route
-    from agent_orchestrator.app.use_cases.create_plan import open_project_plan
-    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from praxis_orchestrator.api.routers.plans import RetryPolicyUpdateRequest, update_retry_policy_route
+    from praxis_orchestrator.app.use_cases.create_plan import open_project_plan
+    from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
 
     project_id = "project-1"
     container.project_repo.add(

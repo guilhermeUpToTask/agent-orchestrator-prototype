@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.ports import TaskFailed
-from agent_orchestrator.app.runtime_failures import safe_runtime_tail
-from agent_orchestrator.app.testing.fakes import CollectingEventSink
-from agent_orchestrator.app.testing.observations import InMemoryObservationRepository
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
-from agent_orchestrator.infra.runtime.cli_runner import CliAgentRunner
-from agent_orchestrator.infra.runtime.pi_protocol import extract_stream_error, parse_pi_events
-from agent_orchestrator.infra.runtime.taxonomy import classify_failure, normalize_failure
+from praxis_orchestrator.app.ports import TaskFailed
+from praxis_orchestrator.app.runtime_failures import safe_runtime_tail
+from praxis_orchestrator.app.testing.fakes import CollectingEventSink
+from praxis_orchestrator.app.testing.observations import InMemoryObservationRepository
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
+from praxis_orchestrator.infra.runtime.cli_runner import CliAgentRunner
+from praxis_orchestrator.infra.runtime.pi_protocol import extract_stream_error, parse_pi_events
+from praxis_orchestrator.infra.runtime.taxonomy import classify_failure, normalize_failure
 
 pytestmark = pytest.mark.integration
 
@@ -160,9 +160,9 @@ def test_execution_correlation_is_allowlisted_into_subprocess_env(tmp_path):
     cli = make_cli(
         tmp_path,
         'printf "%s|%s|%s|%s|%s|%s\\n" '
-        '"$ORCHESTRATOR_PLAN_ID" "$ORCHESTRATOR_GOAL_ID" '
-        '"$ORCHESTRATOR_TASK_ID" "$ORCHESTRATOR_RUN_ID" '
-        '"$ORCHESTRATOR_ATTEMPT_NUMBER" "$ORCHESTRATOR_ATTEMPT_ID"',
+        '"$PRAXIS_PLAN_ID" "$PRAXIS_GOAL_ID" '
+        '"$PRAXIS_TASK_ID" "$PRAXIS_RUN_ID" '
+        '"$PRAXIS_ATTEMPT_NUMBER" "$PRAXIS_ATTEMPT_ID"',
     )
     result, _ = run(
         ScriptedCliRunner(cli),

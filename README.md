@@ -25,14 +25,14 @@ flowchart LR
         gates["✋ Gates<br/>(approve / finish / replan)"]
     end
 
-    subgraph api["API process&nbsp;&nbsp;·&nbsp;&nbsp;orchestrate serve"]
+    subgraph api["API process&nbsp;&nbsp;·&nbsp;&nbsp;praxis serve"]
         rest["FastAPI<br/>thin routers → use cases"]
         relay["Outbox relay thread"]
         sse["SSE broker<br/>GET /api/events"]
         static["Packaged React UI<br/>served same-origin"]
     end
 
-    subgraph state["SQLite&nbsp;&nbsp;·&nbsp;&nbsp;~/.orchestrator/orchestrator.db"]
+    subgraph state["SQLite&nbsp;&nbsp;·&nbsp;&nbsp;~/.praxis/orchestrator.db"]
         plans[("plans<br/>(one JSON document<br/>+ lease columns)")]
         outbox[("outbox +<br/>agent_events")]
         catalog[("agents · capabilities<br/>providers · models<br/>config · secrets")]
@@ -111,12 +111,18 @@ Key mechanics, each explained in depth in [`docs/architecture/`](docs/architectu
 Requires Python 3.11+ and Git.
 
 ```bash
-pipx install agent-orchestrator     # or: uvx --from agent-orchestrator orchestrate
-orchestrate serve                   # migrates, starts API + worker + UI on :8000
+# Grab the wheel from the latest GitHub Release, then:
+pipx install ./praxis_orchestrator-*.whl
+praxis serve                   # migrates, starts API + worker + UI on :8000
 ```
 
-One command. `serve` prepares the state directory (`ORCHESTRATOR_HOME`, default
-`~/.orchestrator`), starts a worker as its own process, and serves the console —
+**Not on PyPI, deliberately.** `pip install praxis-orchestrator` would fetch a
+*different* project that already holds that name there. Releases ship as a wheel
+attached to a [GitHub Release](../../releases), and that wheel is the one that
+carries the built console inside it.
+
+One command. `serve` prepares the state directory (`PRAXIS_HOME`, default
+`~/.praxis`), starts a worker as its own process, and serves the console —
 the wheel carries the built UI, so there is no second thing to install or a
 second port to reach. Then open <http://127.0.0.1:8000> and follow **Settings →
 Get started**, which sequences setup in dependency order and never asks a Tier 0
@@ -130,19 +136,19 @@ Requires Python 3.11+ and Node 18+.
 # 1. Backend install + database
 cd backend
 uv pip install -e .[dev]                       # or: pip install -e .[dev]
-python -m agent_orchestrator.infra.cli.main db upgrade        # DB under ORCHESTRATOR_HOME (default ~/.orchestrator)
-python -m agent_orchestrator.infra.cli.main seed demo --stub  # capabilities, default agent, stub reasoner config
+python -m praxis_orchestrator.infra.cli.main db upgrade        # DB under PRAXIS_HOME (default ~/.praxis)
+python -m praxis_orchestrator.infra.cli.main seed demo --stub  # capabilities, default agent, stub reasoner config
 
 # 2. Two processes (separate terminals)
-python -m agent_orchestrator.infra.cli.main api start --port 8000
-python -m agent_orchestrator.infra.cli.main worker start
+python -m praxis_orchestrator.infra.cli.main api start --port 8000
+python -m praxis_orchestrator.infra.cli.main worker start
 
 # 3. Frontend (Vite dev server, hot reload — the packaged UI is served by the API)
 cd ../frontend
 npm install && npm run dev                     # http://localhost:5173
 ```
 
-> **After every pull, re-run `python -m agent_orchestrator.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
+> **After every pull, re-run `python -m praxis_orchestrator.infra.cli.main db upgrade` before seeding or starting the API/worker.** `seed demo` and the processes assume the schema is at head — they do not migrate. A DB left on an older revision fails with a cryptic `sqlite3.OperationalError: no such column: …` (e.g. `agents.runtime_type`, added by migration `0004_agent_runtime`). The fix is always `db upgrade`.
 
 Create/open a project plan in the UI, submit a brief, then drive the stub reasoner's deterministic discovery grammar:
 
@@ -160,9 +166,9 @@ Two independent switches, both stored in SQLite config (not env vars):
 **1. Real planning LLM** (the reasoner):
 
 ```bash
-export ORCHESTRATOR_MASTER_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+export PRAXIS_MASTER_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 export OPENROUTER_API_KEY=sk-...
-python -m agent_orchestrator.infra.cli.main seed demo --provider openrouter \
+python -m praxis_orchestrator.infra.cli.main seed demo --provider openrouter \
     --model anthropic/claude-sonnet-4-5 --api-key-env OPENROUTER_API_KEY
 ```
 
@@ -171,7 +177,7 @@ python -m agent_orchestrator.infra.cli.main seed demo --provider openrouter \
 **2. Real task execution** (the agent runner):
 
 ```bash
-python -m agent_orchestrator.infra.cli.main config set agent_runner.mode real
+python -m praxis_orchestrator.infra.cli.main config set agent_runner.mode real
 ```
 
 The repository agents work on is **not** an environment variable — it is the
@@ -183,7 +189,7 @@ curl -sS -X POST localhost:8000/api/projects -H 'content-type: application/json'
 ```
 
 A project created without `repo_url` is given a scratch repository under
-`~/.orchestrator/projects/<id>/repo` and works there — which looks exactly like
+`~/.praxis/projects/<id>/repo` and works there — which looks exactly like
 success until you check the tree nobody looked at.
 
 In `real` mode each task resolves **per run** through the agent registry: the bound `AgentSpec.runtime_type` (`pi` default | `claude` | `gemini` | `dry-run`) picks the CLI runtime, and its `provider_id`/`model_id` catalog rows supply the decrypted key and model string. Edit agents or rotate keys at runtime — no restart needed. `GET /api/runner/status` reports mode, per-agent binding validity, and binary probes; the worker warns at boot about missing CLIs.
@@ -193,7 +199,7 @@ In `real` mode each task resolves **per run** through the agent registry: the bo
 ## Repository layout
 
 ```text
-agent-orchestrator/
+praxis-orchestrator/
 ├── README.md                ← you are here
 ├── ROADMAP.md               ← everything planned but not yet implemented
 ├── CLAUDE.md                ← invariants + rules for AI-assisted contributions
@@ -218,12 +224,12 @@ agent-orchestrator/
 
 ## CLI reference
 
-Entry point: `python -m agent_orchestrator.infra.cli.main` (or `orchestrate` once installed). All commands run from `backend/`.
+Entry point: `python -m praxis_orchestrator.infra.cli.main` (or `praxis` once installed; `orchestrate` is the pre-rename name and still works). All commands run from `backend/`.
 
 | Command | Purpose |
 |---|---|
 | `serve` | **The one command a fresh install needs**: migrate, then run the API (with the packaged UI) and a worker together. `--no-worker` for API only; `--no-migrate` to pin the schema |
-| `db upgrade` | Apply Alembic migrations to the DB under `ORCHESTRATOR_HOME`. Run it after every pull, before `seed demo`/`api start`/`worker start` — a stale schema fails with `no such column: …` |
+| `db upgrade` | Apply Alembic migrations to the DB under `PRAXIS_HOME`. Run it after every pull, before `seed demo`/`api start`/`worker start` — a stale schema fails with `no such column: …` |
 | `api start [--host] [--port]` | Serve the API (runs the outbox→SSE relay in-process) |
 | `worker start [--worker-id] [--poll-seconds] [--lease-seconds]` | Run the claim-and-drive worker loop |
 | `seed demo [--stub \| --provider … --model … --api-key-env …]` | Idempotently seed capabilities, the default agent, provider/model rows, and reasoner config |
@@ -249,7 +255,7 @@ operator-owned directory:
 ~~~bash
 python backend/scripts/export_plan_runs.py \
   --format bundle \
-  --output-dir ~/.orchestrator/exports/plan-runs
+  --output-dir ~/.praxis/exports/plan-runs
 ~~~
 
 The bundle contains a hashed <code>manifest.json</code>, sanitized referenced
@@ -272,7 +278,7 @@ python backend/scripts/snapshot_current_plan.py \
 <code>--plan-id</code> selects an exact plan. With no selector, the snapshot
 command chooses the sole plan or sole non-idle plan; it fails with candidate IDs
 when selection is ambiguous. Both commands read
-<code>$ORCHESTRATOR_HOME/orchestrator.db</code> by default and accept
+<code>$PRAXIS_HOME/orchestrator.db</code> by default and accept
 <code>--db PATH</code>. JSON remains on stdout unless an output is explicit.
 SQLite is opened with <code>mode=ro</code>,
 <code>PRAGMA query_only=ON</code>, and one snapshot transaction.
@@ -287,16 +293,17 @@ accordingly.
 
 ## Configuration
 
-**Environment variables** — read *only* in the composition root (`backend/agent_orchestrator/infra/container.py`) and the API server:
+**Environment variables** — read *only* in the composition root (`backend/praxis_orchestrator/infra/container.py`) and the API server:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ORCHESTRATOR_HOME` | `~/.orchestrator` | State directory (SQLite DB, default workspace repo) |
-| `ORCHESTRATOR_MASTER_KEY` | unset | Fernet key wrapping the secret store. Only needed when a real provider key must be decrypted — dry-run/stub never ask for it |
+| `PRAXIS_HOME` | `~/.praxis` | State directory (SQLite DB, default workspace repo) |
+| `PRAXIS_MASTER_KEY` | unset | Fernet key wrapping the secret store. Only needed when a real provider key must be decrypted — dry-run/stub never ask for it |
 | `PROJECT_REPO_DIR` | — | **Not read.** Repository routing is project-scoped: a plan works on its `ProjectDefinition.repo_url`, validated when written. A project without one gets a scratch repo at `<home>/projects/<id>/repo` |
-| `ORCHESTRATOR_API_TOKEN` | unset | Bearer token for **every** API operation except `GET /health`; the API is open when unset. `GET /api/events` also accepts it as `?token=` because EventSource cannot send headers — mirror it to the frontend as `VITE_API_TOKEN` |
+| `PRAXIS_API_TOKEN` | unset | Bearer token for **every** API operation except `GET /health`; the API is open when unset. `GET /api/events` also accepts it as `?token=` because EventSource cannot send headers — mirror it to the frontend as `VITE_API_TOKEN` |
 | `CORS_ALLOW_ORIGINS` | Vite dev origins | Comma-separated allowed origins |
 | `REASONER_SMOKE_API_KEY` (+`_BASE_URL`, `_MODEL`) | unset | Enables the cost-gated real-LLM smoke test only |
+
 
 **SQLite config keys** (scope `orchestrator`) — runtime behavior lives here, *not* in env vars. There is no `AGENT_MODE` anymore:
 
@@ -310,7 +317,7 @@ accordingly.
 
 ## HTTP API
 
-Thin routers map 1:1 onto use cases; domain errors bubble to one code→status table (`backend/agent_orchestrator/api/exceptions.py`). Highlights (full mapping in [`backend/docs/INTEGRATION_GUIDE.md`](backend/docs/INTEGRATION_GUIDE.md)):
+Thin routers map 1:1 onto use cases; domain errors bubble to one code→status table (`backend/praxis_orchestrator/api/exceptions.py`). Highlights (full mapping in [`backend/docs/INTEGRATION_GUIDE.md`](backend/docs/INTEGRATION_GUIDE.md)):
 
 | Route | Purpose |
 |---|---|
@@ -350,14 +357,14 @@ supervised startup, and CI-parity checks. Its parameter and security contract is
 documented in [`docs/development.md`](docs/development.md).
 
 Repository-aware Codex workflows are bundled in
-[`plugins/agent-orchestrator-codex/`](plugins/agent-orchestrator-codex/). Install
+[`plugins/praxis-orchestrator-codex/`](plugins/praxis-orchestrator-codex/). Install
 that local plugin in Codex to use its seven skills, deterministic helper tools,
 and impact/core/adapter/verification agent profiles. The `Codex plugin` CI job
 validates their structure and safe read-only checks.
 
 ```bash
 codex plugin marketplace add .
-codex plugin add agent-orchestrator-codex@personal
+codex plugin add praxis-orchestrator-codex@personal
 ```
 
 ---

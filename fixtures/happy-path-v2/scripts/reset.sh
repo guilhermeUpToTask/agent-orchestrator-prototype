@@ -5,7 +5,7 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SEED_TAG="happy-path-v2-seed"
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }

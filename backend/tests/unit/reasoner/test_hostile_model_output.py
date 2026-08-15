@@ -18,12 +18,12 @@ import json
 
 import pytest
 
-from agent_orchestrator.infra.reasoner.runtime.agent_loop import (
+from praxis_orchestrator.infra.reasoner.runtime.agent_loop import (
     _MAX_TOOL_CALLS_PER_TURN,
     run_tool_session,
 )
-from agent_orchestrator.infra.reasoner.runtime.llm_client import AssistantTurn
-from agent_orchestrator.infra.reasoner.runtime.tools import ToolCall, ToolSpec
+from praxis_orchestrator.infra.reasoner.runtime.llm_client import AssistantTurn
+from praxis_orchestrator.infra.reasoner.runtime.tools import ToolCall, ToolSpec
 from tests.fakes_llm import FakeLLMClient, tool_turn
 
 

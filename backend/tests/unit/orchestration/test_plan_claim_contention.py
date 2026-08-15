@@ -5,7 +5,7 @@ The goal lease already had a two-thread race
 The PLAN claim — `claim_one_unit`, the thing that decides which worker advances
 which plan — had none: every test of it drove one repository, serially. Phase
 10A added these, and each worker gets its OWN engine so the race is between
-connection pools the way two `orchestrate worker start` processes would be,
+connection pools the way two `praxis worker start` processes would be,
 not between threads sharing one.
 
 What is deliberately NOT claimed here: that multi-worker execution is
@@ -24,12 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import text
 
-from agent_orchestrator.app.testing.fakes import FakeClock
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.plan_repository import SqlitePlanRepository
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from praxis_orchestrator.app.testing.fakes import FakeClock
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.plan_repository import SqlitePlanRepository
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 pytestmark = pytest.mark.integration
 

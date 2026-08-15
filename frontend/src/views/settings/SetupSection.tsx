@@ -197,7 +197,7 @@ function ProviderStep() {
       <Field
         label="API key"
         htmlFor="setup-provider-key"
-        hint="Stored envelope-encrypted and never echoed back. Needs ORCHESTRATOR_MASTER_KEY set."
+        hint="Stored envelope-encrypted and never echoed back. Needs PRAXIS_MASTER_KEY set."
       >
         <Input
           id="setup-provider-key"

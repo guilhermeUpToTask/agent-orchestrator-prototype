@@ -1074,11 +1074,19 @@ Every one is locked by a test.
   Phase 10's evidence to collect.
 - **No redesign before the tests.** Stated three times on purpose.
 
-## Phase 10 — repository audit, then launch ⬜ (current)
+## Phase 10 — repository audit, then launch 🚧 (engineering complete 2026-08-15)
 
 **Scoped 2026-08-10.** Two halves that look unrelated and are not: nobody should
 launch a system they have not audited, and an audit with no launch behind it is
 procrastination. Do them in this order.
+
+**Status 2026-08-15: every engineering deliverable in both halves is done.** 10A
+closed with four sweeps, 11 proven findings all fixed with regression tests and
+4 retractions; 10B's audit, name, scope, launch plan and support path are
+written, and the rename itself is executed end to end. What is left is six owner
+actions — registering the name, a guest rebuild from the host, a demo re-run,
+and a GitHub setting — enumerated under *Remaining* at the foot of this phase.
+None of them is code.
 
 ### 10A — audit the whole repository, and prove every claim
 
@@ -1195,14 +1203,14 @@ question, and nothing downstream treats the name as provisional.
 
 Two things the scoping found that this section did not know:
 
-- **`agent-orchestrator` on PyPI belongs to someone else** — version 2.0.0, an
+- **`praxis-orchestrator` on PyPI belongs to someone else** — version 2.0.0, an
   *"Orquestrador de Agentes de IA para Desenvolvimento de Software"*. The same
   category. This project has never published (release-please attaches a wheel to
-  a GitHub Release and never touches PyPI), so `pip install agent-orchestrator`
+  a GitHub Release and never touches PyPI), so `pip install praxis-orchestrator`
   installs a stranger's tool and the first publish attempt would have failed.
   The current distribution name is not merely bad, it is unusable.
-- **The old working name was a Nintendo / Game Freak mark**, so removing it was
-  legal hygiene rather than branding. **Done 2026-08-11:** 49 files rewritten —
+- **The old working name was a third party's mark**, so removing it was legal
+  hygiene rather than branding. **Done 2026-08-11:** 49 files rewritten —
   it had spread from the guest hostname into the npm package name, the
   acceptance-container prefix, the frontend build cache and the e2e artefacts.
   `tests/unit/test_no_third_party_marks.py` now scans the **whole working tree**
@@ -1213,9 +1221,9 @@ Two things the scoping found that this section did not know:
   each demo run's README now says so.
 
 **The rename comes first, because everything else bakes it in.** The original
-working name was a Pokémon: charming, unsearchable, colliding with an existing
-name, and telling a visitor nothing. The criteria a replacement had to meet, and
-which `praxis-orchestrator` was chosen against:
+working name was unsearchable, collided with an existing name, and told a
+visitor nothing. The criteria a replacement had to meet, and which
+`praxis-orchestrator` was chosen against:
 
 - Check availability across **PyPI, npm, GitHub org, and the domain**, and check
   for trademark collision. A name available in three places out of four is not
@@ -1224,7 +1232,7 @@ which `praxis-orchestrator` was chosen against:
   file — *local-first, human-gated, verified multi-agent coding orchestrator* —
   is the brief.
 - **Scope the rename honestly before committing to it.** It touches the Python
-  package `agent_orchestrator`, the CLI entry point `orchestrate`, the dev guest
+  package `praxis_orchestrator`, the CLI entry point `orchestrate`, the dev guest
   `praxis-dev` and `infra/dev-vm/`, the acceptance container prefix
   `praxis-acceptance-*`, the state directory `~/.orchestrator` and
   `ORCHESTRATOR_*` environment variables, the docs, and every fixture. Some of
@@ -1302,8 +1310,8 @@ tools would write it rather than the way engineers imagine marketing works:
   defect at the centre of the invariant everything else rests on. The second is
   setup failure, prioritised over feature requests, because every published run
   to date was on the dev guest by its author and the first mile is the largest
-  untested exposure. **Still to do by hand:** enable Discussions in repository
-  settings — the contact link points at it.
+  untested exposure. **Discussions enabled 2026-08-15**, so the contact link
+  resolves rather than 404ing the first person who follows it.
 
 ### Exit criteria
 
@@ -1319,29 +1327,114 @@ tools would write it rather than the way engineers imagine marketing works:
   rename is scoped with a migration path for existing installs.**
   `praxis-orchestrator`, free on all five (both TLDs);
   [scope](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md) separates
-  the mechanical rename from the state that needs adopt-in-place and
-  read-both-prefer-new aliases. **Provisional pending trademark clearance.**
+  the mechanical rename from the user-visible state. The name is settled, not
+  provisional.
+- ✅ **And the rename is executed — all four groups, 2026-08-15.** The Python
+  package is `praxis_orchestrator` (344 files, zero occurrences of the old name
+  left), the distribution and the **GitHub repository** are
+  `praxis-orchestrator`, the per-attempt runtime variables are `PRAXIS_*`,
+  state lives in `~/.praxis`, and `praxis` is the only CLI entry point.
+
+  **No compatibility layer — a clean break, by owner decision** (decision 65).
+  An alias layer was built first (`PRAXIS_*` falling back to `ORCHESTRATOR_*`,
+  `~/.orchestrator` adopted in place, `orchestrate` delegating) and then
+  deleted the same day. There is nobody to be compatible with: the project has
+  never published to an index, so every pre-rename install is the maintainer's
+  own. What replaces it is an actual migration of that machine — state
+  directory moved with a backup, env file reissued under the new variable name,
+  `/etc/profile.d` rewritten — **verified by decrypting both stored provider
+  keys from the moved database**, not assumed.
+
+  **The alias layer earned its own deletion on the way out.** While it existed
+  it produced two findings, and both argue the same point:
+  - **`GET /api/readiness` reported a working install as broken**, because it
+    read the master key from `os.environ` rather than through the alias. The
+    harm is the *instruction*, not the red mark: the next step it invites is
+    generating a master key, and a second key permanently orphans the secret
+    store. An alias is only as good as the number of places that use it, and
+    the one site that skipped it was the site whose job is telling an operator
+    whether their install works.
+  - **Twenty-one tests changed meaning without failing** — each clears
+    `PRAXIS_*` to assert a no-key/no-token state, and with the alias present
+    the value arrived through the old name instead. Two failed outright on the
+    dev guest; nineteen passed for reasons unrelated to what they claim to
+    test.
+
+  Both are moot now that nothing reads the old names, and
+  `tests/unit/test_state_home.py` asserts precisely that: a pre-rename variable
+  is ignored rather than honoured, and `praxis` is the only declared entry
+  point. A half-removed alias would be worse than either extreme.
+
 - ✅ **A written launch plan** with positioning, channels, assets, sequencing,
   metrics and the pre-agreed stop-and-fix threshold
   ([plan](docs/superpowers/specs/2026-08-11-phase-10b-launch-plan.md)) — which
   opens by correcting this file's own proposed headline, because "proven RED" is
   not supported by the published evidence.
 - ✅ **The support path exists before the first invitation goes out.**
-  `.github/ISSUE_TEMPLATE/`. Discussions still needs enabling by hand.
+  `.github/ISSUE_TEMPLATE/`, and Discussions is enabled (2026-08-15), so the
+  templates' contact link resolves.
 
-**Remaining before the phase can close — all owner decisions, not work:**
+**The name is settled and is not revisited.** `praxis-orchestrator`, decided by
+the owner on 2026-08-11. The `Praxis Framework` collision was raised, considered
+and accepted then — a programme-management methodology is not an agent
+orchestrator — and it is a closed question, not a caveat to reattach to the name
+every time it appears.
 
-1. **Trademark clearance** for `praxis-orchestrator` (USPTO/EUIPO, classes 9
-   and 42; `Praxis Framework` specifically). Blocks the rename, which blocks the
-   launch.
-2. ~~**The RED-run gap**~~ — **closed 2026-08-11.** The run was always proven
-   red and enforced; the verdict is now in the cycle evidence document and the
-   artifact is reachable. Needs only a demo re-run so a published
-   `evidence.json` carries it.
-3. **Git history and recorded evidence** — whether to scrub `praxis` from history
-   (recommended: no) and whether to re-run the demo on the renamed guest rather
-   than edit hostnames inside published evidence (recommended: yes).
-4. **Enable GitHub Discussions**, which the issue-template contact link expects.
+**Distribution, decided 2026-08-15: no PyPI for now.** A release is a **wheel
+attached to a GitHub Release**, which is what `release-please.yml` already
+builds, and it is the artifact that carries the console inside it. Publishing to
+an index is deferred rather than rejected — it can be turned on later without
+changing anything about how the project is built.
+
+This has one consequence that had to be fixed rather than noted: **the README,
+`backend/README.md` and the getting-started guide all told a new visitor to run
+`pipx install praxis-orchestrator`, which fetches a different project that holds
+that name on PyPI.** The first instruction the product gives a stranger pointed
+at somebody else's software. All three now name the wheel.
+
+**The landing page is a GitHub Page**, covering how to install and run the
+orchestrator. Not yet built — it is the next launch asset, and it replaces the
+launch plan's assumption of a separate hosted site.
+
+**Remaining before the phase can close.** Every engineering deliverable in 10A
+and 10B is done.
+
+1. **Register the name** on npm and the two domains — PyPI is deferred per the
+   decision above, and the **GitHub repository is already renamed**
+   (`guilhermeUpToTask/praxis-orchestrator`, 2026-08-15), with every link in the
+   tree rewritten to match. GitHub redirects the old URL, so existing clones
+   keep working until their remote is updated.
+2. **Rebuild the dev guest**, whenever it suits — nothing depends on it. The
+   configuration no longer carries the third party's mark, but the *running*
+   domain keeps its identity until `make -C infra/dev-vm destroy && make -C
+   infra/dev-vm up` is run **from the host**. Then re-seed the roster with
+   `seed-agents.py` and confirm `make verify` returns 8 of 8. The guest's own
+   state was migrated on 2026-08-15 (`~/.praxis`, `~/.praxis-env`,
+   `/etc/profile.d/praxis.sh`), so a rebuild is tidiness rather than repair.
+3. **Re-run the demo**, so a published `evidence.json` carries the RED baseline
+   (the gap itself closed 2026-08-11 — the run was always proven red and
+   enforced; what was missing was visibility, and that shipped). ~13 minutes,
+   ~$0.013, and it refreshes the launch numbers at the same time.
+
+   **This does NOT depend on the guest rebuild, and an earlier version of this
+   file said it did.** The correction is worth keeping because the wrong version
+   sounded reasonable. The mark in the published evidence came from the
+   `acceptance.container_started` log line's `container=` field — the container
+   **name prefix**, which was derived from the old product name **in code**
+   (`infra/environment/container_environment.py`), not from the machine. It now
+   reads `praxis-acceptance-`, and nothing in the package reads the hostname at
+   all: `socket.gethostname`, `platform.node` and `uname` have zero occurrences.
+   So a run on today's guest emits no third-party mark, and the substituted
+   evidence can be replaced with a genuine record whenever someone wants to
+   spend the fourteen minutes.
+4. ~~**Enable GitHub Discussions**~~ — **done 2026-08-15.** The
+   issue-template contact link resolves (HTTP 200) instead of 404ing the first
+   person who follows it.
+
+**Git history keeps the old mark**, decided 2026-08-11 and not reopened here:
+scrubbing means `git filter-repo` and a force-push that breaks every clone and
+rewrites the audit trail, for a string in the log of a project that was never
+published.
 
 ## Deferred — reconsider only with run or user evidence ⏸
 

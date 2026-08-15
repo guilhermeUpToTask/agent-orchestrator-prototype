@@ -6,25 +6,25 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from agent_orchestrator.app.testing.fakes import FakeClock
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.ia_model import IAModel
-from agent_orchestrator.domain.entities.model_provider import ModelProvider
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.agent_errors import AgentNotFoundError, NoDefaultAgentError
-from agent_orchestrator.domain.errors.config_errors import (
+from praxis_orchestrator.app.testing.fakes import FakeClock
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.ia_model import IAModel
+from praxis_orchestrator.domain.entities.model_provider import ModelProvider
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.agent_errors import AgentNotFoundError, NoDefaultAgentError
+from praxis_orchestrator.domain.errors.config_errors import (
     CapabilityNotFoundError,
     EntityAlreadyExistsError,
     ModelProviderNotFoundError,
     ReferencedEntityInUseError,
 )
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.reference_repos import (
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.reference_repos import (
     SqliteAgentRepository,
     SqliteCapabilityRepository,
     SqliteConfigStore,
@@ -32,8 +32,8 @@ from agent_orchestrator.infra.db.reference_repos import (
     SqliteModelRepository,
     SqliteProjectRepository,
 )
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 pytestmark = pytest.mark.integration
 

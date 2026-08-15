@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 REPO="${FIRST_CYCLE_REPO:-$ORCH_HOME/first-cycle-v1/repo}"
 
 die() { printf '\n✗ %s\n' "$*" >&2; exit 1; }

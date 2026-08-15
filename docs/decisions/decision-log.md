@@ -180,7 +180,7 @@ and never revisited, so a plan stuck on a persistent transient failure (a
 rate-limited provider observed during a live walkthrough, `provider_capacity`
 blocks recurring for ~38 minutes across repeated manual `wait_and_retry`
 resolutions) had no way to widen its backoff budget short of a replan — the
-new `execution.retry_*` config keys (`agent_orchestrator/infra/policies/retry_policy_factory.py`)
+new `execution.retry_*` config keys (`praxis_orchestrator/infra/policies/retry_policy_factory.py`)
 only seed a plan's policy AT CREATION and are deliberately never consulted
 again for an existing plan (config is a live global; a plan's policy is
 persisted, per-plan state — conflating the two would let a global config edit
@@ -371,7 +371,7 @@ about the previous attempt, so a retry re-ran an identical prompt against an
 identical contract on a clean worktree and reproduced an identical failure at
 full provider cost. That is why `VERIFICATION_ERROR` being terminal was *correct*
 until the feedback loop existed, and why the loop shipped first
-(`agent_orchestrator/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
+(`praxis_orchestrator/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
 `## Constraints`).
 
 The retryable set is now narrower than the kind: only class **A** — the
@@ -699,3 +699,56 @@ to be a guarded aggregate transition.
 **Surgical, like `edit_task`:** it changes bindings and nothing else — no block
 resolution, no backoff clearing, no status change, no revision bump, no evidence
 invalidation. A different agent is not a different contract.
+
+---
+
+**Decision 65 (2026-08-15) — the rename to Praxis Orchestrator is a clean
+break: existing state is MIGRATED, not accommodated.** Distribution
+`praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`,
+GitHub repository `guilhermeUpToTask/praxis-orchestrator`, state directory
+`~/.praxis`, environment variables `PRAXIS_*`. Scope and execution record:
+[`../superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](../superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
+
+The name was forced rather than chosen for taste: the previous working name is a
+third party's mark, and the previous distribution name belongs to a different
+project in this exact category on PyPI, so `pip install` would have fetched a
+stranger's tool.
+
+**There is no compatibility layer, and that is the decision.** An earlier pass
+of this rename built one — `PRAXIS_*` falling back to `ORCHESTRATOR_*` with a
+one-time warning, `~/.orchestrator` adopted in place, `orchestrate` still
+registered and delegating to `praxis`. It was deleted the same day, by owner
+decision, and the reasoning is worth keeping because the deleted version was the
+more defensive-looking one:
+
+- **There is nobody to be compatible with.** The project has never published to
+  any index. `release-please` attaches a wheel to a GitHub Release and nothing
+  else. Every install that predates the rename is the maintainer's own, and
+  those are countable on one hand.
+- **A compatibility layer that no user exercises is not safety, it is a second
+  code path.** Two spellings of every variable, two entry points, and a home
+  resolver with four branches — each of which has to be read, tested, and
+  reasoned about by everyone who touches configuration afterwards, forever, to
+  serve nobody.
+- **It had already produced a defect of exactly that shape.** `/api/readiness`
+  read the master key from `os.environ` rather than through the alias and so
+  reported a WORKING install as broken, with a detail line inviting the operator
+  to generate a second master key — which permanently orphans the secret store.
+  An alias is only as good as the number of places that use it, and the one site
+  that bypassed it was the site whose whole job is telling an operator whether
+  their install works.
+
+**Migration is what replaces it**, and it is a real migration rather than a
+suggestion: `~/.orchestrator` moved to `~/.praxis` (with a dated backup),
+`~/.orchestrator-env` reissued as `~/.praxis-env` carrying the same master key
+under the new name, and `/etc/profile.d` rewritten. Verified rather than
+assumed — both stored provider keys decrypt from the moved database under
+`PRAXIS_MASTER_KEY`.
+
+`orchestrator.db` keeps its filename inside the directory. It describes what it
+is, contains no stale brand, and renaming it would be churn with a migration
+step attached.
+
+**Why no unfreeze:** nothing in the domain changed. This is packaging, the
+composition root, and one four-line module (`infra/state_home.py`) that answers
+where state lives.

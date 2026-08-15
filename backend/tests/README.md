@@ -9,7 +9,7 @@ pytest -m llm                 # cost-gated real-provider smoke — NEVER in norm
 
 ## The truth test — the suite's keystone
 
-The orchestration tests in `unit/orchestration/` don't run once — they run **twice**, through the parametrized `env_factory` fixture (`conftest.py` + `support.py`): once against the in-memory fakes (`agent_orchestrator/app/testing/fakes.py`) and once against the **real SQLite UnitOfWork** on a `tmp_path` database.
+The orchestration tests in `unit/orchestration/` don't run once — they run **twice**, through the parametrized `env_factory` fixture (`conftest.py` + `support.py`): once against the in-memory fakes (`praxis_orchestrator/app/testing/fakes.py`) and once against the **real SQLite UnitOfWork** on a `tmp_path` database.
 
 Why this matters: the crash-recovery-via-lease-expiry, outbox-rollback, and backoff-gate-survives-crash tests passing on real SQLite is the *proof* that transactional atomicity is real, not simulated by an obliging fake. This is the property the whole persist-first design rests on.
 
@@ -47,6 +47,6 @@ tests/
 ## Conventions
 
 - **Determinism over sleeps**: `FakeClock.advance()` drives backoff and lease expiry; the `DummyAgentRunner` is scripted per task id and emits the *shared failure taxonomy*, so dry-run tests exercise the exact production retry/terminal paths.
-- Always `tmp_path` for file I/O and `monkeypatch` for env vars — tests never touch `~/.orchestrator`.
+- Always `tmp_path` for file I/O and `monkeypatch` for env vars — tests never touch `~/.praxis`.
 - No Redis anywhere (the claim path is the SQLite lease).
 - Regression discipline: every fixed bug gets a test that locks it (the gate-spin, worker-tick-spin, resurrection, and stale-version bugs all have one). When you fix an entry in [known-issues.md](../../docs/architecture/known-issues.md), add its lock here.

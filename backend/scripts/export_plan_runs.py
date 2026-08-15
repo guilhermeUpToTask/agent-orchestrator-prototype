@@ -1285,7 +1285,7 @@ def resolve_database_path(
     if home is None:
         home = Path(
             os.environ.get(
-                "ORCHESTRATOR_HOME",
+                "PRAXIS_HOME",
                 str(Path.home() / ".orchestrator"),
             )
         )

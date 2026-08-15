@@ -10,7 +10,7 @@ import { nextStep, setupSteps, type SetupFacts } from './setupPlan';
  *
  * These steps are derived from live catalog state rather than stored, so the
  * wizard is re-entrant: an operator who set half of this up by hand, or by
- * `orchestrate seed demo`, sees those steps already satisfied.
+ * `praxis seed demo`, sees those steps already satisfied.
  */
 const EMPTY: SetupFacts = {
   tier: 'tier0',
@@ -113,7 +113,7 @@ describe('the next step', () => {
   });
 
   it('skips a step an operator already satisfied by hand or by seed demo', () => {
-    /** `orchestrate seed demo` sets up most of this; the wizard must not insist
+    /** `praxis seed demo` sets up most of this; the wizard must not insist
      *  on redoing it. */
     const seeded: SetupFacts = {
       ...EMPTY,

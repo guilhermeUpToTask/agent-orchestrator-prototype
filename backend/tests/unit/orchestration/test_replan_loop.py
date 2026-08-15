@@ -7,21 +7,21 @@ import asyncio
 import pytest
 
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.services.navigation import next_action
-from agent_orchestrator.domain.value_objects.lifecycle import Status
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.services.navigation import next_action
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-from agent_orchestrator.app.use_cases.control import review_replan
-from agent_orchestrator.app.use_cases.request_replan import request_replan
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.app.use_cases.advance_plan import advance_plan
+from praxis_orchestrator.app.use_cases.control import review_replan
+from praxis_orchestrator.app.use_cases.request_replan import request_replan
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     DummyBehavior,

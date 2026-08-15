@@ -14,8 +14,8 @@ import asyncio
 
 import pytest
 
-from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     DummyBehavior,
@@ -25,27 +25,27 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from agent_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
-from agent_orchestrator.app.use_cases.control import (
+from praxis_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
+from praxis_orchestrator.app.use_cases.control import (
     finish_review,
     reopen_discovery,
     resume_from_review,
     review_replan,
 )
-from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
-from agent_orchestrator.app.use_cases.create_plan import create_plan
-from agent_orchestrator.app.use_cases.operator_commands import pause_plan, resume_plan
-from agent_orchestrator.app.use_cases.request_replan import request_replan
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.app.use_cases.run_worker import worker_tick
-from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.domain.value_objects.lifecycle import Status
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.reference_repos import SqliteProjectRepository
-from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
-from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
+from praxis_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
+from praxis_orchestrator.app.use_cases.create_plan import create_plan
+from praxis_orchestrator.app.use_cases.operator_commands import pause_plan, resume_plan
+from praxis_orchestrator.app.use_cases.request_replan import request_replan
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.app.use_cases.run_worker import worker_tick
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.reference_repos import SqliteProjectRepository
+from praxis_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from praxis_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 from tests.support import make_agent_spec
 
 pytestmark = pytest.mark.integration
@@ -248,8 +248,8 @@ def test_run_worker_forever_starts_ticks_and_stops(tmp_path):
     """The container-wired entrypoint: boots on an empty db, idles (sleeps, no
     spin) and honors the stop event. agent_runner.mode defaults to dry-run —
     no env, no master key."""
-    from agent_orchestrator.infra.container import AppContainer
-    from agent_orchestrator.infra.worker.main import run_worker_forever
+    from praxis_orchestrator.infra.container import AppContainer
+    from praxis_orchestrator.infra.worker.main import run_worker_forever
 
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

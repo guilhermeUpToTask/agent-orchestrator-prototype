@@ -183,7 +183,7 @@ every session. Three are already confirmed:
 
 1. **The repository tree is wrong.** It shows `backend/src/domain/`,
    `backend/src/app/`, `backend/src/infra/`. `backend/src/` **does not exist** —
-   the package is `backend/agent_orchestrator/`. Every path in that tree is
+   the package is `backend/praxis_orchestrator/`. Every path in that tree is
    unusable as written.
 2. **Un-freeze count stale** — says "through un-freeze #19"; #20 landed
    2026-08-10.

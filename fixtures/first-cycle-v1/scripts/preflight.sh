@@ -52,7 +52,7 @@ else
   else
     fail "every worker is stale (last seen > 15s ago)"
   fi
-  fix "backend/scripts/dev.sh start   (or: orchestrate worker start)"
+  fix "backend/scripts/dev.sh start   (or: praxis worker start)"
 fi
 
 # 4. Runtime bindings — a broken one fails the FIRST attempt, not the setup
@@ -62,12 +62,12 @@ if [[ "$(jq -r '.valid' <<<"$runner")" == "true" ]]; then
   pass "agent runner: $mode"
 else
   fail "agent runner ($mode): $(jq -r '.detail // "invalid"' <<<"$runner")"
-  fix "orchestrate config set agent_runner.mode dry-run   # or repair the binding"
+  fix "praxis config set agent_runner.mode dry-run   # or repair the binding"
 fi
 while read -r line; do
   [[ -z "$line" ]] && continue
   fail "agent binding: $line"
-  fix "check the agent's provider/model rows and ORCHESTRATOR_MASTER_KEY"
+  fix "check the agent's provider/model rows and PRAXIS_MASTER_KEY"
 done < <(jq -r '.agents[]? | select(.valid == false) | "\(.agent_name) (\(.runtime_type)) — \(.detail // "invalid")"' <<<"$runner")
 
 if [[ "$mode" == "real" ]]; then

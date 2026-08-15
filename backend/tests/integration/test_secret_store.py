@@ -7,11 +7,11 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.secret_ref import SecretRef
-from agent_orchestrator.infra.db.secret_store import SqliteSecretStore, load_master_key
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.errors import InfrastructureError, SecretNotFoundError
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.secret_ref import SecretRef
+from praxis_orchestrator.infra.db.secret_store import SqliteSecretStore, load_master_key
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.errors import InfrastructureError, SecretNotFoundError
 
 pytestmark = pytest.mark.integration
 
@@ -71,14 +71,18 @@ def test_wrong_master_key_fails_decrypt_not_garbage(sf, master_key):
 
 
 def test_master_key_loading_fails_closed(monkeypatch):
+    monkeypatch.delenv("PRAXIS_MASTER_KEY", raising=False)
+    # And the pre-rename name, which `infra/env_compat.py` falls back to. Any
+    # machine that installed before the rename still exports it — including the
+    # dev guest — so without this the "no key at all" case is never tested.
     monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
     with pytest.raises(InfrastructureError):
         load_master_key()
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", "not-a-fernet-key")
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", "not-a-fernet-key")
     with pytest.raises(InfrastructureError):
         load_master_key()
     key = Fernet.generate_key().decode()
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", key)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", key)
     assert load_master_key() == key.encode()
 
 

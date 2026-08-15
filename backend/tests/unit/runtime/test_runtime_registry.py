@@ -8,9 +8,9 @@ whichever surface was missed. These tests fail instead.
 
 from __future__ import annotations
 
-from agent_orchestrator.infra.runtime.registry import RUNTIME_REGISTRY, runtime_names
-from agent_orchestrator.infra.runtime.dependency_checker import RUNTIME_DEFINITIONS
-from agent_orchestrator.infra.runtime.factory import RUNTIME_TYPES
+from praxis_orchestrator.infra.runtime.registry import RUNTIME_REGISTRY, runtime_names
+from praxis_orchestrator.infra.runtime.dependency_checker import RUNTIME_DEFINITIONS
+from praxis_orchestrator.infra.runtime.factory import RUNTIME_TYPES
 
 
 def test_the_registry_is_the_only_list_of_runtime_names() -> None:

@@ -22,9 +22,9 @@ from typing import Callable, Protocol
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.app.ports import UnitOfWork
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.app.ports import UnitOfWork
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     DummyBehavior,
@@ -35,12 +35,12 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryUnitOfWork,
     NoOpWorkspace,
 )
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
 
 
 def make_agent_spec(agent_id: str = "a1") -> AgentSpec:
@@ -209,7 +209,7 @@ def build_promotion_env(backend: str, tmp_path: Path) -> PromotionEnv:
     # The FK to `plans` is enforced, so the row this test writes needs a parent.
     # `plans` has several NOT NULL columns with no server-side default
     # (phase, iteration, data, created_at, updated_at) — see PlanTable in
-    # agent_orchestrator/infra/db/tables.py — so a raw INSERT must supply all of them.
+    # praxis_orchestrator/infra/db/tables.py — so a raw INSERT must supply all of them.
     with engine.begin() as connection:
         connection.execute(_BARE_PLAN_SQL, {"id": "p1", "now": "2026-07-28T00:00:00+00:00"})
     return PromotionEnv(uow=SqliteUnitOfWork(make_session_factory(engine), FakeClock()))

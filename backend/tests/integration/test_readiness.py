@@ -14,18 +14,18 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path / "home")
     Base.metadata.create_all(container.engine)
     with TestClient(create_app(container)) as test_client:
@@ -112,6 +112,12 @@ def test_a_free_tier_install_without_a_master_key_is_not_reported_broken(
     a perfectly good free-tier install that it is broken — the exact false
     alarm the ok/warn/fail split exists to avoid.
     """
+    monkeypatch.delenv("PRAXIS_MASTER_KEY", raising=False)
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
+    # The pre-rename names too: they are read through `infra/env_compat.py`, so
+    # a machine still exporting the old ones (every install that predates the
+    # rename, including the dev guest) would leave this test asserting the
+    # opposite of what it says.
     monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path / "free")

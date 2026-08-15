@@ -28,7 +28,7 @@ jobs:
           python-version: "3.12"
 
       - name: Validate repository skills, tools, and agents
-        run: python plugins/agent-orchestrator-codex/scripts/validate.py
+        run: python plugins/praxis-orchestrator-codex/scripts/validate.py
 
   backend:
     name: Backend (Python ${{ matrix.python-version }})
@@ -60,10 +60,10 @@ jobs:
         run: uv sync --all-extras --dev --locked
 
       - name: Ruff
-        run: uv run ruff check agent_orchestrator tests
+        run: uv run ruff check praxis_orchestrator tests
 
       - name: Mypy typing ratchet
-        run: uv run mypy agent_orchestrator
+        run: uv run mypy praxis_orchestrator
 
       - name: Unit tests
         run: uv run pytest -q tests/unit

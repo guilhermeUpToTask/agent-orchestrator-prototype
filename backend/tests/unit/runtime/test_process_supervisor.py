@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.infra.runtime.process_supervisor import (
+from praxis_orchestrator.infra.runtime.process_supervisor import (
     attempt_log_path,
     supervise_process,
 )
@@ -177,7 +177,7 @@ def test_bounded_log_rotation_never_exposes_an_empty_file(tmp_path: Path) -> Non
     or marker-less file."""
     import threading
 
-    from agent_orchestrator.infra.runtime.process_supervisor import _BoundedLog
+    from praxis_orchestrator.infra.runtime.process_supervisor import _BoundedLog
 
     log = _BoundedLog(tmp_path / "rot.jsonl", 2048)
     stop = threading.Event()

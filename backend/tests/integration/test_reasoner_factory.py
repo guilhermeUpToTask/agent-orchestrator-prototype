@@ -8,21 +8,21 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from agent_orchestrator.infra.cli.main import cli
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.errors import InfrastructureError
-from agent_orchestrator.infra.reasoner.factory import build_reasoner, validate_reasoner_config
-from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
-from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
+from praxis_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.errors import InfrastructureError
+from praxis_orchestrator.infra.reasoner.factory import build_reasoner, validate_reasoner_config
+from praxis_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
+from praxis_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def container(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.delenv("PRAXIS_MASTER_KEY", raising=False)
     c = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(c.engine)
     return c
@@ -38,7 +38,7 @@ def build(c):
 
 
 def test_stub_is_the_default_and_never_touches_secrets(container):
-    # no ORCHESTRATOR_MASTER_KEY in the env: constructing the secret store
+    # no PRAXIS_MASTER_KEY in the env: constructing the secret store
     # would fail closed — the stub path must never get there
     assert isinstance(build(container), StubReasoner)
 
@@ -93,8 +93,8 @@ def test_validate_reasoner_config_matches_build_reasoner_message(container):
 
 
 def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-123")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
@@ -156,8 +156,8 @@ def test_seed_stub_then_llm_resolves_openai_reasoner(tmp_path, monkeypatch):
 
 
 def test_seed_llm_requires_key_in_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

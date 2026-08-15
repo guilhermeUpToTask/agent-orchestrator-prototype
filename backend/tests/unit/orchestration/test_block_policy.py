@@ -7,7 +7,7 @@ only obvious next step returning 422. Five live runs hit exactly that: an
 `plan is not blocked on a retryable planning stage`.
 
 These tests pin the whole surface: every kind constructed anywhere in the
-backend is declared in `agent_orchestrator/app/block_policy.py`, every call site draws from that
+backend is declared in `praxis_orchestrator/app/block_policy.py`, every call site draws from that
 table, and every advertised resolution is reachable.
 """
 
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app import block_policy
-from agent_orchestrator.app.block_policy import (
+from praxis_orchestrator.app import block_policy
+from praxis_orchestrator.app.block_policy import (
     EDIT_TASK,
     RETRY_STAGE,
     START_REPLAN,
@@ -28,7 +28,7 @@ from agent_orchestrator.app.block_policy import (
     policy_for,
     resolutions_for,
 )
-from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock
+from praxis_orchestrator.domain.entities.planning_artifacts import PlanBlock
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

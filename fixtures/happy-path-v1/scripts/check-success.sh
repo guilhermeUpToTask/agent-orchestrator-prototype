@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v1/repo}"
 # Optional: check a specific worktree/branch checkout (e.g. plan or cycle branch path)
 if [[ "${1:-}" != "" ]]; then

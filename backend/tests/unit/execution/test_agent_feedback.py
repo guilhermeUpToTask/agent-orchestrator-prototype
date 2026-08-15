@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.agent_feedback import is_agent_actionable, split_reasons
+from praxis_orchestrator.app.agent_feedback import is_agent_actionable, split_reasons
 
-_SRC = Path(__file__).resolve().parents[3] / "agent_orchestrator"
+_SRC = Path(__file__).resolve().parents[3] / "praxis_orchestrator"
 
 
 AGENT_REPAIRABLE = [
@@ -25,7 +25,7 @@ AGENT_REPAIRABLE = [
     "test bypass marker present: tests/test_behavior.py",
     "verification configuration changed: pyproject.toml",
     "test author produced no executable checks",
-    "test author modified production paths: ['agent_orchestrator/app.py']",
+    "test author modified production paths: ['praxis_orchestrator/app.py']",
     "test bundle did not establish a meaningful RED result",
     "authoritative verification command failed",
     "verification command changed the validated candidate: path outside allowed scope: x",
@@ -70,7 +70,7 @@ def test_every_whitelisted_prefix_is_still_emitted_somewhere_in_src() -> None:
     rejection message is reworded and this list is not, the agent silently stops
     being told about that failure — the exact regression this module prevents.
     """
-    from agent_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
+    from praxis_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
 
     haystack = "\n".join(
         path.read_text()
@@ -85,7 +85,7 @@ def test_every_whitelisted_prefix_is_still_emitted_somewhere_in_src() -> None:
 def test_the_whitelist_covers_every_candidate_rejection_the_handler_raises() -> None:
     """The other direction: a new candidate rejection added to the finalize path
     must be added here too, or the agent is never told about it."""
-    from agent_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
+    from praxis_orchestrator.app.agent_feedback import _AGENT_ACTIONABLE_PREFIXES
 
     handler = (_SRC / "app" / "handlers" / "execution_handler.py").read_text()
     tree = ast.parse(handler)

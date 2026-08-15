@@ -4,8 +4,8 @@
 **Status:** plan only. Nothing has been published, no channel has been posted to,
 and no account has been created.
 **Depends on:** the rename
-([scope](2026-08-11-phase-10b-rename-scope.md)), which is itself blocked on
-trademark clearance.
+([scope](2026-08-11-phase-10b-rename-scope.md)), **executed 2026-08-15**. The
+name is settled and is not a blocker.
 
 ROADMAP asks for this *"written the way a marketing team that has shipped
 developer tools would write it rather than the way engineers imagine marketing
@@ -270,11 +270,14 @@ existing rule. The loop is not new machinery; it is the discipline already in
 
 ## 7. Sequence
 
-1. Trademark clearance → rename lands ([scope](2026-08-11-phase-10b-rename-scope.md)).
+1. ~~Rename~~ — **landed 2026-08-15** ([scope](2026-08-11-phase-10b-rename-scope.md)). Register the name on PyPI, npm, GitHub and the domains.
 2. README rewritten as the landing page, with the corrected claim from §0.
 3. Issue/Discussion templates and the response commitment.
-4. Re-run `static-site-v1` on the renamed guest — this replaces editing hostnames
-   inside recorded evidence, and refreshes the headline numbers at the same time.
+4. Re-run `static-site-v1` — this replaces the substituted container names in
+   recorded evidence and refreshes the headline numbers at the same time. It
+   needs no guest rebuild: the mark came from the acceptance-container **name
+   prefix** in code, now `praxis-acceptance-`, and nothing in the package reads
+   the hostname.
 5. Demo video from that run.
 6. Reddit post. Wait a week. Absorb the objections.
 7. Show HN.
@@ -287,8 +290,8 @@ than a launch a month later.
 
 ## Open items for the owner
 
-- **Trademark clearance** (blocks everything) — USPTO/EUIPO, classes 9 and 42,
-  `Praxis Framework` specifically.
+- **Register the name** on PyPI, npm, the GitHub org and the two domains. The
+  name itself is settled — see the rename scope's *Closed item*.
 - **The RED-run gap in §0** — decide whether to build it before launch (shorter,
   stronger headline) or launch with the longer honest claim.
 - **Who answers the issues**, and whether the 48h commitment is one you want to

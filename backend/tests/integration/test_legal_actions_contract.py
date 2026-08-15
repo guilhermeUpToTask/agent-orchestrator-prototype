@@ -22,11 +22,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -47,8 +47,8 @@ def _served_operations() -> set[str]:
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(

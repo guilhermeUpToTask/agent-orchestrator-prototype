@@ -23,7 +23,7 @@ started" look identical over HTTP. One read separates them:
 curl -s localhost:8000/api/workers | jq '[.[] | {worker_id, mode, stale, seconds_since_seen}]'
 ```
 
-- `[]` — no worker has ever reported. Start one, or use `orchestrate serve`,
+- `[]` — no worker has ever reported. Start one, or use `praxis serve`,
   which supervises one for you.
 - `stale: true` — a worker reported and went quiet (crashed, or the machine
   slept). Restart it.
@@ -39,10 +39,10 @@ The database is on an older revision than the code. Migrations are not applied
 automatically by `api start` or `worker start`.
 
 ```bash
-orchestrate db upgrade
+praxis db upgrade
 ```
 
-`orchestrate serve` migrates on startup, so this failure mostly bites the
+`praxis serve` migrates on startup, so this failure mostly bites the
 two-process development path after a pull.
 
 ---
@@ -74,7 +74,7 @@ sequences the setup and, on Tier 0, never asks for an API key.
 
 Note that this check demands provider and model rows even on Tier 0, where
 neither the stub reasoner nor the dry-run runner resolves one. You can satisfy
-it with `orchestrate seed demo --stub`, or ignore `catalog` for a Tier 0 run —
+it with `praxis seed demo --stub`, or ignore `catalog` for a Tier 0 run —
 the wizard will tell you what actually matters.
 
 ---
@@ -129,7 +129,7 @@ binding just burns the budget.
 curl -s localhost:8000/api/runner/status | jq '{mode, valid, agents: [.agents[] | {agent_name, valid, detail}]}'
 ```
 
-Also check `ORCHESTRATOR_MASTER_KEY` is set in the environment of the **worker**
+Also check `PRAXIS_MASTER_KEY` is set in the environment of the **worker**
 process, not only the API — they are separate processes and each reads its own.
 
 ---
@@ -151,7 +151,7 @@ to try the tool.
 ## The plan ran but my repository is untouched
 
 Check the project's `repo_url`. A project created **without** one gets a scratch
-repository under `$ORCHESTRATOR_HOME/projects/<id>/repo`, and the run happily
+repository under `$PRAXIS_HOME/projects/<id>/repo`, and the run happily
 succeeds against a tree you never look at.
 
 ```bash

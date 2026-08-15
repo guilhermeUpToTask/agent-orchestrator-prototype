@@ -538,14 +538,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repo",
         default=os.environ.get("HAPPY_PATH_REPO")
-        or str(Path(os.environ.get("ORCHESTRATOR_HOME", Path.home() / ".orchestrator")) / "happy-path-v2" / "repo"),
+        or str(Path(os.environ.get("PRAXIS_HOME", Path.home() / ".orchestrator")) / "happy-path-v2" / "repo"),
     )
     parser.add_argument("--json", action="store_true", help="emit the machine-readable result")
     parser.add_argument("--skip-git", action="store_true", help="plan facts only (no repository access)")
     args = parser.parse_args(argv)
 
     try:
-        token = os.environ.get("ORCHESTRATOR_API_TOKEN")
+        token = os.environ.get("PRAXIS_API_TOKEN")
         plan = fetch_plan(args.api, args.plan_id, token)
         checks = evaluate_plan(plan, args.cycle_id)
 

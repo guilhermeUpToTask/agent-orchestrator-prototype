@@ -88,7 +88,7 @@ Serves **J1**. All routes token-guarded.
 | Set config key | `config_repo` | `PUT /api/config/{scope}/{key}` | `ReasonerSection`, `RunnerSection` | `test_api.py` | full | critical |
 | Unset config key | `config_repo` | `DELETE /api/config/{scope}/{key}` | — | `test_api.py` | api-only | post-launch |
 
-`orchestrate seed demo`, `db upgrade`, `config get|set|list` and `plan list|show`
+`praxis seed demo`, `db upgrade`, `config get|set|list` and `plan list|show`
 are CLI-only by design (J1 runs before an HTTP client exists). Not a gap.
 
 ## 2. Readiness and health

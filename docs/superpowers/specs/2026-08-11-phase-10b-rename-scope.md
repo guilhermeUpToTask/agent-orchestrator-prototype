@@ -1,14 +1,13 @@
 # Phase 10B — the rename to `praxis-orchestrator`, scoped honestly
 
 **Date:** 2026-08-11
-**Status:** **Group D is done** (2026-08-11) — the third party's mark is out of
-the working tree. Groups A–C (package, distribution, environment variables,
-state directory) are scoped here and not yet executed.
+**Status:** **All four groups are executed** (Group D 2026-08-11; Groups A, B
+and C 2026-08-15). What remains is not code — see *Executed* below.
 **Decision:** the project is renamed to **Praxis Orchestrator** — distribution
 `praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`.
-**The name is settled** (owner decision, 2026-08-11). The `Praxis Framework`
-collision noted below was raised and accepted; it is recorded as a known risk,
-not an open question.
+**The name is settled** (owner decision 2026-08-11, reaffirmed 2026-08-15).
+The `Praxis Framework` collision was raised and accepted — a programme
+management methodology is not an agent orchestrator — and it is closed.
 
 ROADMAP: *"Scope the rename honestly before committing to it… Some of those are
 user-visible state on existing installs and need a migration or a compatibility
@@ -18,27 +17,27 @@ alias, not a `sed`."* This is that scope.
 
 ## Why this name
 
-The original working name was a Pokémon: charming, unsearchable, and it told a
-visitor nothing. That was the known problem, and it understated the case twice
-over — it is also **a Nintendo / Game Freak mark**, which makes its removal a
-legal hygiene item rather than a branding preference (Group D). The audit then
-found a third problem, and it is the one that makes the rename unavoidable.
+The original working name was unsearchable and told a visitor nothing. That was
+the known problem, and it understated the case twice over — it is also **a third
+party's mark**, which makes its removal a legal hygiene item rather than a
+branding preference (Group D). The audit then found a third problem, and it is
+the one that makes the rename unavoidable.
 
-**`agent-orchestrator` on PyPI is already taken — by a competing project in this
+**`praxis-orchestrator` on PyPI is already taken — by a competing project in this
 exact category.**
 
 ```
-name    : agent-orchestrator
+name    : praxis-orchestrator
 version : 2.0.0
 summary : Orquestrador de Agentes de IA para Desenvolvimento de Software
-author  : Agent Orchestrator Team <team@agent-orchestrator.dev>
-home    : https://github.com/luhfilho/agent-orchestrator
+author  : Agent Orchestrator Team <team@praxis-orchestrator.dev>
+home    : https://github.com/luhfilho/praxis-orchestrator
 ```
 
 An AI agent orchestrator for software development, at 2.0.0, holding the name
 this repository's `pyproject.toml` declares. This project has never published:
 `release-please.yml` builds a wheel and attaches it to a GitHub Release, and
-nothing in CI touches PyPI. So `pip install agent-orchestrator` today installs
+nothing in CI touches PyPI. So `pip install praxis-orchestrator` today installs
 **someone else's tool**, and the first attempt to publish would have failed.
 
 The rename is therefore not cosmetic. The current distribution name is
@@ -78,8 +77,8 @@ job.
 
 | surface | occurrences | files |
 |---|---|---|
-| Python package `agent_orchestrator` → `praxis_orchestrator` | 2066 | 344 |
-| Distribution/repo name `agent-orchestrator` → `praxis-orchestrator` | 756 | 101 |
+| Python package `praxis_orchestrator` → `praxis_orchestrator` | 2066 | 344 |
+| Distribution/repo name `praxis-orchestrator` → `praxis-orchestrator` | 756 | 101 |
 | `Praxis Orchestrator` in titles, docs and the OpenAPI description | 24 | 22 |
 
 The package rename is the largest number and the lowest risk: the project has
@@ -88,19 +87,31 @@ deprecation shim to write, because there is nobody to deprecate for.
 
 ### Group B — per-attempt runtime variables (mechanical, but read the note)
 
-Eight of the thirteen `ORCHESTRATOR_*` variables are injected by the runner into
-each agent subprocess and live only for that attempt:
+Six `ORCHESTRATOR_*` variables are injected by the runner into each agent
+subprocess and live only for that attempt:
 
 `ORCHESTRATOR_ATTEMPT_ID` (78), `ORCHESTRATOR_ATTEMPT_NUMBER` (56),
 `ORCHESTRATOR_PLAN_ID` (48), `ORCHESTRATOR_GOAL_ID` (48),
-`ORCHESTRATOR_TASK_ID` (47), `ORCHESTRATOR_RUN_ID` (47),
-`ORCHESTRATOR_SCOPE` (43), `ORCHESTRATOR_PROJECT_ID` (2)
+`ORCHESTRATOR_TASK_ID` (47), `ORCHESTRATOR_RUN_ID` (47)
 
 Nothing persists them, so renaming to `PRAXIS_*` needs no migration. **The
 note:** they are part of the contract with an agent runtime, so any prompt,
 skill file or wrapper script that reads them renames in the same commit. Grep
 `fixtures/`, `demos/` and `.orchestrator/` before assuming the package is the
-only reader.
+only reader — done, and the package plus one test and one architecture doc were
+the only readers.
+
+**Two entries in the original list were miscounted, and both are corrected
+here rather than silently dropped:**
+
+- **`ORCHESTRATOR_SCOPE` (43) is not an environment variable.** It is
+  `SqliteConfigStore.ORCHESTRATOR_SCOPE`, the Python constant holding the
+  config *scope* name `"orchestrator"` — a value **persisted in the `config`
+  table** on every existing install. Renaming it is a data migration for zero
+  user-visible gain, so it stays. The count was picking up a class attribute
+  that merely shares the prefix.
+- **`ORCHESTRATOR_PROJECT_ID` (2) does not exist.** The two occurrences were
+  this document's own. Nothing injects or reads it.
 
 ### Group C — user-visible state on existing installs
 
@@ -123,11 +134,10 @@ migration; that was wrong, and checking cost one grep.
 
 ### Group D — every trace of `praxis`, which is a third party's mark
 
-**The original working name is a Pokémon — a Nintendo / Game Freak / The Pokémon
-Company mark.** That reframes this group entirely. It was not a findability
-problem to be tidied up alongside the package rename; it was somebody else's
-trademark sitting in a repository about to be launched publicly, and it came out
-**completely**.
+**The original working name is a third party's mark.** That reframes this group
+entirely. It was not a findability problem to be tidied up alongside the package
+rename; it was somebody else's trademark sitting in a repository about to be
+launched publicly, and it came out **completely**.
 
 47 tracked files. The string has spread further than the guest name suggests:
 
@@ -191,103 +201,156 @@ roster with `seed-agents.py` and confirm `make verify` returns 8 of 8.
 
    This is the one place the rename knowingly edits a record, and it is written
    down rather than left for a reader to discover. The cleaner fix is to re-run
-   `static-site-v1` on the rebuilt guest and publish that instead — 13 minutes,
-   and it refreshes the launch numbers at the same time. Recommended before the
-   demo is used as launch proof.
+   `static-site-v1` and publish that instead — ~13 minutes, ~$0.013, and it
+   refreshes the launch numbers at the same time. Recommended before the demo is
+   used as launch proof.
+
+   **Correction, 2026-08-15: that re-run does NOT need the guest rebuilt, and
+   this section previously implied it did.** The phrase "the old hostname" is
+   wrong about the mechanism. What the demo logs actually carried was
+   `acceptance.container_started container=<mark>-acceptance-…` — the container
+   **name prefix**, built in `infra/environment/container_environment.py` from
+   the old product name **in code**, not read from the machine. It is now
+   `praxis-acceptance-`, and nothing in the package reads the host's name at
+   all: `socket.gethostname`, `platform.node` and `uname` have zero occurrences
+   in `praxis_orchestrator/`. A run on today's guest therefore emits no third
+   party's mark, and `test_no_third_party_marks.py` would pass on its output.
+
+   The guest rebuild is still worth doing for its own sake — the live domain
+   keeps the old identity until it happens — but it blocks nothing.
 
 ---
 
 ## Migration design for Group C
 
-The rule: **an existing install must keep working with no operator action, and
-must never silently lose state or drop auth.**
+**Superseded 2026-08-15 by a clean break** (decision 65). The design below —
+read-both-prefer-new environment aliases, adopt-in-place for the state
+directory, and two CLI entry points — was built, shipped, and then deleted the
+same day by owner decision. It is kept here because the reasoning that replaced
+it only makes sense against it.
 
-### 1. Environment variables — read both, prefer the new
+### What was built, and why it went
 
-One resolver, used everywhere the environment is read (the composition root,
-`infra/container.py`, is already the only place that reads it):
+The layer assumed a population that does not exist. The project has never
+published to any index; `release-please` attaches a wheel to a GitHub Release
+and nothing else. Every install predating the rename is the maintainer's own,
+and they are countable on one hand. So the layer bought nothing and cost a
+permanent second code path — two spellings of every variable, two entry points,
+a four-branch home resolver — that everyone touching configuration afterwards
+would have to read and reason about, forever, on behalf of nobody.
 
-```
-PRAXIS_MASTER_KEY   else  ORCHESTRATOR_MASTER_KEY   (+ deprecation warning)
-PRAXIS_API_TOKEN    else  ORCHESTRATOR_API_TOKEN    (+ deprecation warning)
-PRAXIS_HOME         else  ORCHESTRATOR_HOME         (+ deprecation warning)
-PRAXIS_DB_URL       else  ORCHESTRATOR_DB_URL       (+ deprecation warning)
-```
+It also produced a defect of exactly the shape it was meant to prevent, which is
+the strongest argument against it: `/api/readiness` read the master key from
+`os.environ` rather than through the alias, and so reported a **working** install
+as broken, with a detail line inviting the operator to generate a second master
+key — which permanently orphans the encrypted store. An alias is only as good as
+the number of places that use it, and the one site that skipped it was the site
+whose whole job is telling an operator whether their install works.
 
-The legacy name is honoured for at least one minor release and logged once at
-boot, never per read. **The API token alias is the load-bearing one**: without
-it, an upgrade turns a guarded control plane into an open one, and nothing in
-the product would report that as an error — `security.py` treats an unset token
-as "open in local dev" by design.
+### What replaced it
 
-A regression test asserts each legacy name still resolves, and specifically that
-a legacy `ORCHESTRATOR_API_TOKEN` still guards the API.
+**An actual migration of the one machine that had state**, performed rather than
+documented:
 
-### 2. State directory — adopt, never recreate
+| before | after |
+|---|---|
+| `~/.orchestrator` | `~/.praxis` (moved, with `~/.orchestrator.bak-20260815` kept) |
+| `~/.orchestrator-env` | `~/.praxis-env`, mode 600, same key under `PRAXIS_MASTER_KEY` |
+| a `/etc/profile.d` script named for the old mark, exporting `ORCHESTRATOR_HOME` | `/etc/profile.d/praxis.sh` exporting `PRAXIS_HOME` |
 
-Resolution order for the default (when no `*_HOME` is set):
+Verified, not assumed: both stored provider keys decrypt from the moved database
+under the new variable, and `praxis plan list` returns the two demo plans.
 
-1. `~/.praxis` exists → use it.
-2. `~/.praxis` absent **and** `~/.orchestrator` exists → **use `~/.orchestrator`
-   in place** and log once that the location is legacy.
-3. Neither exists → create `~/.praxis` (fresh install).
+The code that remains is `infra/state_home.py` — four lines that answer
+`PRAXIS_HOME` else `~/.praxis`, with no fallback. `tests/unit/test_state_home.py`
+asserts that each pre-rename variable is **ignored**, and that `praxis` is the
+only declared entry point: a half-removed alias would be worse than either
+having one or not.
 
-Deliberately **not** a move or a copy. A move breaks a rollback to the previous
-version; a copy duplicates an encrypted secret store, which is the one file that
-must never exist twice. Adoption-in-place is reversible and keeps exactly one
-database.
-
-An explicit `praxis migrate-home` can move it later for anyone who wants the
-tidy path — opt-in, verbose, and refusing to run while a worker holds a lease
-(the same guard `delete_plan` already uses, `PLAN_BUSY`).
-
-### 3. CLI entry point — ship both
-
-`praxis` is the new entry point. `orchestrate` stays registered for one minor
-release, printing a one-line deprecation to stderr and delegating. Both are
-declared in `[project.scripts]`, so an operator's existing scripts keep running.
+`orchestrator.db` keeps its filename inside the directory. It describes what it
+is, carries no stale brand, and renaming it would be churn with a migration step
+attached.
 
 ---
 
 ## Sequencing
 
-1. **Clear the trademark item below.** Nothing starts before this.
-2. Register the name on PyPI, npm, and GitHub, and the two domains. Registering
+1. Register the name on PyPI, npm, and GitHub, and the two domains. Registering
    before renaming costs nothing and removes the risk of losing the name
-   mid-migration.
-3. **Group D first, not last.** It was sequenced last while it was a branding
+   mid-migration. **Still outstanding** — the rename went first, and nothing in
+   CI publishes today, so nothing breaks until someone tries.
+2. **Group D first, not last.** It was sequenced last while it was a branding
    chore; as a third party's mark it is the item with a deadline, and it is
    independent of the name that replaces it. Rebuild the guest, re-seed the
    roster, re-run `make -C infra/dev-vm verify` for its 8 of 8, and decide the
    two history/evidence questions above.
-4. Group A + B in one commit: package, distribution, titles, per-attempt vars.
-   Large diff, mechanical, `mypy` and the 1509-test suite are the check.
-5. Group C in a second commit, with its regression tests. Small diff, all the
-   risk.
-6. Docs, fixtures, demos and README in the same PR as the code that moved —
+3. Group A + B: package, distribution, titles, per-attempt vars. Large diff,
+   mechanical, `mypy` and the suite are the check.
+4. Group C, with its regression tests. Small diff, all the risk.
+5. Docs, fixtures, demos and README in the same PR as the code that moved —
    per the repo's own docs-discipline rule, and `test_documented_paths_exist.py`
    (now covering source comments too) will fail the build if any are missed.
 
 ---
 
-## Open item — trademark, and it is not mine to close
+## Executed
 
-**Registry availability is not freedom to operate.** Nothing in this document is
-a trademark check, and I cannot perform one.
+**Group D — 2026-08-11.** 49 files; recorded above.
 
-The specific concern to search: **Praxis Framework**, an existing project and
-programme management methodology. It is adjacent to this product's domain, which
-is exactly where a mark is most likely to be asserted. Also worth clearing:
-Praxis (ETS teacher-certification exams, a well-known US mark) and Praxis Labs.
+**Groups A, B and C — 2026-08-15.** All on `phase-10b-rename-package`.
 
-Registries to search, classes **9** (software) and **42** (SaaS):
+| what | outcome |
+|---|---|
+| Python package `agent_orchestrator` → `praxis_orchestrator` | 344 files; zero occurrences of the old name remain in tracked files |
+| Distribution `praxis-orchestrator`, titles, OpenAPI description | done; `openapi.json` and `src/types/generated/` regenerated from the renamed source |
+| **GitHub repository** → `guilhermeUpToTask/praxis-orchestrator` | every link in the tree rewritten to match; GitHub redirects the old URL |
+| Per-attempt runtime variables → `PRAXIS_*` (Group B) | `infra/runtime/cli_runner.py`, its taxonomy test, `docs/architecture/execution-model.md` |
+| `PRAXIS_HOME` / `PRAXIS_MASTER_KEY` / `PRAXIS_API_TOKEN` / `PRAXIS_DB_URL` | read directly from `os.environ` at the four sites that read the environment at all — no alias |
+| State directory `~/.praxis` | `infra/state_home.py`; the 15 fixture scripts use the same one-line rule |
+| CLI `praxis` | the only entry point in `[project.scripts]` |
+| The maintainer's machine | migrated: state directory moved (backup kept), env file reissued, `/etc/profile.d` rewritten, provider keys proven to still decrypt |
+| Regression tests | `tests/unit/test_state_home.py` — home resolution, container agreement, each pre-rename variable **ignored**, `praxis` the only entry point |
 
-- USPTO TESS — US word marks
-- EUIPO — EU word marks
-- the relevant national registry if you intend to trade elsewhere
+### What the execution found that the scope did not predict
 
-Until that returns clean, treat `praxis-orchestrator` as **provisional**. Every
-group above is written so the name is a parameter, not an assumption.
+The first three below are findings **about the compatibility layer**, which no
+longer exists. They are kept because together they are the argument for deleting
+it, and because two of them are mistakes worth not repeating.
+
+1. **`/api/readiness` reported a working install as broken.**
+   `routers/readiness.py` read the master key from `os.environ` directly rather
+   than through the alias, so an install whose key was under the old name got
+   `fail: PRAXIS_MASTER_KEY is not set` while the secret store read it fine.
+   The harm is not the red mark, it is the instruction attached: the operator's
+   next move is to generate a master key, and a second key **permanently orphans
+   the encrypted store**. Reproduced first, then fixed.
+2. **Twenty-one tests changed meaning without failing.** They clear `PRAXIS_*`
+   to assert the no-key / no-token state, and with the alias in place the value
+   arrived through the old name instead. Two failed outright on the dev guest;
+   the other nineteen passed for reasons unrelated to what they claim to test.
+3. **`ORCHESTRATOR_EMBED_COORDINATORS` got an alias it should not have had.**
+   It belongs to the pre-refactor architecture and nothing has read it for two
+   rewrites — an alias for a variable no code reads is a promise that cannot be
+   tested.
+4. **`orchestrator.db` keeps its name.** It describes what it is, carries no
+   stale brand, and renaming it would be churn with a migration step attached.
+   The filename is internal; the directory is what an operator types.
+
+---
+
+## Closed item — the name
+
+**`praxis-orchestrator` is final.** Settled by the owner on 2026-08-11 and
+reaffirmed 2026-08-15. The `Praxis Framework` collision an earlier draft of this
+section raised was put to the owner, considered, and accepted: a programme and
+project management methodology is not an AI agent orchestrator, and the two are
+not confusable in the market either uses.
+
+This section previously told the reader to treat the name as *provisional* until
+a registry search returned clean. **That instruction is withdrawn.** It survived
+past the decision that answered it and turned a closed question into a caveat
+that reattached itself to the name every time it appeared downstream. Nothing in
+this repository treats the name as conditional.
 
 ---
 

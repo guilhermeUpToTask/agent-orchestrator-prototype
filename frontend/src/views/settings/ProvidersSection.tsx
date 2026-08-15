@@ -49,7 +49,7 @@ export function ProvidersSection() {
       {providers.length === 0 && (
         <div className={styles.empty}>
           No providers registered. Add one here, or seed a preset with{' '}
-          <code>orchestrate seed demo --provider …</code>.
+          <code>praxis seed demo --provider …</code>.
         </div>
       )}
 

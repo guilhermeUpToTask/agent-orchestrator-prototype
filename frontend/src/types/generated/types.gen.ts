@@ -342,7 +342,7 @@ export type BaselineResponse = {
  *
  * The domain `PlanBlock` plus the one fact only `block_policy` knows.
  *
- * `requires_human` is a pure function of `kind` (`agent_orchestrator/app/block_policy.py`),
+ * `requires_human` is a pure function of `kind` (`praxis_orchestrator/app/block_policy.py`),
  * so it is projected here rather than persisted: a policy change must not
  * leave stale copies in old rows, and adding a field to the FROZEN
  * `PlanBlock` would need a domain un-freeze for a value the block can
@@ -729,7 +729,7 @@ export type DefaultAgentResponse = {
  * need three different answers. A LOCAL binding put `cycle/<id>` in the
  * operator's own checkout — it is already delivered and only needs finding. A
  * REMOTE binding put it in a clone the orchestrator owns, under
- * `$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the
+ * `$PRAXIS_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the
  * operator has ever looked. A SCRATCH binding produced a demo repository whose
  * contents nobody wants.
  *

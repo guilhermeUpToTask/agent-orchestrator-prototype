@@ -19,11 +19,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.routers.workers import STALE_AFTER_SECONDS
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.routers.workers import STALE_AFTER_SECONDS
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -45,8 +45,8 @@ class _FixedClock:
 
 @pytest.fixture
 def stack(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     clock = _FixedClock(NOW)
@@ -109,7 +109,7 @@ def test_readiness_fails_when_no_worker_has_ever_reported(stack):
     )
 
     assert check["status"] == "fail"
-    assert "orchestrate worker start" in check["detail"]
+    assert "praxis worker start" in check["detail"]
 
 
 def test_readiness_only_warns_when_a_known_worker_goes_quiet(stack):

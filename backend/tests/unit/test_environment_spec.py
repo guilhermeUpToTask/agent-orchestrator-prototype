@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_orchestrator.infra.environment.spec import (
+from praxis_orchestrator.infra.environment.spec import (
     CONTAINER_BINARY_KEY,
     read_container_binary,
 )

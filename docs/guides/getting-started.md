@@ -11,13 +11,13 @@ thing, against a throwaway state directory and a disposable repository the
 fixture creates for you:
 
 ```bash
-git clone https://github.com/guilhermeUpToTask/agent-orchestrator-prototype
-cd agent-orchestrator-prototype
+git clone https://github.com/guilhermeUpToTask/praxis-orchestrator
+cd praxis-orchestrator
 
-pipx install agent-orchestrator
-orchestrate config set reasoner.mode stub        # Tier 0: no API key, no network
-orchestrate config set agent_runner.mode dry-run
-orchestrate serve &                              # migrate + API + worker + console
+pipx install ./praxis_orchestrator-*.whl    # the wheel from the latest GitHub Release
+praxis config set reasoner.mode stub        # Tier 0: no API key, no network
+praxis config set agent_runner.mode dry-run
+praxis serve &                              # migrate + API + worker + console
 
 ./fixtures/first-cycle-v1/scripts/preflight.sh   # what must be true before a run
 ./fixtures/first-cycle-v1/scripts/materialize.sh # the disposable target repo
@@ -30,7 +30,7 @@ served facts and from git:
 
 ```bash
 python3 fixtures/first-cycle-v1/scripts/verify_run.py \
-  --plan "$PLAN_ID" --repo ~/.orchestrator/first-cycle-v1/repo --tier 0
+  --plan "$PLAN_ID" --repo ~/.praxis/first-cycle-v1/repo --tier 0
 ```
 
 Ten checks, including the one that matters most: your default branch is
@@ -41,12 +41,17 @@ API, not a separate story.
 ## 1. Install and start
 
 ```bash
-pipx install agent-orchestrator     # or: uvx --from agent-orchestrator orchestrate
-orchestrate serve
+pipx install ./praxis_orchestrator-*.whl   # the wheel from the latest GitHub Release
+praxis serve
 ```
 
+**Not on PyPI, deliberately** — that name there belongs to a different project,
+so `pip install praxis-orchestrator` would fetch somebody else's tool. Every
+release attaches a wheel to a [GitHub Release](https://github.com/guilhermeUpToTask/praxis-orchestrator/releases),
+and that wheel is the one carrying the built console inside it.
+
 ```
-✓  state directory /home/you/.orchestrator
+✓  state directory /home/you/.praxis
 ✓  worker worker-1 started (pid 12345)
 ✓  http://127.0.0.1:8000
 ```
@@ -55,12 +60,12 @@ One command does four things: migrates the state directory, starts the API,
 supervises a worker as its own process, and serves the console — the wheel
 carries the built UI, so there is no second install and no second port.
 
-State lives in `ORCHESTRATOR_HOME` (default `~/.orchestrator`): your plans,
+State lives in `PRAXIS_HOME` (default `~/.praxis`): your plans,
 evidence and encrypted keys. Point it elsewhere with the environment variable if
 you want a throwaway install:
 
 ```bash
-ORCHESTRATOR_HOME=/tmp/try-orchestrator orchestrate serve --port 8100
+PRAXIS_HOME=/tmp/try-orchestrator praxis serve --port 8100
 ```
 
 ## 2. Set it up

@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.forge_port import (
+from praxis_orchestrator.app.forge_port import (
     ForgeNotConfiguredError,
     ForgePort,
     ForgeRequestFailedError,
     PullRequestRef,
 )
-from agent_orchestrator.app.testing.fakes import FakeForge
-from agent_orchestrator.infra.forge.no_forge import NoForge
+from praxis_orchestrator.app.testing.fakes import FakeForge
+from praxis_orchestrator.infra.forge.no_forge import NoForge
 
 
 def test_no_forge_refuses_both_operations_with_an_actionable_message():

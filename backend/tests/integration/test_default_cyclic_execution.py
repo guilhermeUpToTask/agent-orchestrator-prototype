@@ -6,18 +6,18 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from agent_orchestrator.app.execution_records import RuntimeCircuit
-from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-from agent_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
-from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent, propose_intent
-from agent_orchestrator.app.use_cases.run_worker import drive_goal, drive_plan
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
-from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus, ProposalKind
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.domain.value_objects.lifecycle import Status
-from agent_orchestrator.infra.cli.main import cli
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.app.execution_records import RuntimeCircuit
+from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+from praxis_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
+from praxis_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent, propose_intent
+from praxis_orchestrator.app.use_cases.run_worker import drive_goal, drive_plan
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from praxis_orchestrator.domain.entities.planning_artifacts import PlanStatus, ProposalKind
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 from tests.integration.cyclic_walk import _git, _init_trunk_repo, drive_cycle_to_publication
 
 pytestmark = pytest.mark.integration
@@ -74,8 +74,8 @@ def test_cyclic_task_success_clears_the_runtime_circuit(tmp_path, monkeypatch) -
     provider_id/model_id) while `agent_runner.mode` stays dry-run, so execution
     is deterministic but the spec still carries the circuit key.
     """
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CIRCUIT_TEST_KEY", "sk-not-a-real-key")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)

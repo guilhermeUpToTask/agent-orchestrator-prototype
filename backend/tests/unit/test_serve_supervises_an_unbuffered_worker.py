@@ -22,7 +22,7 @@ import sys
 import pytest
 from click.testing import CliRunner
 
-from agent_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.cli.main import cli
 
 
 class _NeverRunningChild:
@@ -39,7 +39,7 @@ class _NeverRunningChild:
 
 @pytest.fixture()
 def spawned_argv(tmp_path, monkeypatch) -> list[str]:
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "state"))
     recorded: list[list[str]] = []
 
     def fake_popen(argv, *args, **kwargs):
@@ -77,14 +77,14 @@ def test_serve_still_spawns_the_worker_it_is_supervising(spawned_argv) -> None:
     """Guards the fixture: an argv that no longer starts a worker would pass
     the flag assertions above for the wrong reason."""
     assert spawned_argv[spawned_argv.index("-m") + 1] == (
-        "agent_orchestrator.infra.cli.main"
+        "praxis_orchestrator.infra.cli.main"
     )
     assert "worker" in spawned_argv
     assert "start" in spawned_argv
 
 
 def test_no_worker_spawns_nothing_to_buffer(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "state"))
     recorded: list[list[str]] = []
     monkeypatch.setattr(
         subprocess, "Popen", lambda argv, *a, **k: recorded.append(list(argv))

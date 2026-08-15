@@ -6394,7 +6394,7 @@
           "resolution"
         ],
         "title": "BlockResponse",
-        "description": "The domain `PlanBlock` plus the one fact only `block_policy` knows.\n\n`requires_human` is a pure function of `kind` (`agent_orchestrator/app/block_policy.py`),\nso it is projected here rather than persisted: a policy change must not\nleave stale copies in old rows, and adding a field to the FROZEN\n`PlanBlock` would need a domain un-freeze for a value the block can\nalready derive from a field it carries today."
+        "description": "The domain `PlanBlock` plus the one fact only `block_policy` knows.\n\n`requires_human` is a pure function of `kind` (`praxis_orchestrator/app/block_policy.py`),\nso it is projected here rather than persisted: a policy change must not\nleave stale copies in old rows, and adding a field to the FROZEN\n`PlanBlock` would need a domain un-freeze for a value the block can\nalready derive from a field it carries today."
       },
       "Capability": {
         "properties": {
@@ -6989,7 +6989,7 @@
           "in_operator_checkout"
         ],
         "title": "DeliveryResponse",
-        "description": "Where this cycle's work physically is, so the hand-off can be true.\n\n`ProjectDefinition.repo_url` decides three different topologies and they\nneed three different answers. A LOCAL binding put `cycle/<id>` in the\noperator's own checkout \u2014 it is already delivered and only needs finding. A\nREMOTE binding put it in a clone the orchestrator owns, under\n`$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the\noperator has ever looked. A SCRATCH binding produced a demo repository whose\ncontents nobody wants.\n\nServing these as facts rather than as a rendered instruction follows the\nsame rule as `status`/`legal_actions`: the API states what is true, and the\nfrontend and the API-only fixtures each render the commands they need."
+        "description": "Where this cycle's work physically is, so the hand-off can be true.\n\n`ProjectDefinition.repo_url` decides three different topologies and they\nneed three different answers. A LOCAL binding put `cycle/<id>` in the\noperator's own checkout \u2014 it is already delivered and only needs finding. A\nREMOTE binding put it in a clone the orchestrator owns, under\n`$PRAXIS_HOME/projects/<id>/repos/<sha256[:16]>`, which is nowhere the\noperator has ever looked. A SCRATCH binding produced a demo repository whose\ncontents nobody wants.\n\nServing these as facts rather than as a rendered instruction follows the\nsame rule as `status`/`legal_actions`: the API states what is true, and the\nfrontend and the API-only fixtures each render the commands they need."
       },
       "DiffStatResponse": {
         "properties": {

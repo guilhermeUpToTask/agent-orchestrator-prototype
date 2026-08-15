@@ -45,7 +45,7 @@ done
 command -v jq >/dev/null 2>&1 || die "jq is required"
 api() { "$SCRIPT_DIR/api.sh" "$@"; }
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 
 if [[ "$TIER" == "1" ]]; then
@@ -120,7 +120,7 @@ if [[ "$TIER" == "1" ]]; then
   jq -e '.binaries[] | select(.name == "git") | .ok' <<<"$RUNNER" >/dev/null \
     && pass "git binary present" || fail "git binary missing (the workspace needs it)"
 
-  # NOT checked here: ORCHESTRATOR_MASTER_KEY. Preflight runs in the OPERATOR's
+  # NOT checked here: PRAXIS_MASTER_KEY. Preflight runs in the OPERATOR's
   # shell, but the process that decrypts the provider key is the WORKER — which
   # normally loads it from an env file preflight never sees. Testing the wrong
   # process's environment produced a confident false failure, which is worse than
@@ -132,7 +132,7 @@ fi
 
 # --- 3. the repository the run will actually write --------------------------
 # The trap this fixture found on its first live run: a project with no repo_url
-# gets a fresh empty repo auto-seeded under ORCHESTRATOR_HOME, so the run
+# gets a fresh empty repo auto-seeded under PRAXIS_HOME, so the run
 # "passes" against a tree the checker never looks at.
 if [[ -n "$PROJECT_ID" ]]; then
   PROJECT="$(api GET /api/projects | jq -c --arg id "$PROJECT_ID" '.[] | select(.id == $id)')"

@@ -1,12 +1,12 @@
 [project]
-name = "agent-orchestrator"
+name = "praxis-orchestrator"
 version = "0.1.0"
 description = "Local-first, human-gated, verified multi-agent coding orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "agent-orchestrator contributors" }]
+authors = [{ name = "praxis-orchestrator contributors" }]
 keywords = ["ai", "agents", "orchestration", "code-generation", "cli"]
 classifiers = [
     # Preview, not production: the runtime is unsandboxed and the API's auth is
@@ -52,25 +52,25 @@ dev = [
 ]
 
 [project.scripts]
-orchestrate = "agent_orchestrator.infra.cli.main:cli"
+praxis = "praxis_orchestrator.infra.cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent_orchestrator"]
+packages = ["praxis_orchestrator"]
 # The migration scripts are DATA, not modules, so hatchling would not ship them
 # on its own — and an installed copy with no migrations cannot create its
-# database at all (see agent_orchestrator/infra/db/migration_config.py).
+# database at all (see praxis_orchestrator/infra/db/migration_config.py).
 artifacts = [
-    "agent_orchestrator/infra/db/migrations/env.py",
-    "agent_orchestrator/infra/db/migrations/script.py.mako",
-    "agent_orchestrator/infra/db/migrations/versions/*.py",
+    "praxis_orchestrator/infra/db/migrations/env.py",
+    "praxis_orchestrator/infra/db/migrations/script.py.mako",
+    "praxis_orchestrator/infra/db/migrations/versions/*.py",
     # The built UI, staged by scripts/build_frontend.sh. Git-ignored and absent
     # in a source checkout: the API serves it only when present, so a wheel
     # built without it is a working backend, not a broken install.
-    "agent_orchestrator/api/static/**/*",
+    "praxis_orchestrator/api/static/**/*",
 ]
 
 [tool.pytest.ini_options]
@@ -93,7 +93,7 @@ testpaths = ["tests"]
 # needs it, and a crash is easier to read without interleaved workers.
 #
 # `--dist loadfile` keeps a file's tests inside ONE worker. That is not a
-# balancing preference: the default round-robin ran four `orchestrate serve`
+# balancing preference: the default round-robin ran four `praxis serve`
 # tests simultaneously, each booting a real API and a real worker, and they
 # knocked each other over. Per-file also imports each module once per worker
 # instead of many times, which is where this suite's setup cost lives.
@@ -112,13 +112,13 @@ target-version = "py311"
 python_version = "3.11"
 strict = true
 
-# Honest per-layer typing: agent_orchestrator/domain and .../app are fully strict (the
+# Honest per-layer typing: praxis_orchestrator/domain and .../app are fully strict (the
 # layers that claim it); the adapter layers carry explicit relaxations
-# until they are brought up to strict. Ratchet rule: `mypy agent_orchestrator` must stay
+# until they are brought up to strict. Ratchet rule: `mypy praxis_orchestrator` must stay
 # at zero errors under this config — tighten flags here, never loosen.
 # TODO(type-health): remove these overrides module by module.
 [[tool.mypy.overrides]]
-module = ["agent_orchestrator.infra.*", "agent_orchestrator.api.*"]
+module = ["praxis_orchestrator.infra.*", "praxis_orchestrator.api.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_any_generics = false

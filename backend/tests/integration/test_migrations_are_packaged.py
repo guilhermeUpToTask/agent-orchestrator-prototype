@@ -3,8 +3,8 @@
 Found by installing the built wheel into a clean venv (Phase 6's own exit
 criterion — "install to green Tier 0 using public docs only"):
 
-    $ pip install agent_orchestrator-0.1.0-py3-none-any.whl
-    $ orchestrate db upgrade
+    $ pip install praxis_orchestrator-0.1.0-py3-none-any.whl
+    $ praxis db upgrade
     ImportError: Can't find Python file .../site-packages/alembic/env.py
 
 `db_upgrade` resolved the migration directory from `Path(__file__).parents[3]`,
@@ -24,12 +24,12 @@ from pathlib import Path
 
 import pytest
 
-import agent_orchestrator
-from agent_orchestrator.infra.db.migration_config import alembic_config, migrations_dir
+import praxis_orchestrator
+from praxis_orchestrator.infra.db.migration_config import alembic_config, migrations_dir
 
 pytestmark = pytest.mark.integration
 
-PACKAGE_ROOT = Path(agent_orchestrator.__file__).resolve().parent
+PACKAGE_ROOT = Path(praxis_orchestrator.__file__).resolve().parent
 
 
 def test_the_migration_directory_lives_inside_the_package() -> None:
@@ -56,7 +56,7 @@ def test_the_resolver_does_not_depend_on_a_repository_marker() -> None:
 
 
 def migration_config_module():  # noqa: ANN201 - test helper
-    from agent_orchestrator.infra.db import migration_config
+    from praxis_orchestrator.infra.db import migration_config
 
     return migration_config
 

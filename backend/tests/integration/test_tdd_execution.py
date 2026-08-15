@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     FakeClock,
     InMemoryAgentRepository,
@@ -16,22 +16,22 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     GoalContract,
     TaskContract,
     VerificationStrategy,
 )
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
-from agent_orchestrator.infra.git.workspace import GitBranchWorkspace
-from agent_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.infra.git.workspace import GitBranchWorkspace
+from praxis_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -410,7 +410,7 @@ def test_deleted_test_file_becomes_a_recoverable_verification_block(tmp_path):
 
     # Un-freeze #17: a rejected CANDIDATE is not terminal on the first failure.
     # Agent output is a sample; the retry now carries the orchestrator's own
-    # rejection in its prompt (agent_orchestrator/app/agent_feedback.py), so it is not a rerun.
+    # rejection in its prompt (praxis_orchestrator/app/agent_feedback.py), so it is not a rerun.
     first = asyncio.run(handler.handle(plan.id, plan, uow))
 
     assert first.value in {"continue", "paused"}
@@ -452,14 +452,14 @@ def test_capacity_waits_do_not_spend_the_verification_ceiling(tmp_path):
     unlucky enough to hit an outage gets ZERO verification retries, which is the
     exact behaviour un-freeze #17 set out to remove.
     """
-    from agent_orchestrator.app.execution_records import (
+    from praxis_orchestrator.app.execution_records import (
         ExecutionAttempt,
         ExecutionAttemptStatus,
         ExecutionRun,
         ExecutionRunStatus,
     )
-    from agent_orchestrator.app.runtime_failures import RuntimeFailure
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.app.runtime_failures import RuntimeFailure
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
     from uuid import uuid4
 
     repo_dir = tmp_path / "repo"

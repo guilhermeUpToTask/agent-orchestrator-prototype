@@ -91,7 +91,7 @@ block's resolutions plus `pause` and `start_replan`.
 Check in this order:
 
 1. **Is a worker running?** No worker means nothing advances, and the plan will
-   sit in `running` looking healthy. `orchestrate serve` runs one for you.
+   sit in `running` looking healthy. `praxis serve` runs one for you.
 2. **Is the activity `provider_waiting`?** Then it is waiting on purpose. Leave
    it.
 3. **Is there a backoff in flight?** A failed task retries on a curve, in strict

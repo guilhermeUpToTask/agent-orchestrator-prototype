@@ -1,7 +1,7 @@
 [project]
 name = "happy-path"
 version = "0.1.0"
-description = "Disposable seed for agent-orchestrator happy-path-v1 walkthroughs"
+description = "Disposable seed for praxis-orchestrator happy-path-v1 walkthroughs"
 requires-python = ">=3.11"
 dependencies = []
 

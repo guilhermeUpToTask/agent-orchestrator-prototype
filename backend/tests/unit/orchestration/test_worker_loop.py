@@ -9,20 +9,20 @@ import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
-from agent_orchestrator.app.testing.fakes import FakeClock
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.tasks_errors import StaleVersionError
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.app.provider_capacity import ProviderCapacityPolicy, RoutingPolicy
+from praxis_orchestrator.app.testing.fakes import FakeClock
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.tasks_errors import StaleVersionError
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
-from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-from agent_orchestrator.app.use_cases.control import finish_review
-from agent_orchestrator.app.use_cases.run_worker import _advance_with_heartbeats, drive_plan, worker_tick
-from agent_orchestrator.infra.runtime.factory import RunnerModeStatus
-from agent_orchestrator.infra.worker.main import run_worker_forever
+from praxis_orchestrator.app.use_cases.advance_plan import advance_plan
+from praxis_orchestrator.app.use_cases.control import finish_review
+from praxis_orchestrator.app.use_cases.run_worker import _advance_with_heartbeats, drive_plan, worker_tick
+from praxis_orchestrator.infra.runtime.factory import RunnerModeStatus
+from praxis_orchestrator.infra.worker.main import run_worker_forever
 
 
 class _NoopRegistry:
@@ -280,9 +280,9 @@ def test_heartbeat_failure_cancels_and_awaits_the_advance_task():
 
 
 def test_goal_driver_stale_version_is_benign_contention(monkeypatch):
-    from agent_orchestrator.app.use_cases import claim_ready_goal as claim_module
-    from agent_orchestrator.app.use_cases import run_worker as worker_module
-    from agent_orchestrator.infra.worker import main as worker_main
+    from praxis_orchestrator.app.use_cases import claim_ready_goal as claim_module
+    from praxis_orchestrator.app.use_cases import run_worker as worker_module
+    from praxis_orchestrator.infra.worker import main as worker_main
 
     releases: list[tuple[str, str, str]] = []
     spawned: list[asyncio.Task[tuple[str, int]]] = []
@@ -385,9 +385,9 @@ def test_a_raising_goal_claim_scan_does_not_kill_the_worker(monkeypatch):
     killing the worker; under the dev supervisor that took the API down too.
     A delete racing a claim is normal (`DELETE /api/plans/{id}` cascades while a
     scan is in flight), so it has to be survivable."""
-    from agent_orchestrator.app.use_cases import claim_ready_goal as claim_module
-    from agent_orchestrator.app.use_cases import run_worker as worker_module
-    from agent_orchestrator.infra.worker import main as worker_main
+    from praxis_orchestrator.app.use_cases import claim_ready_goal as claim_module
+    from praxis_orchestrator.app.use_cases import run_worker as worker_module
+    from praxis_orchestrator.infra.worker import main as worker_main
 
     stop = asyncio.Event()
     tick_count = 0

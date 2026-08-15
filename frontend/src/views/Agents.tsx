@@ -75,7 +75,7 @@ export function AgentsView() {
           {agents.length === 0 && (
             <p className={styles.empty}>
               No agents registered. Add one in Settings → Agents, or seed with{' '}
-              <code>orchestrate seed demo --stub</code>.
+              <code>praxis seed demo --stub</code>.
             </p>
           )}
 

@@ -10,24 +10,24 @@ import pytest
 from click.testing import CliRunner
 from cryptography.fernet import Fernet
 
-from agent_orchestrator.app.ports import TaskFailed
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.ia_model import IAModel
-from agent_orchestrator.domain.entities.model_provider import ModelProvider
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
-from agent_orchestrator.infra.cli.main import cli
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.secret_ref import SecretRef
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.errors import InfrastructureError
-from agent_orchestrator.infra.runtime.cli_runner import (
+from praxis_orchestrator.app.ports import TaskFailed
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.ia_model import IAModel
+from praxis_orchestrator.domain.entities.model_provider import ModelProvider
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
+from praxis_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.secret_ref import SecretRef
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.errors import InfrastructureError
+from praxis_orchestrator.infra.runtime.cli_runner import (
     ClaudeCodeRunner,
     CodexRunner,
     PiAgentRunner,
 )
-from agent_orchestrator.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
-from agent_orchestrator.infra.runtime.factory import (
+from praxis_orchestrator.infra.runtime.dummy_runner import DryRunAgentRunner, DummyAgentRunner
+from praxis_orchestrator.infra.runtime.factory import (
     CatalogAgentRunner,
     build_agent_runner,
     validate_agent_binding,
@@ -39,8 +39,8 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def container(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.delenv("PRAXIS_MASTER_KEY", raising=False)
     c = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(c.engine)
     return c
@@ -68,7 +68,7 @@ def spec_with(**overrides) -> AgentSpec:
 
 def seed_anthropic(container, monkeypatch) -> None:
     """A provider row whose id maps to a pi backend, one model, and the key."""
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     ref = SecretRef.for_provider("anthropic")
     container.secret_store.put(ref, "sk-agent-test")
     container.provider_repo.add(
@@ -89,7 +89,7 @@ def seed_anthropic(container, monkeypatch) -> None:
 
 
 def test_dry_run_is_the_default_and_never_touches_secrets(container):
-    # no ORCHESTRATOR_MASTER_KEY in the env: constructing the secret store
+    # no PRAXIS_MASTER_KEY in the env: constructing the secret store
     # would fail closed — the dry-run path must never get there
     assert isinstance(build(container), DryRunAgentRunner)
 
@@ -250,7 +250,7 @@ def test_provider_and_model_bound_to_agent_are_delete_guarded(container, monkeyp
     container.agent_repo.add(
         spec_with(runtime_type="claude", provider_id="anthropic", model_id="anthropic:sonnet")
     )
-    from agent_orchestrator.domain.errors.config_errors import ReferencedEntityInUseError
+    from praxis_orchestrator.domain.errors.config_errors import ReferencedEntityInUseError
 
     with pytest.raises(ReferencedEntityInUseError):
         container.model_repo.delete("anthropic:sonnet")
@@ -259,8 +259,8 @@ def test_provider_and_model_bound_to_agent_are_delete_guarded(container, monkeyp
 
 
 def test_seed_binds_the_demo_agent_runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-123")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
@@ -304,7 +304,7 @@ def test_codex_resolves_without_touching_the_secret_store(container, monkeypatch
     seed_anthropic(container, monkeypatch)
     scope = container.config_store.ORCHESTRATOR_SCOPE
     container.config_store.set(scope, "agent_runner.mode", "real")
-    monkeypatch.delenv("ORCHESTRATOR_MASTER_KEY", raising=False)
+    monkeypatch.delenv("PRAXIS_MASTER_KEY", raising=False)
 
     runner = build(container)
     codex = runner._runner_for(

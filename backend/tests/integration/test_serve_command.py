@@ -1,4 +1,4 @@
-"""`orchestrate serve` — the one command Phase 6 promises a new operator.
+"""`praxis serve` — the one command Phase 6 promises a new operator.
 
 The deliverable is "start API, worker, and packaged frontend with one command
 and an explicit state directory". Until now that took three: `db upgrade`,
@@ -107,18 +107,18 @@ def _is_running(pid: int) -> bool:
 def _spawn(port: int, home: Path, log: Path) -> subprocess.Popen:
     env = {
         **os.environ,
-        "ORCHESTRATOR_HOME": str(home),
+        "PRAXIS_HOME": str(home),
         "PYTHONPATH": str(BACKEND),
         # Otherwise the child block-buffers to the log file and a failure
         # reports an EMPTY server log, which is the one thing it must not do.
         "PYTHONUNBUFFERED": "1",
     }
-    env.pop("ORCHESTRATOR_API_TOKEN", None)
+    env.pop("PRAXIS_API_TOKEN", None)
     return subprocess.Popen(
         [
             sys.executable,
             "-m",
-            "agent_orchestrator.infra.cli.main",
+            "praxis_orchestrator.infra.cli.main",
             "serve",
             "--port",
             str(port),
@@ -140,7 +140,7 @@ def _spawn(port: int, home: Path, log: Path) -> subprocess.Popen:
 
 @pytest.fixture
 def served(tmp_path):
-    """The real `orchestrate serve`, on a free port, in its own process group.
+    """The real `praxis serve`, on a free port, in its own process group.
 
     `_free_port` binds a port, closes it, and hands the number over — so
     between that and uvicorn's own bind there is a window another process can

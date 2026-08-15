@@ -35,7 +35,7 @@ its look like its only coping the events logs like activity.
 
 the workspace repo is incorrect handled per plan based git at workspace-repo, it should be per project folder structure like it was the last backend.
 
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git branch
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git branch
 * main
   plan/b45f6dc6-9590-4082-b5d7-f805e81fc5c6
   plan/dd5c6486-e73b-4db2-8061-2432d08a1e67
@@ -336,42 +336,42 @@ Done
 
 the bash interaction:
 root@5a224f22092e:/workspaces/agent-orchestrator#  source /workspaces/agent-orchestrator/backend/.venv/bin/activate
-(agent-orchestrator) root@5a224f22092e:/workspaces/agent-orchestrator# cd ..
-(agent-orchestrator) root@5a224f22092e:/workspaces# cd ..
-(agent-orchestrator) root@5a224f22092e:/# cd root/
-(agent-orchestrator) root@5a224f22092e:~# cd .orchestrator/
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator# ls
+(praxis-orchestrator) root@5a224f22092e:/workspaces/agent-orchestrator# cd ..
+(praxis-orchestrator) root@5a224f22092e:/workspaces# cd ..
+(praxis-orchestrator) root@5a224f22092e:/# cd root/
+(praxis-orchestrator) root@5a224f22092e:~# cd .orchestrator/
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator# ls
 config.json  orchestrator.db  orchestrator.db-shm  orchestrator.db-wal  projects  workspace-repo
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator# cd workspace-repo/
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git status
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator# cd workspace-repo/
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git status
 On branch plan/ed49f12a-ed41-4579-ab95-f968a115366b
 nothing to commit, working tree clean
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout main
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout main
 Switched to branch 'main'
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls -a
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls -a
 .  ..  .git
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git branch
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git branch
 * main
   plan/b45f6dc6-9590-4082-b5d7-f805e81fc5c6
   plan/dd5c6486-e73b-4db2-8061-2432d08a1e67
   plan/ed49f12a-ed41-4579-ab95-f968a115366b
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout dd5c6486-e73b-4db2-8061-2432d08a1e67
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout dd5c6486-e73b-4db2-8061-2432d08a1e67
 error: pathspec 'dd5c6486-e73b-4db2-8061-2432d08a1e67' did not match any file(s) known to git
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout plan/dd5c6486-e73b-4db2-8061-2432d08a1e67
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# git checkout plan/dd5c6486-e73b-4db2-8061-2432d08a1e67
 Switched to branch 'plan/dd5c6486-e73b-4db2-8061-2432d08a1e67'
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# ls
 README.md  alembic  alembic.ini  app.db  fastapi_crud.db  pyproject.toml  src  uv.lock
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# tree
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# tree
 bash: tree: command not found
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# cd src
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src# ls
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo# cd src
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src# ls
 fastapi_crud
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src# cd fastapi_crud/
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# ls
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src# cd fastapi_crud/
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# ls
 __init__.py  __main__.py  api  core  database.py  db  main.py  models  router.py  schemas
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# code main.py
-(agent-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# 
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# code main.py
+(praxis-orchestrator) root@5a224f22092e:~/.orchestrator/workspace-repo/src/fastapi_crud# 
 
 the code snipped:
 

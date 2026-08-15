@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 ACCEPTANCE="$FIXTURE_DIR/acceptance"
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 if [[ "${1:-}" != "" ]]; then
   TARGET="$1"

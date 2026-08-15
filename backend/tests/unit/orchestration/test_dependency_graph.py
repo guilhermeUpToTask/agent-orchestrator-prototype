@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.domain.services.dependency_graph import ready_nodes, validate_acyclic
+from praxis_orchestrator.domain.services.dependency_graph import ready_nodes, validate_acyclic
 
 
 def test_validate_acyclic_accepts_a_dag():

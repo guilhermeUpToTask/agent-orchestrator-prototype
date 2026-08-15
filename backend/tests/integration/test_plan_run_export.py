@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.infra.db.engine import build_engine
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.engine import build_engine
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 

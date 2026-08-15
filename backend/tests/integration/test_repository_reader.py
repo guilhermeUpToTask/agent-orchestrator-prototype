@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
-from agent_orchestrator.infra.git.repository_reader import GitRepositoryReader, RepositoryUnavailable
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+from praxis_orchestrator.infra.git.repository_reader import GitRepositoryReader, RepositoryUnavailable
 
 pytestmark = pytest.mark.integration
 

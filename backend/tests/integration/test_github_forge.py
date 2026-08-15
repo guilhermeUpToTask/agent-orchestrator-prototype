@@ -10,12 +10,12 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from agent_orchestrator.app.forge_port import (
+from praxis_orchestrator.app.forge_port import (
     ForgeAuthFailedError,
     ForgeRepoNotFoundError,
     ForgeRequestFailedError,
 )
-from agent_orchestrator.infra.forge.github import GitHubForge, verify_github_token
+from praxis_orchestrator.infra.forge.github import GitHubForge, verify_github_token
 
 pytestmark = pytest.mark.integration
 
@@ -120,7 +120,7 @@ def test_the_token_never_appears_in_the_repr():
 
 def test_a_failed_push_scrubs_the_token_out_of_git_stderr(tmp_path):
     """git echoes the remote URL on failure, and that URL carries the token."""
-    from agent_orchestrator.app.forge_port import ForgePushFailedError
+    from praxis_orchestrator.app.forge_port import ForgePushFailedError
 
     repo = tmp_path / "repo"
     repo.mkdir()

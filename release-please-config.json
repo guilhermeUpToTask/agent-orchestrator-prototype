@@ -6,7 +6,7 @@
   "initial-version": "0.1.0",
   "packages": {
     ".": {
-      "package-name": "agent-orchestrator",
+      "package-name": "praxis-orchestrator",
       "extra-files": [
         {
           "type": "toml",

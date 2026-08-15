@@ -123,7 +123,7 @@ def test_the_verification_command_and_its_exit_code_are_beside_the_diff(walk):
 def test_a_missing_commit_degrades_one_unit_and_not_the_document(walk):
     """A garbage-collected SHA must make ONE unit unavailable with a reason.
     Failing the whole page would hide every unit that is still fine."""
-    from agent_orchestrator.infra.git.review_reader import GitReviewReader
+    from praxis_orchestrator.infra.git.review_reader import GitReviewReader
 
     reader = GitReviewReader()
     assert reader.resolves(walk.repo, "trunk") is True
@@ -149,7 +149,7 @@ def test_the_patch_endpoint_returns_the_real_diff(walk):
 def test_the_patch_endpoint_reports_truncation_rather_than_hiding_it(walk, tmp_path):
     """A silently clipped patch is how somebody reviews half a change believing
     it was all of it."""
-    from agent_orchestrator.infra.git.review_reader import GitReviewReader
+    from praxis_orchestrator.infra.git.review_reader import GitReviewReader
 
     body = _review(walk)
     unit = body["whole_cycle"]

@@ -9,7 +9,7 @@
 # runs are only comparable if you can say what code and what fixture produced
 # each — a snapshot with no version stamp is an anecdote.
 #
-# Writes to  $ORCHESTRATOR_HOME/happy-path-v2/runs/<UTC>-tier<N>-<plan prefix>/
+# Writes to  $PRAXIS_HOME/happy-path-v2/runs/<UTC>-tier<N>-<plan prefix>/
 #
 #   manifest.json      versions, ids, tier, pinned runtime config, checks summary
 #   plan.json          snapshot_current_plan.py — the debugging snapshot
@@ -46,7 +46,7 @@ CYCLE_ID="${3:-}"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 HAPPY_PATH_REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="$ORCH_HOME/happy-path-v2/runs/${STAMP}-tier${TIER}-${PLAN_ID:0:8}"

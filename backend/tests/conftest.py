@@ -1,4 +1,4 @@
-"""Test bootstrap: make the backend root importable so `agent_orchestrator.*`
+"""Test bootstrap: make the backend root importable so `praxis_orchestrator.*`
 resolves without an editable install."""
 
 from __future__ import annotations

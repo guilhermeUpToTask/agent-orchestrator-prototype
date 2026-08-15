@@ -43,12 +43,12 @@ Use separate labeled experiments for those.
 ## Known ambient flakes
 
 - **Project row created without `repo_url`** — the worker then branches a freshly
-  auto-seeded empty repo under `$ORCHESTRATOR_HOME/projects/<id>/repo` and the run
+  auto-seeded empty repo under `$PRAXIS_HOME/projects/<id>/repo` and the run
   "passes" against the wrong tree. Setting `PROJECT_REPO_DIR` does not fix this.  
 - Free-tier provider rate limits (signal about capacity handling, not greeter difficulty)  
 - Missing agent CLI binary (`GET /api/runner/status` before real runs)  
 - Stale worktrees after hard kills — `reset.sh` + worker startup prune help  
-- Unset `ORCHESTRATOR_MASTER_KEY` when real provider keys are required  
+- Unset `PRAXIS_MASTER_KEY` when real provider keys are required  
 
 ## Naming runs
 

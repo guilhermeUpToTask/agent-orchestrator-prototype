@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "agent-orchestrator-codex",
+      "name": "praxis-orchestrator-codex",
       "source": {
         "source": "local",
-        "path": "./plugins/agent-orchestrator-codex"
+        "path": "./plugins/praxis-orchestrator-codex"
       },
       "policy": {
         "installation": "AVAILABLE",

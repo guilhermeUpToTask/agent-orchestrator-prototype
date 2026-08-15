@@ -19,9 +19,9 @@ import asyncio
 
 import pytest
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.infra.reasoner.live_reasoner import LiveReasoner
-from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.infra.reasoner.live_reasoner import LiveReasoner
+from praxis_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 
 
 def _plan() -> Plan:

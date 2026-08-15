@@ -89,7 +89,7 @@ Scanning the shipped source found two live ones:
 
 | file | claimed | reality |
 |---|---|---|
-| `frontend/src/lib/api.ts:764` | `backend/src/api/security.py` | `backend/agent_orchestrator/api/security.py` |
+| `frontend/src/lib/api.ts:764` | `backend/src/api/security.py` | `backend/praxis_orchestrator/api/security.py` |
 | `infra/db/migrations/versions/0001_core.py:5` | `docs/DESIGN_NOTES.md` | never committed — no such file in git history |
 
 The first is the *same* never-existed layout that test was written about, still
@@ -105,13 +105,13 @@ existing document check, reusing its `_ROOTS`/`_SUFFIXES` discipline.
 **Scope is deliberately narrow**, following the existing test's own reasoning
 that *"a check that cries wolf gets deleted rather than fixed"*:
 
-- **shipped source only** (`backend/agent_orchestrator/`, `frontend/src/`).
+- **shipped source only** (`backend/praxis_orchestrator/`, `frontend/src/`).
   `tests/` is excluded because test bodies carry synthetic paths as fixture data
   (`docs/x.md`), and `test_documented_paths_exist.py` itself must keep naming
   `backend/src/domain/` in order to describe the defect it exists for.
 - **the bare `infra/` prefix stays excluded**, exactly as the document check
   excludes it: the docs and comments use it to mean the backend package
-  (`backend/agent_orchestrator/infra/`), while the repository also has a
+  (`backend/praxis_orchestrator/infra/`), while the repository also has a
   top-level `infra/` for the dev VM. All ten `infra/`-prefixed comment
   references were resolved by hand against the package and **all ten exist**.
 

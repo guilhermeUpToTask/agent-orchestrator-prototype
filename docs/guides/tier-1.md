@@ -29,7 +29,7 @@ planning session per goal. Keep first cycles to one goal.
 dependency order:
 
 1. **Register a provider** — name, base URL, API key. The key is
-   envelope-encrypted at rest, which requires `ORCHESTRATOR_MASTER_KEY` in the
+   envelope-encrypted at rest, which requires `PRAXIS_MASTER_KEY` in the
    environment of **both** the API and the worker (separate processes, each
    reads its own).
 

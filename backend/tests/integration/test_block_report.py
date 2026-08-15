@@ -18,15 +18,15 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.app import block_policy
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock, PlanStatus
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.engine import build_engine
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.app import block_policy
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.planning_artifacts import PlanBlock, PlanStatus
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.engine import build_engine
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -201,7 +201,7 @@ def test_rejects_unmigrated_database_with_actionable_error(tmp_path: Path) -> No
 
 # ---- `requires_human` served on every block (P4.2 Task 4) ----
 #
-# `agent_orchestrator/app/block_policy.py` is the single source of the "is this my problem, or
+# `praxis_orchestrator/app/block_policy.py` is the single source of the "is this my problem, or
 # does the orchestrator recover on its own?" verdict. Nothing served it before
 # this projection -- these tests iterate the policy table itself (never a
 # hard-coded kind list), so a newly added kind cannot ship unserved.
@@ -211,8 +211,8 @@ NOW = datetime(2026, 7, 28, tzinfo=timezone.utc)
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(

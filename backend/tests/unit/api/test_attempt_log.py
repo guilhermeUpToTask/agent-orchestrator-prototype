@@ -10,18 +10,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.exceptions import register_exception_handlers
-from agent_orchestrator.api.routers import plans
-from agent_orchestrator.app.execution_records import (
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.exceptions import register_exception_handlers
+from praxis_orchestrator.api.routers import plans
+from praxis_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
 )
-from agent_orchestrator.app.testing.execution_records import InMemoryExecutionRecordRepository
-from agent_orchestrator.app.testing.fakes import InMemoryOutbox, InMemoryPlanRepository, InMemoryUnitOfWork
-from agent_orchestrator.infra.runtime.process_supervisor import attempt_log_path
+from praxis_orchestrator.app.testing.execution_records import InMemoryExecutionRecordRepository
+from praxis_orchestrator.app.testing.fakes import InMemoryOutbox, InMemoryPlanRepository, InMemoryUnitOfWork
+from praxis_orchestrator.infra.runtime.process_supervisor import attempt_log_path
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
 

@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.use_cases.operator_commands import (
+from praxis_orchestrator.app.use_cases.operator_commands import (
     rebind_goal_agents,
     retry_planning_stage,
 )
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
-from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
+from praxis_orchestrator.domain.errors.planning_errors import InvalidEditError
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
 
 def role_agent(agent_id: str, capabilities: list[str]) -> AgentSpec:

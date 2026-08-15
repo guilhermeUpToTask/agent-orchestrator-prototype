@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
-from agent_orchestrator.infra.policies.provider_capacity_factory import build_provider_capacity_policy
+from praxis_orchestrator.app.provider_capacity import ProviderCapacityPolicy
+from praxis_orchestrator.infra.policies.provider_capacity_factory import build_provider_capacity_policy
 
 
 class _ConfigStore:

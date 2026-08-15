@@ -11,8 +11,8 @@ import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 
-from agent_orchestrator.infra.db.migration_config import alembic_config
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.migration_config import alembic_config
+from praxis_orchestrator.infra.db.tables import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 

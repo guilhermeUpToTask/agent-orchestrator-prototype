@@ -94,7 +94,7 @@ so the reasoning error is not repeated.
 *and* strictly serial — goal 2's session starts the second goal 1's commits — so
 five goals cost ~25 minutes of pure sequencing.
 
-- Files: `backend/agent_orchestrator/app/handlers/planning_handler.py`,
+- Files: `backend/praxis_orchestrator/app/handlers/planning_handler.py`,
   `backend/tests/unit/orchestration/`
 
 **Steps**
@@ -117,7 +117,7 @@ slowest session rather than their sum.
 **Why:** the roster carries four implementers across four models; a rate-limited
 task waits on its own binding while three sit idle.
 
-- Files: `backend/agent_orchestrator/app/handlers/execution_handler.py`
+- Files: `backend/praxis_orchestrator/app/handlers/execution_handler.py`
 
 **Steps**
 

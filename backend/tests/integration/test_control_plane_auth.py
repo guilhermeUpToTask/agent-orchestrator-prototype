@@ -14,10 +14,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -57,8 +57,8 @@ def _operations() -> list[tuple[str, str]]:
 
 @pytest.fixture
 def guarded_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("ORCHESTRATOR_API_TOKEN", "sekrit")
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PRAXIS_API_TOKEN", "sekrit")
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     with TestClient(create_app(container)) as client:
@@ -109,7 +109,7 @@ def test_no_other_route_accepts_a_query_token(guarded_client):
 # docs routes on the bare app with `include_in_schema=False`, so they are absent
 # from `openapi()["paths"]` — the very inventory this file trusts — and no
 # router dependency reaches them. Phase 10A found all three answering 200 with
-# `ORCHESTRATOR_API_TOKEN` set, serving the whole control-plane schema to an
+# `PRAXIS_API_TOKEN` set, serving the whole control-plane schema to an
 # anonymous caller. They are named explicitly because they cannot be discovered.
 API_DOC_ROUTES = ("/api/openapi.json", "/api/docs", "/api/redoc")
 

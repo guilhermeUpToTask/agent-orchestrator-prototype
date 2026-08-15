@@ -1,6 +1,6 @@
 Implemented and committed as `a27923f` (`test(dispatcher): cover goal enrichment routing`). Worktree is clean and `TASK.md` is deleted.
 
-Added [test_plan_dispatcher.py](/tmp/agent-orchestrator-goalparallel-phase6/backend/tests/unit/orchestration/test_plan_dispatcher.py) with dual memory/SQLite coverage:
+Added [test_plan_dispatcher.py](/tmp/praxis-orchestrator-goalparallel-phase6/backend/tests/unit/orchestration/test_plan_dispatcher.py) with dual memory/SQLite coverage:
 
 - Blocked head plus ready later goal invokes planning, proving lines 89–94 use all ready goal IDs.
 - Enriched goals invoke the runner—not planning—proving the line 95 execution fallback.

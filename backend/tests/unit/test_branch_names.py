@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_orchestrator.app.branch_names import (
+from praxis_orchestrator.app.branch_names import (
     cycle_branch,
     goal_branch,
     legacy_plan_branch,

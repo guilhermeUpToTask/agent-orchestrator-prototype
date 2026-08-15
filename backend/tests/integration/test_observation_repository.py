@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import text
 
-from agent_orchestrator.app.observations import (
+from praxis_orchestrator.app.observations import (
     ModelUsagePayload,
     ObservationConflictError,
     ObservationCorrelation,
@@ -19,13 +19,13 @@ from agent_orchestrator.app.observations import (
     ObservationSource,
     TelemetryObservation,
 )
-from agent_orchestrator.app.testing.fakes import FakeClock
-from agent_orchestrator.app.testing.observations import InMemoryObservationRepository
-from agent_orchestrator.domain.events.agent_events import AgentEvent
-from agent_orchestrator.infra.db.agent_event_sink import SqliteAgentEventSink
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.observation_repository import SqliteObservationRepository
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.app.testing.fakes import FakeClock
+from praxis_orchestrator.app.testing.observations import InMemoryObservationRepository
+from praxis_orchestrator.domain.events.agent_events import AgentEvent
+from praxis_orchestrator.infra.db.agent_event_sink import SqliteAgentEventSink
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.observation_repository import SqliteObservationRepository
+from praxis_orchestrator.infra.db.tables import Base
 
 from tests.support import seed_plan_row
 

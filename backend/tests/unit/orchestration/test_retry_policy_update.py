@@ -11,15 +11,15 @@ from datetime import timedelta
 
 import pytest
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.planning_errors import PlanAlreadyTerminalError
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.planning_errors import PlanAlreadyTerminalError
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
-from agent_orchestrator.app.use_cases.update_retry_policy import update_retry_policy
+from praxis_orchestrator.app.use_cases.update_retry_policy import update_retry_policy
 
 
 def task(tid: str, position: int, **kwargs) -> Task:

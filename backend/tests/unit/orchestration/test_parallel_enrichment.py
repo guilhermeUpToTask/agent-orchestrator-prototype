@@ -26,16 +26,16 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from agent_orchestrator.app.handlers.base import Signal
-from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
+from praxis_orchestrator.app.handlers.base import Signal
+from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.infra.reasoner.stub_reasoner import StubReasoner
 
 NOW = datetime(2026, 8, 10, tzinfo=timezone.utc)
 
@@ -236,7 +236,7 @@ def test_one_goals_failed_session_does_not_strand_the_sibling_beside_it(
     commits its contract in the same pass, the plan-wide scalar block stays
     empty, and the plan stays claimable for the work that is still viable.
     """
-    from agent_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
 
     class FailsOneGoal(OverlapProbeReasoner):
         async def enrich_goal_contract(self, plan, goal, capabilities):  # type: ignore[no-untyped-def]
