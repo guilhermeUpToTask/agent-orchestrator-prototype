@@ -1387,6 +1387,12 @@ runs on — none of which an agent inside the guest has.
 2. **Register the name** on PyPI, npm and the GitHub org, and the two domains.
    Nothing in CI publishes to PyPI today, so nothing breaks until someone tries;
    registering removes the risk of losing the name between now and then.
+   **The repository URL is deliberately NOT renamed yet.** Every doc that links
+   to it — `SECURITY.md`'s advisory link, the issue templates' Discussions
+   link, the clone line in `getting-started.md` — still points at
+   `agent-orchestrator-prototype`, because that is where the repository
+   actually is. They get rewritten in the same action that renames it, not
+   before: a link to a URL that does not exist yet is worse than an old name.
 3. **Rebuild the dev guest.** The configuration no longer carries the third
    party's mark, but the *running* domain keeps its identity until
    `make -C infra/dev-vm destroy && make -C infra/dev-vm up` is run **from the
