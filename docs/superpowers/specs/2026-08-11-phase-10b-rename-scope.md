@@ -2,13 +2,12 @@
 
 **Date:** 2026-08-11
 **Status:** **All four groups are executed** (Group D 2026-08-11; Groups A, B
-and C 2026-08-15). What remains is not code — see *Executed* below and the
-open trademark item at the foot of this document.
+and C 2026-08-15). What remains is not code — see *Executed* below.
 **Decision:** the project is renamed to **Praxis Orchestrator** — distribution
 `praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`.
-**The name is settled** (owner decision, 2026-08-11). The `Praxis Framework`
-collision noted below was raised and accepted; it is recorded as a known risk,
-not an open question.
+**The name is settled** (owner decision 2026-08-11, reaffirmed 2026-08-15).
+The `Praxis Framework` collision was raised and accepted — a programme
+management methodology is not an agent orchestrator — and it is closed.
 
 ROADMAP: *"Scope the rename honestly before committing to it… Some of those are
 user-visible state on existing installs and need a migration or a compatibility
@@ -203,9 +202,23 @@ roster with `seed-agents.py` and confirm `make verify` returns 8 of 8.
 
    This is the one place the rename knowingly edits a record, and it is written
    down rather than left for a reader to discover. The cleaner fix is to re-run
-   `static-site-v1` on the rebuilt guest and publish that instead — 13 minutes,
-   and it refreshes the launch numbers at the same time. Recommended before the
-   demo is used as launch proof.
+   `static-site-v1` and publish that instead — ~13 minutes, ~$0.013, and it
+   refreshes the launch numbers at the same time. Recommended before the demo is
+   used as launch proof.
+
+   **Correction, 2026-08-15: that re-run does NOT need the guest rebuilt, and
+   this section previously implied it did.** The phrase "the old hostname" is
+   wrong about the mechanism. What the demo logs actually carried was
+   `acceptance.container_started container=<mark>-acceptance-…` — the container
+   **name prefix**, built in `infra/environment/container_environment.py` from
+   the old product name **in code**, not read from the machine. It is now
+   `praxis-acceptance-`, and nothing in the package reads the host's name at
+   all: `socket.gethostname`, `platform.node` and `uname` have zero occurrences
+   in `praxis_orchestrator/`. A run on today's guest therefore emits no third
+   party's mark, and `test_no_third_party_marks.py` would pass on its output.
+
+   The guest rebuild is still worth doing for its own sake — the live domain
+   keeps the old identity until it happens — but it blocks nothing.
 
 ---
 
@@ -263,30 +276,21 @@ declared in `[project.scripts]`, so an operator's existing scripts keep running.
 
 ## Sequencing
 
-1. **Clear the trademark item below.** Nothing starts before this.
-2. Register the name on PyPI, npm, and GitHub, and the two domains. Registering
+1. Register the name on PyPI, npm, and GitHub, and the two domains. Registering
    before renaming costs nothing and removes the risk of losing the name
-   mid-migration.
-3. **Group D first, not last.** It was sequenced last while it was a branding
+   mid-migration. **Still outstanding** — the rename went first, and nothing in
+   CI publishes today, so nothing breaks until someone tries.
+2. **Group D first, not last.** It was sequenced last while it was a branding
    chore; as a third party's mark it is the item with a deadline, and it is
    independent of the name that replaces it. Rebuild the guest, re-seed the
    roster, re-run `make -C infra/dev-vm verify` for its 8 of 8, and decide the
    two history/evidence questions above.
-4. Group A + B in one commit: package, distribution, titles, per-attempt vars.
-   Large diff, mechanical, `mypy` and the 1509-test suite are the check.
-5. Group C in a second commit, with its regression tests. Small diff, all the
-   risk.
-6. Docs, fixtures, demos and README in the same PR as the code that moved —
+3. Group A + B: package, distribution, titles, per-attempt vars. Large diff,
+   mechanical, `mypy` and the suite are the check.
+4. Group C, with its regression tests. Small diff, all the risk.
+5. Docs, fixtures, demos and README in the same PR as the code that moved —
    per the repo's own docs-discipline rule, and `test_documented_paths_exist.py`
    (now covering source comments too) will fail the build if any are missed.
-
-**Step 1 was not honoured, deliberately and on the record.** The trademark item
-is still open, and the rename went ahead of it because the owner settled the
-name on 2026-08-11 and every group below is written so the name is a parameter.
-If clearance comes back dirty, what has to change is a search-and-replace over
-identifiers plus a second alias generation — the migration design, the compat
-layer and the tests are all name-independent. Registration on PyPI/npm/GitHub
-(step 2) is likewise still outstanding and is an owner action.
 
 ---
 
@@ -336,24 +340,19 @@ layer and the tests are all name-independent. Registration on PyPI/npm/GitHub
 
 ---
 
-## Open item — trademark, and it is not mine to close
+## Closed item — the name
 
-**Registry availability is not freedom to operate.** Nothing in this document is
-a trademark check, and I cannot perform one.
+**`praxis-orchestrator` is final.** Settled by the owner on 2026-08-11 and
+reaffirmed 2026-08-15. The `Praxis Framework` collision an earlier draft of this
+section raised was put to the owner, considered, and accepted: a programme and
+project management methodology is not an AI agent orchestrator, and the two are
+not confusable in the market either uses.
 
-The specific concern to search: **Praxis Framework**, an existing project and
-programme management methodology. It is adjacent to this product's domain, which
-is exactly where a mark is most likely to be asserted. Also worth clearing:
-Praxis (ETS teacher-certification exams, a well-known US mark) and Praxis Labs.
-
-Registries to search, classes **9** (software) and **42** (SaaS):
-
-- USPTO TESS — US word marks
-- EUIPO — EU word marks
-- the relevant national registry if you intend to trade elsewhere
-
-Until that returns clean, treat `praxis-orchestrator` as **provisional**. Every
-group above is written so the name is a parameter, not an assumption.
+This section previously told the reader to treat the name as *provisional* until
+a registry search returned clean. **That instruction is withdrawn.** It survived
+past the decision that answered it and turned a closed question into a caveat
+that reattached itself to the name every time it appeared downstream. Nothing in
+this repository treats the name as conditional.
 
 ---
 

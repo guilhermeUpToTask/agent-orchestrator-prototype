@@ -1084,10 +1084,9 @@ procrastination. Do them in this order.
 closed with four sweeps, 11 proven findings all fixed with regression tests and
 4 retractions; 10B's audit, name, scope, launch plan and support path are
 written, and the rename itself is executed end to end. What is left is six owner
-actions — trademark clearance, registry registration, a guest rebuild from the
-host, a demo re-run, a history decision, and a GitHub setting — enumerated under
-*Remaining* at the foot of this phase. None of them is code, and none can be
-performed from inside the development guest.
+actions — registering the name, a guest rebuild from the host, a demo re-run,
+and a GitHub setting — enumerated under *Remaining* at the foot of this phase.
+None of them is code.
 
 ### 10A — audit the whole repository, and prove every claim
 
@@ -1329,7 +1328,7 @@ tools would write it rather than the way engineers imagine marketing works:
   `praxis-orchestrator`, free on all five (both TLDs);
   [scope](docs/superpowers/specs/2026-08-11-phase-10b-rename-scope.md) separates
   the mechanical rename from the state that needs adopt-in-place and
-  read-both-prefer-new aliases. **Provisional pending trademark clearance.**
+  read-both-prefer-new aliases. The name is settled, not provisional.
 - ✅ **And the rename is executed — all four groups, 2026-08-15.** The Python
   package is `praxis_orchestrator` (344 files, zero occurrences of the old name
   left), the distribution is `praxis-orchestrator`, the per-attempt runtime
@@ -1372,19 +1371,17 @@ tools would write it rather than the way engineers imagine marketing works:
 - ✅ **The support path exists before the first invitation goes out.**
   `.github/ISSUE_TEMPLATE/`. Discussions still needs enabling by hand.
 
-**Remaining before the phase can close — all owner actions, none of them code.**
-Every engineering deliverable in 10A and 10B is done. What is left needs either
-the maintainer's legal judgement, their credentials, or the host the dev guest
-runs on — none of which an agent inside the guest has.
+**The name is settled and is not revisited.** `praxis-orchestrator`, decided by
+the owner on 2026-08-11. The `Praxis Framework` collision was raised, considered
+and accepted then — a programme-management methodology is not an agent
+orchestrator — and it is a closed question, not a caveat to reattach to the name
+every time it appears.
 
-1. **Trademark clearance** for `praxis-orchestrator` (USPTO/EUIPO, classes 9
-   and 42; `Praxis Framework` specifically). The rename **shipped ahead of
-   this**, deliberately and on the record: the owner settled the name on
-   2026-08-11, and every group was written so the name is a parameter rather
-   than an assumption. If clearance comes back dirty the cost is a
-   search-and-replace over identifiers plus a second alias generation — the
-   compat layer, the migration design and their tests are all name-independent.
-2. **Register the name** on PyPI, npm and the GitHub org, and the two domains.
+**Remaining before the phase can close.** Every engineering deliverable in 10A
+and 10B is done. Items 1 and 4 need the maintainer's credentials; item 2 needs
+the host the guest runs on; item 3 is a run somebody has to decide to pay for.
+
+1. **Register the name** on PyPI, npm and the GitHub org, and the two domains.
    Nothing in CI publishes to PyPI today, so nothing breaks until someone tries;
    registering removes the risk of losing the name between now and then.
    **The repository URL is deliberately NOT renamed yet.** Every doc that links
@@ -1393,23 +1390,35 @@ runs on — none of which an agent inside the guest has.
    `agent-orchestrator-prototype`, because that is where the repository
    actually is. They get rewritten in the same action that renames it, not
    before: a link to a URL that does not exist yet is worse than an old name.
-3. **Rebuild the dev guest.** The configuration no longer carries the third
-   party's mark, but the *running* domain keeps its identity until
-   `make -C infra/dev-vm destroy && make -C infra/dev-vm up` is run **from the
-   host** — this session's guest still answers to the old hostname. Then re-seed
-   the roster with `seed-agents.py` and confirm `make verify` returns 8 of 8.
-   A rebuilt guest is a fresh install and gets `~/.praxis`; the current one is
-   an adopted `~/.orchestrator`, and both are now exercised paths.
-4. ~~**The RED-run gap**~~ — **closed 2026-08-11.** The run was always proven
-   red and enforced; the verdict is now in the cycle evidence document and the
-   artifact is reachable. Needs only a demo re-run so a published
-   `evidence.json` carries it — which is the same re-run as item 5.
-5. **Git history and recorded evidence** — whether to scrub the old mark from
-   history (recommended: no) and whether to re-run the demo on the rebuilt guest
-   rather than leave substituted hostnames inside published evidence
-   (recommended: yes — it is 13 minutes, it refreshes the launch numbers, and it
-   is the run that would carry the RED baseline in its `evidence.json`).
-6. **Enable GitHub Discussions**, which the issue-template contact link expects.
+2. **Rebuild the dev guest**, whenever it suits — nothing depends on it. The
+   configuration no longer carries the third party's mark, but the *running*
+   domain keeps its identity until `make -C infra/dev-vm destroy && make -C
+   infra/dev-vm up` is run **from the host**. Then re-seed the roster with
+   `seed-agents.py` and confirm `make verify` returns 8 of 8. A rebuilt guest is
+   a fresh install and gets `~/.praxis`; the current one is an adopted
+   `~/.orchestrator`, and both are now exercised paths.
+3. **Re-run the demo**, so a published `evidence.json` carries the RED baseline
+   (the gap itself closed 2026-08-11 — the run was always proven red and
+   enforced; what was missing was visibility, and that shipped). ~13 minutes,
+   ~$0.013, and it refreshes the launch numbers at the same time.
+
+   **This does NOT depend on the guest rebuild, and an earlier version of this
+   file said it did.** The correction is worth keeping because the wrong version
+   sounded reasonable. The mark in the published evidence came from the
+   `acceptance.container_started` log line's `container=` field — the container
+   **name prefix**, which was derived from the old product name **in code**
+   (`infra/environment/container_environment.py`), not from the machine. It now
+   reads `praxis-acceptance-`, and nothing in the package reads the hostname at
+   all: `socket.gethostname`, `platform.node` and `uname` have zero occurrences.
+   So a run on today's guest emits no third-party mark, and the substituted
+   evidence can be replaced with a genuine record whenever someone wants to
+   spend the fourteen minutes.
+4. **Enable GitHub Discussions**, which the issue-template contact link expects.
+
+**Git history keeps the old mark**, decided 2026-08-11 and not reopened here:
+scrubbing means `git filter-repo` and a force-push that breaks every clone and
+rewrites the audit trail, for a string in the log of a project that was never
+published.
 
 ## Deferred — reconsider only with run or user evidence ⏸
 
