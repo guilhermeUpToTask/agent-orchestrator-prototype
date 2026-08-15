@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_orchestrator.app.test_identity import criterion_test_map, declared_checks
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.app.test_identity import criterion_test_map, declared_checks
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     VerificationStrategy,

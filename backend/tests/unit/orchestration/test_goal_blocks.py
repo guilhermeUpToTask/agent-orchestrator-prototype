@@ -7,16 +7,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import (
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     CycleStatus,
     PlanBlock,
     PlanStatus,
 )
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -181,7 +181,7 @@ def test_completing_the_last_non_terminal_goal_does_not_force_blocked():
 def test_reopening_the_same_goals_block_still_raises():
     """The guard IS still meaningful for a genuine same-goal double-open."""
     import pytest
-    from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
+    from praxis_orchestrator.domain.errors.planning_errors import InvalidEditError
 
     plan = _cyclic_plan([_goal("g1", 0, [_task("t1")])])
     plan.open_block(_block("g1"))
@@ -243,9 +243,9 @@ def test_enrichment_reasoner_failure_blocks_only_its_own_goal(env_factory):
     """
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.ports import ReasonerUnavailable
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
 
     class EnrichFails:
         def __init__(self):
@@ -307,11 +307,11 @@ def test_capacity_reasoner_failure_keeps_waiting_past_the_attempt_budget(env_fac
     """
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.ports import ReasonerUnavailable
-    from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.provider_capacity import ProviderCapacityPolicy
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     class RateLimited:
         def __init__(self):
@@ -371,11 +371,11 @@ def test_tool_error_reasoner_failure_still_blocks_on_the_attempt_budget(env_fact
     transient failure as capacity would loop forever against an incapable model."""
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.ports import ReasonerUnavailable
-    from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.provider_capacity import ProviderCapacityPolicy
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     class NeverSubmits:
         def __init__(self):
@@ -427,10 +427,10 @@ def test_planning_backoff_honors_provider_retry_after(env_factory):
     the provider asked just earns another refusal."""
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.ports import ReasonerUnavailable
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     class RetryAfter:
         async def converse(self, plan, history, message, mode):  # pragma: no cover
@@ -461,10 +461,10 @@ def test_cycle_architecture_reasoner_failure_remains_plan_wide(env_factory):
     """An operation without a goal target must retain scalar-block semantics."""
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.ports import ReasonerUnavailable
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-    from agent_orchestrator.domain.entities.planning_artifacts import IntentProposal, ProposalKind
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.ports import ReasonerUnavailable
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.domain.entities.planning_artifacts import IntentProposal, ProposalKind
 
     class ArchitectureFails:
         async def architect_cycle(self, plan):
@@ -513,10 +513,10 @@ def test_unsatisfiable_role_binding_opens_a_block_instead_of_poisoning_the_worke
     """
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
-    from agent_orchestrator.domain.entities.capability import Capability
-    from agent_orchestrator.domain.entities.execution_contracts import (
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.testing.fakes import InMemoryCapabilityRepository
+    from praxis_orchestrator.domain.entities.capability import Capability
+    from praxis_orchestrator.domain.entities.execution_contracts import (
         ContractCriterion,
         GoalContract,
         TaskContract,
@@ -585,7 +585,7 @@ def test_a_per_goal_reasoner_failure_is_reachable_by_its_own_resolution(env_fact
     """
     import pytest
 
-    from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
+    from praxis_orchestrator.domain.errors.planning_errors import InvalidEditError
 
     plan = _cyclic_plan([_goal("g1", 0, [])])
     plan.open_block(

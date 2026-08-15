@@ -8,7 +8,7 @@ reviewable — most of them exist because breaking them already cost someone a d
 ```bash
 cd backend
 uv pip install -e .[dev]                 # or: pip install -e .[dev]
-python -m agent_orchestrator.infra.cli.main db upgrade
+python -m praxis_orchestrator.infra.cli.main db upgrade
 
 cd ../frontend
 npm install
@@ -19,8 +19,8 @@ npm install
 ```bash
 # backend
 cd backend
-ruff check agent_orchestrator tests --fix
-mypy agent_orchestrator                                 # zero errors, no exclude list
+ruff check praxis_orchestrator tests --fix
+mypy praxis_orchestrator                                 # zero errors, no exclude list
 pytest -m "not integration"              # fast
 pytest -m integration                    # real SQLite, real git, TestClient
 # Both run in parallel (`-n auto`). Add `-p no:xdist` when you need `--pdb`
@@ -42,7 +42,7 @@ yours by accident.
 not been shown to test anything. Bug fixes get a regression test that reproduces
 the bug before the fix exists.
 
-**The domain is frozen.** `backend/agent_orchestrator/domain/` does not change without a
+**The domain is frozen.** `backend/praxis_orchestrator/domain/` does not change without a
 deliberate un-freeze recorded in
 [`docs/decisions/decision-log.md`](docs/decisions/decision-log.md). There are
 nineteen so far, each with a reason. If your change seems to need a twentieth,
@@ -53,7 +53,7 @@ imports nothing from the other layers; `app` talks to ports, never adapters.
 
 **One error map.** Domain errors subclass `DomainError` with a stable `code`;
 the API maps codes to HTTP statuses in exactly one table
-(`agent_orchestrator/api/exceptions.py`). Do not scatter try/except returning responses in
+(`praxis_orchestrator/api/exceptions.py`). Do not scatter try/except returning responses in
 routers.
 
 **State and its events share one transaction.** A state change and its

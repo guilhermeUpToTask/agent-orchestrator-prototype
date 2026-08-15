@@ -15,19 +15,19 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path / "home")
     Base.metadata.create_all(container.engine)
     with TestClient(create_app(container)) as test_client:
@@ -165,8 +165,8 @@ def test_materialize_remote_does_not_block_on_a_credential_prompt(tmp_path):
     """A private https remote makes git ask for a username. There is no tty to
     answer it, so without GIT_TERMINAL_PROMPT=0 the worker blocked forever
     while holding a goal lease. It must fail fast instead."""
-    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-    from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+    from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from praxis_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
 
     class _NoProjects:
         def get(self, project_id):  # pragma: no cover - never reached
@@ -189,7 +189,7 @@ def test_materialize_remote_does_not_block_on_a_credential_prompt(tmp_path):
 
 
 def test_probe_classifies_an_unreachable_host():
-    from agent_orchestrator.infra.git.repository_binding import probe_remote
+    from praxis_orchestrator.infra.git.repository_binding import probe_remote
 
     probe = probe_remote("https://127.0.0.1:1/a/b.git", timeout_seconds=5.0)
 
@@ -201,7 +201,7 @@ def test_probe_classifies_an_unreachable_host():
 def test_probe_reads_the_default_branch_of_a_local_repository(tmp_path):
     """A file:// URL is a remote as far as ls-remote is concerned, so the probe
     is exercised end to end with no network."""
-    from agent_orchestrator.infra.git.repository_binding import probe_remote
+    from praxis_orchestrator.infra.git.repository_binding import probe_remote
 
     origin = tmp_path / "origin"
     _git_repo(origin)

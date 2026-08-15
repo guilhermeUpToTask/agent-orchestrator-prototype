@@ -13,26 +13,26 @@ from datetime import timedelta
 
 import pytest
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import (
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     PlanBlock,
     PlanStatus,
 )
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.tasks_errors import InvalidTransitionError
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
 
-from agent_orchestrator.app.execution_records import RuntimeCircuit
-from agent_orchestrator.app.handlers.base import Signal
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.app.testing.fakes import DummyBehavior, InMemoryCapabilityRepository
-from agent_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
-from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-from agent_orchestrator.app.use_cases.control import finish_review
-from agent_orchestrator.app.use_cases.operator_commands import (
+from praxis_orchestrator.app.execution_records import RuntimeCircuit
+from praxis_orchestrator.app.handlers.base import Signal
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.app.testing.fakes import DummyBehavior, InMemoryCapabilityRepository
+from praxis_orchestrator.app.use_cases.apply_edit import UpdateTask, apply_edit
+from praxis_orchestrator.app.use_cases.advance_plan import advance_plan
+from praxis_orchestrator.app.use_cases.control import finish_review
+from praxis_orchestrator.app.use_cases.operator_commands import (
     pause_plan,
     resume_plan,
     retry_planning_stage,
@@ -504,7 +504,7 @@ def test_human_pause_survives_an_in_flight_terminal_failure(env_factory):
     exhausts its budget. The task is recorded FAILED, but the human pause keeps
     its auto=False semantics — exactly one PlanPaused (the human's), no flip to
     needs-attention."""
-    from agent_orchestrator.app.testing.fakes import DummyAgentRunner
+    from praxis_orchestrator.app.testing.fakes import DummyAgentRunner
 
     class PauseMidRun(DummyAgentRunner):
         """Pause the plan (as a human would) during the side effect, then fail

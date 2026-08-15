@@ -6,7 +6,7 @@
 #   ./fixtures/first-cycle-v1/scripts/api.sh POST "/api/plans/$PLAN/intent/approve" "$BODY"
 #
 # Base URL:  FIRST_CYCLE_API (default http://127.0.0.1:8000)
-# Auth:      ORCHESTRATOR_API_TOKEN (sent as Authorization: Bearer …; omitted when unset)
+# Auth:      PRAXIS_API_TOKEN (sent as Authorization: Bearer …; omitted when unset)
 #
 # Prints the response body on 2xx and exits 0; prints status + body and exits 1
 # otherwise, so the operator loop can branch on it.
@@ -26,8 +26,8 @@ BODY="${3:-}"
 BASE="${FIRST_CYCLE_API:-http://127.0.0.1:8000}"
 
 args=(--silent --show-error --request "$METHOD" --write-out '\n%{http_code}')
-if [[ -n "${ORCHESTRATOR_API_TOKEN:-}" ]]; then
-  args+=(--header "Authorization: Bearer $ORCHESTRATOR_API_TOKEN")
+if [[ -n "${PRAXIS_API_TOKEN:-}" ]]; then
+  args+=(--header "Authorization: Bearer $PRAXIS_API_TOKEN")
 fi
 if [[ -n "$BODY" ]]; then
   args+=(--header 'Content-Type: application/json' --data "$BODY")

@@ -14,7 +14,7 @@ finding.
 | | |
 |---|---|
 | **Lives at** | `fixtures/first-cycle-v1/` |
-| **Target repo** | Materialized *outside* this monorepo (default `~/.orchestrator/first-cycle-v1/repo`) |
+| **Target repo** | Materialized *outside* this monorepo (default `~/.praxis/first-cycle-v1/repo`) |
 | **Seed tag** | `first-cycle-v1-seed` |
 | **Budget** | 1 goal, 1–2 tasks; 10–40 min on free models |
 | **Tier** | Either. Tier 1 (real reasoner + real agent) is the point; Tier 0 completes free and deterministic |
@@ -25,11 +25,11 @@ finding.
 # 0. once per machine — the database must be at head, or /api/workers and the
 #    evidence endpoint answer 500 for reasons that look like anything else
 cd backend && set -a && . ./.env && set +a
-python -m agent_orchestrator.infra.cli.main db upgrade
+python -m praxis_orchestrator.infra.cli.main db upgrade
 
 # 1. start the API and the worker (each needs the env exported)
-python -m agent_orchestrator.infra.cli.main api start --port 8000 &
-python -m agent_orchestrator.infra.cli.main worker start &
+python -m praxis_orchestrator.infra.cli.main api start --port 8000 &
+python -m praxis_orchestrator.infra.cli.main worker start &
 
 # 2. create the disposable target repository
 cd .. && ./fixtures/first-cycle-v1/scripts/materialize.sh
@@ -50,7 +50,7 @@ finding you can paste, not a hang you have to interpret.
 
 # the run's own success contract (see EXPECTATIONS.md)
 python3 fixtures/first-cycle-v1/scripts/verify_run.py \
-  --plan "$PLAN_ID" --repo ~/.orchestrator/first-cycle-v1/repo --tier 1
+  --plan "$PLAN_ID" --repo ~/.praxis/first-cycle-v1/repo --tier 1
 ```
 
 ## Which tier am I in?
@@ -59,15 +59,15 @@ Tier is **data**, not an environment variable — it lives in the config store,
 and `preflight.sh` prints and enforces it:
 
 ```bash
-orchestrate config set reasoner.mode stub    ; orchestrate config set agent_runner.mode dry-run   # Tier 0
-orchestrate config set reasoner.mode llm     ; orchestrate config set agent_runner.mode real      # Tier 1
+praxis config set reasoner.mode stub    ; praxis config set agent_runner.mode dry-run   # Tier 0
+praxis config set reasoner.mode llm     ; praxis config set agent_runner.mode real      # Tier 1
 ```
 
 Never mix the halves. A real reasoner verified by a dummy runner, or a dry-run
 plan spending real tokens, produces evidence that means nothing —
 `preflight.sh` fails a mixed pair on purpose.
 
-Tier 1 also needs `ORCHESTRATOR_MASTER_KEY` (to decrypt the provider key) and
+Tier 1 also needs `PRAXIS_MASTER_KEY` (to decrypt the provider key) and
 the CLI the agent is bound to (`pi`, `claude`). Free models make it affordable:
 bind the agents to a `:free` model in the catalog and a full cycle costs
 nothing but patience.
@@ -126,7 +126,7 @@ Safe against a live install: one throwaway provider, created and deleted.
 The worker resolves the checkout from the **project row's `repo_url`**, not from
 an environment variable. `PROJECT_REPO_DIR` is read by nothing (a test enforces
 that). A project created without `repo_url` gets a fresh empty repo under
-`$ORCHESTRATOR_HOME/projects/<id>/repo` — and the run then "succeeds" against a
+`$PRAXIS_HOME/projects/<id>/repo` — and the run then "succeeds" against a
 tree nobody looks at. `run-cycle.sh` always sets it.
 
 ## Re-running

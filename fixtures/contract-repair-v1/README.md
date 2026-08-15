@@ -14,7 +14,7 @@ that only executes when something is wrong.
 
 ## Why it exists
 
-`agent_orchestrator/app/contract_repair.py` (un-freeze #17) exists so a contract no agent could
+`praxis_orchestrator/app/contract_repair.py` (un-freeze #17) exists so a contract no agent could
 satisfy is fixed in place rather than escalated to a person. Until this fixture
 there was **no run evidence that it worked** — and when a Tier 1 series finally
 provoked it on 2026-07-27, it did not: the repair write self-deadlocked SQLite,

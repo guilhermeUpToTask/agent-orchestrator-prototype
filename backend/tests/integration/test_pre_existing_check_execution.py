@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     InMemoryPlanningArtifactStore,
     FakeClock,
@@ -35,23 +35,23 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     GoalContract,
     TaskContract,
     VerificationStrategy,
 )
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
-from agent_orchestrator.infra.git.workspace import GitBranchWorkspace
-from agent_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.infra.git.workspace import GitBranchWorkspace
+from praxis_orchestrator.infra.runtime.verification_executor import LocalVerificationExecutor
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)

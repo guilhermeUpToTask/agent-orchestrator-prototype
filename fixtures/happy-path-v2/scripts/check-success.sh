@@ -19,7 +19,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 ACCEPTANCE="$FIXTURE_DIR/acceptance"
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
+# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
+# place rather than left behind holding the operator's only database.
+ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
+[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 if [[ "${1:-}" != "" ]]; then
   TARGET="$1"

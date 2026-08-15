@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.environment_port import EnvironmentSpec
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.app.environment_port import EnvironmentSpec
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
 
 pytestmark = pytest.mark.integration
 

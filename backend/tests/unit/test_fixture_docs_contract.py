@@ -3,7 +3,7 @@
 Was a known issue: the fixture told operators to `export PROJECT_REPO_DIR`, but
 `AppContainer` does not read it. Repository routing is project-scoped through
 `ProjectDefinition.repo_url`, and a project WITHOUT one gets a fresh empty repo
-auto-seeded at `$ORCHESTRATOR_HOME/projects/<id>/repo` — so a live run edits a
+auto-seeded at `$PRAXIS_HOME/projects/<id>/repo` — so a live run edits a
 tree the checker never inspects and "passes" against nothing.
 
 Found on the first real run of the fixture. Locked here because the defect lived
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures"
-BACKEND_SRC = Path(__file__).resolve().parents[2] / "agent_orchestrator"
+BACKEND_SRC = Path(__file__).resolve().parents[2] / "praxis_orchestrator"
 
 
 def _walkthrough_docs() -> list[Path]:

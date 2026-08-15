@@ -18,7 +18,7 @@ Two things this must NOT assume, both learned the hard way:
 Stdlib only — no requests, no jq.
 
     export OPENROUTER_API_KEY=...       # first run only; stored encrypted
-    export ORCHESTRATOR_API_TOKEN=...   # only if the server has auth enabled
+    export PRAXIS_API_TOKEN=...         # only if the server has auth enabled
     ./seed-agents.py [BASE_URL]         # default http://127.0.0.1:8000
 """
 
@@ -31,7 +31,12 @@ import urllib.error
 import urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
-TOKEN = os.environ.get("ORCHESTRATOR_API_TOKEN", "").strip()
+# Reads the pre-rename name too: this script is run against a guest whose
+# ~/.praxis-env may predate the rename, and a token read as empty here does not
+# fail loudly — it produces 401s that look like a server problem.
+TOKEN = (
+    os.environ.get("PRAXIS_API_TOKEN") or os.environ.get("ORCHESTRATOR_API_TOKEN") or ""
+).strip()
 
 
 def call(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
@@ -52,7 +57,7 @@ def call(method: str, path: str, body: dict | None = None) -> tuple[int, object]
             return e.code, raw
     except urllib.error.URLError as e:
         print(f"ERROR: cannot reach {BASE}: {e.reason}", file=sys.stderr)
-        print("Start it with: uv run python -m agent_orchestrator.infra.cli.main "
+        print("Start it with: uv run python -m praxis_orchestrator.infra.cli.main "
               "serve --port 8000", file=sys.stderr)
         raise SystemExit(1)
 

@@ -133,8 +133,8 @@ def replanned_client(tmp_path, monkeypatch):
     """
     import asyncio
 
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-    from agent_orchestrator.app.use_cases.run_worker import drive_plan
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.app.use_cases.run_worker import drive_plan
     from tests.integration.cyclic_walk import drive_cycle_to_publication
 
     walk = drive_cycle_to_publication(tmp_path, monkeypatch, publish=False)
@@ -212,7 +212,7 @@ def test_edited_task_no_longer_serves_its_prior_evidence_as_accepted(
     (`ExecutionHandler` calls `task.accept_verification` immediately
     followed by `plan.complete_task`), and there is no wired use case that
     reopens a DONE task for editing (`Plan.reopen_task` exists on the
-    aggregate but nothing in `agent_orchestrator/app` calls it) -- nor can the plan pause
+    aggregate but nothing in `praxis_orchestrator/app` calls it) -- nor can the plan pause
     its way out of a completion-review WAITING status. So a task that has
     ever served accepted evidence can never be edited again through the real
     API: `edit_task` refuses it outright, which is the fully honest way the
@@ -362,7 +362,7 @@ def _rebind(walk, repo_url: str | None) -> None:
     afterwards exercises the real endpoint for all three topologies without
     paying for three full cycle drives.
     """
-    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
 
     project = walk.container.project_repo.get("project-1")
     walk.container.project_repo.update(
@@ -392,7 +392,7 @@ def test_remote_binding_does_not_point_at_a_checkout_that_lacks_the_branch(
     """The regression this whole read model exists for.
 
     A remote-bound project's cycle branch lives ONLY inside
-    `$ORCHESTRATOR_HOME/projects/<id>/repos/<sha256[:16]>`. Telling that
+    `$PRAXIS_HOME/projects/<id>/repos/<sha256[:16]>`. Telling that
     operator to push it from their own checkout is a dead end, so the endpoint
     must name the orchestrator's clone and say plainly that it is not theirs.
     """

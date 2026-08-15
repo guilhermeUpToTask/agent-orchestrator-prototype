@@ -14,10 +14,10 @@ import asyncio
 
 import pytest
 
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.planning_artifacts import IntentProposal, ProposalKind
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.planning_artifacts import IntentProposal, ProposalKind
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import GreedyReaderLLMClient, SilentLLMClient
 from datetime import datetime, timezone
 

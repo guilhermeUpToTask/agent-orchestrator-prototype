@@ -10,20 +10,20 @@ repository scan that discovers "the checks that already exist". One was written
 while chasing a Tier 1 block and it is the wrong idea — a scan cannot tell task
 3's checks from task 1's, so on a multi-task goal it freezes another task's
 failing test as this task's evidence. Which tests prove a task is done is intent,
-and intent has to be declared (`agent_orchestrator/app/test_identity.py`).
+and intent has to be declared (`praxis_orchestrator/app/test_identity.py`).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.verification import is_check_path
+from praxis_orchestrator.app.verification import is_check_path
 
 # Aliased: pytest collects any imported name starting with `test_` as a test
 # case, and would report the function itself as an error for lacking a `path`
 # fixture.
-from agent_orchestrator.app.verification import test_author_path_allowed as author_path_allowed
-from agent_orchestrator.domain.entities.execution_contracts import VerificationStrategy
+from praxis_orchestrator.app.verification import test_author_path_allowed as author_path_allowed
+from praxis_orchestrator.domain.entities.execution_contracts import VerificationStrategy
 
 
 @pytest.mark.parametrize(

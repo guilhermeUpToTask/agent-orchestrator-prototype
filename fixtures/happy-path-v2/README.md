@@ -43,7 +43,7 @@ fixtures/happy-path-v1/
 Why not under `backend/tests/`? Those are automated dual-backend truth tests.
 This fixture is an **operator walkthrough**: real API, real worker, optional real
 LLM/agent. Why not nested git inside the monorepo? Nested repos confuse worktrees
-and accidental commits; materialize to `ORCHESTRATOR_HOME` instead.
+and accidental commits; materialize to `PRAXIS_HOME` instead.
 
 ---
 
@@ -64,8 +64,8 @@ backend/scripts/dev.sh seed --stub          # free path
 ./fixtures/happy-path-v1/scripts/materialize.sh
 ```
 
-Default target: `$ORCHESTRATOR_HOME/happy-path-v1/repo`
-(`ORCHESTRATOR_HOME` defaults to `~/.orchestrator`.)
+Default target: `$PRAXIS_HOME/happy-path-v1/repo`
+(`PRAXIS_HOME` defaults to `~/.orchestrator`.)
 
 Override:
 
@@ -80,7 +80,7 @@ export HAPPY_PATH_REPO="${HAPPY_PATH_REPO:-$HOME/.orchestrator/happy-path-v1/rep
 # real agent runs also need:
 #   config: agent_runner.mode=real
 #   CLIs: pi / claude / gemini as bound on the agent
-#   ORCHESTRATOR_MASTER_KEY if using encrypted provider keys
+#   PRAXIS_MASTER_KEY if using encrypted provider keys
 
 backend/scripts/dev.sh start          # API :8000 + worker; no --frontend
 ```
@@ -89,7 +89,7 @@ backend/scripts/dev.sh start          # API :8000 + worker; no --frontend
 For a project-bound plan the worker resolves the checkout from the project's
 `repo_url` (`ProjectWorkspaceResolver._repository_path`): a bare local path or a
 `file://` URL is used in place, and a project with **no** `repo_url` gets a fresh
-empty repo auto-seeded at `$ORCHESTRATOR_HOME/projects/<project_id>/repo`. Create
+empty repo auto-seeded at `$PRAXIS_HOME/projects/<project_id>/repo`. Create
 the project with `repo_url` set (step 3) or the run will silently succeed against
 the wrong tree. `PROJECT_REPO_DIR` only names the legacy single global workspace
 and does not apply here.
@@ -98,7 +98,7 @@ and does not apply here.
 
 ```bash
 export HAPPY_PATH_API="${HAPPY_PATH_API:-http://127.0.0.1:8000}"
-# export ORCHESTRATOR_API_TOKEN=…   # only if the API was started with a token
+# export PRAXIS_API_TOKEN=…   # only if the API was started with a token
 api() { ./fixtures/happy-path-v1/scripts/api.sh "$@"; }
 
 # before any real run: mode, binding validity, and CLI binary probes
@@ -107,7 +107,7 @@ api GET /api/runner/status | jq '{mode, valid, detail,
   agents: [.agents[] | {agent_name, runtime_type, valid, detail}]}'
 ```
 
-`api.sh` adds the base URL and `Authorization: Bearer $ORCHESTRATOR_API_TOKEN`
+`api.sh` adds the base URL and `Authorization: Bearer $PRAXIS_API_TOKEN`
 (omitted when unset), prints the body, and exits non-zero on any non-2xx.
 
 ### 3. Create the project and open the plan with the locked brief
@@ -184,7 +184,7 @@ api POST "/api/plans/$PLAN_ID/cycle-draft/approve" "$(gate_body)" | jq '{id, goa
 
 ```bash
 # domain event feed (named SSE events; Ctrl-C to stop)
-curl -N ${ORCHESTRATOR_API_TOKEN:+-H "Authorization: Bearer $ORCHESTRATOR_API_TOKEN"} \
+curl -N ${PRAXIS_API_TOKEN:+-H "Authorization: Bearer $PRAXIS_API_TOKEN"} \
   "$HAPPY_PATH_API/api/events"
 
 # attempt timeline + one attempt's log
@@ -227,7 +227,7 @@ reference. Two runs are only comparable if you can say what produced each:
 export HAPPY_PATH_WORKER_LOG=…            # optional; copied into the run dir
 ./fixtures/happy-path-v1/scripts/capture-run.sh "$PLAN_ID"      # Tier 0
 ./fixtures/happy-path-v1/scripts/capture-run.sh "$PLAN_ID" 1    # Tier 1
-# → $ORCHESTRATOR_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan prefix>/
+# → $PRAXIS_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan prefix>/
 ```
 
 `capture-run.sh` exits 0 only when the run is green, 1 when a check failed (the

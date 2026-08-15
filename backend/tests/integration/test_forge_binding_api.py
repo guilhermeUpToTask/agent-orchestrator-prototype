@@ -12,21 +12,21 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.secret_ref import SecretRef
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.forge.github import GitHubForge
-from agent_orchestrator.infra.forge.no_forge import NoForge
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.secret_ref import SecretRef
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.forge.github import GitHubForge
+from praxis_orchestrator.infra.forge.no_forge import NoForge
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def container(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     made = AppContainer(orchestrator_home=tmp_path / "home")
     Base.metadata.create_all(made.engine)
     yield made
@@ -57,7 +57,7 @@ def _stub_github(monkeypatch, *, push: bool = True):
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr("agent_orchestrator.infra.forge.github.httpx.Client", patched)
+    monkeypatch.setattr("praxis_orchestrator.infra.forge.github.httpx.Client", patched)
 
 
 def _project(client) -> str:

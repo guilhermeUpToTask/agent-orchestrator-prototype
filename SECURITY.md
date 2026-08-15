@@ -1,6 +1,6 @@
 # Security
 
-`agent-orchestrator` is a **preview**. This document states what it does and
+`praxis-orchestrator` is a **preview**. This document states what it does and
 does not protect, plainly, so you can decide what to point it at. Nothing here
 is aspirational: every claim describes code in this repository.
 
@@ -20,7 +20,7 @@ When `agent_runner.mode = real`, the orchestrator runs the CLI you bound the
 agent to (`pi`, `claude`, …) as a subprocess with your environment, your
 filesystem permissions, your git identity and your credentials. Those CLIs run a
 model's output. There is **no container, no seccomp filter, no syscall
-restriction, and no filesystem jail**. `agent_orchestrator/infra/runtime/sandbox.py` supplies
+restriction, and no filesystem jail**. `praxis_orchestrator/infra/runtime/sandbox.py` supplies
 `NoSandbox`, which passes the command through unchanged; its `probe()` reports
 that plainly rather than claiming a healthy sandbox, and it is the deliberate
 permanent fallback for hosts with no OS-level confinement — not a stub awaiting
@@ -44,14 +44,14 @@ to rebuild.** A disposable clone or a VM is the right posture for the preview.
 
 ## Control-plane authentication
 
-`ORCHESTRATOR_API_TOKEN` guards **every** operation except `GET /health`:
+`PRAXIS_API_TOKEN` guards **every** operation except `GET /health`:
 
 - unset -> the API is **open** to anyone who can reach the port. The default
   bind is `127.0.0.1`, so that is local-only until you change it.
 - set -> every request must present `Authorization: Bearer <token>` or
   `X-API-Token`.
 
-The guard is applied once at mount (`agent_orchestrator/api/server.py`) and a test parametrizes
+The guard is applied once at mount (`praxis_orchestrator/api/server.py`) and a test parametrizes
 it over the whole OpenAPI inventory, so a route added later is covered before it
 is written.
 
@@ -72,7 +72,7 @@ Known limits, stated rather than hidden:
 ## Secrets
 
 Provider API keys are **envelope-encrypted at rest** (Fernet) in the `secrets`
-table, keyed by `ORCHESTRATOR_MASTER_KEY`.
+table, keyed by `PRAXIS_MASTER_KEY`.
 
 - The key is read only in the composition root and decrypted at exactly one
   point (`secret_store.py::resolve`).
@@ -81,7 +81,7 @@ table, keyed by `ORCHESTRATOR_MASTER_KEY`.
   once and never echoes it back.
 - Structured logging never writes secret material. If you find a log line that
   does, that is a vulnerability worth reporting.
-- Lose `ORCHESTRATOR_MASTER_KEY` and the stored keys are unrecoverable; that is
+- Lose `PRAXIS_MASTER_KEY` and the stored keys are unrecoverable; that is
   the intended failure mode.
 
 ### GitHub forge tokens
@@ -122,7 +122,7 @@ rest does not change what a subprocess, or anything it spawns, can read.
 ## Supported surface
 
 - Python 3.11+ on Linux and macOS. Windows is untested.
-- SQLite state under `ORCHESTRATOR_HOME` (default `~/.orchestrator`). Back that
+- SQLite state under `PRAXIS_HOME` (default `~/.praxis`). Back that
   directory up; it holds your plans, evidence and encrypted keys.
 - Agent runtimes: `pi`, `claude` (each must be installed and authenticated by
   you). `gemini` is bindable but unexercised.

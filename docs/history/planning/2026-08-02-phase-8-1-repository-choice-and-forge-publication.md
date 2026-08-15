@@ -12,18 +12,18 @@
 
 ## Global Constraints
 
-- **The frozen domain is not touched.** No file under `agent_orchestrator/domain/` is created or modified by any task in this plan. If a task seems to need one, stop and escalate — it means the design was wrong, and a domain change needs a `docs/decisions/decision-log.md` entry and an explicit un-freeze.
+- **The frozen domain is not touched.** No file under `praxis_orchestrator/domain/` is created or modified by any task in this plan. If a task seems to need one, stop and escalate — it means the design was wrong, and a domain change needs a `docs/decisions/decision-log.md` entry and an explicit un-freeze.
 - **Dependency rule:** `domain` → `app` → `infra` & `api`. Never import `app`, `infra`, or `api` inside `domain/`. Never import `infra` inside `app/`.
 - **The orchestrator opens a pull request and never merges one.** `OutputDisposition.MERGE` stays a recorded human claim.
 - **Only `cycle/<id>` is ever pushed.** No task may push, write, or force-update the default branch.
 - **Side effects never run inside a `with uow:` transaction** (architectural invariant #5).
-- **Routers stay thin** (invariant #8): no `try/except` returning HTTP responses inside a router, no blanket `KeyError`/`ValueError` handlers. Error codes go in the ONE table, `agent_orchestrator/api/exceptions.py::_STATUS_BY_CODE`.
+- **Routers stay thin** (invariant #8): no `try/except` returning HTTP responses inside a router, no blanket `KeyError`/`ValueError` handlers. Error codes go in the ONE table, `praxis_orchestrator/api/exceptions.py::_STATUS_BY_CODE`.
 - **Never log a token.** Secrets live envelope-encrypted; `resolve()` in `infra/db/secret_store.py` stays the single decryption point in the codebase.
 - **No `print()` and no stdlib `logging`.** Use `log = structlog.get_logger(__name__)` with namespaced, action-oriented event names.
 - **Every module uses `from __future__ import annotations`.**
 - **Quality gates that must pass before every commit** (run from `backend/`):
-  - `ruff check agent_orchestrator tests --fix`
-  - `mypy agent_orchestrator` — zero errors, no excludes
+  - `ruff check praxis_orchestrator tests --fix`
+  - `mypy praxis_orchestrator` — zero errors, no excludes
 - **GitHub only.** Do not add a GitLab/Gitea/Bitbucket adapter, a provider-detection heuristic, or a `forge.provider` value other than `github`.
 - **New routes must be added to `docs/architecture/capability-matrix.md`** or `backend/tests/unit/test_capability_matrix.py` fails the build in both directions.
 - The API token guard (`require_api_token`) is applied at router mount; do not add per-route auth.
@@ -36,27 +36,27 @@
 
 | File | Responsibility |
 |---|---|
-| `agent_orchestrator/app/forge_port.py` | The `ForgePort` protocol, `PullRequestRef`, and `ForgeNotConfiguredError`. No I/O. |
-| `agent_orchestrator/infra/forge/__init__.py` | Package marker. |
-| `agent_orchestrator/infra/forge/no_forge.py` | `NoForge` — the permanent fallback adapter. |
-| `agent_orchestrator/infra/forge/github.py` | `GitHubForge` — REST against `api.github.com`, plus `verify_github_token`. |
-| `agent_orchestrator/infra/forge/binding.py` | Reads/writes the three project-scoped config keys and the token ref. The one place the key names live. |
-| `agent_orchestrator/app/use_cases/publish_cycle.py` | The three-step publication flow. |
-| `agent_orchestrator/app/pr_body.py` | Renders the evidence document into a PR body. Pure function, no I/O. |
+| `praxis_orchestrator/app/forge_port.py` | The `ForgePort` protocol, `PullRequestRef`, and `ForgeNotConfiguredError`. No I/O. |
+| `praxis_orchestrator/infra/forge/__init__.py` | Package marker. |
+| `praxis_orchestrator/infra/forge/no_forge.py` | `NoForge` — the permanent fallback adapter. |
+| `praxis_orchestrator/infra/forge/github.py` | `GitHubForge` — REST against `api.github.com`, plus `verify_github_token`. |
+| `praxis_orchestrator/infra/forge/binding.py` | Reads/writes the three project-scoped config keys and the token ref. The one place the key names live. |
+| `praxis_orchestrator/app/use_cases/publish_cycle.py` | The three-step publication flow. |
+| `praxis_orchestrator/app/pr_body.py` | Renders the evidence document into a PR body. Pure function, no I/O. |
 
 **Backend — modified**
 
 | File | Change |
 |---|---|
-| `agent_orchestrator/infra/git/repository_binding.py` | `GIT_NONINTERACTIVE_ENV`, `probe_remote()`, `RemoteProbe`. |
-| `agent_orchestrator/infra/git/project_workspace.py:126` | `_materialize_remote` runs the clone under `GIT_NONINTERACTIVE_ENV`. |
-| `agent_orchestrator/api/routers/reference.py` | `binding` on `ProjectBody`; `/projects/probe`, `/projects/{id}/clone`, `/projects/{id}/forge` (GET/PUT/DELETE). |
-| `agent_orchestrator/api/routers/plans.py:1194` | Publication route calls `publish_cycle`. |
-| `agent_orchestrator/api/exceptions.py` | Five new codes. |
-| `agent_orchestrator/infra/errors.py` | Five new error classes. |
-| `agent_orchestrator/infra/container.py` | `forge_for(project_id)` factory. |
-| `agent_orchestrator/infra/db/secret_ref.py` | `SecretRef.for_forge`. |
-| `agent_orchestrator/app/testing/fakes.py` | `FakeForge`. |
+| `praxis_orchestrator/infra/git/repository_binding.py` | `GIT_NONINTERACTIVE_ENV`, `probe_remote()`, `RemoteProbe`. |
+| `praxis_orchestrator/infra/git/project_workspace.py:126` | `_materialize_remote` runs the clone under `GIT_NONINTERACTIVE_ENV`. |
+| `praxis_orchestrator/api/routers/reference.py` | `binding` on `ProjectBody`; `/projects/probe`, `/projects/{id}/clone`, `/projects/{id}/forge` (GET/PUT/DELETE). |
+| `praxis_orchestrator/api/routers/plans.py:1194` | Publication route calls `publish_cycle`. |
+| `praxis_orchestrator/api/exceptions.py` | Five new codes. |
+| `praxis_orchestrator/infra/errors.py` | Five new error classes. |
+| `praxis_orchestrator/infra/container.py` | `forge_for(project_id)` factory. |
+| `praxis_orchestrator/infra/db/secret_ref.py` | `SecretRef.for_forge`. |
+| `praxis_orchestrator/app/testing/fakes.py` | `FakeForge`. |
 | `pyproject.toml` | `httpx` as an explicit runtime dependency. |
 
 **Frontend — modified**
@@ -74,8 +74,8 @@
 Standalone defect fix in current `main`; ships value with nothing else.
 
 **Files:**
-- Modify: `agent_orchestrator/infra/git/repository_binding.py`
-- Modify: `agent_orchestrator/infra/git/project_workspace.py:126-139`
+- Modify: `praxis_orchestrator/infra/git/repository_binding.py`
+- Modify: `praxis_orchestrator/infra/git/project_workspace.py:126-139`
 - Test: `backend/tests/integration/test_repository_binding.py`
 
 **Interfaces:**
@@ -91,8 +91,8 @@ def test_materialize_remote_does_not_block_on_a_credential_prompt(tmp_path):
     """A private https remote makes git ask for a username. There is no tty to
     answer it, so without GIT_TERMINAL_PROMPT=0 the worker blocks forever while
     holding a goal lease. It must fail fast instead."""
-    from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-    from agent_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
+    from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+    from praxis_orchestrator.infra.git.project_workspace import ProjectWorkspaceResolver
 
     class _Projects:
         def get(self, project_id): raise NotImplementedError
@@ -121,7 +121,7 @@ Expected: FAIL — it hangs to the timeout, or raises something other than `Call
 
 - [ ] **Step 3: Add the environment guard**
 
-In `agent_orchestrator/infra/git/repository_binding.py`, after the `_SCP_STYLE` definition:
+In `praxis_orchestrator/infra/git/repository_binding.py`, after the `_SCP_STYLE` definition:
 
 ```python
 # git will happily block forever asking a human for a username. Nothing in the
@@ -138,10 +138,10 @@ GIT_NONINTERACTIVE_ENV: dict[str, str] = {
 
 - [ ] **Step 4: Apply it to the clone**
 
-In `agent_orchestrator/infra/git/project_workspace.py`, add to the imports:
+In `praxis_orchestrator/infra/git/project_workspace.py`, add to the imports:
 
 ```python
-from agent_orchestrator.infra.git.repository_binding import GIT_NONINTERACTIVE_ENV
+from praxis_orchestrator.infra.git.repository_binding import GIT_NONINTERACTIVE_ENV
 ```
 
 and change the `subprocess.run` inside `_materialize_remote` to:
@@ -166,15 +166,15 @@ Expected: PASS, no regressions.
 
 - [ ] **Step 6: Quality gates**
 
-Run: `cd backend && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator`
+Run: `cd backend && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator`
 
 Expected: clean.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/agent_orchestrator/infra/git/repository_binding.py \
-        backend/agent_orchestrator/infra/git/project_workspace.py \
+git add backend/praxis_orchestrator/infra/git/repository_binding.py \
+        backend/praxis_orchestrator/infra/git/project_workspace.py \
         backend/tests/integration/test_repository_binding.py
 git commit -m "fix: a private remote could hang the worker instead of failing
 
@@ -191,7 +191,7 @@ Every git subprocess that can reach a remote now runs non-interactively."
 ## Task 2: Let the operator name the binding, and refuse a disagreement
 
 **Files:**
-- Modify: `agent_orchestrator/api/routers/reference.py:300-331`
+- Modify: `praxis_orchestrator/api/routers/reference.py:300-331`
 - Test: `backend/tests/integration/test_reference_repos.py`
 
 **Interfaces:**
@@ -245,7 +245,7 @@ Expected: the first two FAIL with 201 instead of 422; the last two PASS already.
 
 - [ ] **Step 3: Implement the agreement check**
 
-In `agent_orchestrator/api/routers/reference.py`, replace the `ProjectBody` class and add a helper above it:
+In `praxis_orchestrator/api/routers/reference.py`, replace the `ProjectBody` class and add a helper above it:
 
 ```python
 class ProjectBody(BaseModel):
@@ -290,8 +290,8 @@ Expected: PASS — these post `{name, repo_url}` with no `binding`.
 - [ ] **Step 6: Quality gates and commit**
 
 ```bash
-cd backend && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator
-cd .. && git add backend/agent_orchestrator/api/routers/reference.py \
+cd backend && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator
+cd .. && git add backend/praxis_orchestrator/api/routers/reference.py \
                  backend/tests/integration/test_reference_repos.py
 git commit -m "feat(api): let a project name its binding, and refuse a disagreement
 
@@ -307,8 +307,8 @@ Optional, so every fixture keeps working; inference stays the fallback."
 ## Task 3: Probe a remote without cloning it
 
 **Files:**
-- Modify: `agent_orchestrator/infra/git/repository_binding.py`
-- Modify: `agent_orchestrator/api/routers/reference.py`
+- Modify: `praxis_orchestrator/infra/git/repository_binding.py`
+- Modify: `praxis_orchestrator/api/routers/reference.py`
 - Test: `backend/tests/integration/test_repository_binding.py`
 
 **Interfaces:**
@@ -323,7 +323,7 @@ Append to `backend/tests/integration/test_repository_binding.py`:
 
 ```python
 def test_probe_classifies_an_unreachable_host():
-    from agent_orchestrator.infra.git.repository_binding import probe_remote
+    from praxis_orchestrator.infra.git.repository_binding import probe_remote
 
     # RFC 5737 TEST-NET-1 — never routable.
     probe = probe_remote("https://192.0.2.1/a/b.git", timeout_seconds=2.0)
@@ -336,7 +336,7 @@ def test_probe_classifies_an_unreachable_host():
 def test_probe_reads_the_default_branch_of_a_local_repository(tmp_path):
     """A file:// URL is a remote as far as ls-remote is concerned, so the probe
     works offline and the test needs no network."""
-    from agent_orchestrator.infra.git.repository_binding import probe_remote
+    from praxis_orchestrator.infra.git.repository_binding import probe_remote
 
     repo = tmp_path / "origin"
     repo.mkdir()
@@ -374,7 +374,7 @@ Expected: FAIL — `ImportError: cannot import name 'probe_remote'`.
 
 - [ ] **Step 3: Implement `probe_remote`**
 
-Append to `agent_orchestrator/infra/git/repository_binding.py`:
+Append to `praxis_orchestrator/infra/git/repository_binding.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -446,7 +446,7 @@ Add `import os` to that module's imports.
 
 - [ ] **Step 4: Add the route**
 
-In `agent_orchestrator/api/routers/reference.py`, above the existing
+In `praxis_orchestrator/api/routers/reference.py`, above the existing
 `@router.get("/projects")`:
 
 ```python
@@ -517,9 +517,9 @@ Expected: PASS. This test fails the build in both directions, so a missing row i
 - [ ] **Step 7: Quality gates and commit**
 
 ```bash
-cd backend && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator
-cd .. && git add backend/agent_orchestrator/infra/git/repository_binding.py \
-                 backend/agent_orchestrator/api/routers/reference.py \
+cd backend && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator
+cd .. && git add backend/praxis_orchestrator/infra/git/repository_binding.py \
+                 backend/praxis_orchestrator/api/routers/reference.py \
                  backend/tests/integration/test_repository_binding.py \
                  docs/architecture/capability-matrix.md
 git commit -m "feat(api): probe a remote before binding a project to it
@@ -540,7 +540,7 @@ than the decision reversed."
 ## Task 4: Materialize a clone on request
 
 **Files:**
-- Modify: `agent_orchestrator/api/routers/reference.py`
+- Modify: `praxis_orchestrator/api/routers/reference.py`
 - Test: `backend/tests/integration/test_reference_repos.py`
 
 **Interfaces:**
@@ -588,7 +588,7 @@ Expected: FAIL with 404 — no such route.
 
 - [ ] **Step 3: Add the route**
 
-In `agent_orchestrator/api/routers/reference.py`, after `project_readiness`:
+In `praxis_orchestrator/api/routers/reference.py`, after `project_readiness`:
 
 ```python
 class CloneResponse(BaseModel):
@@ -630,8 +630,8 @@ Add `POST /api/projects/{project_id}/clone` to `docs/architecture/capability-mat
 
 ```bash
 cd backend && pytest tests/unit/test_capability_matrix.py -v \
-  && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator
-cd .. && git add backend/agent_orchestrator/api/routers/reference.py \
+  && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator
+cd .. && git add backend/praxis_orchestrator/api/routers/reference.py \
                  backend/tests/integration/test_reference_repos.py \
                  docs/architecture/capability-matrix.md
 git commit -m "feat(api): materialize a project's clone on request
@@ -647,12 +647,12 @@ instead of inside their first cycle. Idempotent."
 No network, no GitHub. This task defines the seam every later task plugs into.
 
 **Files:**
-- Create: `agent_orchestrator/app/forge_port.py`
-- Create: `agent_orchestrator/infra/forge/__init__.py`
-- Create: `agent_orchestrator/infra/forge/no_forge.py`
-- Modify: `agent_orchestrator/app/testing/fakes.py`
-- Modify: `agent_orchestrator/infra/errors.py`
-- Modify: `agent_orchestrator/api/exceptions.py`
+- Create: `praxis_orchestrator/app/forge_port.py`
+- Create: `praxis_orchestrator/infra/forge/__init__.py`
+- Create: `praxis_orchestrator/infra/forge/no_forge.py`
+- Modify: `praxis_orchestrator/app/testing/fakes.py`
+- Modify: `praxis_orchestrator/infra/errors.py`
+- Modify: `praxis_orchestrator/api/exceptions.py`
 - Test: `backend/tests/unit/test_forge_port.py` (create)
 
 **Interfaces:**
@@ -675,9 +675,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.forge_port import ForgeNotConfiguredError, ForgePort, PullRequestRef
-from agent_orchestrator.app.testing.fakes import FakeForge
-from agent_orchestrator.infra.forge.no_forge import NoForge
+from praxis_orchestrator.app.forge_port import ForgeNotConfiguredError, ForgePort, PullRequestRef
+from praxis_orchestrator.app.testing.fakes import FakeForge
+from praxis_orchestrator.infra.forge.no_forge import NoForge
 
 
 def test_no_forge_refuses_both_operations():
@@ -712,7 +712,7 @@ def test_fake_forge_records_what_it_was_asked_to_do():
 
 
 def test_fake_forge_can_be_scripted_to_fail_at_either_step():
-    from agent_orchestrator.app.forge_port import ForgeRequestFailedError
+    from praxis_orchestrator.app.forge_port import ForgeRequestFailedError
 
     with pytest.raises(ForgeRequestFailedError):
         FakeForge(fail_on="push").push_branch(Path("/tmp/repo"), "cycle/abc")
@@ -727,11 +727,11 @@ def test_fake_forge_can_be_scripted_to_fail_at_either_step():
 
 Run: `cd backend && pytest tests/unit/test_forge_port.py -v`
 
-Expected: FAIL — `ModuleNotFoundError: agent_orchestrator.app.forge_port`.
+Expected: FAIL — `ModuleNotFoundError: praxis_orchestrator.app.forge_port`.
 
 - [ ] **Step 3: Write the port**
 
-Create `agent_orchestrator/app/forge_port.py`:
+Create `praxis_orchestrator/app/forge_port.py`:
 
 ```python
 """The Forge port: pushing a verified cycle branch to a hosting service and
@@ -742,7 +742,7 @@ and deliberately not part of the Workspace port, whose contract is local git
 only. An authenticated push spends the forge's credential, not the workspace's,
 so the two operations that need that credential live together here.
 
-Adapters live in infra: `NoForge` (agent_orchestrator/infra/forge/no_forge.py)
+Adapters live in infra: `NoForge` (praxis_orchestrator/infra/forge/no_forge.py)
 is the PERMANENT fallback, not a placeholder — an installation with no token
 must keep running and record a disposition the operator typed, exactly as it
 does today. `GitHubForge` plugs in beside it without any caller changing.
@@ -758,7 +758,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from agent_orchestrator.domain.errors.base import BaseAppException
+from praxis_orchestrator.domain.errors.base import BaseAppException
 
 
 class ForgeError(BaseAppException):
@@ -818,17 +818,17 @@ class ForgePort(Protocol):
 
 - [ ] **Step 4: Write `NoForge`**
 
-Create `agent_orchestrator/infra/forge/__init__.py` (empty) and
-`agent_orchestrator/infra/forge/no_forge.py`:
+Create `praxis_orchestrator/infra/forge/__init__.py` (empty) and
+`praxis_orchestrator/infra/forge/no_forge.py`:
 
 ```python
-"""The permanent no-forge fallback. See agent_orchestrator/app/forge_port.py."""
+"""The permanent no-forge fallback. See praxis_orchestrator/app/forge_port.py."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from agent_orchestrator.app.forge_port import ForgeNotConfiguredError, PullRequestRef
+from praxis_orchestrator.app.forge_port import ForgeNotConfiguredError, PullRequestRef
 
 _MESSAGE = (
     "No forge is bound to this project, so the orchestrator cannot open a pull "
@@ -849,7 +849,7 @@ class NoForge:
 
 - [ ] **Step 5: Write `FakeForge`**
 
-Append to `agent_orchestrator/app/testing/fakes.py`:
+Append to `praxis_orchestrator/app/testing/fakes.py`:
 
 ```python
 class FakeForge:
@@ -885,7 +885,7 @@ Add to that file's imports:
 ```python
 from pathlib import Path
 
-from agent_orchestrator.app.forge_port import (
+from praxis_orchestrator.app.forge_port import (
     ForgeRequestFailedError,
     PullRequestRef,
 )
@@ -893,7 +893,7 @@ from agent_orchestrator.app.forge_port import (
 
 - [ ] **Step 6: Register the error codes**
 
-In `agent_orchestrator/api/exceptions.py`, add to `_STATUS_BY_CODE` in the 422 block:
+In `praxis_orchestrator/api/exceptions.py`, add to `_STATUS_BY_CODE` in the 422 block:
 
 ```python
     "FORGE_NOT_CONFIGURED": 422,
@@ -916,17 +916,17 @@ separately, add a registration for `ForgeError` alongside them using the same
 
 - [ ] **Step 7: Run the tests**
 
-Run: `cd backend && pytest tests/unit/test_forge_port.py -v && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator`
+Run: `cd backend && pytest tests/unit/test_forge_port.py -v && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator`
 
 Expected: PASS, clean.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/agent_orchestrator/app/forge_port.py \
-        backend/agent_orchestrator/infra/forge/ \
-        backend/agent_orchestrator/app/testing/fakes.py \
-        backend/agent_orchestrator/api/exceptions.py \
+git add backend/praxis_orchestrator/app/forge_port.py \
+        backend/praxis_orchestrator/infra/forge/ \
+        backend/praxis_orchestrator/app/testing/fakes.py \
+        backend/praxis_orchestrator/api/exceptions.py \
         backend/tests/unit/test_forge_port.py
 git commit -m "feat(app): the Forge port, its permanent fallback, and its fake
 
@@ -943,11 +943,11 @@ no way to name a branch other than the one passed in."
 ## Task 6: The GitHub adapter and the project's forge binding
 
 **Files:**
-- Create: `agent_orchestrator/infra/forge/github.py`
-- Create: `agent_orchestrator/infra/forge/binding.py`
-- Modify: `agent_orchestrator/infra/db/secret_ref.py`
-- Modify: `agent_orchestrator/infra/container.py`
-- Modify: `agent_orchestrator/api/routers/reference.py`
+- Create: `praxis_orchestrator/infra/forge/github.py`
+- Create: `praxis_orchestrator/infra/forge/binding.py`
+- Modify: `praxis_orchestrator/infra/db/secret_ref.py`
+- Modify: `praxis_orchestrator/infra/container.py`
+- Modify: `praxis_orchestrator/api/routers/reference.py`
 - Modify: `pyproject.toml`
 - Test: `backend/tests/integration/test_github_forge.py` (create)
 
@@ -978,11 +978,11 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from agent_orchestrator.app.forge_port import (
+from praxis_orchestrator.app.forge_port import (
     ForgeAuthFailedError,
     ForgeRepoNotFoundError,
 )
-from agent_orchestrator.infra.forge.github import GitHubForge, verify_github_token
+from praxis_orchestrator.infra.forge.github import GitHubForge, verify_github_token
 
 
 def _transport(handler):
@@ -1080,7 +1080,7 @@ Expected: FAIL — `ModuleNotFoundError`.
 
 - [ ] **Step 4: Write `GitHubForge`**
 
-Create `agent_orchestrator/infra/forge/github.py`:
+Create `praxis_orchestrator/infra/forge/github.py`:
 
 ```python
 """GitHub adapter for the Forge port.
@@ -1104,14 +1104,14 @@ import httpx
 import structlog
 from pydantic import SecretStr
 
-from agent_orchestrator.app.forge_port import (
+from praxis_orchestrator.app.forge_port import (
     ForgeAuthFailedError,
     ForgePushFailedError,
     ForgeRepoNotFoundError,
     ForgeRequestFailedError,
     PullRequestRef,
 )
-from agent_orchestrator.infra.git.repository_binding import GIT_NONINTERACTIVE_ENV
+from praxis_orchestrator.infra.git.repository_binding import GIT_NONINTERACTIVE_ENV
 
 log = structlog.get_logger(__name__)
 
@@ -1246,7 +1246,7 @@ up an ambient credential helper that could redirect it.
 
 - [ ] **Step 5: Write the binding module**
 
-Create `agent_orchestrator/infra/forge/binding.py`:
+Create `praxis_orchestrator/infra/forge/binding.py`:
 
 ```python
 """Where a project's forge binding is stored.
@@ -1263,7 +1263,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_orchestrator.infra.db.secret_ref import SecretRef
+from praxis_orchestrator.infra.db.secret_ref import SecretRef
 
 PROVIDER_KEY = "forge.provider"
 REPOSITORY_KEY = "forge.repository"
@@ -1300,13 +1300,13 @@ def clear_binding(config_store, project_id: str) -> None:
 ```
 
 Check `SqliteConfigStore`'s actual method names in
-`agent_orchestrator/infra/db/reference_repos.py:546` and match them exactly; if
+`praxis_orchestrator/infra/db/reference_repos.py:546` and match them exactly; if
 there is no `delete`, use whatever the class provides (e.g. `unset`) rather than
 adding a method.
 
 - [ ] **Step 6: Add the secret ref and the container factory**
 
-In `agent_orchestrator/infra/db/secret_ref.py`, beside `for_provider`:
+In `praxis_orchestrator/infra/db/secret_ref.py`, beside `for_provider`:
 
 ```python
     @classmethod
@@ -1317,7 +1317,7 @@ In `agent_orchestrator/infra/db/secret_ref.py`, beside `for_provider`:
         return cls(uri=f"secret://forge/{project_id}")
 ```
 
-In `agent_orchestrator/infra/container.py`, add a method (not a
+In `praxis_orchestrator/infra/container.py`, add a method (not a
 `cached_property` — it takes an argument, and the binding can change between
 calls):
 
@@ -1340,7 +1340,7 @@ with the corresponding imports.
 
 - [ ] **Step 7: Add the three binding routes**
 
-In `agent_orchestrator/api/routers/reference.py`:
+In `praxis_orchestrator/api/routers/reference.py`:
 
 ```python
 class ForgeBindingBody(BaseModel):
@@ -1403,17 +1403,17 @@ removal method; do not add one.
 ```bash
 cd backend && pytest tests/integration/test_github_forge.py tests/integration/test_secret_store.py -v \
   && pytest tests/unit/test_capability_matrix.py -v \
-  && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator
+  && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator
 ```
 
 Add the three `/projects/{project_id}/forge` rows to
 `docs/architecture/capability-matrix.md` before the matrix test will pass.
 
 ```bash
-git add backend/agent_orchestrator/infra/forge/ \
-        backend/agent_orchestrator/infra/db/secret_ref.py \
-        backend/agent_orchestrator/infra/container.py \
-        backend/agent_orchestrator/api/routers/reference.py \
+git add backend/praxis_orchestrator/infra/forge/ \
+        backend/praxis_orchestrator/infra/db/secret_ref.py \
+        backend/praxis_orchestrator/infra/container.py \
+        backend/praxis_orchestrator/api/routers/reference.py \
         backend/pyproject.toml \
         backend/tests/integration/test_github_forge.py \
         docs/architecture/capability-matrix.md
@@ -1433,9 +1433,9 @@ un-freeze is needed."
 ## Task 7: Publication that really opens the pull request
 
 **Files:**
-- Create: `agent_orchestrator/app/pr_body.py`
-- Create: `agent_orchestrator/app/use_cases/publish_cycle.py`
-- Modify: `agent_orchestrator/api/routers/plans.py:1194-1209`
+- Create: `praxis_orchestrator/app/pr_body.py`
+- Create: `praxis_orchestrator/app/use_cases/publish_cycle.py`
+- Modify: `praxis_orchestrator/api/routers/plans.py:1194-1209`
 - Test: `backend/tests/integration/test_publish_cycle.py` (create)
 
 **Interfaces:**
@@ -1456,10 +1456,10 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.forge_port import ForgeRequestFailedError
-from agent_orchestrator.app.testing.fakes import FakeForge
-from agent_orchestrator.app.use_cases.publish_cycle import publish_cycle
-from agent_orchestrator.domain.entities.planning_artifacts import OutputDisposition
+from praxis_orchestrator.app.forge_port import ForgeRequestFailedError
+from praxis_orchestrator.app.testing.fakes import FakeForge
+from praxis_orchestrator.app.use_cases.publish_cycle import publish_cycle
+from praxis_orchestrator.domain.entities.planning_artifacts import OutputDisposition
 
 
 def test_open_pr_pushes_then_records_the_real_url(published_cycle):
@@ -1543,7 +1543,7 @@ def test_retain_branch_never_touches_the_forge(published_cycle):
 def test_open_pr_with_no_forge_still_records_a_typed_reference(published_cycle):
     """Existing behaviour is not removed: an installation with no token keeps
     recording the disposition the operator typed."""
-    from agent_orchestrator.infra.forge.no_forge import NoForge
+    from praxis_orchestrator.infra.forge.no_forge import NoForge
 
     env, plan_id, gate_id, cycle_id = published_cycle
 
@@ -1572,7 +1572,7 @@ Expected: FAIL — `ModuleNotFoundError: ...use_cases.publish_cycle`.
 
 - [ ] **Step 3: Write the PR body renderer**
 
-Create `agent_orchestrator/app/pr_body.py`:
+Create `praxis_orchestrator/app/pr_body.py`:
 
 ```python
 """Render a cycle's accepted evidence into a pull-request body.
@@ -1646,7 +1646,7 @@ def render_pr_body(
 
 - [ ] **Step 4: Write the use case**
 
-Create `agent_orchestrator/app/use_cases/publish_cycle.py`:
+Create `praxis_orchestrator/app/use_cases/publish_cycle.py`:
 
 ```python
 """Publication: the one place a side effect precedes a recorded disposition.
@@ -1673,13 +1673,13 @@ from typing import Callable
 
 import structlog
 
-from agent_orchestrator.app.branch_names import cycle_branch
-from agent_orchestrator.app.forge_port import ForgeNotConfiguredError, ForgePort
-from agent_orchestrator.app.ports import UnitOfWork
-from agent_orchestrator.app.pr_body import EvidenceLine, render_pr_body, render_pr_title
-from agent_orchestrator.app.use_cases.cyclic_planning import record_output_disposition
-from agent_orchestrator.domain.entities.planning_artifacts import OutputDisposition
-from agent_orchestrator.domain.ports.clock import Clock
+from praxis_orchestrator.app.branch_names import cycle_branch
+from praxis_orchestrator.app.forge_port import ForgeNotConfiguredError, ForgePort
+from praxis_orchestrator.app.ports import UnitOfWork
+from praxis_orchestrator.app.pr_body import EvidenceLine, render_pr_body, render_pr_title
+from praxis_orchestrator.app.use_cases.cyclic_planning import record_output_disposition
+from praxis_orchestrator.domain.entities.planning_artifacts import OutputDisposition
+from praxis_orchestrator.domain.ports.clock import Clock
 
 log = structlog.get_logger(__name__)
 
@@ -1769,7 +1769,7 @@ def publish_cycle(
 The attribute names `cycle.intent_summary`, `cycle.protected_paths`,
 `task.accepted_evidence.command/.exit_code/.candidate_sha` and `task.title` must
 be checked against the real aggregate in
-`agent_orchestrator/domain/aggregates/planner_orchestrator.py` and
+`praxis_orchestrator/domain/aggregates/planner_orchestrator.py` and
 `domain/entities/`, and corrected to whatever the domain actually calls them.
 **Do not add or rename any domain attribute** — read the code and adapt this
 function to it.
@@ -1777,7 +1777,7 @@ function to it.
 - [ ] **Step 5: Rewire the route**
 
 Replace the body of `publish_cycle_route` in
-`agent_orchestrator/api/routers/plans.py:1194`:
+`praxis_orchestrator/api/routers/plans.py:1194`:
 
 ```python
 @router.post("/{plan_id}/publication", status_code=204)
@@ -1823,10 +1823,10 @@ Expected: PASS. This is the first task that touches the publication path every c
 - [ ] **Step 8: Quality gates and commit**
 
 ```bash
-cd backend && ruff check agent_orchestrator tests --fix && mypy agent_orchestrator
-cd .. && git add backend/agent_orchestrator/app/pr_body.py \
-                 backend/agent_orchestrator/app/use_cases/publish_cycle.py \
-                 backend/agent_orchestrator/api/routers/plans.py \
+cd backend && ruff check praxis_orchestrator tests --fix && mypy praxis_orchestrator
+cd .. && git add backend/praxis_orchestrator/app/pr_body.py \
+                 backend/praxis_orchestrator/app/use_cases/publish_cycle.py \
+                 backend/praxis_orchestrator/api/routers/plans.py \
                  backend/tests/integration/test_publish_cycle.py
 git commit -m "feat(app): publication opens the pull request, then records it
 
@@ -2034,7 +2034,7 @@ Expected: PASS.
 - [ ] **Step 5: Full verification before the PR leaves draft**
 
 ```bash
-cd backend && ruff check agent_orchestrator tests && mypy agent_orchestrator && pytest
+cd backend && ruff check praxis_orchestrator tests && mypy praxis_orchestrator && pytest
 cd ../frontend && npm run build && npx vitest run && npm run generate:api && git diff --exit-code src/types/generated/
 ```
 

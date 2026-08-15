@@ -133,8 +133,8 @@ guest fact 5.
 Inside the guest, as `dev`.
 
 ```bash
-git clone <repo-url> ~/agent-orchestrator
-cd ~/agent-orchestrator/backend
+git clone <repo-url> ~/praxis-orchestrator
+cd ~/praxis-orchestrator/backend
 ```
 
 Cloud-init installs git but configures no identity, and the guest's default
@@ -167,8 +167,8 @@ every stored provider credential (this has happened; the keys had to be
 destroyed and re-issued).
 
 ```bash
-# ~/.orchestrator-env, mode 600 — NOT ~/.bashrc (fact 2)
-export ORCHESTRATOR_MASTER_KEY=...
+# ~/.praxis-env, mode 600 — NOT ~/.bashrc (fact 2)
+export PRAXIS_MASTER_KEY=...
 export OPENROUTER_API_KEY=...
 ```
 
@@ -176,14 +176,14 @@ Source it from the shell that launches the server or an agent. Verify presence
 without printing it:
 
 ```bash
-[ -n "$ORCHESTRATOR_MASTER_KEY" ] && echo present
+[ -n "$PRAXIS_MASTER_KEY" ] && echo present
 ```
 
 **Migrate, serve, seed.**
 
 ```bash
-uv run python -m agent_orchestrator.infra.cli.main db upgrade
-uv run python -m agent_orchestrator.infra.cli.main serve --port 8000   # background it
+uv run python -m praxis_orchestrator.infra.cli.main db upgrade
+uv run python -m praxis_orchestrator.infra.cli.main serve --port 8000   # background it
 ```
 
 Check for a server already listening before starting another — a stale one
@@ -196,7 +196,7 @@ ss -ltnp | grep :8000
 Then, with the server up:
 
 ```bash
-uv run python -m agent_orchestrator.infra.cli.main seed demo   # capabilities, one agent, config keys
+uv run python -m praxis_orchestrator.infra.cli.main seed demo   # capabilities, one agent, config keys
 ./seed-agents.py                                               # the six-agent free-tier roster
 ```
 
@@ -216,8 +216,8 @@ Also, not covered by cloud-init: install the `pi` CLI, authenticate `claude` and
 **Confirm.**
 
 ```bash
-cd ~/agent-orchestrator/backend && uv run pytest -m "not integration" -q
-uv run python -m agent_orchestrator.infra.cli.main config list
+cd ~/praxis-orchestrator/backend && uv run pytest -m "not integration" -q
+uv run python -m praxis_orchestrator.infra.cli.main config list
 ```
 
 Expected config: `reasoner.mode=llm`, `agent_runner.mode=real`, and
@@ -239,11 +239,11 @@ disposable. A `uv venv` + `uv run` is the alternative and needs no override.
 
 **2. `~/.bashrc` returns early for non-interactive shells.** Anything exported
 there is invisible to `ssh host 'cmd'` and to an agent's tool calls. Secrets
-belong in `~/.orchestrator-env` (mode 600), exported by the shell that launches
-the process. A session that cannot see `ORCHESTRATOR_MASTER_KEY` will generate a
+belong in `~/.praxis-env` (mode 600), exported by the shell that launches
+the process. A session that cannot see `PRAXIS_MASTER_KEY` will generate a
 second one and silently orphan the encrypted secret store.
 
-The same applies to `/etc/profile.d/praxis.sh`, which sets `ORCHESTRATOR_HOME`
+The same applies to `/etc/profile.d/praxis.sh`, which sets `PRAXIS_HOME`
 for **login** shells only. A non-interactive remote command will not see it.
 
 **3. Catalog IDs are server-generated UUIDs.** Only `seed demo` writes
@@ -315,10 +315,13 @@ What this means concretely:
   is precisely why `create-vm.sh` is idempotent and `seed-agents.py` exists as
   code rather than as a remembered sequence of curl calls. Treating the guest as
   precious would quietly re-introduce the coupling the VM was adopted to break.
-- **Durable state lives in `~/.orchestrator`.** The SQLite database, the
+- **Durable state lives in `~/.praxis`.** The SQLite database, the
   envelope-encrypted secret store and the config scopes are all under
-  `ORCHESTRATOR_HOME` (default `~/.orchestrator`). That directory is the only
-  thing worth backing up before a `destroy`, and `ORCHESTRATOR_MASTER_KEY` is
+  `PRAXIS_HOME` (default `~/.praxis`). A guest built before the Phase 10B
+  rename has it at `~/.orchestrator`, which is **adopted in place** rather than
+  replaced — nothing is moved or copied, so the same database keeps serving
+  (`praxis_orchestrator/infra/env_compat.py`). That directory is the only
+  thing worth backing up before a `destroy`, and `PRAXIS_MASTER_KEY` is
   the only thing without which its secrets are unreadable. Back up neither
   casually: the database contains encrypted provider credentials, and the key
   must never be written to a file in the repository, echoed into a log, or

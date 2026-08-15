@@ -22,7 +22,7 @@ afterEach(() => vi.unstubAllGlobals());
  * Requests are SAME-ORIGIN by default. These assertions used to hardcode
  * `http://localhost:8000`, which was the old default base — and that default
  * was the packaging defect: the UI shipped inside the wheel called port 8000
- * no matter which port `orchestrate serve` was given. What matters here is the
+ * no matter which port `praxis serve` was given. What matters here is the
  * PATH each call builds, so that is what these assert.
  */
 

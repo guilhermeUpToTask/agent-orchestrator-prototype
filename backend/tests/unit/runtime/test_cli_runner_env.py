@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, GeminiRunner, PiAgentRunner
+from praxis_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, GeminiRunner, PiAgentRunner
 
 
 @pytest.mark.parametrize(
@@ -18,10 +18,10 @@ from agent_orchestrator.infra.runtime.cli_runner import ClaudeCodeRunner, Gemini
     ],
 )
 def test_runner_env_scrubs_worker_only_variables(monkeypatch, runner, api_key_name, api_key):
-    monkeypatch.setenv("ORCHESTRATOR_HOME", "/worker/orchestrator")
+    monkeypatch.setenv("PRAXIS_HOME", "/worker/orchestrator")
     monkeypatch.setenv("PROJECT_REPO_DIR", "/worker/repo")
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", "master-key")
-    monkeypatch.setenv("ORCHESTRATOR_API_TOKEN", "api-token")
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", "master-key")
+    monkeypatch.setenv("PRAXIS_API_TOKEN", "api-token")
     monkeypatch.setenv("PATH", "/bin")
     monkeypatch.setenv("HOME", "/home/agent")
 
@@ -30,10 +30,10 @@ def test_runner_env_scrubs_worker_only_variables(monkeypatch, runner, api_key_na
     assert child_env["PATH"] == "/bin"
     assert child_env["HOME"] == "/home/agent"
     assert child_env[api_key_name] == api_key
-    assert "ORCHESTRATOR_HOME" not in child_env
+    assert "PRAXIS_HOME" not in child_env
     assert "PROJECT_REPO_DIR" not in child_env
-    assert "ORCHESTRATOR_MASTER_KEY" not in child_env
-    assert "ORCHESTRATOR_API_TOKEN" not in child_env
+    assert "PRAXIS_MASTER_KEY" not in child_env
+    assert "PRAXIS_API_TOKEN" not in child_env
 
 
 @pytest.mark.parametrize(

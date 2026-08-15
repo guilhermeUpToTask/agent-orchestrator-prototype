@@ -8,26 +8,26 @@ from uuid import UUID
 
 import pytest
 
-from agent_orchestrator.app.execution_records import (
+from praxis_orchestrator.app.execution_records import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionRun,
     ExecutionRunStatus,
     RuntimeCircuit,
 )
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.app.provider_capacity import ProviderCapacityPolicy
-from agent_orchestrator.app.runtime_failures import LimitScope
-from agent_orchestrator.app.testing.fakes import DummyBehavior
-from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-from agent_orchestrator.app.use_cases.operator_commands import resume_plan, retry_task
-from agent_orchestrator.app.use_cases.reconcile_runtime import reconcile_stale_attempts
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.app.provider_capacity import ProviderCapacityPolicy
+from praxis_orchestrator.app.runtime_failures import LimitScope
+from praxis_orchestrator.app.testing.fakes import DummyBehavior
+from praxis_orchestrator.app.use_cases.advance_plan import advance_plan
+from praxis_orchestrator.app.use_cases.operator_commands import resume_plan, retry_task
+from praxis_orchestrator.app.use_cases.reconcile_runtime import reconcile_stale_attempts
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
 from tests.support import make_agent_spec
 
 
@@ -1162,8 +1162,8 @@ def test_an_unusable_stored_cap_does_not_wedge_the_plan(env_factory):
     attempt with NOTHING in flight — `0 >= -1` — and an admission decline opens
     no circuit and no block, so the plan waited forever with nothing to look at.
     Rows like this predate the API bound, so the resolver must ignore them."""
-    from agent_orchestrator.domain.entities.ia_model import IAModel
-    from agent_orchestrator.domain.entities.model_provider import ModelProvider
+    from praxis_orchestrator.domain.entities.ia_model import IAModel
+    from praxis_orchestrator.domain.entities.model_provider import ModelProvider
 
     agent = make_agent_spec().model_copy(
         update={"runtime_type": "pi", "provider_id": "openrouter", "model_id": "nemotron"}

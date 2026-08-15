@@ -8,7 +8,11 @@ FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SEED_DIR="$FIXTURE_DIR/seed"
 SEED_TAG="happy-path-v2-seed"
 
-ORCH_HOME="${ORCHESTRATOR_HOME:-$HOME/.orchestrator}"
+# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
+# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
+# place rather than left behind holding the operator's only database.
+ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
+[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }
@@ -53,7 +57,7 @@ fi
 git -C "$TARGET" tag -f "$SEED_TAG"
 note "tagged $SEED_TAG at $(git -C "$TARGET" rev-parse --short HEAD)"
 # NOT PROJECT_REPO_DIR: AppContainer does not read it here. A project created
-# without `repo_url` gets a fresh empty repo auto-seeded under ORCHESTRATOR_HOME,
+# without `repo_url` gets a fresh empty repo auto-seeded under PRAXIS_HOME,
 # and the run then "passes" against a tree the checker never looks at.
 note "bind this repo by creating the project WITH repo_url:"
 note "  POST /api/projects {\"name\":\"happy-path-v2\",\"repo_url\":\"$TARGET\"}"

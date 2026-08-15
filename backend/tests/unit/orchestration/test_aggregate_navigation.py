@@ -4,31 +4,31 @@ that kill the reconciler and the FAILED-loop, plus error paths."""
 import pytest
 
 
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.services.capability_matching import match_agent
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.services.capability_matching import match_agent
 from datetime import datetime, timezone
-from agent_orchestrator.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
+from praxis_orchestrator.domain.services.navigation import action_for_goal, next_action, ready_goal_ids
 
-from agent_orchestrator.domain.services import edit_service as ed
-from agent_orchestrator.domain.factories.plan_factory import PlanFactory
-from agent_orchestrator.domain.errors.tasks_errors import (
+from praxis_orchestrator.domain.services import edit_service as ed
+from praxis_orchestrator.domain.factories.plan_factory import PlanFactory
+from praxis_orchestrator.domain.errors.tasks_errors import (
     GoalNotFoundError,
     InvalidTransitionError,
     TaskNotFoundError,
     GoalAlreadyRunningError,
 )
-from agent_orchestrator.domain.errors.planning_errors import (
+from praxis_orchestrator.domain.errors.planning_errors import (
     PlanAlreadyTerminalError,
     EmptyPlanError,
     InvalidEditError,
 )
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind, Status
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

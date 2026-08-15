@@ -14,7 +14,7 @@ refused instead of quietly becoming a demo repository.
 | Binding | What you give it | Where the work lands |
 |---|---|---|
 | **Point at a local repository** | a path on this machine | your own checkout — `cycle/<id>` is already there |
-| **Clone a remote** | an `https://` or `ssh://` URL | a clone the orchestrator owns, under `$ORCHESTRATOR_HOME/projects/<id>/repos/<hash>` |
+| **Clone a remote** | an `https://` or `ssh://` URL | a clone the orchestrator owns, under `$PRAXIS_HOME/projects/<id>/repos/<hash>` |
 | **Create an empty one** | nothing | a scratch repository — good for trying the flow, not code you will keep |
 
 `scp`-style remotes (`git@github.com:acme/widgets.git`) are **not** supported.

@@ -39,7 +39,7 @@ import type {
 /**
  * Empty means SAME ORIGIN, which is what a packaged install needs: the wheel
  * serves this bundle from the API itself, on whatever port the operator chose
- * (`orchestrate serve --port 9000`). Defaulting to a hardcoded
+ * (`praxis serve --port 9000`). Defaulting to a hardcoded
  * `http://localhost:8000` made every request from the packaged UI fail with
  * ERR_CONNECTION_REFUSED unless the operator happened to pick port 8000 — the
  * UI loaded, and nothing in it worked.
@@ -51,7 +51,7 @@ import type {
 const BASE = import.meta.env.VITE_API_URL ?? "";
 
 // Control-plane auth (reference/config routers): open when the backend has no
-// ORCHESTRATOR_API_TOKEN; otherwise mirror it here as VITE_API_TOKEN.
+// PRAXIS_API_TOKEN; otherwise mirror it here as VITE_API_TOKEN.
 const API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -761,7 +761,7 @@ export function subscribeToEvents(cb: SubscribeCallbacks): () => void {
   function connect() {
     // EventSource cannot set request headers, so the token travels in the query
     // string here — the ONLY route that accepts it that way (see
-    // backend/agent_orchestrator/api/security.py::require_api_token_or_query).
+    // backend/praxis_orchestrator/api/security.py::require_api_token_or_query).
     // The server runs uvicorn with access_log=False so it is never logged.
     const query = API_TOKEN ? `?token=${encodeURIComponent(API_TOKEN)}` : "";
     es = new EventSource(`${BASE}/api/events${query}`);

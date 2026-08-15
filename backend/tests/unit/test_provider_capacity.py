@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.provider_capacity import (
+from praxis_orchestrator.app.provider_capacity import (
     CapacityScope,
     ProviderCapacityPolicy,
     capacity_backoff_seconds,
@@ -13,9 +13,9 @@ from agent_orchestrator.app.provider_capacity import (
     parse_circuit_ref,
     resolve_max_inflight,
 )
-from agent_orchestrator.app.runtime_failures import LimitScope
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+from praxis_orchestrator.app.runtime_failures import LimitScope
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
 
 @pytest.mark.parametrize(

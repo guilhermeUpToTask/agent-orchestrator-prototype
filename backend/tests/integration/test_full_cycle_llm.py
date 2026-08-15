@@ -7,8 +7,8 @@ import asyncio
 
 import pytest
 
-from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     DummyAgentRunner,
     FakeClock,
@@ -17,20 +17,20 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryChatStore,
     NoOpWorkspace,
 )
-from agent_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
-from agent_orchestrator.app.use_cases.create_plan import create_plan
-from agent_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.app.use_cases.run_worker import worker_tick
-from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
-from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.reference_repos import SqliteProjectRepository
-from agent_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
-from agent_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
+from praxis_orchestrator.app.use_cases.conversation import discovery_message, replanning_message
+from praxis_orchestrator.app.use_cases.create_plan import create_plan
+from praxis_orchestrator.app.use_cases.cyclic_planning import activate_cycle, approve_intent
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.app.use_cases.run_worker import worker_tick
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+from praxis_orchestrator.domain.entities.planning_artifacts import PlanStatus
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.reference_repos import SqliteProjectRepository
+from praxis_orchestrator.infra.db.unit_of_work import SqliteUnitOfWork
+from praxis_orchestrator.infra.reasoner.openai_reasoner import OpenAIReasoner
 from tests.fakes_llm import FakeLLMClient, text_turn, tool_turn
 from tests.support import make_agent_spec
 

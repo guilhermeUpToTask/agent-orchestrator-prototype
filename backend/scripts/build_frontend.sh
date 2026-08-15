@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 BACKEND_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 REPO_DIR="$(cd -- "$BACKEND_DIR/.." && pwd -P)"
 FRONTEND_DIR="$REPO_DIR/frontend"
-STAGED="$BACKEND_DIR/agent_orchestrator/api/static"
+STAGED="$BACKEND_DIR/praxis_orchestrator/api/static"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }
 note() { printf '==> %s\n' "$*"; }

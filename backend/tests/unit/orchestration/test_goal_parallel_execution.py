@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
-from agent_orchestrator.app.use_cases.run_worker import drive_goal
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
+from praxis_orchestrator.app.use_cases.run_worker import drive_goal
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
 
 def _task(task_id: str) -> Task:

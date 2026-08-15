@@ -5,13 +5,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
-from agent_orchestrator.infra.reasoner.runtime.context import (
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.infra.reasoner.runtime.context import (
     render_capabilities,
     render_plan_context,
 )

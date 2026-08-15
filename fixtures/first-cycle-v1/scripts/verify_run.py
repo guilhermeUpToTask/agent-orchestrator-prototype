@@ -301,7 +301,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    token = os.environ.get("ORCHESTRATOR_API_TOKEN")
+    token = os.environ.get("PRAXIS_API_TOKEN")
     try:
         plan = _get(args.api, f"/api/plans/{args.plan}", token)
         cycles = plan.get("cycles") or []

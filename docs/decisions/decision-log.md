@@ -180,7 +180,7 @@ and never revisited, so a plan stuck on a persistent transient failure (a
 rate-limited provider observed during a live walkthrough, `provider_capacity`
 blocks recurring for ~38 minutes across repeated manual `wait_and_retry`
 resolutions) had no way to widen its backoff budget short of a replan — the
-new `execution.retry_*` config keys (`agent_orchestrator/infra/policies/retry_policy_factory.py`)
+new `execution.retry_*` config keys (`praxis_orchestrator/infra/policies/retry_policy_factory.py`)
 only seed a plan's policy AT CREATION and are deliberately never consulted
 again for an existing plan (config is a live global; a plan's policy is
 persisted, per-plan state — conflating the two would let a global config edit
@@ -371,7 +371,7 @@ about the previous attempt, so a retry re-ran an identical prompt against an
 identical contract on a clean worktree and reproduced an identical failure at
 full provider cost. That is why `VERIFICATION_ERROR` being terminal was *correct*
 until the feedback loop existed, and why the loop shipped first
-(`agent_orchestrator/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
+(`praxis_orchestrator/app/agent_feedback.py`, `PriorAttemptFeedback`, rendered after
 `## Constraints`).
 
 The retryable set is now narrower than the kind: only class **A** — the
@@ -699,3 +699,54 @@ to be a guarded aggregate transition.
 **Surgical, like `edit_task`:** it changes bindings and nothing else — no block
 resolution, no backoff clearing, no status change, no revision bump, no evidence
 invalidation. A different agent is not a different contract.
+
+---
+
+**Decision 65 (2026-08-15) — the rename to Praxis Orchestrator adopts existing
+state in place rather than migrating it.** Distribution `praxis-orchestrator`,
+Python package `praxis_orchestrator`, CLI `praxis`, state directory `~/.praxis`,
+environment variables `PRAXIS_*`. Scope and execution record:
+[`../superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](../superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
+
+The name was forced rather than chosen for taste: the previous working name is a
+Nintendo / Game Freak mark, and the previous distribution name belongs to a
+different project in this exact category on PyPI, so `pip install` would have
+fetched a stranger's tool.
+
+**The decision worth recording is not the name, it is what happens to an install
+that already exists.** Three options were available for the state directory and
+two of them are wrong in ways that are invisible until they cost somebody their
+work:
+
+- **Move it.** Breaks rolling back to the previous version — the old code looks
+  for a directory that is no longer there.
+- **Copy it.** Duplicates the envelope-encrypted secret store, the one file that
+  must never exist twice. Two copies wrapped by the same master key is how you
+  get an orphaned half nobody notices until a key is rotated.
+- **Adopt it in place**, which is what `infra/env_compat.py::resolve_home` does:
+  `PRAXIS_HOME`, else `ORCHESTRATOR_HOME`, else `~/.praxis` if it exists, else
+  `~/.orchestrator` **used where it is**, else a fresh `~/.praxis`. Nothing is
+  moved, nothing is copied, exactly one database exists, and the whole thing is
+  reversible. `orchestrator.db` keeps its filename for the same reason: renaming
+  it would make adoption look for a file that is not there and create an empty
+  one beside the operator's real data.
+
+The environment variables follow the same rule — read the new name, fall back to
+the one it replaced, warn once per process. **The API token alias is the
+load-bearing one.** `api/security.py` treats an unset token as "open in local
+dev", by design, so an upgrade that stopped reading `ORCHESTRATOR_API_TOKEN`
+would not raise, log, or fail a health check. It would silently unguard the
+control plane, and the first symptom would be a stranger's request succeeding.
+
+**Why no unfreeze:** nothing in the domain changed. This is packaging, the
+composition root, and one new infrastructure module.
+
+**What it cost to find out the layer was incomplete:** `/api/readiness` read the
+master key from `os.environ` directly rather than through the alias, and so
+reported a perfectly working pre-rename install as broken — with a detail line
+that invites the operator to generate a second master key, which permanently
+orphans the secret store. Reproduced before it was fixed, and locked by
+`test_readiness_sees_a_legacy_master_key`. The general lesson is the reason this
+entry exists: **an alias is only as good as the number of places that use it**,
+and the one site that bypassed it was the site whose whole job is telling an
+operator whether their install works.

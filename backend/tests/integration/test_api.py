@@ -11,19 +11,19 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     container.project_repo.add(
@@ -42,8 +42,8 @@ def test_health(client):
 
 
 def test_quarantined_legacy_plan_can_bind_a_project_over_http(client):
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-    from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock, PlanStatus
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from praxis_orchestrator.domain.entities.planning_artifacts import PlanBlock, PlanStatus
 
     container = dependencies.get_container()
     now = datetime(2026, 7, 17, tzinfo=timezone.utc)
@@ -255,9 +255,9 @@ def test_cyclic_plan_review_edits_activation_and_publication(client):
 
     # Deterministic cycle verification is the application-owned predecessor of
     # publication. Seed its accepted gate directly to isolate this HTTP contract.
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.domain.entities.planning_artifacts import ReviewGate, ReviewSubjectType
-    from agent_orchestrator.domain.factories.identity import new_id
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.domain.entities.planning_artifacts import ReviewGate, ReviewSubjectType
+    from praxis_orchestrator.domain.factories.identity import new_id
 
     container = dependencies.get_container()
     with container.new_unit_of_work() as uow:
@@ -294,9 +294,9 @@ def test_cyclic_plan_review_edits_activation_and_publication(client):
 
 def _plan_with_enriched_active_goal(client, project_id="project-1") -> str:
     """Drive intent -> roadmap approval -> one head-goal JIT contract."""
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.app.use_cases.advance_plan import advance_plan
-    from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.app.use_cases.advance_plan import advance_plan
+    from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
 
     for capability_id in ("implementation", "test_authoring"):
         client.post(
@@ -432,9 +432,9 @@ def test_pause_resume_and_edit_over_http(client):
 def test_blocked_task_retry_over_http(client):
     plan_id = _plan_with_enriched_active_goal(client)
 
-    from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock
-    from agent_orchestrator.domain.factories.identity import new_id
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.domain.entities.planning_artifacts import PlanBlock
+    from praxis_orchestrator.domain.factories.identity import new_id
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     container = dependencies.get_container()
     with container.new_unit_of_work() as uow:
@@ -492,8 +492,8 @@ def test_blocked_planning_stage_retry_over_http(client):
 
     from datetime import timedelta
 
-    from agent_orchestrator.domain.entities.planning_artifacts import PlanBlock
-    from agent_orchestrator.domain.factories.identity import new_id
+    from praxis_orchestrator.domain.entities.planning_artifacts import PlanBlock
+    from praxis_orchestrator.domain.factories.identity import new_id
 
     container = dependencies.get_container()
     with container.new_unit_of_work() as uow:
@@ -527,8 +527,8 @@ def _seed_agent_events(events):
     """Write agent_events rows directly through the sink for read-side tests."""
     import asyncio
 
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.domain.events.agent_events import AgentEvent
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.domain.events.agent_events import AgentEvent
 
     sink = dependencies.get_container().agent_event_sink
     for e in events:
@@ -598,14 +598,14 @@ def test_metrics_endpoint(client):
     ]
     import asyncio
     from uuid import uuid4
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.app.execution_records import (
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.app.execution_records import (
         ExecutionAttempt,
         ExecutionAttemptStatus,
         ExecutionRun,
         ExecutionRunStatus,
     )
-    from agent_orchestrator.app.observations import (
+    from praxis_orchestrator.app.observations import (
         ModelUsagePayload,
         ObservationCorrelation,
         ObservationKind,
@@ -613,8 +613,8 @@ def test_metrics_endpoint(client):
         ObservationSource,
         TelemetryObservation,
     )
-    from agent_orchestrator.app.runtime_failures import RuntimeFailure
-    from agent_orchestrator.domain.value_objects.lifecycle import FailureKind
+    from praxis_orchestrator.app.runtime_failures import RuntimeFailure
+    from praxis_orchestrator.domain.value_objects.lifecycle import FailureKind
 
     container = dependencies.get_container()
     asyncio.run(
@@ -967,7 +967,7 @@ def test_two_tier_config_over_http(client):
 
 
 def test_control_plane_token_guard(client, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_API_TOKEN", "sekrit")
+    monkeypatch.setenv("PRAXIS_API_TOKEN", "sekrit")
     denied = client.get("/api/providers")
     assert denied.status_code == 401
     allowed = client.get("/api/providers", headers={"Authorization": "Bearer sekrit"})
@@ -993,7 +993,7 @@ def _set_plan_phase(plan_id: str, phase) -> None:
 
 
 def test_plan_intent_and_cycle_draft_cancel_routes_over_http(client):
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
 
     plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()["plan_id"]
     client.post(f"/api/plans/{plan_id}/intent", json={"objective": "o"})
@@ -1013,7 +1013,7 @@ def test_plan_intent_and_cycle_draft_cancel_routes_over_http(client):
 
 
 def test_review_reopen_route_over_http(client):
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
     plan_id = _plan_at_cycle_review(client)
     assert client.post(f"/api/plans/{plan_id}/cycle-draft", json={"goals": [{"key": "g", "name": "G", "objective": "g", "position": 0, "depends_on": []}]}).status_code == 201
     _set_plan_phase(plan_id, PlanPhase.AWAITING_REVIEW)
@@ -1025,7 +1025,7 @@ def test_review_reopen_route_over_http(client):
 
 
 def test_review_finish_and_replan_routes_over_http(client):
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
     finish_plan = _plan_with_enriched_active_goal(client)
     _set_plan_phase(finish_plan, PlanPhase.REVIEW)
     assert client.post(f"/api/plans/{finish_plan}/review/finish").status_code == 204
@@ -1049,12 +1049,12 @@ def test_review_finish_and_replan_routes_over_http(client):
 
 
 def test_mid_running_replan_and_replanning_message_routes_over_http(client):
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import PlanPhase
     plan_id = _plan_with_enriched_active_goal(client)
     assert client.post(f"/api/plans/{plan_id}/replan").status_code == 204
     assert client.get(f"/api/plans/{plan_id}").json()["phase"] == PlanPhase.REPLANNING.value
     container = dependencies.get_container()
-    from agent_orchestrator.domain.entities.planning_artifacts import PlanStatus
+    from praxis_orchestrator.domain.entities.planning_artifacts import PlanStatus
     with container.new_unit_of_work() as uow:
         plan = uow.plans.get(plan_id)
         plan.status = PlanStatus.IDLE
@@ -1096,8 +1096,8 @@ def test_additional_error_codes_over_http(client, monkeypatch):
     assert invalid_edit.status_code == 422
     assert invalid_edit.json()["error"]["code"] == "INVALID_EDIT"
 
-    from agent_orchestrator.domain.errors.tasks_errors import StaleVersionError
-    from agent_orchestrator.infra.db.plan_repository import SqlitePlanRepository
+    from praxis_orchestrator.domain.errors.tasks_errors import StaleVersionError
+    from praxis_orchestrator.infra.db.plan_repository import SqlitePlanRepository
     original_save = SqlitePlanRepository.save
     monkeypatch.setattr(SqlitePlanRepository, "save", lambda self, plan: (_ for _ in ()).throw(StaleVersionError(plan.id, plan.version, plan.version + 1)))
     stale = client.post(f"/api/plans/{plan_id}/edits", json={"type": "update_goal", "goal_id": goal_id, "name": "x"})
@@ -1131,8 +1131,8 @@ def test_planning_artifacts_are_readable_and_resettable(client):
     informed looks identical from outside to one that does not."""
     from datetime import datetime, timezone
 
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.app.ports import PlanningArtifact
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.app.ports import PlanningArtifact
 
     plan_id = client.post("/api/plans", json={"brief": "b", "project_id": "project-1"}).json()[
         "plan_id"
@@ -1173,17 +1173,17 @@ def test_update_task_contract_repairs_a_frozen_contract_over_http(client):
     full replan, because no edit type could reach a frozen contract's fields."""
     from datetime import datetime, timezone
 
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-    from agent_orchestrator.domain.entities.execution_contracts import (
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from praxis_orchestrator.domain.entities.execution_contracts import (
         ContractCriterion,
         GoalContract,
         TaskContract,
         VerificationStrategy,
     )
-    from agent_orchestrator.domain.entities.goal import Goal
-    from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
-    from agent_orchestrator.domain.entities.task import Task
+    from praxis_orchestrator.domain.entities.goal import Goal
+    from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+    from praxis_orchestrator.domain.entities.task import Task
 
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     contract = TaskContract(
@@ -1266,8 +1266,8 @@ def test_plan_detail_distinguishes_a_live_worker_from_a_dead_one(client, tmp_pat
     """
     from datetime import timedelta
 
-    from agent_orchestrator.api import dependencies
-    from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+    from praxis_orchestrator.api import dependencies
+    from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
 
     container = dependencies.get_container()
     with container.new_unit_of_work() as uow:

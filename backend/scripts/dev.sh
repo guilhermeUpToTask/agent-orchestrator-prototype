@@ -113,7 +113,7 @@ load_environment() {
   #
   # The env file provides DEFAULTS: anything already set in the process
   # environment wins. `set -a; source` alone silently clobbered an explicit
-  # `export ORCHESTRATOR_HOME=…`, so a run an operator had carefully pointed at a
+  # `export PRAXIS_HOME=…`, so a run an operator had carefully pointed at a
   # disposable state directory went to `~/.orchestrator` instead — same class of
   # trap as `PROJECT_REPO_DIR`: you set a variable, it was ignored, and the work
   # happened somewhere else. Whether that overwrites real data is luck.
@@ -233,9 +233,9 @@ run_seed() {
   # directory — died with a raw `no such table: capabilities` traceback. There is
   # no case where seeding an unmigrated database is what the operator wanted.
   note "migrating the development database to head"
-  (cd "$BACKEND_DIR" && uv run orchestrate db upgrade)
+  (cd "$BACKEND_DIR" && uv run praxis db upgrade)
   note "seeding $mode development configuration"
-  (cd "$BACKEND_DIR" && uv run orchestrate "${args[@]}")
+  (cd "$BACKEND_DIR" && uv run praxis "${args[@]}")
 }
 
 CHILD_PIDS=()
@@ -277,7 +277,7 @@ run_start() {
   load_environment
   if [[ "$migrate" == true ]]; then
     note "migrating the development database to head"
-    (cd "$BACKEND_DIR" && uv run orchestrate db upgrade)
+    (cd "$BACKEND_DIR" && uv run praxis db upgrade)
   else
     note "database migration skipped by explicit --no-migrate"
   fi
@@ -285,9 +285,9 @@ run_start() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
   note "starting API at http://$host:$port"
-  (cd "$BACKEND_DIR" && exec uv run orchestrate api start --host "$host" --port "$port") & CHILD_PIDS+=("$!")
+  (cd "$BACKEND_DIR" && exec uv run praxis api start --host "$host" --port "$port") & CHILD_PIDS+=("$!")
   note "starting worker $worker_id (poll=${poll_seconds}s, lease=${lease_seconds}s)"
-  (cd "$BACKEND_DIR" && exec uv run orchestrate worker start --worker-id "$worker_id" --poll-seconds "$poll_seconds" --lease-seconds "$lease_seconds") & CHILD_PIDS+=("$!")
+  (cd "$BACKEND_DIR" && exec uv run praxis worker start --worker-id "$worker_id" --poll-seconds "$poll_seconds" --lease-seconds "$lease_seconds") & CHILD_PIDS+=("$!")
   if [[ "$frontend" == true ]]; then
     note "starting frontend at http://$frontend_host:$frontend_port"
     (cd "$FRONTEND_DIR" && exec npm run dev -- --host "$frontend_host" --port "$frontend_port") & CHILD_PIDS+=("$!")
@@ -311,7 +311,7 @@ run_check() {
     require_command git
     require_command python
     note "validating repository-aware Codex plugin"
-    (cd "$REPO_ROOT" && python plugins/agent-orchestrator-codex/scripts/validate.py)
+    (cd "$REPO_ROOT" && python plugins/praxis-orchestrator-codex/scripts/validate.py)
   fi
   if [[ "$RUN_BACKEND" == true ]]; then
     require_command uv

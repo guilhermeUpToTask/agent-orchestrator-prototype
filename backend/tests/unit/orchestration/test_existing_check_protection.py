@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.test_identity import existing_checks
-from agent_orchestrator.app.verification import (
+from praxis_orchestrator.app.test_identity import existing_checks
+from praxis_orchestrator.app.verification import (
     baseline_outcome,
     check_config_untouched,
     check_declared_scope,
@@ -28,7 +28,7 @@ from agent_orchestrator.app.verification import (
     sha256_file,
     validate_authoring,
 )
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     VerificationStrategy,

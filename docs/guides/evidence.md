@@ -72,7 +72,7 @@ means the work is already in a checkout you use.
 | `binding` | `repository_path` | What to do |
 |---|---|---|
 | `local` | the repository you named | Nothing to transport. `git -C "$PATH" diff "$BASE".."$BRANCH"` |
-| `remote` | a clone the orchestrator owns, under `$ORCHESTRATOR_HOME/projects/<id>/repos/<hash>` | The branch is **not** in your checkout. Add the clone as a remote and fetch |
+| `remote` | a clone the orchestrator owns, under `$PRAXIS_HOME/projects/<id>/repos/<hash>` | The branch is **not** in your checkout. Add the clone as a remote and fetch |
 | `scratch` | an auto-seeded demo repository | The run demonstrated the flow; there is no code here you want |
 
 For a `remote` binding — `in_operator_checkout` is `false` — the work reaches
@@ -136,7 +136,7 @@ python backend/scripts/snapshot_current_plan.py --plan-id "$PLAN" --pretty --out
 python backend/scripts/export_plan_runs.py --plan-id "$PLAN" --format bundle --output-dir ./evidence
 ```
 
-Both default to `$ORCHESTRATOR_HOME`; pass `--db` or `--orchestrator-home` to
+Both default to `$PRAXIS_HOME`; pass `--db` or `--orchestrator-home` to
 read another install. They open SQLite read-only (`mode=ro`, `query_only=ON`),
 construct no application container, and write nothing back. Secret, config and
 capability tables are excluded, and provider/model/agent catalog fields are

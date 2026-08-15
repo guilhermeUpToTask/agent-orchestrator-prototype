@@ -18,27 +18,27 @@ import pytest
 from click.testing import CliRunner
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.app.handlers.planning_handler import PlanningHandler
-from agent_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
-from agent_orchestrator.app.use_cases.cyclic_planning import (
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.app.handlers.planning_handler import PlanningHandler
+from praxis_orchestrator.app.use_cases.claim_ready_goal import claim_ready_goal
+from praxis_orchestrator.app.use_cases.cyclic_planning import (
     activate_cycle,
     approve_intent,
     propose_intent,
     record_output_disposition,
 )
-from agent_orchestrator.app.use_cases.run_worker import drive_goal, drive_plan
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan
-from agent_orchestrator.domain.entities.planning_artifacts import (
+from praxis_orchestrator.app.use_cases.run_worker import drive_goal, drive_plan
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from praxis_orchestrator.domain.entities.planning_artifacts import (
     OutputDisposition,
     PlanStatus,
     ProposalKind,
     ReviewSubjectType,
 )
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.infra.cli.main import cli
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 
 @dataclass
@@ -90,10 +90,10 @@ def drive_cycle_to_publication(
     on_ready: object | None = None,
 ) -> CompletedCycle:
     """Drive intent -> draft -> cycle -> enrichment -> execution -> publication."""
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
     # Left unset: the control plane stays open in local/test dev
-    # (`agent_orchestrator/api/security.py`), so the returned client needs no token.
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    # (`praxis_orchestrator/api/security.py`), so the returned client needs no token.
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])

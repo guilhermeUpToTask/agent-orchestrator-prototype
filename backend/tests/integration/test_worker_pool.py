@@ -1,6 +1,6 @@
 """Domain unfreeze #14 (symmetric per-goal leases + dynamic goal-worker
 pool): the actual operational promise this unfreeze makes — a SINGLE
-`orchestrate worker start` process drives multiple independent, ready goals
+`praxis worker start` process drives multiple independent, ready goals
 CONCURRENTLY, without an operator hand-starting a second OS process the way
 last session's live walkthrough required. This drives a real (real-SQLite,
 real git worktrees, dry-run agent runner) two-goal cyclic plan through ONE
@@ -17,18 +17,18 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
-from agent_orchestrator.domain.entities.project_definition import ProjectDefinition
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.value_objects.lifecycle import Status
-from agent_orchestrator.infra.cli.main import cli
-from agent_orchestrator.app.execution_services import ExecutionServices
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.environment.no_environment import NoEnvironment
-from agent_orchestrator.infra.worker.main import run_worker_forever
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, CycleStatus, PlanStatus
+from praxis_orchestrator.domain.entities.project_definition import ProjectDefinition
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.app.execution_services import ExecutionServices
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.environment.no_environment import NoEnvironment
+from praxis_orchestrator.infra.worker.main import run_worker_forever
 
 pytestmark = pytest.mark.integration
 
@@ -61,7 +61,7 @@ def _init_trunk_repo(repo: Path) -> None:
 def test_single_worker_process_drives_two_independent_goals_concurrently(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])
@@ -165,8 +165,8 @@ def test_a_worker_keeps_beating_while_a_goal_is_running(tmp_path, monkeypatch) -
     working. A test that only beats an IDLE worker passes against that broken
     design, so this one holds a goal open and watches the beat continue.
     """
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
-    monkeypatch.setattr("agent_orchestrator.infra.worker.main._HEARTBEAT_SECONDS", 0.05)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    monkeypatch.setattr("praxis_orchestrator.infra.worker.main._HEARTBEAT_SECONDS", 0.05)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])
@@ -291,7 +291,7 @@ def test_the_worker_hands_its_drivers_the_environment_the_container_built(
     the environment by hand into its own `drive_plan`/`drive_goal` call. This
     drives the REAL entrypoint and captures what the drivers were handed.
     """
-    monkeypatch.setenv("ORCHESTRATOR_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     seeded = CliRunner().invoke(cli, ["seed", "demo", "--stub"])
@@ -359,10 +359,10 @@ def test_the_worker_hands_its_drivers_the_environment_the_container_built(
         return ("paused", 0)
 
     monkeypatch.setattr(
-        "agent_orchestrator.app.use_cases.run_worker.worker_tick", _fake_worker_tick
+        "praxis_orchestrator.app.use_cases.run_worker.worker_tick", _fake_worker_tick
     )
     monkeypatch.setattr(
-        "agent_orchestrator.app.use_cases.run_worker.drive_goal", _fake_drive_goal
+        "praxis_orchestrator.app.use_cases.run_worker.drive_goal", _fake_drive_goal
     )
 
     async def scenario() -> None:

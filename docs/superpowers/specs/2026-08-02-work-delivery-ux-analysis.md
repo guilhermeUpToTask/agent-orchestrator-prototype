@@ -14,7 +14,7 @@ live state, a pull request, or something else?
 decided by a field most operators set once and forget: `ProjectDefinition.repo_url`.**
 
 `ProjectWorkspaceResolver.repository_path_for`
-(`backend/agent_orchestrator/infra/git/project_workspace.py:101`) resolves three
+(`backend/praxis_orchestrator/infra/git/project_workspace.py:101`) resolves three
 topologies:
 
 | # | `repo_url` | Where the work lands | The delivery problem |

@@ -2,7 +2,7 @@
 
 *One SQLite file holds everything. The plan is a document; the catalogs are relational; secrets are envelope-encrypted.*
 
-Code anchors: `backend/agent_orchestrator/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `goal_promotion_repository.py` (promoted git refs), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/agent_orchestrator/infra/db/migrations/versions/` (the migration chain, currently through `0018_acceptance_runs`; inside the package so an installed copy ships it).
+Code anchors: `backend/praxis_orchestrator/infra/db/tables.py` (schema), `engine.py` (PRAGMAs), `plan_repository.py` (document + lease), `execution_record_repository.py` (run/attempt ledger), `goal_promotion_repository.py` (promoted git refs), `observation_repository.py` (typed operational evidence), `reference_repos.py` (catalog CRUD + integrity), `secret_store.py` (encryption), `backend/praxis_orchestrator/infra/db/migrations/versions/` (the migration chain, currently through `0018_acceptance_runs`; inside the package so an installed copy ships it).
 
 ## Schema at a glance
 
@@ -262,12 +262,12 @@ Applied to **every** pooled connection via a `connect` event listener (`engine.p
 
 ## Secrets — envelope encryption
 
-Each secret row stores `ciphertext` + `wrapped_key`: the value is encrypted with a per-secret data key, which is itself wrapped by the master key (`ORCHESTRATOR_MASTER_KEY`, Fernet). Catalog rows reference secrets by `api_key_ref` URI only. `resolve()` in `secret_store.py` is the single decryption point, and the store fails closed on a missing/invalid master key — which is exactly why stub/dry-run factories receive it as an *unevaluated thunk*.
+Each secret row stores `ciphertext` + `wrapped_key`: the value is encrypted with a per-secret data key, which is itself wrapped by the master key (`PRAXIS_MASTER_KEY`, Fernet). Catalog rows reference secrets by `api_key_ref` URI only. `resolve()` in `secret_store.py` is the single decryption point, and the store fails closed on a missing/invalid master key — which is exactly why stub/dry-run factories receive it as an *unevaluated thunk*.
 
 ## State directory
 
 ```text
-~/.orchestrator/            (ORCHESTRATOR_HOME)
+~/.praxis/                  (PRAXIS_HOME)
 ├── orchestrator.db         everything above (+ -wal/-shm)
 ├── projects/<project id>/
 │   └── repo/               ONLY for a project created with no `repo_url` —
@@ -282,4 +282,4 @@ Each secret row stores `ciphertext` + `wrapped_key`: the value is encrypted with
                             GET /api/plans/{id}/attempts/{id}/log
 ```
 
-One file to back up; delete the directory for a factory reset. Migrations: `python -m agent_orchestrator.infra.cli.main db upgrade`.
+One file to back up; delete the directory for a factory reset. Migrations: `python -m praxis_orchestrator.infra.cli.main db upgrade`.

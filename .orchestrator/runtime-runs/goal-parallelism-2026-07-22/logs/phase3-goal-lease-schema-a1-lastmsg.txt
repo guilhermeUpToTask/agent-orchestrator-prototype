@@ -38,7 +38,7 @@ s....................................................................... [ 22%]
     from starlette.testclient import TestClient as TestClient  # noqa
 
 src/domain/entities/execution_contracts.py:105
-  /tmp/agent-orchestrator-goalparallel-phase3/backend/src/domain/entities/execution_contracts.py:105: PytestCollectionWarning: cannot collect test class 'TestBundle' because it has a __init__ constructor (from: tests/unit/runtime/test_cli_runner_prompt.py)
+  /tmp/praxis-orchestrator-goalparallel-phase3/backend/src/domain/entities/execution_contracts.py:105: PytestCollectionWarning: cannot collect test class 'TestBundle' because it has a __init__ constructor (from: tests/unit/runtime/test_cli_runner_prompt.py)
     class TestBundle(BaseModel):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -58,7 +58,7 @@ warning: `VIRTUAL_ENV=/workspaces/agent-orchestrator/backend/.venv` does not mat
     from starlette.testclient import TestClient as TestClient  # noqa
 
 src/domain/entities/execution_contracts.py:105
-  /tmp/agent-orchestrator-goalparallel-phase3/backend/src/domain/entities/execution_contracts.py:105: PytestCollectionWarning: cannot collect test class 'TestBundle' because it has a __init__ constructor (from: tests/unit/runtime/test_cli_runner_prompt.py)
+  /tmp/praxis-orchestrator-goalparallel-phase3/backend/src/domain/entities/execution_contracts.py:105: PytestCollectionWarning: cannot collect test class 'TestBundle' because it has a __init__ constructor (from: tests/unit/runtime/test_cli_runner_prompt.py)
     class TestBundle(BaseModel):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

@@ -3,7 +3,7 @@
 Not plan-scoped (a worker outlives every plan), upserted by worker_id rather
 than appended (a restarted worker replaces its own row), and best-effort:
 a write failure is logged and swallowed, never propagated — mirrors
-`SqliteAgentEventSink` (`agent_orchestrator/infra/db/agent_event_sink.py`)."""
+`SqliteAgentEventSink` (`praxis_orchestrator/infra/db/agent_event_sink.py`)."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ import time
 
 import pytest
 
-from agent_orchestrator.infra.db.engine import build_engine, make_session_factory
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.db.worker_registry import WorkerRegistry
+from praxis_orchestrator.infra.db.engine import build_engine, make_session_factory
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.db.worker_registry import WorkerRegistry
 
 pytestmark = pytest.mark.integration
 

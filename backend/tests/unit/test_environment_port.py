@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_orchestrator.app.environment_port import (
+from praxis_orchestrator.app.environment_port import (
     AcceptanceVerdict,
     EnvironmentSpec,
     ProjectEnvironment,
 )
-from agent_orchestrator.infra.environment.no_environment import NoEnvironment
+from praxis_orchestrator.infra.environment.no_environment import NoEnvironment
 
 
 def test_no_environment_satisfies_the_protocol():

@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.environment_port import (
+from praxis_orchestrator.app.environment_port import (
     AcceptanceVerdict,
     EnvironmentSpec,
     ProjectEnvironment,
 )
-from agent_orchestrator.domain.entities.planning_artifacts import OutputDisposition
+from praxis_orchestrator.domain.entities.planning_artifacts import OutputDisposition
 from tests.integration.cyclic_walk import drive_cycle_to_publication
 
 pytestmark = pytest.mark.integration
@@ -161,7 +161,7 @@ def test_the_verdict_survives_publication(tmp_path, monkeypatch):
     gate = plan.review_gate
     assert gate is not None
 
-    from agent_orchestrator.app.use_cases.cyclic_planning import record_output_disposition
+    from praxis_orchestrator.app.use_cases.cyclic_planning import record_output_disposition
 
     record_output_disposition(
         walk.plan_id,
@@ -326,7 +326,7 @@ def test_a_further_tick_does_not_reopen_or_re_run_anything(tmp_path, monkeypatch
     what a ledger-only guard would get wrong for a non-recording adapter."""
     import asyncio
 
-    from agent_orchestrator.app.use_cases.run_worker import drive_plan
+    from praxis_orchestrator.app.use_cases.run_worker import drive_plan
 
     environment = RecordingEnvironment("skipped")
     walk = _walk(tmp_path, monkeypatch, environment)

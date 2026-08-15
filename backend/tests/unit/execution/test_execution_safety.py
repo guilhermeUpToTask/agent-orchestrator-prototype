@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_orchestrator.app.handlers.execution_handler import ExecutionHandler
-from agent_orchestrator.app.ports import CommandExecution
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.handlers.execution_handler import ExecutionHandler
+from praxis_orchestrator.app.ports import CommandExecution
+from praxis_orchestrator.app.testing.fakes import (
     CollectingEventSink,
     FakeClock,
     InMemoryAgentRepository,
@@ -15,11 +15,11 @@ from agent_orchestrator.app.testing.fakes import (
     InMemoryPlanRepository,
     InMemoryUnitOfWork,
 )
-from agent_orchestrator.app.use_cases.cyclic_planning import propose_intent
-from agent_orchestrator.app.verification import sha256_file
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.app.use_cases.cyclic_planning import propose_intent
+from praxis_orchestrator.app.verification import sha256_file
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     TestBundle as AuthoritativeTestBundle,
@@ -27,18 +27,18 @@ from agent_orchestrator.domain.entities.execution_contracts import (
     VerificationKind,
     VerificationStrategy,
 )
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import (
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import (
     Cycle,
     CycleStatus,
     PlanStatus,
     ProposalKind,
 )
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.planning_errors import InvalidEditError
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import Status
-from agent_orchestrator.domain.value_objects.tasks_vos import TaskResult
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.planning_errors import InvalidEditError
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.value_objects.tasks_vos import TaskResult
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)

@@ -1,14 +1,14 @@
 from datetime import datetime, timezone
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     TaskContract,
     TestBundle,
     VerificationStrategy,
 )
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.infra.runtime.cli_runner import build_task_prompt
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.infra.runtime.cli_runner import build_task_prompt
 
 
 def spec(role="implementer"):
@@ -129,7 +129,7 @@ def test_a_prior_rejection_is_rendered_so_the_retry_is_not_identical():
 
     This is the precondition for making a verification failure retryable at all.
     """
-    from agent_orchestrator.app.ports import PriorAttemptRejection
+    from praxis_orchestrator.app.ports import PriorAttemptRejection
 
     prompt = build_task_prompt(
         Task(id="t1", name="Example", position=0, description="Do it.", contract=contract()),

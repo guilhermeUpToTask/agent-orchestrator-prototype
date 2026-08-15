@@ -1,4 +1,4 @@
-"""`orchestrate version` — the identity every run report is supposed to carry.
+"""`praxis version` — the identity every run report is supposed to carry.
 
 Until this existed the reporting guide told people to run `git rev-parse` by
 hand, which an installed copy cannot do at all: there is no repository beside
@@ -13,14 +13,14 @@ import subprocess
 
 from click.testing import CliRunner
 
-from agent_orchestrator.infra.cli.main import cli
+from praxis_orchestrator.infra.cli.main import cli
 
 
 def test_version_prints_the_facts_a_report_needs() -> None:
     result = CliRunner().invoke(cli, ["version"])
 
     assert result.exit_code == 0, result.output
-    assert "agent-orchestrator" in result.output
+    assert "praxis-orchestrator" in result.output
     for key in ("commit", "python", "platform"):
         assert key in result.output
 

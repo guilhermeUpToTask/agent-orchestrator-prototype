@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from agent_orchestrator.app.testing.fakes import InMemoryAgentRepository
-from agent_orchestrator.app.verification import sha256_file, validate_candidate
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.execution_contracts import (
+from praxis_orchestrator.app.testing.fakes import InMemoryAgentRepository
+from praxis_orchestrator.app.verification import sha256_file, validate_candidate
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.execution_contracts import (
     ContractCriterion,
     GoalContract,
     TaskContract,
@@ -17,16 +17,16 @@ from agent_orchestrator.domain.entities.execution_contracts import (
     TestBundleState as BundleState,
     VerificationStrategy,
 )
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
-from agent_orchestrator.domain.errors.base import DomainError
-from agent_orchestrator.domain.services.agent_role_resolution import (
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.errors.agent_errors import RoleUnsatisfiableError
+from praxis_orchestrator.domain.errors.base import DomainError
+from praxis_orchestrator.domain.services.agent_role_resolution import (
     RunRole,
     resolve_role_agent,
     resolve_task_role_agents,
 )
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -152,7 +152,7 @@ def test_role_resolution_never_falls_back_without_role_capability() -> None:
     single `_STATUS_BY_CODE` table could not reach it: `POST /retry-stage` on an
     `agent_capability` block -- the block's OWN advertised legal resolution --
     returned an opaque `500 INTERNAL_ERROR` instead of telling the operator
-    which capabilities no agent covers. agent_orchestrator/api/exceptions.py states the rule
+    which capabilities no agent covers. praxis_orchestrator/api/exceptions.py states the rule
     outright: "an unmapped builtin error is a bug and should surface as the
     enveloped 500."
     """
@@ -206,7 +206,7 @@ def test_repository_root_scope_accepts_normal_relative_paths(tmp_path) -> None:
     frozen = bundle("tests/test_behavior.py", sha256_file(protected))
     contract = task_contract(allowed_scope=["."], forbidden_scope=[".git/"])
 
-    accepted = validate_candidate(tmp_path, contract, frozen, ["agent_orchestrator/app.py"])
+    accepted = validate_candidate(tmp_path, contract, frozen, ["praxis_orchestrator/app.py"])
     rejected = validate_candidate(tmp_path, contract, frozen, [".git/config"])
 
     assert accepted.accepted

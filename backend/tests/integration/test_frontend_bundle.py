@@ -22,11 +22,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api import frontend as frontend_module
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api import frontend as frontend_module
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -44,7 +44,7 @@ def bundle(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path / "home")
     Base.metadata.create_all(container.engine)
     with TestClient(create_app(container)) as test_client:
@@ -119,7 +119,7 @@ def test_the_api_starts_without_a_bundle(tmp_path, monkeypatch) -> None:
     """A source checkout that never ran `npm run build` must still work — that
     is how the test suite and every fixture run operate."""
     monkeypatch.setattr(frontend_module, "bundle_dir", lambda: tmp_path / "absent")
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path / "home")
     Base.metadata.create_all(container.engine)
 
@@ -132,6 +132,6 @@ def test_the_api_starts_without_a_bundle(tmp_path, monkeypatch) -> None:
 def test_the_bundle_directory_is_inside_the_package() -> None:
     """Same property the migrations needed: an installed copy has no
     repository, so the path must be derived from the package."""
-    import agent_orchestrator
+    import praxis_orchestrator
 
-    assert frontend_module.bundle_dir().is_relative_to(Path(agent_orchestrator.__file__).resolve().parent)
+    assert frontend_module.bundle_dir().is_relative_to(Path(praxis_orchestrator.__file__).resolve().parent)

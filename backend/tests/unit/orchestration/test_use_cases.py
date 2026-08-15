@@ -5,24 +5,24 @@ from datetime import datetime, timezone
 import pytest
 
 
-from agent_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
-from agent_orchestrator.domain.entities.agent_spec import AgentSpec
-from agent_orchestrator.domain.entities.capability import Capability
-from agent_orchestrator.domain.entities.goal import Goal
-from agent_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
-from agent_orchestrator.domain.entities.task import Task
-from agent_orchestrator.domain.errors.agent_errors import AgentNotFoundError, UnknownCapabilityError
-from agent_orchestrator.domain.errors.planning_errors import EmptyPlanError, InvalidEditError
-from agent_orchestrator.domain.errors.tasks_errors import (
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan, PlanPhase
+from praxis_orchestrator.domain.entities.agent_spec import AgentSpec
+from praxis_orchestrator.domain.entities.capability import Capability
+from praxis_orchestrator.domain.entities.goal import Goal
+from praxis_orchestrator.domain.entities.planning_artifacts import Cycle, PlanBlock, PlanStatus
+from praxis_orchestrator.domain.entities.task import Task
+from praxis_orchestrator.domain.errors.agent_errors import AgentNotFoundError, UnknownCapabilityError
+from praxis_orchestrator.domain.errors.planning_errors import EmptyPlanError, InvalidEditError
+from praxis_orchestrator.domain.errors.tasks_errors import (
     GoalAlreadyRunningError,
     InvalidTransitionError,
     StaleVersionError,
 )
-from agent_orchestrator.domain.policies.retry_policies import RetryPolicy
-from agent_orchestrator.domain.value_objects.lifecycle import Status
+from praxis_orchestrator.domain.policies.retry_policies import RetryPolicy
+from praxis_orchestrator.domain.value_objects.lifecycle import Status
 
-from agent_orchestrator.app.use_cases.create_plan import create_plan
-from agent_orchestrator.app.use_cases.apply_edit import (
+from praxis_orchestrator.app.use_cases.create_plan import create_plan
+from praxis_orchestrator.app.use_cases.apply_edit import (
     apply_edit,
     AddTask,
     RemoveTask,
@@ -33,8 +33,8 @@ from agent_orchestrator.app.use_cases.apply_edit import (
     UpdateGoal,
     UpdateTask,
 )
-from agent_orchestrator.app.use_cases.control import finish_review, resume_from_review
-from agent_orchestrator.app.testing.fakes import (
+from praxis_orchestrator.app.use_cases.control import finish_review, resume_from_review
+from praxis_orchestrator.app.testing.fakes import (
     InMemoryAgentRepository,
     InMemoryCapabilityRepository,
     InMemoryOutbox,

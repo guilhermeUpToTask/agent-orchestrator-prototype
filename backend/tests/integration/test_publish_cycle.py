@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from agent_orchestrator.app.forge_port import ForgeRequestFailedError
-from agent_orchestrator.app.testing.fakes import FakeForge
-from agent_orchestrator.app.use_cases.publish_cycle import publish_cycle
-from agent_orchestrator.domain.entities.planning_artifacts import OutputDisposition
-from agent_orchestrator.infra.forge.no_forge import NoForge
+from praxis_orchestrator.app.forge_port import ForgeRequestFailedError
+from praxis_orchestrator.app.testing.fakes import FakeForge
+from praxis_orchestrator.app.use_cases.publish_cycle import publish_cycle
+from praxis_orchestrator.domain.entities.planning_artifacts import OutputDisposition
+from praxis_orchestrator.infra.forge.no_forge import NoForge
 from tests.integration.cyclic_walk import drive_cycle_to_publication
 
 pytestmark = pytest.mark.integration

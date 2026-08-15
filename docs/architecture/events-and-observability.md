@@ -2,7 +2,7 @@
 
 *Two event streams, one operational execution ledger, and one delivery path; what an operator can see, and how secrets stay out of all of it.*
 
-Code anchors: `backend/agent_orchestrator/domain/events/` (domain event types), `backend/agent_orchestrator/app/execution_records.py` (operational lifecycle), `backend/agent_orchestrator/app/observations.py` (typed evidence), `backend/agent_orchestrator/infra/db/execution_record_repository.py` + `observation_repository.py` (persistence), `backend/agent_orchestrator/infra/db/outbox.py` + `agent_event_sink.py` (event writers), `backend/agent_orchestrator/api/outbox_relay.py` (delivery), and `backend/agent_orchestrator/api/logging/` (logs).
+Code anchors: `backend/praxis_orchestrator/domain/events/` (domain event types), `backend/praxis_orchestrator/app/execution_records.py` (operational lifecycle), `backend/praxis_orchestrator/app/observations.py` (typed evidence), `backend/praxis_orchestrator/infra/db/execution_record_repository.py` + `observation_repository.py` (persistence), `backend/praxis_orchestrator/infra/db/outbox.py` + `agent_event_sink.py` (event writers), `backend/praxis_orchestrator/api/outbox_relay.py` (delivery), and `backend/praxis_orchestrator/api/logging/` (logs).
 
 ## The two streams
 
@@ -64,7 +64,7 @@ The contract, end to end:
 CLI runners read subprocess stdout and stderr incrementally through the shared
 `supervise_process()` supervisor. For attempts with a canonical `attempt_id`,
 the supervisor writes bounded JSONL records to
-`$ORCHESTRATOR_HOME/runtime-logs/<attempt_id>.jsonl` via `attempt_log_path()`;
+`$PRAXIS_HOME/runtime-logs/<attempt_id>.jsonl` via `attempt_log_path()`;
 its process observations contain lifecycle metadata such as byte counts, exit
 code, duration, and log path, never raw output.
 
@@ -141,5 +141,5 @@ project-sensitive even though secrets and unrelated catalogs are excluded.
 Three rules, enforced at the choke points:
 
 1. Keys live **envelope-encrypted** in the `secrets` table; catalog rows carry only `api_key_ref` URIs.
-2. `SqliteSecretStore.resolve()` is the **single decryption point**; the store is passed to factories as a thunk so stub/dry-run modes never construct it (it fails closed on a missing `ORCHESTRATOR_MASTER_KEY`).
+2. `SqliteSecretStore.resolve()` is the **single decryption point**; the store is passed to factories as a thunk so stub/dry-run modes never construct it (it fails closed on a missing `PRAXIS_MASTER_KEY`).
 3. Never log key material: domain-error `context` is log-safe by contract. Typed observation serialization is an allowlist and excludes prompts, completions, messages, source code, raw output, credentials, and arbitrary dictionaries.

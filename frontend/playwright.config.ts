@@ -59,12 +59,12 @@ export default defineConfig({
         // a live server. That produced a 500 on the first `GET /api/projects`
         // (SQLite CANTOPEN — the directory was gone), which looked exactly like
         // a product defect for as long as it took to find.
-        command: `rm -rf ${E2E_HOME} && ${PYTHON} -m agent_orchestrator.infra.cli.main serve --port ${PORT} --no-worker`,
+        command: `rm -rf ${E2E_HOME} && ${PYTHON} -m praxis_orchestrator.infra.cli.main serve --port ${PORT} --no-worker`,
         url: `http://127.0.0.1:${PORT}/health`,
         timeout: 120_000,
         reuseExistingServer: false,
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ORCHESTRATOR_HOME: E2E_HOME },
+        env: { PRAXIS_HOME: E2E_HOME },
       },
 });

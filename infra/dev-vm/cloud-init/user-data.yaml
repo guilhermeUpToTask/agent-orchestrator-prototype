@@ -53,7 +53,7 @@ packages:
 write_files:
   - path: /etc/profile.d/praxis.sh
     content: |
-      export ORCHESTRATOR_HOME="$HOME/.orchestrator"
+      export PRAXIS_HOME="$HOME/.praxis"
   - path: /etc/sysctl.d/60-praxis-userns.conf
     content: |
       # Ubuntu 24.04 ships kernel.apparmor_restrict_unprivileged_userns=1, which
@@ -80,4 +80,4 @@ runcmd:
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   - apt-get install -y nodejs
   - npm install -g @anthropic-ai/claude-code @openai/codex
-  - su - dev -c 'mkdir -p ~/.orchestrator'
+  - su - dev -c 'mkdir -p ~/.praxis'

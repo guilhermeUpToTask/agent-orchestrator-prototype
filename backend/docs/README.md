@@ -7,4 +7,4 @@ System-level documentation (architecture with diagrams, decision log, legacy fea
 - `adr-concurrency-lease.md` → [`docs/decisions/adr-001-concurrency-lease.md`](../../docs/decisions/adr-001-concurrency-lease.md)
 - `DESIGN_NOTES.md` → [`docs/decisions/domain-design-decisions.md`](../../docs/decisions/domain-design-decisions.md)
 
-Per-layer READMEs sit next to the code: [`agent_orchestrator/domain/`](../src/domain/README.md) · [`agent_orchestrator/app/`](../src/app/README.md) · [`agent_orchestrator/infra/`](../src/infra/README.md) · [`agent_orchestrator/api/`](../src/api/README.md) · [`tests/`](../tests/README.md).
+Per-layer READMEs sit next to the code: [`praxis_orchestrator/domain/`](../src/domain/README.md) · [`praxis_orchestrator/app/`](../src/app/README.md) · [`praxis_orchestrator/infra/`](../src/infra/README.md) · [`praxis_orchestrator/api/`](../src/api/README.md) · [`tests/`](../tests/README.md).

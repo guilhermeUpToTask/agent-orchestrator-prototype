@@ -1,9 +1,9 @@
 # Phase 10B — the rename to `praxis-orchestrator`, scoped honestly
 
 **Date:** 2026-08-11
-**Status:** **Group D is done** (2026-08-11) — the third party's mark is out of
-the working tree. Groups A–C (package, distribution, environment variables,
-state directory) are scoped here and not yet executed.
+**Status:** **All four groups are executed** (Group D 2026-08-11; Groups A, B
+and C 2026-08-15). What remains is not code — see *Executed* below and the
+open trademark item at the foot of this document.
 **Decision:** the project is renamed to **Praxis Orchestrator** — distribution
 `praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`.
 **The name is settled** (owner decision, 2026-08-11). The `Praxis Framework`
@@ -24,21 +24,21 @@ over — it is also **a Nintendo / Game Freak mark**, which makes its removal a
 legal hygiene item rather than a branding preference (Group D). The audit then
 found a third problem, and it is the one that makes the rename unavoidable.
 
-**`agent-orchestrator` on PyPI is already taken — by a competing project in this
+**`praxis-orchestrator` on PyPI is already taken — by a competing project in this
 exact category.**
 
 ```
-name    : agent-orchestrator
+name    : praxis-orchestrator
 version : 2.0.0
 summary : Orquestrador de Agentes de IA para Desenvolvimento de Software
-author  : Agent Orchestrator Team <team@agent-orchestrator.dev>
-home    : https://github.com/luhfilho/agent-orchestrator
+author  : Agent Orchestrator Team <team@praxis-orchestrator.dev>
+home    : https://github.com/luhfilho/praxis-orchestrator
 ```
 
 An AI agent orchestrator for software development, at 2.0.0, holding the name
 this repository's `pyproject.toml` declares. This project has never published:
 `release-please.yml` builds a wheel and attaches it to a GitHub Release, and
-nothing in CI touches PyPI. So `pip install agent-orchestrator` today installs
+nothing in CI touches PyPI. So `pip install praxis-orchestrator` today installs
 **someone else's tool**, and the first attempt to publish would have failed.
 
 The rename is therefore not cosmetic. The current distribution name is
@@ -78,8 +78,8 @@ job.
 
 | surface | occurrences | files |
 |---|---|---|
-| Python package `agent_orchestrator` → `praxis_orchestrator` | 2066 | 344 |
-| Distribution/repo name `agent-orchestrator` → `praxis-orchestrator` | 756 | 101 |
+| Python package `praxis_orchestrator` → `praxis_orchestrator` | 2066 | 344 |
+| Distribution/repo name `praxis-orchestrator` → `praxis-orchestrator` | 756 | 101 |
 | `Praxis Orchestrator` in titles, docs and the OpenAPI description | 24 | 22 |
 
 The package rename is the largest number and the lowest risk: the project has
@@ -88,19 +88,31 @@ deprecation shim to write, because there is nobody to deprecate for.
 
 ### Group B — per-attempt runtime variables (mechanical, but read the note)
 
-Eight of the thirteen `ORCHESTRATOR_*` variables are injected by the runner into
-each agent subprocess and live only for that attempt:
+Six `ORCHESTRATOR_*` variables are injected by the runner into each agent
+subprocess and live only for that attempt:
 
 `ORCHESTRATOR_ATTEMPT_ID` (78), `ORCHESTRATOR_ATTEMPT_NUMBER` (56),
 `ORCHESTRATOR_PLAN_ID` (48), `ORCHESTRATOR_GOAL_ID` (48),
-`ORCHESTRATOR_TASK_ID` (47), `ORCHESTRATOR_RUN_ID` (47),
-`ORCHESTRATOR_SCOPE` (43), `ORCHESTRATOR_PROJECT_ID` (2)
+`ORCHESTRATOR_TASK_ID` (47), `ORCHESTRATOR_RUN_ID` (47)
 
 Nothing persists them, so renaming to `PRAXIS_*` needs no migration. **The
 note:** they are part of the contract with an agent runtime, so any prompt,
 skill file or wrapper script that reads them renames in the same commit. Grep
 `fixtures/`, `demos/` and `.orchestrator/` before assuming the package is the
-only reader.
+only reader — done, and the package plus one test and one architecture doc were
+the only readers.
+
+**Two entries in the original list were miscounted, and both are corrected
+here rather than silently dropped:**
+
+- **`ORCHESTRATOR_SCOPE` (43) is not an environment variable.** It is
+  `SqliteConfigStore.ORCHESTRATOR_SCOPE`, the Python constant holding the
+  config *scope* name `"orchestrator"` — a value **persisted in the `config`
+  table** on every existing install. Renaming it is a data migration for zero
+  user-visible gain, so it stays. The count was picking up a class attribute
+  that merely shares the prefix.
+- **`ORCHESTRATOR_PROJECT_ID` (2) does not exist.** The two occurrences were
+  this document's own. Nothing injects or reads it.
 
 ### Group C — user-visible state on existing installs
 
@@ -267,6 +279,60 @@ declared in `[project.scripts]`, so an operator's existing scripts keep running.
 6. Docs, fixtures, demos and README in the same PR as the code that moved —
    per the repo's own docs-discipline rule, and `test_documented_paths_exist.py`
    (now covering source comments too) will fail the build if any are missed.
+
+**Step 1 was not honoured, deliberately and on the record.** The trademark item
+is still open, and the rename went ahead of it because the owner settled the
+name on 2026-08-11 and every group below is written so the name is a parameter.
+If clearance comes back dirty, what has to change is a search-and-replace over
+identifiers plus a second alias generation — the migration design, the compat
+layer and the tests are all name-independent. Registration on PyPI/npm/GitHub
+(step 2) is likewise still outstanding and is an owner action.
+
+---
+
+## Executed
+
+**Group D — 2026-08-11.** 49 files; recorded above.
+
+**Groups A, B and C — 2026-08-15.** All on `phase-10b-rename-package`.
+
+| what | outcome |
+|---|---|
+| Python package `agent_orchestrator` → `praxis_orchestrator` | 344 files; zero occurrences of the old name remain in tracked files |
+| Distribution `praxis-orchestrator`, titles, OpenAPI description | done; `openapi.json` and `src/types/generated/` regenerated from the renamed source |
+| Per-attempt runtime variables → `PRAXIS_*` (Group B) | `infra/runtime/cli_runner.py`, its taxonomy test, `docs/architecture/execution-model.md` |
+| `PRAXIS_HOME` / `PRAXIS_MASTER_KEY` / `PRAXIS_API_TOKEN` / `PRAXIS_DB_URL` | `infra/env_compat.py`, read at the four sites that read the environment at all |
+| State directory `~/.praxis`, adopting `~/.orchestrator` in place | `env_compat.resolve_home()`; the 15 fixture scripts mirror the same order |
+| CLI `praxis`, with `orchestrate` delegating | `[project.scripts]` declares both; the deprecation goes to **stderr** so `… \| jq` in this repo's own fixtures keeps working |
+| Regression tests | `tests/integration/test_rename_compatibility.py` — aliases, precedence, a legacy token still guarding the API, a legacy key still decrypting, adoption without move or copy, both entry points |
+
+### What the execution found that the scope did not predict
+
+1. **`/api/readiness` reported a working pre-rename install as broken.**
+   `routers/readiness.py` read the master key from `os.environ` directly rather
+   than through the alias, so an install whose key is under
+   `ORCHESTRATOR_MASTER_KEY` — every install that predates the rename — got
+   `fail: PRAXIS_MASTER_KEY is not set`. The secret store itself worked fine.
+   The harm is not the red mark, it is the instruction attached to it: the
+   operator's next move is to generate a master key, and a second key
+   **permanently orphans the encrypted store**. Reproduced first, then fixed;
+   locked by `test_readiness_sees_a_legacy_master_key`.
+2. **Twenty-one tests changed meaning without failing.** They clear `PRAXIS_*`
+   to assert the no-key / no-token state, and with the alias in place the value
+   now arrives through the old name instead. Two failed outright on the dev
+   guest (which exports `ORCHESTRATOR_MASTER_KEY`); the other nineteen passed
+   for reasons unrelated to what they claim to test. Fixed once, in
+   `tests/conftest.py`, by stripping the pre-rename names for the session —
+   the class rather than twenty-one instances of it.
+3. **`ORCHESTRATOR_EMBED_COORDINATORS` got an alias it should not have had.**
+   It belongs to the pre-refactor architecture and nothing has read it for two
+   rewrites. An alias for a variable no code reads is a compatibility promise
+   that cannot be tested; removed, with the reason recorded in `env_compat.py`.
+4. **`orchestrator.db` keeps its name.** Renaming the file inside the state
+   directory would make adoption look for `praxis.db` in an adopted
+   `~/.orchestrator`, not find it, and create an empty one beside the
+   operator's real database — precisely the failure adoption exists to prevent.
+   The filename is internal; the directory is what an operator types.
 
 ---
 

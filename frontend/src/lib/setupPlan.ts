@@ -9,7 +9,7 @@
  * says that a reasoner cannot be pointed at a model that does not exist yet.
  *
  * Steps are DERIVED from live catalog state, never stored, so the wizard is
- * re-entrant by construction: an operator who ran `orchestrate seed demo`, or
+ * re-entrant by construction: an operator who ran `praxis seed demo`, or
  * configured half of this by hand, sees those steps already satisfied instead
  * of being asked to redo them.
  */

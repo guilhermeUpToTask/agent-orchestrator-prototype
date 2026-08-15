@@ -1,0 +1,304 @@
+"""SQLite Plan repository with CAS, project ownership, and plan leases."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Session, sessionmaker
+
+from praxis_orchestrator.app.ports import Clock
+from praxis_orchestrator.domain.aggregates.planner_orchestrator import Plan
+from praxis_orchestrator.domain.errors.planning_errors import PlanNotFoundError
+from praxis_orchestrator.domain.errors.tasks_errors import StaleVersionError
+from praxis_orchestrator.domain.factories.plan_factory import PlanFactory
+from praxis_orchestrator.infra.db._session import run_in_session
+
+_UPSERT_SQL = text(
+    """
+    INSERT INTO plans
+        (id, project_id, version, status, phase, iteration, data,
+         retry_not_before, paused, pause_requested, created_at, updated_at)
+    VALUES
+        (:id, :project_id, :version, :status, :phase, :iteration, :data,
+         :retry_not_before, :paused, :pause_requested, :now, :now)
+    ON CONFLICT(id) DO UPDATE SET
+        project_id = excluded.project_id,
+        version = excluded.version,
+        status = excluded.status,
+        phase = excluded.phase,
+        iteration = excluded.iteration,
+        data = excluded.data,
+        retry_not_before = excluded.retry_not_before,
+        paused = excluded.paused,
+        pause_requested = excluded.pause_requested,
+        updated_at = excluded.updated_at
+    WHERE plans.version < excluded.version
+    """
+)
+
+_CLAIM_SQL = text(
+    """
+    UPDATE plans
+    SET claimed_by = :worker_id,
+        claimed_at = :now_epoch,
+        lease_expires_at = :expires_epoch,
+        lease_seconds = :lease_seconds
+    WHERE id = (
+        SELECT id FROM plans
+        WHERE status = 'running'
+          AND project_id IS NOT NULL
+          AND (claimed_by IS NULL OR lease_expires_at < :now_epoch)
+          AND (retry_not_before IS NULL OR retry_not_before < :now_epoch)
+          AND paused = 0
+          AND pause_requested = 0
+        -- FAIRNESS, not recency. Ordering by `updated_at` alone starved healthy
+        -- plans: a tick that throws never reaches `plans.save`, so the poisoned
+        -- plan's `updated_at` never moved, it stayed the oldest row, and every
+        -- subsequent poll re-selected it forever. The worker survived
+        -- (`worker.tick_failed` releases and backs off) while the plan-level
+        -- claim slot was monopolized and every other plan's planning turns,
+        -- gates, and enrichment stopped happening.
+        --
+        -- `claimed_at` is the round-robin cursor: the claim stamps it and the
+        -- release deliberately does NOT clear it, so "when this plan was last
+        -- claimed" survives the release that ends the attempt. A plan just
+        -- claimed sorts last; a never-claimed plan (NULL -> 0) sorts first, so
+        -- new work is still picked up promptly. `claimed_by` remains the sole
+        -- authority on "currently held" -- see _RELEASE_SQL.
+        ORDER BY COALESCE(claimed_at, 0) ASC, updated_at ASC
+        LIMIT 1
+    )
+    RETURNING data
+    """
+)
+
+_HEARTBEAT_SQL = text(
+    """
+    UPDATE plans
+    SET lease_expires_at = :now_epoch + lease_seconds
+    WHERE id = :plan_id AND claimed_by = :worker_id
+    """
+)
+
+# `claimed_at` is deliberately NOT cleared here: it is the claim-fairness cursor
+# (_CLAIM_SQL), and clearing it on release would reset the round-robin on every
+# tick — restoring the starvation exactly. Nothing reads it as "currently
+# claimed"; `claimed_by` is that fact, and the claim predicate tests
+# `claimed_by IS NULL OR lease_expires_at < now`, never `claimed_at`.
+_RELEASE_SQL = text(
+    """
+    UPDATE plans
+    SET claimed_by = NULL,
+        lease_expires_at = NULL, lease_seconds = NULL
+    WHERE id = :plan_id AND claimed_by = :worker_id
+    """
+)
+
+
+class SqlitePlanRepository:
+    def __init__(self, session_factory: sessionmaker[Session], clock: Clock) -> None:
+        self._session_factory = session_factory
+        self._clock = clock
+        self._session: Session | None = None
+
+    def bind(self, session: Session) -> None:
+        self._session = session
+
+    def unbind(self) -> None:
+        self._session = None
+
+    def _bound(self) -> Session:
+        if self._session is None:
+            raise RuntimeError("SqlitePlanRepository used outside a UnitOfWork transaction")
+        return self._session
+
+    def get(self, plan_id: str) -> Plan:
+        row = (
+            self._bound()
+            .execute(text("SELECT data FROM plans WHERE id = :id"), {"id": plan_id})
+            .one_or_none()
+        )
+        if row is None:
+            raise PlanNotFoundError(plan_id)
+        return PlanFactory.reconstruct(json.loads(row[0]))
+
+    def delete(self, plan_id: str) -> None:
+        session = self._bound()
+        exists = session.execute(
+            text("SELECT 1 FROM plans WHERE id = :id"), {"id": plan_id}
+        ).one_or_none()
+        if exists is None:
+            raise PlanNotFoundError(plan_id)
+        # One statement, deliberately. Every plan-scoped table declares
+        # ON DELETE CASCADE (migration 0015), and `PRAGMA foreign_keys=ON`
+        # (engine.py) makes SQLite honour it — so the schema guarantees no
+        # leftovers instead of this adapter maintaining a list that the fifth
+        # such table would quietly fall off.
+        session.execute(text("DELETE FROM plans WHERE id = :id"), {"id": plan_id})
+
+    def save(self, plan: Plan) -> None:
+        session = self._bound()
+        result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
+            _UPSERT_SQL,
+            {
+                "id": plan.id,
+                "project_id": plan.project_id,
+                "version": plan.version,
+                "status": plan.status.value,
+                "phase": plan.phase.value,
+                "iteration": plan.iteration,
+                "data": plan.model_dump_json(),
+                "retry_not_before": (
+                    int(plan.planning_retry_not_before.timestamp())
+                    if plan.planning_retry_not_before is not None
+                    else None
+                ),
+                "paused": int(plan.paused),
+                "pause_requested": int(plan.pause_requested),
+                "now": self._clock.now().isoformat(),
+            },
+        )
+        if result.rowcount == 0:
+            stored = session.execute(
+                text("SELECT version FROM plans WHERE id = :id"), {"id": plan.id}
+            ).scalar_one()
+            raise StaleVersionError(plan.id, plan.version, int(stored))
+
+    def find_by_project_id(self, project_id: str) -> str | None:
+        row = (
+            self._bound()
+            .execute(
+                text("SELECT id FROM plans WHERE project_id = :project_id"),
+                {"project_id": project_id},
+            )
+            .one_or_none()
+        )
+        return None if row is None else str(row[0])
+
+    def find_by_request_id(self, request_id: str) -> str | None:
+        row = (
+            self._bound()
+            .execute(
+                text("SELECT plan_id FROM plan_requests WHERE request_id = :rid"),
+                {"rid": request_id},
+            )
+            .one_or_none()
+        )
+        return None if row is None else str(row[0])
+
+    def bind_request_id(self, request_id: str, plan_id: str) -> None:
+        self._bound().execute(
+            text("INSERT OR IGNORE INTO plan_requests (request_id, plan_id) VALUES (:rid, :pid)"),
+            {"rid": request_id, "pid": plan_id},
+        )
+
+    def claim_one_unit(self, worker_id: str, lease_seconds: int) -> Plan | None:
+        now_epoch = int(self._clock.now().timestamp())
+
+        def claim(session: Session) -> str | None:
+            row = session.execute(
+                _CLAIM_SQL,
+                {
+                    "worker_id": worker_id,
+                    "now_epoch": now_epoch,
+                    "expires_epoch": now_epoch + lease_seconds,
+                    "lease_seconds": lease_seconds,
+                },
+            ).one_or_none()
+            return None if row is None else str(row[0])
+
+        data = run_in_session(self._session_factory, claim)
+        return None if data is None else PlanFactory.reconstruct(json.loads(data))
+
+    def heartbeat(self, plan_id: str, worker_id: str) -> None:
+        now_epoch = int(self._clock.now().timestamp())
+        run_in_session(
+            self._session_factory,
+            lambda session: session.execute(
+                _HEARTBEAT_SQL,
+                {"plan_id": plan_id, "worker_id": worker_id, "now_epoch": now_epoch},
+            ),
+        )
+
+    def lease_holder(self, plan_id: str) -> tuple[str, datetime] | None:
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT claimed_by, lease_expires_at FROM plans "
+                    "WHERE id = :plan_id AND claimed_by IS NOT NULL "
+                    "AND lease_expires_at IS NOT NULL"
+                ),
+                {"plan_id": plan_id},
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return str(row[0]), datetime.fromtimestamp(int(row[1]), tz=timezone.utc)
+
+    def is_claim_live(self, plan_id: str) -> bool:
+        now_epoch = int(self._clock.now().timestamp())
+        row = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT 1 FROM plans WHERE id = :plan_id "
+                    "AND claimed_by IS NOT NULL AND lease_expires_at > :now_epoch"
+                ),
+                {"plan_id": plan_id, "now_epoch": now_epoch},
+            )
+            .one_or_none()
+        )
+        return row is not None
+
+    def release(self, plan_id: str, worker_id: str) -> None:
+        run_in_session(
+            self._session_factory,
+            lambda session: session.execute(
+                _RELEASE_SQL, {"plan_id": plan_id, "worker_id": worker_id}
+            ),
+        )
+
+    def list_running_ids(self, limit: int) -> list[str]:
+        rows = (
+            self._bound()
+            .execute(
+                text(
+                    "SELECT id FROM plans WHERE status = 'running' "
+                    "ORDER BY updated_at ASC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
+            .all()
+        )
+        return [row[0] for row in rows]
+
+    def list_summaries(self) -> list[dict[str, object]]:
+        with self._session_factory() as session:
+            rows = session.execute(
+                text(
+                    "SELECT id, project_id, status, phase, iteration, version, "
+                    "claimed_by, updated_at, paused, pause_requested "
+                    "FROM plans ORDER BY updated_at DESC"
+                )
+            ).all()
+        return [
+            {
+                "id": row[0],
+                "project_id": row[1],
+                "status": row[2],
+                "phase": row[3],
+                "iteration": row[4],
+                "version": row[5],
+                "claimed_by": row[6],
+                "updated_at": row[7],
+                "paused": bool(row[8]),
+                "pause_requested": bool(row[9]),
+            }
+            for row in rows
+        ]

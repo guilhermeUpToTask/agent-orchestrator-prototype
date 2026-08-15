@@ -16,7 +16,7 @@ body:
         by its author. The first mile has barely been walked by anyone else, so
         a report here is genuinely useful rather than an inconvenience.
 
-        Before filing, `orchestrate serve` and the readiness panel
+        Before filing, `praxis serve` and the readiness panel
         (`GET /api/readiness`) between them cover most first-run problems — but
         if the readiness check itself is what is confusing, that is a report
         worth making.
@@ -26,7 +26,7 @@ body:
       label: Where did it stop?
       options:
         - "Install — pip / uv"
-        - "orchestrate serve — the server would not start"
+        - "praxis serve — the server would not start"
         - "The console loaded but nothing worked"
         - "Provider or agent configuration"
         - "A plan was created but the worker never picked it up"

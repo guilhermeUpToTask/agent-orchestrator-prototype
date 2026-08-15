@@ -52,7 +52,7 @@ A run is **green** only if every item holds:
 ./scripts/capture-run.sh "$PLAN_ID" [0|1]
 ```
 
-One directory per run — `$ORCHESTRATOR_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan
+One directory per run — `$PRAXIS_HOME/happy-path-v1/runs/<UTC>-tier<N>-<plan
 prefix>/` — holding `manifest.json` (fixture version, seed commit, orchestrator
 SHA + dirty flag, pinned reasoner/runner/agent bindings, failed checks),
 `verification.json`, `plan.json`, `attempts.json`, `agent-events.json`,

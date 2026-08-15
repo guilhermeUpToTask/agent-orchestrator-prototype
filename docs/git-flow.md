@@ -54,7 +54,7 @@ produce release-ready history.
 
 Every pull request to `main` runs these checks in parallel:
 
-- backend on Python 3.11 and 3.12: Ruff, the zero-error `mypy agent_orchestrator` ratchet,
+- backend on Python 3.11 and 3.12: Ruff, the zero-error `mypy praxis_orchestrator` ratchet,
   unit tests, and integration tests
 - frontend on Node LTS: clean npm install, TypeScript/Vite production build,
   OpenAPI type generation, and a generated-file drift check

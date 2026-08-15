@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.tables import Base
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
-from agent_orchestrator.infra.environment.no_environment import NoEnvironment
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.infra.environment.no_environment import NoEnvironment
 
 
 @pytest.fixture

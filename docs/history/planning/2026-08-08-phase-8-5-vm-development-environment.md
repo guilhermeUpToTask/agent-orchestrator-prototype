@@ -12,15 +12,15 @@
 
 ## Global Constraints
 
-- Python 3.11; `mypy agent_orchestrator` must pass with **zero errors and no exclude list**.
-- `ruff check agent_orchestrator tests --fix`; line length 100.
+- Python 3.11; `mypy praxis_orchestrator` must pass with **zero errors and no exclude list**.
+- `ruff check praxis_orchestrator tests --fix`; line length 100.
 - `from __future__ import annotations` at the top of every new Python module.
 - **Never** `print()` or stdlib `logging` — `structlog` only, with namespaced action-oriented event names (`log.info("acceptance.container_started", ...)`).
 - `verify()` **MUST NOT raise**, ever. Any failure returns `AcceptanceVerdict(outcome="errored", ...)`.
 - The acceptance verdict is **advisory** — it never blocks goal promotion or the publication gate.
 - The container binary is **configuration, never hardcoded**. No string literal `"docker"` in adapter logic.
 - The operator authors `EnvironmentSpec`, never a model.
-- Domain stays FROZEN. Nothing in this plan touches `agent_orchestrator/domain/`.
+- Domain stays FROZEN. Nothing in this plan touches `praxis_orchestrator/domain/`.
 - VM sizing: 4 vCPU, 8 GiB RAM, 40 GiB sparse qcow2.
 - No state migration. Credentials are rotated deliberately.
 
@@ -43,7 +43,7 @@ Stage 1 is COMPLETE: the guest is provisioned and the capability gate is GREEN.
 | 6–11 — the adapter | ⏸ **NEXT**, unblocked | — |
 
 **Task 4 Step 6 evidence**, `uv run pytest -m "not integration" -q` in
-`~/agent-orchestrator/backend` inside the guest, 2026-08-09:
+`~/praxis-orchestrator/backend` inside the guest, 2026-08-09:
 
 ```text
 733 passed, 1 skipped, 8 warnings in 9.07s
@@ -614,12 +614,12 @@ Expected: `=== 7 passed, 0 failed ===` and exit 0.
 - [ ] **Step 5: Bootstrap the orchestrator in the guest**
 
 ```bash
-git clone <repo-url> ~/agent-orchestrator && cd ~/agent-orchestrator/backend
+git clone <repo-url> ~/praxis-orchestrator && cd ~/praxis-orchestrator/backend
 uv pip install --system -e '.[dev]'
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # export the printed value as ORCHESTRATOR_MASTER_KEY in ~/.bashrc, then:
-python -m agent_orchestrator.infra.cli.main db upgrade
-python -m agent_orchestrator.infra.cli.main seed demo
+python -m praxis_orchestrator.infra.cli.main db upgrade
+python -m praxis_orchestrator.infra.cli.main seed demo
 ```
 
 Then, in order:
@@ -630,7 +630,7 @@ Then, in order:
 
 - [ ] **Step 6: Confirm the suite passes in the guest**
 
-Run: `cd ~/agent-orchestrator/backend && pytest -m "not integration" -q`
+Run: `cd ~/praxis-orchestrator/backend && pytest -m "not integration" -q`
 Expected: all pass.
 
 - [ ] **Step 7: Write the README**
@@ -711,7 +711,7 @@ inside the guest. Do not proceed on a red gate.
 ## Task 6: The container binary is configuration
 
 **Files:**
-- Modify: `backend/agent_orchestrator/infra/environment/spec.py`
+- Modify: `backend/praxis_orchestrator/infra/environment/spec.py`
 - Modify: `backend/pyproject.toml`
 - Test: `backend/tests/unit/test_environment_spec.py`
 
@@ -726,7 +726,7 @@ Create `backend/tests/unit/test_environment_spec.py`:
 ```python
 from __future__ import annotations
 
-from agent_orchestrator.infra.environment.spec import (
+from praxis_orchestrator.infra.environment.spec import (
     CONTAINER_BINARY_KEY,
     read_container_binary,
 )
@@ -761,7 +761,7 @@ Expected: FAIL — `ImportError: cannot import name 'CONTAINER_BINARY_KEY'`.
 
 - [ ] **Step 3: Implement**
 
-Append to `backend/agent_orchestrator/infra/environment/spec.py`:
+Append to `backend/praxis_orchestrator/infra/environment/spec.py`:
 
 ```python
 # Orchestrator-scoped, not project-scoped: which container CLI exists is a
@@ -799,7 +799,7 @@ In `backend/pyproject.toml`, add to `markers`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/agent_orchestrator/infra/environment/spec.py backend/tests/unit/test_environment_spec.py backend/pyproject.toml
+git add backend/praxis_orchestrator/infra/environment/spec.py backend/tests/unit/test_environment_spec.py backend/pyproject.toml
 git commit -m "feat(environment): the container binary is configuration, not a hardcoded docker"
 ```
 
@@ -808,7 +808,7 @@ git commit -m "feat(environment): the container binary is configuration, not a h
 ## Task 7: ContainerEnvironment — the happy path against a real container
 
 **Files:**
-- Create: `backend/agent_orchestrator/infra/environment/container_environment.py`
+- Create: `backend/praxis_orchestrator/infra/environment/container_environment.py`
 - Test: `backend/tests/integration/test_container_environment.py`
 
 **Interfaces:**
@@ -831,8 +831,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.environment_port import EnvironmentSpec
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.app.environment_port import EnvironmentSpec
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
 
 pytestmark = [pytest.mark.integration, pytest.mark.container]
 
@@ -900,7 +900,7 @@ Expected: FAIL — `ModuleNotFoundError: ... container_environment`.
 
 - [ ] **Step 3: Implement**
 
-Create `backend/agent_orchestrator/infra/environment/container_environment.py`:
+Create `backend/praxis_orchestrator/infra/environment/container_environment.py`:
 
 ```python
 """Boot a cycle's tree in a real container and check the application works.
@@ -922,7 +922,7 @@ from pathlib import Path
 
 import structlog
 
-from agent_orchestrator.app.environment_port import AcceptanceVerdict, EnvironmentSpec
+from praxis_orchestrator.app.environment_port import AcceptanceVerdict, EnvironmentSpec
 
 log = structlog.get_logger(__name__)
 
@@ -1102,7 +1102,7 @@ Expected: all pass, parametrized over every runtime on PATH.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agent_orchestrator/infra/environment/container_environment.py backend/tests/integration/test_container_environment.py
+git add backend/praxis_orchestrator/infra/environment/container_environment.py backend/tests/integration/test_container_environment.py
 git commit -m "feat(environment): ContainerEnvironment booting real containers"
 ```
 
@@ -1218,8 +1218,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.app.environment_port import EnvironmentSpec
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.app.environment_port import EnvironmentSpec
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
 
 pytestmark = pytest.mark.integration
 
@@ -1272,7 +1272,7 @@ git commit -m "test(environment): missing binary and refusing daemon return erro
 ## Task 10: Wire it into the composition root
 
 **Files:**
-- Modify: `backend/agent_orchestrator/infra/container.py:202-209`
+- Modify: `backend/praxis_orchestrator/infra/container.py:202-209`
 - Test: `backend/tests/unit/test_environment_selection.py`
 
 **Interfaces:**
@@ -1288,10 +1288,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.models import Base
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
-from agent_orchestrator.infra.environment.no_environment import NoEnvironment
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.models import Base
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.infra.environment.no_environment import NoEnvironment
 
 
 @pytest.fixture
@@ -1350,8 +1350,8 @@ Replace the `environment` property body in `container.py`:
 Add the imports beside the existing environment imports:
 
 ```python
-from agent_orchestrator.infra.environment.container_environment import ContainerEnvironment
-from agent_orchestrator.infra.environment.spec import read_container_binary, read_environment_spec
+from praxis_orchestrator.infra.environment.container_environment import ContainerEnvironment
+from praxis_orchestrator.infra.environment.spec import read_container_binary, read_environment_spec
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -1362,7 +1362,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agent_orchestrator/infra/container.py backend/tests/unit/test_environment_selection.py
+git add backend/praxis_orchestrator/infra/container.py backend/tests/unit/test_environment_selection.py
 git commit -m "feat(environment): select ContainerEnvironment via environment.mode"
 ```
 
@@ -1381,9 +1381,9 @@ git commit -m "feat(environment): select ContainerEnvironment via environment.mo
 - [ ] **Step 1: Full verification in the guest**
 
 ```bash
-cd ~/agent-orchestrator/backend
-ruff check agent_orchestrator tests --fix
-mypy agent_orchestrator
+cd ~/praxis-orchestrator/backend
+ruff check praxis_orchestrator tests --fix
+mypy praxis_orchestrator
 pytest -q
 ```
 
@@ -1392,7 +1392,7 @@ Expected: ruff clean, **mypy zero errors**, whole suite green. Record the output
 - [ ] **Step 2: A real acceptance run under both runtimes**
 
 ```bash
-cd ~/agent-orchestrator/backend
+cd ~/praxis-orchestrator/backend
 pytest tests/integration/test_container_environment.py -v -p no:xdist
 ```
 

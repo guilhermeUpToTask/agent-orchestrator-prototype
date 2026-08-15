@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
-  /** Mirrors the backend's ORCHESTRATOR_API_TOKEN for the guarded routers. */
+  /** Mirrors the backend's PRAXIS_API_TOKEN for the guarded routers. */
   readonly VITE_API_TOKEN?: string;
 }
 

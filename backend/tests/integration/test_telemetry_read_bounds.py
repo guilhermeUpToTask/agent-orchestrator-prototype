@@ -13,11 +13,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agent_orchestrator.api import dependencies
-from agent_orchestrator.api.server import create_app
-from agent_orchestrator.infra.container import AppContainer
-from agent_orchestrator.infra.db.agent_event_sink import _INSERT_SQL
-from agent_orchestrator.infra.db.tables import Base
+from praxis_orchestrator.api import dependencies
+from praxis_orchestrator.api.server import create_app
+from praxis_orchestrator.infra.container import AppContainer
+from praxis_orchestrator.infra.db.agent_event_sink import _INSERT_SQL
+from praxis_orchestrator.infra.db.tables import Base
 
 pytestmark = pytest.mark.integration
 
@@ -27,8 +27,8 @@ DEFAULT_AGENT_EVENT_LIMIT = 200
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCHESTRATOR_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRAXIS_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
     container = AppContainer(orchestrator_home=tmp_path)
     Base.metadata.create_all(container.engine)
     with TestClient(create_app(container)) as test_client:
@@ -119,7 +119,7 @@ def test_planning_artifacts_without_a_goal_id_spans_every_goal(client, plan_with
     """
     from datetime import datetime, timezone
 
-    from agent_orchestrator.app.ports import PlanningArtifact
+    from praxis_orchestrator.app.ports import PlanningArtifact
 
     container = client.container  # type: ignore[attr-defined]
     for index, goal_id in enumerate(("goal-a", "goal-b")):

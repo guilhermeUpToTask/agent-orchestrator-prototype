@@ -8,7 +8,7 @@ zero exit — are exactly the ones a made-up fixture would omit.
 
 from __future__ import annotations
 
-from agent_orchestrator.infra.runtime.codex_protocol import (
+from praxis_orchestrator.infra.runtime.codex_protocol import (
     extract_final_text,
     extract_stream_error,
     extract_usage,
