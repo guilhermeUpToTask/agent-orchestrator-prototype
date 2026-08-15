@@ -11,10 +11,10 @@ thing, against a throwaway state directory and a disposable repository the
 fixture creates for you:
 
 ```bash
-git clone https://github.com/guilhermeUpToTask/agent-orchestrator-prototype
-cd agent-orchestrator-prototype
+git clone https://github.com/guilhermeUpToTask/praxis-orchestrator
+cd praxis-orchestrator
 
-pipx install praxis-orchestrator
+pipx install ./praxis_orchestrator-*.whl    # the wheel from the latest GitHub Release
 praxis config set reasoner.mode stub        # Tier 0: no API key, no network
 praxis config set agent_runner.mode dry-run
 praxis serve &                              # migrate + API + worker + console
@@ -41,12 +41,17 @@ API, not a separate story.
 ## 1. Install and start
 
 ```bash
-pipx install praxis-orchestrator     # or: uvx --from praxis-orchestrator orchestrate
+pipx install ./praxis_orchestrator-*.whl   # the wheel from the latest GitHub Release
 praxis serve
 ```
 
+**Not on PyPI, deliberately** — that name there belongs to a different project,
+so `pip install praxis-orchestrator` would fetch somebody else's tool. Every
+release attaches a wheel to a [GitHub Release](https://github.com/guilhermeUpToTask/praxis-orchestrator/releases),
+and that wheel is the one carrying the built console inside it.
+
 ```
-✓  state directory /home/you/.orchestrator
+✓  state directory /home/you/.praxis
 ✓  worker worker-1 started (pid 12345)
 ✓  http://127.0.0.1:8000
 ```

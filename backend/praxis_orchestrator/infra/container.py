@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from praxis_orchestrator.app.ports import AgentRunner, Clock, Reasoner, Sandbox
 from praxis_orchestrator.infra.clock import SystemClock
 from praxis_orchestrator.infra.db.engine import build_engine, db_url_for_home, make_session_factory
-from praxis_orchestrator.infra.env_compat import resolve_home
+from praxis_orchestrator.infra.state_home import resolve_home
 from praxis_orchestrator.infra.db.observation_repository import SqliteProcessObservationRepository
 from praxis_orchestrator.infra.db.reference_repos import (
     SqliteAgentRepository,
@@ -91,9 +91,7 @@ class AppContainer:
 
     @classmethod
     def from_env(cls) -> "AppContainer":
-        # Honours PRAXIS_HOME, then the pre-rename ORCHESTRATOR_HOME, then adopts
-        # an existing `~/.orchestrator` in place rather than starting empty
-        # beside it. See infra/env_compat.py for why adoption and not migration.
+        # `PRAXIS_HOME`, else `~/.praxis`. See infra/state_home.py.
         return cls(orchestrator_home=resolve_home())
 
     # --- Stage 3: persistence core ---

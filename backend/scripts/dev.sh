@@ -114,7 +114,7 @@ load_environment() {
   # The env file provides DEFAULTS: anything already set in the process
   # environment wins. `set -a; source` alone silently clobbered an explicit
   # `export PRAXIS_HOME=…`, so a run an operator had carefully pointed at a
-  # disposable state directory went to `~/.orchestrator` instead — same class of
+  # disposable state directory went to `~/.praxis` instead — same class of
   # trap as `PROJECT_REPO_DIR`: you set a variable, it was ignored, and the work
   # happened somewhere else. Whether that overwrites real data is luck.
   local preserved

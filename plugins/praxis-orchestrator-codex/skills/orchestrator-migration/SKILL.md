@@ -20,4 +20,4 @@ description: Evolve Agent Orchestrator SQLite schemas safely across SQLAlchemy t
 8. Add tests for empty-database upgrade and upgrade from the predecessor.
 9. Run affected repository/truth tests, contract sync when public data changes, then `make check`.
 
-Do not access a developer database or `~/.orchestrator`; use temporary databases.
+Do not access a developer database or `~/.praxis`; use temporary databases.

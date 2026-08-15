@@ -11,7 +11,7 @@ client of the same endpoints; if a run needs it, that is itself a finding.
 | | |
 |---|---|
 | **Lives at** | `fixtures/happy-path-v1/` (repo root — operator material, not product code) |
-| **Target repo** | Materialized *outside* this monorepo (default `~/.orchestrator/happy-path-v1/repo`) |
+| **Target repo** | Materialized *outside* this monorepo (default `~/.praxis/happy-path-v1/repo`) |
 | **Seed tag** | `happy-path-v1-seed` |
 | **Budget** | 1 goal, 1–2 tasks, ~10–25 min real mode |
 | **Interface** | `GET/POST /api/…` via `curl` + `jq` only |
@@ -64,7 +64,7 @@ backend/scripts/dev.sh seed --stub          # free path
 ```
 
 Default target: `$PRAXIS_HOME/happy-path-v1/repo`
-(`PRAXIS_HOME` defaults to `~/.orchestrator`.)
+(`PRAXIS_HOME` defaults to `~/.praxis`.)
 
 Override:
 

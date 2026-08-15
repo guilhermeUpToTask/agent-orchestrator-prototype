@@ -53,9 +53,6 @@ dev = [
 
 [project.scripts]
 praxis = "praxis_orchestrator.infra.cli.main:cli"
-# The pre-rename name. Kept for one minor release so existing scripts keep
-# working; it prints a deprecation line to stderr and delegates.
-orchestrate = "praxis_orchestrator.infra.cli.main:legacy_cli"
 
 [build-system]
 requires = ["hatchling"]

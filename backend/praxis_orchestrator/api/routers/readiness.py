@@ -21,6 +21,7 @@ correct.
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -30,7 +31,6 @@ from praxis_orchestrator.api.dependencies import get_container
 from praxis_orchestrator.api.routers.workers import STALE_AFTER_SECONDS
 from praxis_orchestrator.infra.container import AppContainer
 from praxis_orchestrator.infra.db.secret_store import MASTER_KEY_ENV
-from praxis_orchestrator.infra.env_compat import env
 from praxis_orchestrator.infra.errors import ProjectBindingInvalidError
 from praxis_orchestrator.infra.git.repository_binding import validate_repo_url
 from praxis_orchestrator.infra.reasoner.factory import ReasonerConfigStatus, validate_reasoner_config
@@ -126,11 +126,7 @@ def _secrets(reasoner_mode: str, runner_mode: str) -> ReadinessCheck:
     touches the secret store, so reporting `fail` there would tell an operator
     their working free-tier install is broken.
     """
-    # Through env_compat, never os.environ: a pre-rename install has the key
-    # under ORCHESTRATOR_MASTER_KEY and the secret store reads it perfectly
-    # well, so a direct read reports a WORKING install as broken — and the
-    # detail below then sends the operator to set a key they already have.
-    if (env(MASTER_KEY_ENV) or "").strip():
+    if os.environ.get(MASTER_KEY_ENV, "").strip():
         return ReadinessCheck(name="secrets", status="ok", detail="master key present")
     needed_by = [
         label

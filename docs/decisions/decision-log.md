@@ -702,51 +702,53 @@ invalidation. A different agent is not a different contract.
 
 ---
 
-**Decision 65 (2026-08-15) — the rename to Praxis Orchestrator adopts existing
-state in place rather than migrating it.** Distribution `praxis-orchestrator`,
-Python package `praxis_orchestrator`, CLI `praxis`, state directory `~/.praxis`,
-environment variables `PRAXIS_*`. Scope and execution record:
+**Decision 65 (2026-08-15) — the rename to Praxis Orchestrator is a clean
+break: existing state is MIGRATED, not accommodated.** Distribution
+`praxis-orchestrator`, Python package `praxis_orchestrator`, CLI `praxis`,
+GitHub repository `guilhermeUpToTask/praxis-orchestrator`, state directory
+`~/.praxis`, environment variables `PRAXIS_*`. Scope and execution record:
 [`../superpowers/specs/2026-08-11-phase-10b-rename-scope.md`](../superpowers/specs/2026-08-11-phase-10b-rename-scope.md).
 
 The name was forced rather than chosen for taste: the previous working name is a
-Nintendo / Game Freak mark, and the previous distribution name belongs to a
-different project in this exact category on PyPI, so `pip install` would have
-fetched a stranger's tool.
+third party's mark, and the previous distribution name belongs to a different
+project in this exact category on PyPI, so `pip install` would have fetched a
+stranger's tool.
 
-**The decision worth recording is not the name, it is what happens to an install
-that already exists.** Three options were available for the state directory and
-two of them are wrong in ways that are invisible until they cost somebody their
-work:
+**There is no compatibility layer, and that is the decision.** An earlier pass
+of this rename built one — `PRAXIS_*` falling back to `ORCHESTRATOR_*` with a
+one-time warning, `~/.orchestrator` adopted in place, `orchestrate` still
+registered and delegating to `praxis`. It was deleted the same day, by owner
+decision, and the reasoning is worth keeping because the deleted version was the
+more defensive-looking one:
 
-- **Move it.** Breaks rolling back to the previous version — the old code looks
-  for a directory that is no longer there.
-- **Copy it.** Duplicates the envelope-encrypted secret store, the one file that
-  must never exist twice. Two copies wrapped by the same master key is how you
-  get an orphaned half nobody notices until a key is rotated.
-- **Adopt it in place**, which is what `infra/env_compat.py::resolve_home` does:
-  `PRAXIS_HOME`, else `ORCHESTRATOR_HOME`, else `~/.praxis` if it exists, else
-  `~/.orchestrator` **used where it is**, else a fresh `~/.praxis`. Nothing is
-  moved, nothing is copied, exactly one database exists, and the whole thing is
-  reversible. `orchestrator.db` keeps its filename for the same reason: renaming
-  it would make adoption look for a file that is not there and create an empty
-  one beside the operator's real data.
+- **There is nobody to be compatible with.** The project has never published to
+  any index. `release-please` attaches a wheel to a GitHub Release and nothing
+  else. Every install that predates the rename is the maintainer's own, and
+  those are countable on one hand.
+- **A compatibility layer that no user exercises is not safety, it is a second
+  code path.** Two spellings of every variable, two entry points, and a home
+  resolver with four branches — each of which has to be read, tested, and
+  reasoned about by everyone who touches configuration afterwards, forever, to
+  serve nobody.
+- **It had already produced a defect of exactly that shape.** `/api/readiness`
+  read the master key from `os.environ` rather than through the alias and so
+  reported a WORKING install as broken, with a detail line inviting the operator
+  to generate a second master key — which permanently orphans the secret store.
+  An alias is only as good as the number of places that use it, and the one site
+  that bypassed it was the site whose whole job is telling an operator whether
+  their install works.
 
-The environment variables follow the same rule — read the new name, fall back to
-the one it replaced, warn once per process. **The API token alias is the
-load-bearing one.** `api/security.py` treats an unset token as "open in local
-dev", by design, so an upgrade that stopped reading `ORCHESTRATOR_API_TOKEN`
-would not raise, log, or fail a health check. It would silently unguard the
-control plane, and the first symptom would be a stranger's request succeeding.
+**Migration is what replaces it**, and it is a real migration rather than a
+suggestion: `~/.orchestrator` moved to `~/.praxis` (with a dated backup),
+`~/.orchestrator-env` reissued as `~/.praxis-env` carrying the same master key
+under the new name, and `/etc/profile.d` rewritten. Verified rather than
+assumed — both stored provider keys decrypt from the moved database under
+`PRAXIS_MASTER_KEY`.
+
+`orchestrator.db` keeps its filename inside the directory. It describes what it
+is, contains no stale brand, and renaming it would be churn with a migration
+step attached.
 
 **Why no unfreeze:** nothing in the domain changed. This is packaging, the
-composition root, and one new infrastructure module.
-
-**What it cost to find out the layer was incomplete:** `/api/readiness` read the
-master key from `os.environ` directly rather than through the alias, and so
-reported a perfectly working pre-rename install as broken — with a detail line
-that invites the operator to generate a second master key, which permanently
-orphans the secret store. Reproduced before it was fixed, and locked by
-`test_readiness_sees_a_legacy_master_key`. The general lesson is the reason this
-entry exists: **an alias is only as good as the number of places that use it**,
-and the one site that bypassed it was the site whose whole job is telling an
-operator whether their install works.
+composition root, and one four-line module (`infra/state_home.py`) that answers
+where state lives.

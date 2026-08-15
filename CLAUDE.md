@@ -22,12 +22,9 @@ time if you assume otherwise:
   every check fails as "red" and no task can ever go green.
 - **`~/.bashrc` returns early for non-interactive shells.** Anything exported
   there is invisible to `ssh host 'cmd'` and to agent tool calls. Secrets live
-  in `~/.praxis-env` (mode 600) — a guest built before the Phase 10B rename has
-  it at `~/.orchestrator-env`, and either works because it is only a file the
-  shell sources. The master key already exists — never generate a second one; it
-  silently orphans the encrypted secret store. Verify with
-  `[ -n "$PRAXIS_MASTER_KEY$ORCHESTRATOR_MASTER_KEY" ] && echo present`, never
-  by printing it.
+  in `~/.praxis-env` (mode 600). `PRAXIS_MASTER_KEY` already exists — never
+  generate a second one; it silently orphans the encrypted secret store. Verify
+  with `[ -n "$PRAXIS_MASTER_KEY" ] && echo present`, never by printing it.
 - **Catalog ids are server-generated UUIDs**, and `POST /api/providers` and
   `POST /api/agents` do **not** deduplicate by name. Look ids up by name from
   the API; never construct `provider:name`. Duplicates are how
@@ -42,11 +39,11 @@ restores it on top of `seed demo` after a rebuild.
 
 ### Backend (Python) — all commands run from `backend/`
 - **Install**: `cd backend && uv pip install -e .[dev]` (or `pip install -e .[dev]`)
-- **DB migrations**: `python -m praxis_orchestrator.infra.cli.main db upgrade` (DB lives under `PRAXIS_HOME`, default `~/.praxis` — an existing `~/.orchestrator` is adopted in place, never replaced; see `infra/env_compat.py`)
+- **DB migrations**: `python -m praxis_orchestrator.infra.cli.main db upgrade` (DB lives under `PRAXIS_HOME`, default `~/.praxis` — see `infra/state_home.py`)
 - **Run everything (one command)**: `python -m praxis_orchestrator.infra.cli.main serve --port 8000` — migrates, starts the API with the packaged UI, and supervises a worker subprocess (`--no-worker` / `--no-migrate` to opt out). This is the installed-user path; the two commands below stay for development.
 - **Run API**: `python -m praxis_orchestrator.infra.cli.main api start --port 8000`
 - **Run Worker**: `python -m praxis_orchestrator.infra.cli.main worker start` (dry-run by default — the config key `agent_runner.mode` selects the runtime, NOT an env var)
-- **CLI Entry Point**: `python -m praxis_orchestrator.infra.cli.main` (or `praxis` if installed; `orchestrate` is the pre-rename name, still registered for one minor release and printing a deprecation to stderr) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
+- **CLI Entry Point**: `python -m praxis_orchestrator.infra.cli.main` (or `praxis` if installed) — commands: `serve`, `db upgrade`, `api start`, `worker start`, `config get|set|list`, `plan list|show`, `seed demo [--stub | --provider … --model … --api-key-env …]`
 - **Format & Lint**: `ruff check praxis_orchestrator tests --fix`
 - **Type Check**: `mypy praxis_orchestrator` (zero errors, no excludes)
 - **Test All**: `pytest` — runs `-n auto --dist loadfile` (pytest-xdist) from `addopts`; add **`-n0`** for a serial run when you need `--pdb` or readable output. (`-p no:xdist` does NOT work: unloading the plugin leaves `addopts`' own `-n`/`--dist` unrecognised and pytest exits on a usage error.) Coverage is NOT on by default: `make coverage`.
@@ -54,7 +51,7 @@ restores it on top of `seed demo` after a rebuild.
 - **Test Integration**: `pytest -m integration` (includes the SQLite truth-test parametrization)
 - **Test real-LLM smoke** (cost-gated, never in normal CI): `pytest -m llm` with `REASONER_SMOKE_API_KEY` (+ optional `REASONER_SMOKE_BASE_URL` / `REASONER_SMOKE_MODEL`)
 
-Environment: `PRAXIS_HOME` (state dir), `PRAXIS_MASTER_KEY` (Fernet key for the secret store), `PRAXIS_API_TOKEN` (auth for EVERY operation except `GET /health`; open when unset; `GET /api/events` also accepts it as `?token=` because EventSource cannot send headers). Each is read through `infra/env_compat.py`, which falls back to the pre-rename `ORCHESTRATOR_*` name and warns once — the API token alias is load-bearing, because an unset token means "open in local dev" and an upgrade that stopped reading it would silently unguard the control plane. There is NO `AGENT_MODE` env var — runtime selection lives in SQLite, and **`PROJECT_REPO_DIR` is not read by anything** (locked by `tests/unit/test_fixture_docs_contract.py`): a plan reaches a repository through its `ProjectDefinition.repo_url`, validated on write by `praxis_orchestrator/infra/git/repository_binding.py`, and a project without one gets a scratch repo it is told about.
+Environment: `PRAXIS_HOME` (state dir), `PRAXIS_MASTER_KEY` (Fernet key for the secret store), `PRAXIS_API_TOKEN` (auth for EVERY operation except `GET /health`; open when unset; `GET /api/events` also accepts it as `?token=` because EventSource cannot send headers). There is NO `AGENT_MODE` env var — runtime selection lives in SQLite, and **`PROJECT_REPO_DIR` is not read by anything** (locked by `tests/unit/test_fixture_docs_contract.py`): a plan reaches a repository through its `ProjectDefinition.repo_url`, validated on write by `praxis_orchestrator/infra/git/repository_binding.py`, and a project without one gets a scratch repo it is told about.
 
 **The reasoner resolves via the providers catalog, NOT env vars** — config keys (scope `orchestrator`): `reasoner.mode` (`stub` default | `llm`), `reasoner.provider_id`, `reasoner.model_id`, `reasoner.temperature` (0.2), `reasoner.max_turns` (8). In `llm` mode `praxis_orchestrator/infra/reasoner/factory.py` fail-fasts (`REASONER_CONFIG_INVALID` → 422) and resolves the provider row (base_url + envelope-encrypted key) and model row; **stub mode never touches the secret store** (dry-run needs no master key). `praxis seed demo` seeds capabilities, the default agent, provider/model rows, and the config keys idempotently.
 

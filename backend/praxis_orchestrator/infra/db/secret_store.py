@@ -13,6 +13,8 @@ Master-key rotation re-wraps data keys (cheap) without touching ciphertext.
 
 from __future__ import annotations
 
+import os
+
 
 import structlog
 from cryptography.fernet import Fernet, InvalidToken
@@ -21,7 +23,6 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
 
 from praxis_orchestrator.infra.db._session import run_in_session
-from praxis_orchestrator.infra.env_compat import env
 from praxis_orchestrator.infra.db.secret_ref import SecretRef
 from praxis_orchestrator.infra.db.tables import SecretTable
 from praxis_orchestrator.infra.errors import InfrastructureError, SecretNotFoundError
@@ -38,9 +39,7 @@ def load_master_key() -> bytes:
     Raises InfrastructureException with an actionable message if missing or
     malformed — secret storage must fail closed, never with a silent default.
     """
-    # Falls back to the pre-rename ORCHESTRATOR_MASTER_KEY: without it an
-    # upgraded install cannot decrypt a single stored provider key.
-    raw = (env(MASTER_KEY_ENV) or "").strip()
+    raw = os.environ.get(MASTER_KEY_ENV, "").strip()
     if not raw:
         raise InfrastructureError(
             f"{MASTER_KEY_ENV} is not set. Generate one with "

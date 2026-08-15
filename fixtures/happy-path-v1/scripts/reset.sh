@@ -5,11 +5,7 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SEED_TAG="happy-path-v1-seed"
-# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
-# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
-# place rather than left behind holding the operator's only database.
-ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
-[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v1/repo}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }

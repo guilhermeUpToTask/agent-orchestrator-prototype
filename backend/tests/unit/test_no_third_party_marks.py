@@ -1,9 +1,9 @@
 """A third party's trademark must not re-enter the shipped tree.
 
-`aipom` is a Pokémon — a Nintendo / Game Freak / The Pokémon Company mark. It
-was this project's working name, which made it a findability problem; Phase 10B
-reframed it as a legal-hygiene one, because the exposure is the presence of the
-string itself in a repository about to be published.
+The strings in `FORBIDDEN` below are marks belonging to other people. One of
+them was this project's working name, which made it a findability problem;
+Phase 10B reframed it as a legal-hygiene one, because the exposure is the
+presence of the string itself in a repository about to be published.
 
 The rename removes it. This is what stops it coming back — in a copied comment,
 a restored fixture, a doc written from an old draft, or a container prefix

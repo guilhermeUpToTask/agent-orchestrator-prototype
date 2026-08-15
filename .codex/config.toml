@@ -12,7 +12,7 @@ startup_timeout_sec = 60
 
 [mcp_servers.sqlite]
 command = "/usr/local/bin/uv"
-args = ["tool", "run", "--from", "mcp-server-sqlite", "mcp-server-sqlite", "--db-path", "/root/.orchestrator/orchestrator.db"]
+args = ["tool", "run", "--from", "mcp-server-sqlite", "mcp-server-sqlite", "--db-path", "/root/.praxis/orchestrator.db"]
 enabled_tools = ["read_query", "list_tables", "describe_table"]
 
 [mcp_servers.graphify]

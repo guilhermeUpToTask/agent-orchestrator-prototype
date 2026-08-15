@@ -11,11 +11,7 @@ ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 API_SH="$ROOT/fixtures/happy-path-v1/scripts/api.sh"
 
 export HAPPY_PATH_API="${HAPPY_PATH_API:-http://127.0.0.1:8000}"
-# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
-# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
-# place rather than left behind holding the operator's only database.
-ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
-[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v1/repo}"
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }

@@ -40,7 +40,7 @@ from praxis_orchestrator.app.ports import (
     WorkspaceHandle,
 )
 from praxis_orchestrator.app.runtime_failures import safe_runtime_tail
-from praxis_orchestrator.infra.env_compat import resolve_home
+from praxis_orchestrator.infra.state_home import resolve_home
 from praxis_orchestrator.infra.runtime.sandbox import NoSandbox
 from praxis_orchestrator.app.observations import (
     ObservationRepository,

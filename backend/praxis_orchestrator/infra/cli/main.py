@@ -12,23 +12,16 @@ roadmap 4.2).
 The old command accretion (task/goal/spec/wizard groups) went with the
 pre-refactor architecture: mutations go through the API; the worker and the
 API are the only long-running processes.
-
-`orchestrate` is the pre-rename name of this same CLI and stays registered for
-one minor release — see `legacy_cli` at the bottom of this file.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import sys
 
 import click
 
 from praxis_orchestrator.infra.cli.error_handler import catch_domain_errors, ok
-
-LEGACY_ENTRY_POINT = "orchestrate"
-CURRENT_ENTRY_POINT = "praxis"
 
 
 @click.group()
@@ -614,28 +607,6 @@ def plan_show(plan_id: str) -> None:
     with uow:
         found = uow.plans.get(plan_id)
     click.echo(json.dumps(found.model_dump(mode="json"), indent=2))
-
-
-# ---------------------------------------------------------------------------
-# the pre-rename entry point
-# ---------------------------------------------------------------------------
-
-
-def legacy_cli() -> None:
-    """`orchestrate`, which is what this CLI was called before the rename.
-
-    It delegates rather than duplicating: same group, same commands, same exit
-    codes, so an operator's existing scripts keep working unchanged for one
-    minor release. The notice goes to **stderr** on purpose — `praxis plan
-    show` is piped into `jq` in this repository's own fixtures, and a
-    deprecation line on stdout would break every one of them.
-    """
-    print(
-        f"{LEGACY_ENTRY_POINT}: renamed to `{CURRENT_ENTRY_POINT}`. "
-        f"This name still works and will be removed in a future release.",
-        file=sys.stderr,
-    )
-    cli()
 
 
 if __name__ == "__main__":

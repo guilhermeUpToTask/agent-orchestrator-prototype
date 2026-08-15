@@ -3,11 +3,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
-# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
-# place rather than left behind holding the operator's only database.
-ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
-[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v1/repo}"
 # Optional: check a specific worktree/branch checkout (e.g. plan or cycle branch path)
 if [[ "${1:-}" != "" ]]; then

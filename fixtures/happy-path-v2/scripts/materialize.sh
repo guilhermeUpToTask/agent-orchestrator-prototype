@@ -8,11 +8,7 @@ FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SEED_DIR="$FIXTURE_DIR/seed"
 SEED_TAG="happy-path-v2-seed"
 
-# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
-# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
-# place rather than left behind holding the operator's only database.
-ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
-[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 TARGET="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 2; }

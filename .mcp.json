@@ -32,7 +32,7 @@
         "mcp-server-sqlite",
         "mcp-server-sqlite",
         "--db-path",
-        "/root/.orchestrator/orchestrator.db"
+        "/root/.praxis/orchestrator.db"
       ],
       "disabledTools": [
         "write_query",

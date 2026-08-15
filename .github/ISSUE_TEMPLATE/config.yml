@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Did I set this up right?
-    url: https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/discussions
+    url: https://github.com/guilhermeUpToTask/praxis-orchestrator/discussions
     about: >-
       Questions about configuration, providers, agents or your first cycle.
       Ask here rather than opening an issue — answers stay searchable for the

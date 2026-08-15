@@ -317,10 +317,7 @@ What this means concretely:
   precious would quietly re-introduce the coupling the VM was adopted to break.
 - **Durable state lives in `~/.praxis`.** The SQLite database, the
   envelope-encrypted secret store and the config scopes are all under
-  `PRAXIS_HOME` (default `~/.praxis`). A guest built before the Phase 10B
-  rename has it at `~/.orchestrator`, which is **adopted in place** rather than
-  replaced — nothing is moved or copied, so the same database keeps serving
-  (`praxis_orchestrator/infra/env_compat.py`). That directory is the only
+  `PRAXIS_HOME` (default `~/.praxis`). That directory is the only
   thing worth backing up before a `destroy`, and `PRAXIS_MASTER_KEY` is
   the only thing without which its secrets are unreadable. Back up neither
   casually: the database contains encrypted provider credentials, and the key

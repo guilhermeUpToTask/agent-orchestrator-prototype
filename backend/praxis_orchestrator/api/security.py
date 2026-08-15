@@ -10,20 +10,18 @@ Failures raise the shared taxonomy (-> 401), never a bare framework error.
 
 from __future__ import annotations
 
+import os
+
 from fastapi import Header, Query
 
-from praxis_orchestrator.infra.env_compat import env
 from praxis_orchestrator.infra.errors import UnauthorizedError
 
 API_TOKEN_ENV = "PRAXIS_API_TOKEN"
 
 
 def _expected_token() -> str:
-    # Reads the pre-rename ORCHESTRATOR_API_TOKEN too, and this alias is the
-    # load-bearing one in the whole rename: an unset token is not an error here,
-    # it means "open in local dev". So an upgrade that stopped reading the old
-    # name would not fail — it would silently unguard the control plane.
-    return (env(API_TOKEN_ENV) or "").strip()
+    # An unset token is not an error here: it means "open in local dev".
+    return os.environ.get(API_TOKEN_ENV, "").strip()
 
 
 def _from_headers(authorization: str | None, x_api_token: str | None) -> str | None:

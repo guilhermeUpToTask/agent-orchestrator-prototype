@@ -46,11 +46,7 @@ CYCLE_ID="${3:-}"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
-# Mirrors praxis_orchestrator/infra/env_compat.py: an explicit home wins, a
-# fresh install is ~/.praxis, and a pre-rename ~/.orchestrator is adopted in
-# place rather than left behind holding the operator's only database.
-ORCH_HOME="${PRAXIS_HOME:-${ORCHESTRATOR_HOME:-$HOME/.praxis}}"
-[ -d "$ORCH_HOME" ] || [ ! -d "$HOME/.orchestrator" ] || ORCH_HOME="$HOME/.orchestrator"
+ORCH_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 HAPPY_PATH_REPO="${HAPPY_PATH_REPO:-$ORCH_HOME/happy-path-v2/repo}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="$ORCH_HOME/happy-path-v2/runs/${STAMP}-tier${TIER}-${PLAN_ID:0:8}"

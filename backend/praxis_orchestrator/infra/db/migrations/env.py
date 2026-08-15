@@ -2,14 +2,13 @@
 
 The database URL is resolved (in priority order):
   1. ``sqlalchemy.url`` set programmatically on the Config (bootstrap path),
-  2. the ``PRAXIS_DB_URL`` environment variable (or the pre-rename
-     ``ORCHESTRATOR_DB_URL``, via ``infra/env_compat.py``),
+  2. the ``PRAXIS_DB_URL`` environment variable,
   3. the static placeholder in alembic.ini.
 """
 from __future__ import annotations
 
 
-from praxis_orchestrator.infra.env_compat import env
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -25,7 +24,7 @@ if config.config_file_name is not None:
 # A URL set programmatically on the Config (bootstrap path) wins. Otherwise
 # fall back to PRAXIS_DB_URL, then the alembic.ini placeholder.
 if config.get_main_option("sqlalchemy.url") in (None, "", "sqlite:///orchestrator.db"):
-    _env_url = env("PRAXIS_DB_URL")
+    _env_url = os.environ.get("PRAXIS_DB_URL")
     if _env_url:
         config.set_main_option("sqlalchemy.url", _env_url)
 

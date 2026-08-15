@@ -31,12 +31,7 @@ import urllib.error
 import urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
-# Reads the pre-rename name too: this script is run against a guest whose
-# ~/.praxis-env may predate the rename, and a token read as empty here does not
-# fail loudly — it produces 401s that look like a server problem.
-TOKEN = (
-    os.environ.get("PRAXIS_API_TOKEN") or os.environ.get("ORCHESTRATOR_API_TOKEN") or ""
-).strip()
+TOKEN = os.environ.get("PRAXIS_API_TOKEN", "").strip()
 
 
 def call(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
@@ -163,7 +158,7 @@ def main() -> int:
         for p in matches:
             print(f"           {p['id']}")
         print("         Delete the extras (DELETE /api/providers/<id>) or wipe")
-        print("         ~/.orchestrator/orchestrator.db and start clean. Refusing")
+        print("         ~/.praxis/orchestrator.db and start clean. Refusing")
         print("         to guess which one the roster should bind to.")
         return 1
     if matches:

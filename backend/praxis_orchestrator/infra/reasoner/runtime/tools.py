@@ -60,7 +60,7 @@ def execute_tool_call(tools: list[ToolSpec], tool_call: ToolCall) -> ToolResult:
             # Reaching here means something unexpected broke, and `str(exc)` on an
             # unexpected exception is internal detail: Phase 10A confirmed a
             # handler's message travelling verbatim into the NEXT provider request
-            # (an absolute `~/.orchestrator` path, in the reproduction). The model
+            # (an absolute `~/.praxis` path, in the reproduction). The model
             # still needs to know the call failed so it can adapt, so it is told
             # that and nothing more; the detail goes to the local log, which is
             # where an operator debugging a tool actually looks.

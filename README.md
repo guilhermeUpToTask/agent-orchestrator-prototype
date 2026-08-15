@@ -111,9 +111,15 @@ Key mechanics, each explained in depth in [`docs/architecture/`](docs/architectu
 Requires Python 3.11+ and Git.
 
 ```bash
-pipx install praxis-orchestrator     # or: uvx --from praxis-orchestrator praxis
+# Grab the wheel from the latest GitHub Release, then:
+pipx install ./praxis_orchestrator-*.whl
 praxis serve                   # migrates, starts API + worker + UI on :8000
 ```
+
+**Not on PyPI, deliberately.** `pip install praxis-orchestrator` would fetch a
+*different* project that already holds that name there. Releases ship as a wheel
+attached to a [GitHub Release](../../releases), and that wheel is the one that
+carries the built console inside it.
 
 One command. `serve` prepares the state directory (`PRAXIS_HOME`, default
 `~/.praxis`), starts a worker as its own process, and serves the console —
@@ -298,13 +304,6 @@ accordingly.
 | `CORS_ALLOW_ORIGINS` | Vite dev origins | Comma-separated allowed origins |
 | `REASONER_SMOKE_API_KEY` (+`_BASE_URL`, `_MODEL`) | unset | Enables the cost-gated real-LLM smoke test only |
 
-**Upgrading from before the rename?** Nothing to do. The `ORCHESTRATOR_*`
-spellings of the four variables above still work when the new name is unset
-(warned once at boot), and an existing `~/.orchestrator` is **adopted in
-place** — nothing moved, nothing copied, so a rollback still works and the
-encrypted secret store is never duplicated. `orchestrate` stays registered as a
-CLI entry point and delegates to `praxis`. See
-`backend/praxis_orchestrator/infra/env_compat.py`.
 
 **SQLite config keys** (scope `orchestrator`) — runtime behavior lives here, *not* in env vars. There is no `AGENT_MODE` anymore:
 

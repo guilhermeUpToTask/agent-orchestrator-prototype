@@ -6,7 +6,7 @@ is aspirational: every claim describes code in this repository.
 
 ## Reporting a vulnerability
 
-Use **[GitHub private security advisories](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/security/advisories/new)**
+Use **[GitHub private security advisories](https://github.com/guilhermeUpToTask/praxis-orchestrator/security/advisories/new)**
 rather than a public issue. Include a reproduction and the version or commit.
 
 There is no SLA yet — this is a preview maintained by a small number of people.

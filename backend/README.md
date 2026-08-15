@@ -11,9 +11,14 @@ verification evidence are checked independently before anything is promoted.
 ## Install
 
 ```bash
-pipx install praxis-orchestrator     # or: uvx --from praxis-orchestrator orchestrate
+# Grab the wheel from the latest GitHub Release, then:
+pipx install ./praxis_orchestrator-*.whl
 praxis serve
 ```
+
+**Not on PyPI, deliberately** — that name there belongs to a different project.
+Releases ship as a wheel attached to a [GitHub Release](../../releases), and
+that wheel is the one carrying the built console inside it.
 
 `serve` migrates the state directory (`~/.praxis` by default), starts the
 API and a worker, and serves the console at <http://127.0.0.1:8000>. Open it and
@@ -40,11 +45,11 @@ that means nothing.
 ## Security posture, in one line
 
 Agent runtimes execute **unsandboxed**, as your user, against the repository you
-point them at. See [SECURITY.md](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype/blob/main/SECURITY.md).
+point them at. See [SECURITY.md](https://github.com/guilhermeUpToTask/praxis-orchestrator/blob/main/SECURITY.md).
 
 ## Documentation
 
 Full architecture, decision log and operator walkthroughs live in the
-[repository](https://github.com/guilhermeUpToTask/agent-orchestrator-prototype).
+[repository](https://github.com/guilhermeUpToTask/praxis-orchestrator).
 
 Licensed under Apache-2.0.
